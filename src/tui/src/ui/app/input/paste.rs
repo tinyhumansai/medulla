@@ -34,7 +34,7 @@ impl App {
     ///    keystrokes it happens to spell;
     /// 3. an open inline prompt, flattened to one line because that is all it
     ///    can draw;
-    /// 4. the harness picker, whose workspace step is a path box and whose
+    /// 4. the session picker, whose workspace step is a path box and whose
     ///    harness step is a list;
     /// 5. any remaining modal, before anything per-tab — one can be raised over
     ///    a tab the operator has since moved to;
@@ -57,7 +57,7 @@ impl App {
         // it out let a paste land in a composer while the question stayed armed
         // for whatever key came next.
         if self.kill_armed.take().is_some() {
-            self.set_status("Harness kill cancelled");
+            self.set_status("Session kill cancelled");
             return;
         }
         // The hand-back question is asked while still attached, so it outranks
@@ -75,10 +75,10 @@ impl App {
             prompt.paste(text);
             return;
         }
-        // The harness picker is two overlays in one: a provider list with no
+        // The session picker is two overlays in one: a harness-type list with no
         // field, then a visible path box. Routed as one call so the distinction
         // stays with the picker rather than being re-derived here.
-        if self.harness_picker.is_some() {
+        if self.agent_picker.is_some() {
             self.paste_into_harness_workspace(text);
             return;
         }

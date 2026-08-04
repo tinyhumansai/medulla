@@ -27,7 +27,7 @@ impl App {
                 // the arrows belong to the live step. Letting them keep driving
                 // the kind list meant confirming Remote and arrowing to Local
                 // carried the confirmation across, so the next Enter skipped
-                // "Choose a harness" and asked for a directory for a harness
+                // "Choose a harness type" and asked for a directory for a harness type
                 // nobody had picked. Esc is how you go back a step.
                 match (self.add_host_selected_kind(), self.add_host_kind_chosen) {
                     (AddHostKind::Local, true) => {
@@ -74,7 +74,7 @@ impl App {
                     // would mean the arrows never reached the harness list.
                     AddHostKind::Local if !self.add_host_kind_chosen => {
                         self.add_host_kind_chosen = true;
-                        self.set_status("Choose a harness · Enter to set the directory");
+                        self.set_status("Choose a harness type · Enter to set the directory");
                     }
                     AddHostKind::Local => {
                         let providers = self.add_host_providers();

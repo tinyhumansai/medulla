@@ -87,7 +87,7 @@ impl App {
                     // agent, and inventing one with no harness would advertise a
                     // placement that cannot run.
                     self.set_status(format!(
-                        "{} reports no harness, so its roles cannot be saved",
+                        "{} reports no harness type, so its roles cannot be saved",
                         agent.agent_id
                     ));
                     return false;

@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use medulla::protocol::HarnessProvider;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 // ------------------------------------------------------------- allocator ---
 
@@ -121,7 +121,7 @@ fn flooding(label: &str) -> LaunchSpec {
         // The orchestrator's own sessions, as a task frame opens them: this
         // measures the dispatch path, and an operator-held session is one
         // `claim_idle` skips entirely.
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
         name: None,
     }

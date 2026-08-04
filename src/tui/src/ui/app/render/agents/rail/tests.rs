@@ -12,7 +12,7 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
-use crate::worker::pty::{AttentionKind, HarnessAttention, HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{AttentionKind, HarnessAttention, PtyState, SessionControl, SessionRow};
 
 use super::rows::{display_session_title, running_session_title};
 use super::wrap::{flow_path, short_home, wrap_line, wrap_path};
@@ -38,7 +38,7 @@ fn attention_uses_the_configured_color_and_can_stay_solid() {
         0,
     ));
 
-    let lines = app.own_harness_lines(&row, false, 48, NOW);
+    let lines = app.own_session_lines(&row, false, 48, NOW);
     let style = lines[0].spans[0].style;
 
     assert_eq!(style.fg, Some(Color::LightMagenta));
@@ -130,7 +130,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         last_output_at: 1,
         last_error: None,
         busy: false,
-        control: HarnessControl::User,
+        control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
         name: None,
         attention: None,
@@ -148,7 +148,7 @@ fn viewport_keeps_all_three_lines_of_the_selected_harness_visible() {
 #[test]
 fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
     let app = app();
-    let lines = app.own_harness_lines(&harness_row("/workspace/medulla"), false, 48, NOW);
+    let lines = app.own_session_lines(&harness_row("/workspace/medulla"), false, 48, NOW);
 
     assert_eq!(lines.len(), 1, "a harness should consume one rail row");
     assert_eq!(
@@ -160,7 +160,7 @@ fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
 #[test]
 fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
     let app = app();
-    let lines = app.own_harness_lines(
+    let lines = app.own_session_lines(
         &harness_row("/workspace/tinyhumans/products/medulla-public"),
         false,
         36,
@@ -179,7 +179,7 @@ fn a_long_harness_path_is_shortened_instead_of_adding_rows() {
 fn a_harness_prefix_never_exceeds_the_available_width() {
     let app = app();
     for width in [0, 1, 4, 8] {
-        let line = &app.own_harness_lines(&harness_row("/workspace/medulla"), false, width, NOW)[0];
+        let line = &app.own_session_lines(&harness_row("/workspace/medulla"), false, width, NOW)[0];
         assert!(line.width() <= width, "width {width}: {line:?}");
     }
 }
@@ -191,14 +191,14 @@ fn harness_branch_and_path_can_be_hidden_independently() {
 
     app.loaded.config.appearance.show_harness_branch = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
+        app.own_session_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 
     app.loaded.config.appearance.show_harness_branch = true;
     app.loaded.config.appearance.show_harness_path = false;
     assert_eq!(
-        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
+        app.own_session_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · main"
     );
 }
@@ -210,7 +210,7 @@ fn a_non_git_harness_omits_the_branch_without_a_placeholder() {
     row.branch = None;
 
     assert_eq!(
-        app.own_harness_lines(&row, false, 48, NOW)[0].to_string(),
+        app.own_session_lines(&row, false, 48, NOW)[0].to_string(),
         "● codex · unmanaged · /workspace/medulla"
     );
 }

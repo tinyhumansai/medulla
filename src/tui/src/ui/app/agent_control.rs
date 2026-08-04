@@ -7,7 +7,7 @@
 //! nothing, inheriting the harness and the directory from the declaration rather
 //! than asking again.
 //!
-//! Both reuse the picker in [`harness_control`](super::harness_control): picking
+//! Both reuse the picker in [`session_control`](super::session_control): picking
 //! a CLI and a directory is the same two steps either way, and the intent it
 //! carries ([`PickerPurpose`]) is what decides which of these two ends it lands
 //! in.
@@ -23,9 +23,7 @@ use medulla::runtime::{suggest_agent_id, AgentDeclaration, WorkspaceRef, Workspa
 
 use crate::ui::harness_pane::HarnessChoice;
 
-use super::types::{
-    tab_pos, App, HarnessPicker, HarnessPickerStep, PickerPurpose, Prompt, PromptKind,
-};
+use super::types::{tab_pos, AgentPicker, AgentPickerStep, App, PickerPurpose, Prompt, PromptKind};
 
 impl App {
     /// Open the create-agent flow: harness type, then workspace, then a name.
@@ -34,7 +32,7 @@ impl App {
     /// nothing in it: an agent is declared *on a host*, and there is none here to
     /// declare it on.
     pub(in crate::ui::app) fn open_new_agent_picker(&mut self) {
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no agents to declare");
             return;
         };
@@ -43,11 +41,11 @@ impl App {
             self.set_status("No harness CLIs found on this device");
             return;
         }
-        self.harness_picker = Some(HarnessPicker {
+        self.agent_picker = Some(AgentPicker {
             purpose: PickerPurpose::DeclareAgent,
             choices,
             index: 0,
-            step: HarnessPickerStep::Harness,
+            step: AgentPickerStep::Harness,
             cwd: harnesses.workspace.clone(),
             workspace_query: String::new(),
             workspace_choices: Vec::new(),
@@ -55,7 +53,7 @@ impl App {
             workspace_picked: false,
             managed: true,
         });
-        self.set_status("New agent · pick a harness · Enter workspace · Esc cancel");
+        self.set_status("New agent · pick a harness type · Enter workspace · Esc cancel");
     }
 
     /// Ask what to call the agent about to be declared for this pair.
@@ -132,7 +130,7 @@ impl App {
     /// slower. Silent when the directory is already declared, and when this
     /// device is not hosting.
     pub(in crate::ui::app) fn offer_agent_declaration(&mut self, harness: &str, workspace: &str) {
-        if self.harnesses.is_none() {
+        if self.local_sessions.is_none() {
             return;
         }
         let declared = self.local_agent_declarations().into_iter().any(|held| {
@@ -199,7 +197,7 @@ impl App {
         name: &str,
         managed: bool,
     ) {
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions to open");
             return;
         };

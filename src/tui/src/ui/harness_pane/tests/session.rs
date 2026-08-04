@@ -1,4 +1,4 @@
-//! Tests for the session-facing half of [`LocalHarnesses`], against a real
+//! Tests for the session-facing half of [`LocalSessions`], against a real
 //! child on a real pseudo-terminal.
 //!
 //! `/bin/sh` stands in for a coding agent: it is a genuine pty client with a
@@ -14,10 +14,10 @@ use std::time::{Duration, Instant};
 
 use medulla::protocol::HarnessProvider;
 
-use crate::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use crate::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 use super::super::HarnessChoice;
-use super::super::LocalHarnesses;
+use super::super::LocalSessions;
 
 /// A spec that runs `sh -c <script>` on a pty.
 ///
@@ -40,18 +40,18 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
     }
 }
 
-/// A [`LocalHarnesses`] over `sessions`, with a runtime that serves no tasks.
+/// A [`LocalSessions`] over `sessions`, with a runtime that serves no tasks.
 ///
 /// Task resolution needs a live host and is covered by the daemon's own screen
 /// e2e; everything here is about what the pane does *once* a session is named,
 /// so the runtime is inert on purpose.
-pub(super) fn harnesses(sessions: PtyManager) -> LocalHarnesses {
+pub(super) fn harnesses(sessions: PtyManager) -> LocalSessions {
     let config = medulla::daemon::DaemonConfig {
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
@@ -77,7 +77,7 @@ pub(super) fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     let send: medulla::daemon::SendFn = std::sync::Arc::new(|_, _| {
         Box::pin(async {}) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
     });
-    LocalHarnesses {
+    LocalSessions {
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -271,7 +271,7 @@ fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
 }
 
 /// The whole screen as one string.
-fn text(harnesses: &LocalHarnesses, id: &str) -> String {
+fn text(harnesses: &LocalSessions, id: &str) -> String {
     harnesses
         .screen(id)
         .expect("the session has a screen")

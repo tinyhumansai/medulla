@@ -26,22 +26,22 @@ pub(in crate::ui::app) fn app() -> App {
 /// allowed to offer `+ New agent` and to list local sessions.
 pub(in crate::ui::app) fn hosting_app() -> App {
     let mut app = app();
-    app.set_local_harnesses(shell_harnesses(PtyManager::new()));
+    app.set_local_sessions(shell_harnesses(PtyManager::new()));
     app
 }
 
-/// A [`LocalHarnesses`](crate::ui::harness_pane::LocalHarnesses) whose "codex"
+/// A [`LocalSessions`](crate::ui::harness_pane::LocalSessions) whose "codex"
 /// is `/bin/sh`, so opening one starts a real pty client and nothing else.
 pub(in crate::ui::app) fn shell_harnesses(
     sessions: PtyManager,
-) -> crate::ui::harness_pane::LocalHarnesses {
+) -> crate::ui::harness_pane::LocalSessions {
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {
         env.insert("PATH".to_string(), path);
     }
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
-    crate::ui::harness_pane::LocalHarnesses {
+    crate::ui::harness_pane::LocalSessions {
         sessions,
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),
@@ -149,7 +149,7 @@ fn a_dispatched_session_and_an_operator_session_are_the_same_row_type() {
     let mut app = hosting_app();
     app.loaded.config.fleet.agent_declarations =
         vec![AgentDeclaration::new("shell", "", "codex", "/")];
-    let harnesses = app.local_harnesses().expect("hosting").clone();
+    let harnesses = app.local_sessions().expect("hosting").clone();
     let choice = harnesses
         .choices()
         .into_iter()
@@ -179,7 +179,7 @@ fn a_session_in_an_undeclared_directory_is_still_listed() {
     // that is running, costing tokens and invisible is exactly the failure the
     // old separate group existed to prevent.
     let app = hosting_app();
-    let harnesses = app.local_harnesses().expect("hosting").clone();
+    let harnesses = app.local_sessions().expect("hosting").clone();
     let choice = harnesses
         .choices()
         .into_iter()

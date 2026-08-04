@@ -72,18 +72,15 @@ fn every_tab_renders() {
 #[test]
 fn drawing_an_intervening_tab_preserves_the_harness_selected_for_changes() {
     let mut a = app();
-    a.selected_harness_session = Some("older-harness".to_owned());
-    a.harness_pane_session = Some("older-harness".to_owned());
+    a.rail_session = Some("older-harness".to_owned());
+    a.pane_session = Some("older-harness".to_owned());
     a.tab_index = tab("Workflows");
 
     render(&mut a);
 
+    assert_eq!(a.pane_session, None, "hidden panes cannot receive keys");
     assert_eq!(
-        a.harness_pane_session, None,
-        "hidden panes cannot receive keys"
-    );
-    assert_eq!(
-        a.selected_harness_session.as_deref(),
+        a.rail_session.as_deref(),
         Some("older-harness"),
         "tab navigation must not discard the Changes repository selection"
     );
@@ -150,7 +147,7 @@ fn typing_inserts_into_draft() {
 
 #[test]
 fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
-    use super::types::{HarnessPicker, HarnessPickerStep, WorkspaceChoice};
+    use super::types::{AgentPicker, AgentPickerStep, WorkspaceChoice};
     use crate::ui::harness_pane::HarnessChoice;
 
     let mut a = app();
@@ -159,14 +156,14 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     // it — the state the attach shortcut reads. Opening the picker on top of
     // that used to lose the very next Enter to the pane underneath, which
     // attached instead of advancing to the workspace step.
-    a.harness_pane_session = Some("already-running".to_string());
-    a.harness_picker = Some(HarnessPicker {
+    a.pane_session = Some("already-running".to_string());
+    a.agent_picker = Some(AgentPicker {
         purpose: super::types::PickerPurpose::Spawn,
         choices: vec![HarnessChoice::native(
             medulla::protocol::HarnessProvider::Claude,
         )],
         index: 0,
-        step: HarnessPickerStep::Harness,
+        step: AgentPickerStep::Harness,
         cwd: ".".into(),
         workspace_query: String::new(),
         workspace_choices: Vec::new(),
@@ -180,17 +177,17 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(cmd.is_none());
-    assert_eq!(a.attached_harness(), None, "must not attach behind a modal");
+    assert_eq!(a.attached_session(), None, "must not attach behind a modal");
     assert_eq!(
-        a.harness_picker.as_ref().map(|picker| picker.step),
-        Some(HarnessPickerStep::Workspace),
+        a.agent_picker.as_ref().map(|picker| picker.step),
+        Some(AgentPickerStep::Workspace),
         "the picker should have advanced to its workspace step"
     );
 
     // This app has no local harnesses, so nothing completes the empty query.
     // Stand a choice in for the completion pass, which is what the workspace
     // step's Enter reads.
-    if let Some(picker) = &mut a.harness_picker {
+    if let Some(picker) = &mut a.agent_picker {
         picker.workspace_choices = vec![WorkspaceChoice {
             path: ".".into(),
             source: "recent",
@@ -203,8 +200,8 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
 
     assert!(cmd.is_none());
     assert_eq!(
-        a.harness_picker.as_ref().map(|picker| picker.step),
-        Some(HarnessPickerStep::Decision),
+        a.agent_picker.as_ref().map(|picker| picker.step),
+        Some(AgentPickerStep::Decision),
         "the picker should have advanced to its decision step"
     );
 }
@@ -219,7 +216,7 @@ fn enter_on_a_harness_asks_before_taking_it() {
     // so — the point being that Enter is consumed by the harness path rather
     // than returning to the composer or submitting a turn, and that it never
     // attaches on its own.
-    a.harness_pane_session = Some("just-exited".to_string());
+    a.pane_session = Some("just-exited".to_string());
 
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
@@ -227,7 +224,7 @@ fn enter_on_a_harness_asks_before_taking_it() {
     assert!(a.agents_rail_focused());
     assert!(a.status().contains("not hosting"), "{}", a.status());
     assert!(a.handback_prompt.is_none());
-    assert_eq!(a.attached_harness(), None);
+    assert_eq!(a.attached_session(), None);
 }
 
 #[test]

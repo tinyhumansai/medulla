@@ -23,9 +23,6 @@ mod credentials;
 mod custom_harnesses;
 mod decisions;
 mod feedback;
-mod harness_control;
-#[cfg(test)]
-mod harness_control_tests;
 mod harness_workspace;
 #[cfg(test)]
 mod harness_workspace_tests;
@@ -38,6 +35,9 @@ mod overlays_tests;
 mod rail;
 mod render;
 mod routing_options;
+mod session_control;
+#[cfg(test)]
+mod session_control_tests;
 mod session_focus;
 #[cfg(test)]
 mod session_focus_tests;

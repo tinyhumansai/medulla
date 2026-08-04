@@ -47,7 +47,7 @@ pub fn parse(input: &str) -> Option<SlashCommand> {
         "quit" | "q" | "exit" => SlashCommand::Quit,
         "new" => SlashCommand::NewSession,
         "resume" => SlashCommand::Resume,
-        "harness" => parse_harness(arg),
+        "session" | "harness" => parse_session(arg),
         "takecontrol" | "take" => SlashCommand::TakeControl,
         // `arg`, not `flag`: a note is prose the orchestrator reads, so its
         // capitalisation is the operator's to choose.
@@ -82,21 +82,21 @@ pub fn copy_text(events: &[EventEnvelope], scope: CopyScope) -> String {
     }
 }
 
-/// Parse the argument tail of `/harness` into its provider and path.
+/// Parse the argument tail of `/session` into its harness type and path.
 ///
-/// The shapes are `/harness`, `/harness <provider>`, and
-/// `/harness <provider> <path>`. A named provider is validated here, against the
-/// same [`HarnessProvider::from_wire`] the wire uses, because "claud" should say
-/// so rather than silently starting the default harness — that failure is
-/// invisible until the wrong CLI is already running in the operator's workspace.
+/// The shapes are `/session`, `/session <harness>`, and
+/// `/session <harness> <path>`. A named harness type is validated here, against
+/// the same [`HarnessProvider::from_wire`] the wire uses, because "claud" should
+/// say so rather than silently starting the default CLI — that failure is
+/// invisible until the wrong one is already running in the operator's workspace.
 ///
 /// The path is not validated: only the front end knows the active workspace, and
 /// a bad path produces a far better message at spawn time than at parse time.
-fn parse_harness(arg: &str) -> SlashCommand {
-    const USAGE: &str = "Usage: /harness [claude|codex|opencode] [path]";
+fn parse_session(arg: &str) -> SlashCommand {
+    const USAGE: &str = "Usage: /session [claude|codex|opencode] [path]";
     let arg = arg.trim();
     if arg.is_empty() {
-        return SlashCommand::NewHarness {
+        return SlashCommand::StartSession {
             provider: None,
             path: None,
         };
@@ -109,7 +109,7 @@ fn parse_harness(arg: &str) -> SlashCommand {
     if HarnessProvider::from_wire(&provider).is_none() {
         return SlashCommand::BadUsage(USAGE);
     }
-    SlashCommand::NewHarness {
+    SlashCommand::StartSession {
         provider: Some(provider),
         path,
     }

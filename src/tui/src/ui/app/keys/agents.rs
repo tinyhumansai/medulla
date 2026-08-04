@@ -37,7 +37,7 @@ impl App {
     /// [`agents_panes`](crate::ui::app::render) lays out from, so the keyboard
     /// and the screen cannot disagree about whether there is somewhere to type.
     pub fn agents_composer_shown(&self) -> bool {
-        self.on_orchestrator_lane() && self.harness_pane_session.is_none()
+        self.on_orchestrator_lane() && self.pane_session.is_none()
     }
 
     /// Whether the Agents rail currently holds the keyboard.
@@ -86,7 +86,7 @@ impl App {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
                 } else {
-                    self.set_status("Select a running harness task first");
+                    self.set_status("Select a running session first");
                 }
                 AgentsKey::Handled(None)
             }

@@ -13,7 +13,7 @@
 //! shows them, and an *attached* screen lets the operator answer them.
 //!
 //! Responsibilities:
-//! - [`LocalHarnesses`] — resolving "what is the cursor on" to a live session;
+//! - [`LocalSessions`] — resolving "what is the cursor on" to a live session;
 //! - [`HarnessFocus`] — which of the TUI and the harness owns the keyboard;
 //! - [`keys`] — encoding a crossterm key back into the bytes a terminal sends;
 //! - [`spawn`] — starting a harness the orchestrator will not dispatch into,
@@ -33,7 +33,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use types::{HarnessChoice, HarnessFocus, LocalHarnesses};
+pub use types::{HarnessChoice, HarnessFocus, LocalSessions};
 
 /// How the focus chord is written in hints and titles.
 ///
@@ -47,7 +47,7 @@ pub use types::{HarnessChoice, HarnessFocus, LocalHarnesses};
 /// terminals do not deliver this key the way it is written.
 pub const FOCUS_CHORD_LABEL: &str = "Ctrl-]";
 
-impl LocalHarnesses {
+impl LocalSessions {
     /// The live session serving `task_id`, if one is.
     ///
     /// `None` once the task settles: the runtime drops the record then, so a

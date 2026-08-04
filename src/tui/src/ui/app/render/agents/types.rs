@@ -27,14 +27,13 @@ pub(super) struct Selection {
     /// Whether the pane is showing the operator's own conversation, which
     /// scrolls separately and renders the chat log rather than model calls.
     pub(super) on_orchestrator: bool,
-    /// The live local harness session this row resolves to, when it resolves to
-    /// one.
+    /// The live local session this row resolves to, when it resolves to one.
     ///
     /// Decided here rather than at draw time because it changes the *layout*,
-    /// not just the contents: a harness paints its own composer, so ours has no
+    /// not just the contents: a session paints its own composer, so ours has no
     /// rows and the work panel no columns. Resolving it after the split would
     /// mean laying out for a transcript and then drawing a terminal into it.
-    pub(super) harness: Option<String>,
+    pub(super) session: Option<String>,
 }
 
 impl Selection {

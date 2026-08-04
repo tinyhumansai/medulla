@@ -51,7 +51,7 @@ fn descriptorless_lanes_still_show_their_pull_request_context() {
         lane_index: 0,
         task: None,
         on_orchestrator: false,
-        harness: None,
+        session: None,
     };
     let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
     terminal

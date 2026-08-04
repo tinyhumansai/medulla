@@ -31,16 +31,16 @@ impl App {
     /// Reload commits, changed paths, and the selected patch from Git.
     pub(super) fn refresh_changes(&mut self) {
         let preferred_id = self
-            .attached_harness()
+            .attached_session()
             .map(str::to_owned)
-            .or_else(|| self.selected_harness_session.clone());
-        let selected = self.harnesses.as_ref().map(|harnesses| {
+            .or_else(|| self.rail_session.clone());
+        let selected = self.local_sessions.as_ref().map(|harnesses| {
             select_harness_baseline(harnesses.sessions.rows(), preferred_id.as_deref())
         });
         match selected {
             Some(Ok(Some((row, commit)))) => {
                 let root = row.launch_root.as_deref().unwrap_or(&row.cwd);
-                self.changes.follow_harness(
+                self.changes.follow_session(
                     Path::new(root),
                     &commit,
                     row.launch_checkout_identity

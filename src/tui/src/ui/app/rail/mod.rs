@@ -239,7 +239,7 @@ impl App {
         let mut rows: Vec<RailRow> = lane_rows.into_iter().map(RailRow::Lane).collect();
         // A device that hosts nothing cannot declare an agent on itself, so the
         // action is absent there rather than present and refusing.
-        if self.harnesses.is_some() {
+        if self.local_sessions.is_some() {
             rows.push(RailRow::NewAgent);
         }
         // Progressive disclosure: one host is the common case, and a permanent
@@ -271,8 +271,8 @@ impl App {
     /// The attached session is excluded. Its prompt is on screen in front of
     /// the person the count is for, so counting it would ask them to go and
     /// look at what they are already looking at.
-    pub(in crate::ui) fn harnesses_waiting(&self) -> usize {
-        let Some(harnesses) = self.harnesses.as_ref() else {
+    pub(in crate::ui) fn sessions_waiting(&self) -> usize {
+        let Some(harnesses) = self.local_sessions.as_ref() else {
             return 0;
         };
         Self::count_waiting(&harnesses.sessions.waiting_sessions(), &self.harness_focus)
@@ -305,7 +305,7 @@ impl App {
     /// and a row that vanishes on failure is a row that hides the failure. They
     /// leave when the operator forgets them.
     pub(super) fn own_session_rows(&self) -> Vec<SessionRow> {
-        let Some(harnesses) = self.harnesses.as_ref() else {
+        let Some(harnesses) = self.local_sessions.as_ref() else {
             return Vec::new();
         };
         let mut rows: Vec<SessionRow> = harnesses
@@ -313,7 +313,7 @@ impl App {
             .rows()
             .into_iter()
             .filter(|row| {
-                row.origin.is_user() || row.control == crate::worker::pty::HarnessControl::User
+                row.origin.is_user() || row.control == crate::worker::pty::SessionControl::User
             })
             .collect();
         rows.sort_by_key(|row| row.started_at);

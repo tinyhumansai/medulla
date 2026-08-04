@@ -16,8 +16,8 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use medulla::protocol::HarnessProvider;
-use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// A shell on a pty running `script`.
 ///
@@ -42,7 +42,7 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
         })
@@ -53,7 +53,7 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
 /// move the cursor onto the harness row, then press the focus chord.
 fn attached_app(sessions: PtyManager, id: &str) -> App {
     let mut app = agents_app();
-    app.set_local_harnesses(LocalHarnesses {
+    app.set_local_sessions(LocalSessions {
         sessions,
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),
@@ -67,7 +67,7 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
 
     for _ in 0..64 {
         draw(&mut app);
-        if app.harness_pane_session_for_test().is_some() {
+        if app.pane_session_for_test().is_some() {
             break;
         }
         let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
@@ -77,7 +77,7 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
         KeyCode::Char(']'),
         KeyModifiers::CONTROL,
     )));
-    assert_eq!(app.attached_harness(), Some(id), "{}", app.status());
+    assert_eq!(app.attached_session(), Some(id), "{}", app.status());
     app
 }
 
@@ -180,7 +180,7 @@ fn the_handback_question_swallows_the_paste_instead_of_typing_it() {
         KeyModifiers::CONTROL,
     )));
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(id.as_str()),
         "the question is asked with the pane still attached"
     );
@@ -191,7 +191,7 @@ fn the_handback_question_swallows_the_paste_instead_of_typing_it() {
     // still waiting on its `read`, which is how we know nothing was typed
     // into it, and the composer is untouched.
     let _ = app.on_event(key(KeyCode::Char('n')));
-    assert_eq!(app.attached_harness(), None, "{}", app.status());
+    assert_eq!(app.attached_session(), None, "{}", app.status());
     let mut screen = String::new();
     sessions.screen_text_into(&id, &mut screen);
     assert!(

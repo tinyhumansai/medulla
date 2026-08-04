@@ -212,7 +212,7 @@ pub struct SessionHandle {
     pub(super) busy: AtomicBool,
     /// Whether the operator, rather than the orchestrator, holds this session.
     ///
-    /// [`HarnessControl`](super::super::types::HarnessControl) as one bit, for
+    /// [`SessionControl`](super::super::types::SessionControl) as one bit, for
     /// the same reason `busy` is: `claim_idle` tests it for every session on
     /// every dispatch, and it is the gate that stops a task prompt landing in a
     /// composer a person is typing in.

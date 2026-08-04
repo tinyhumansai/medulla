@@ -1,8 +1,8 @@
 # Workflows
 
-A Medulla task is one instruction handed to one harness. A **workflow** is a
+A Medulla task is one instruction handed to one agent. A **workflow** is a
 saved, multi-step plan: a directed acyclic graph whose `agent` steps each run as
-a real coding-harness session — Claude Code, Codex, or OpenCode — in the order
+a real agent session — on Claude Code, Codex, or OpenCode — in the order
 and with the parallelism the graph declares.
 
 The engine is [`tinyflows`](https://github.com/tinyhumansai/tinyflows), vendored
@@ -141,7 +141,7 @@ is meaningless, or wrong, on another. Name both when you mean both.
 
 A harness that is not one of the three built-in CLIs is taken as a custom
 harness preset id — the ones this machine has configured are listed by
-`workflow_host` and in the TUI's Routing → Harnesses screen. Whether the *worker*
+`workflow_host` and in the TUI's Routing → Harness Types screen. Whether the *worker*
 that runs the step exposes that preset is only answered when it runs.
 
 `harness` must be written plainly, never as a `=`-expression. Which binary and
@@ -203,7 +203,7 @@ Workflows is a top-level tab: a sidebar, a canvas, and a copilot.
   it never reached are dimmed, and the inspector shows the node's duration and
   any diagnostics.
 - **The copilot** (`c`) is a conversation that edits the graph. Ask for a change
-  in plain words; a real harness session makes it with the MCP tools below, and
+  in plain words; a real agent session makes it with the MCP tools below, and
   the graph is then re-read from the store so the transcript reports what
   actually changed rather than whatever the agent said it did.
 
@@ -242,7 +242,7 @@ compatible:
 - A worker's capability probe now advertises `workflows` — the ids it has
   installed, with names, descriptions, and step counts.
 - A task frame may carry a `workflow` field. Naming one makes the worker run that
-  saved graph instead of handing the frame's `text` to a harness; the text
+  saved graph instead of handing the frame's `text` to an agent; the text
   becomes the trigger payload. The ack, the reply, the correlation, and the
   work-snapshot attachment are all the ordinary ones, so an orchestrator that
   knows nothing about workflows still sees a task it dispatched and a task that
@@ -276,7 +276,7 @@ request that changes what this host holds.
 Everything is served from the same layered store the Workflows tab, the
 `medulla workflow` subcommand and the MCP tools read — a socket `get` and
 `medulla workflow get` are one implementation, so they cannot drift. `copilot` is
-not a read: it is a whole authoring turn on this machine's own harness, with the
+not a read: it is a whole authoring turn on this machine's own agent, with the
 `medulla-workflows` tools attached, and its result is derived from re-reading the
 store afterwards rather than from what the model said it did.
 
@@ -305,7 +305,7 @@ Three properties are load-bearing rather than incidental:
 A run reports itself in the *existing* `harness_work` vocabulary — a
 `plan_update` naming every node, `todo_update` as steps settle, `subagent_start`
 per agent node, and a `run_result`. So a workflow renders through the same pane
-that shows a harness's own todo list, with no rendering code of its own.
+that shows an agent's own todo list, with no rendering code of its own.
 
 ## Configuration
 

@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::fmt_tokens;
-use crate::worker::pty::{HarnessAttention, HarnessControl, SessionRow, ATTENTION_GLYPH};
+use crate::worker::pty::{HarnessAttention, SessionControl, SessionRow, ATTENTION_GLYPH};
 
 use super::super::super::super::types::App;
 use super::super::super::color;
@@ -28,7 +28,7 @@ impl App {
     /// PTY attention overrides the ordinary state glyph and adds a textual cue,
     /// while the operator's field placement and visibility choices remain in
     /// force for the status line itself.
-    pub(in crate::ui::app::render) fn own_harness_lines(
+    pub(in crate::ui::app::render) fn own_session_lines(
         &self,
         row: &SessionRow,
         active: bool,
@@ -51,7 +51,7 @@ impl App {
             }
         } else if active {
             self.theme.selection()
-        } else if row.control == HarnessControl::User {
+        } else if row.control == SessionControl::User {
             Style::default().fg(color("cyan"))
         } else {
             Style::default()
@@ -213,7 +213,7 @@ impl App {
         if !self.loaded.config.appearance.show_session_titles {
             return None;
         }
-        let harnesses = self.harnesses.as_ref()?;
+        let harnesses = self.local_sessions.as_ref()?;
         running_session_title(lane, |task_id| {
             let id = harnesses.session_for_task(task_id)?;
             harnesses

@@ -126,7 +126,7 @@ impl App {
         item: &AgentLane,
         waiting_sessions: &HashSet<String>,
     ) -> bool {
-        let Some(harnesses) = self.harnesses.as_ref() else {
+        let Some(harnesses) = self.local_sessions.as_ref() else {
             return false;
         };
         lane_waiting_session(
@@ -140,7 +140,7 @@ impl App {
 
     /// Whether the exact task row is backed by a waiting local harness.
     pub(super) fn task_attention(&self, task_id: &str, waiting_sessions: &HashSet<String>) -> bool {
-        let Some(harnesses) = self.harnesses.as_ref() else {
+        let Some(harnesses) = self.local_sessions.as_ref() else {
             return false;
         };
         task_waiting_session(

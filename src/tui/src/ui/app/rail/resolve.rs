@@ -66,7 +66,7 @@ mod tests {
     use medulla::protocol::HarnessProvider;
     use medulla::runtime::WorkspaceRef;
 
-    use crate::worker::pty::{HarnessControl, PtyState, SessionOrigin};
+    use crate::worker::pty::{PtyState, SessionControl, SessionOrigin};
 
     fn session(provider: HarnessProvider, cwd: &str) -> SessionRow {
         SessionRow {
@@ -85,7 +85,7 @@ mod tests {
             last_output_at: 1,
             last_error: None,
             busy: false,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: SessionOrigin::User,
             name: None,
             attention: None,

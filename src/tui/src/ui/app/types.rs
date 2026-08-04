@@ -61,7 +61,7 @@ pub const TABS: [&str; 6] = [
 /// The Routing tab's left-nav pages.
 ///
 /// Ordered by the containment chain. `Hosts` is the machine level the operator
-/// registers and steers by hand; `Harnesses` is the runtime level, which is
+/// registers and steers by hand; `Harness Types` is the runtime level, which is
 /// where credentials live — a subscription or an API key is a property of the
 /// CLI runtime that spends it, not of the machine it happens to sit on;
 /// `Workspaces` is the folder level, which is what the orchestrator actually
@@ -84,7 +84,7 @@ pub const TABS: [&str; 6] = [
 /// its name back here and renumbering.
 pub const ROUTING_SUBPAGES: [&str; 5] = [
     "Hosts",
-    "Harnesses",
+    "Harness Types",
     "Agent Templates",
     "Add Host",
     "Strategies",
@@ -356,21 +356,21 @@ pub enum Cmd {
         /// The `(worker address, task id)` to start streaming, if any.
         start: Option<(String, String)>,
     },
-    /// Kill the harness serving a watched task after UI confirmation.
+    /// Kill the session serving a watched task after UI confirmation.
     KillTask {
-        /// The worker address that owns the harness.
+        /// The worker address that owns the session.
         worker: String,
-        /// The dispatched task whose harness should be killed.
+        /// The dispatched task whose session should be killed.
         task_id: String,
     },
-    /// Push a handoff brief for a harness the operator just gave back.
+    /// Push a handoff brief for a session the operator just gave back.
     ///
     /// Off the render thread because it does two things that must not block a
     /// frame: shells out to `git` for the branch, and awaits a socket emit.
     /// Arrives with `branch`/`project` unset — the dispatcher fills them.
-    HandOffHarness(Box<medulla::hub::HarnessHandoff>),
-    /// Tell the orchestrator the operator has taken the harness in a workspace.
-    HoldHarness {
+    HandOffSession(Box<medulla::hub::HarnessHandoff>),
+    /// Tell the orchestrator the operator has taken the session in a workspace.
+    HoldSession {
         /// The workspace being taken.
         workspace: String,
         /// Why, when the operator said.
@@ -410,7 +410,7 @@ pub enum Cmd {
     /// Run an installed workflow on this machine.
     ///
     /// Off-thread like every other filesystem/process command: a workflow run
-    /// dispatches real harness sessions and takes minutes, so doing it on the
+    /// dispatches real agent sessions and takes minutes, so doing it on the
     /// render thread would freeze the app for the whole run.
     #[cfg(feature = "workflows")]
     RunWorkflow {
@@ -423,7 +423,7 @@ pub enum Cmd {
     },
     /// Ask the copilot to change or explain a workflow.
     ///
-    /// Off-thread for the same reason a run is: the turn starts a real harness
+    /// Off-thread for the same reason a run is: the turn starts a real agent
     /// session, and the pane it reports into has to keep repainting while it
     /// does.
     #[cfg(feature = "workflows")]
@@ -532,7 +532,7 @@ pub(super) struct ResumePicker {
 /// An overlay the app can draw over the content pane.
 ///
 /// Ordered as they stack, back to front: the two that float over the content,
-/// then the harness picker, then the question asked about a harness being
+/// then the session picker, then the question asked about a session being
 /// released, and finally the two that claim a row of their own below it.
 ///
 /// Produced by [`App::visible_overlays`], which is the single source of truth
@@ -543,9 +543,9 @@ pub(super) enum Overlay {
     Decisions,
     /// The agent-template detail popup.
     TemplatePopup,
-    /// The "start a harness" picker.
-    HarnessPicker,
-    /// The question asked when the operator lets go of a harness.
+    /// The "start a session" picker.
+    AgentPicker,
+    /// The question asked when the operator lets go of a session.
     HandbackPrompt,
     /// The shared single-line prompt (Workers add/edit, Agents answer).
     InlinePrompt,
@@ -553,7 +553,7 @@ pub(super) enum Overlay {
     ResumePicker,
 }
 
-/// What the harness/workspace picker is being used for.
+/// What the harness-type/workspace picker is being used for.
 ///
 /// The same two steps — pick a CLI, pick a directory — answer both questions the
 /// Agents tab asks, and they differ only in what happens at the end. Declaring an
@@ -562,14 +562,14 @@ pub(super) enum Overlay {
 /// one overlay rather than two that would drift apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PickerPurpose {
-    /// Start a session here and now, declaring nothing — the `/harness` path.
+    /// Start a session here and now, declaring nothing — the `/session` path.
     Spawn,
     /// Declare an agent: `harness × workspace`, named on the step after.
     DeclareAgent,
 }
 
-/// The modal state for the harness/workspace picker overlay.
-pub(super) struct HarnessPicker {
+/// The modal state for the harness-type/workspace picker overlay.
+pub(super) struct AgentPicker {
     /// What confirming the last step will do.
     pub(super) purpose: PickerPurpose,
     /// Installed providers and registered presets, in offer order.
@@ -577,7 +577,7 @@ pub(super) struct HarnessPicker {
     /// The highlighted row.
     pub(super) index: usize,
     /// Which half of the two-step picker owns the keyboard.
-    pub(super) step: HarnessPickerStep,
+    pub(super) step: AgentPickerStep,
     /// Default directory used to seed the editable workspace query.
     pub(super) cwd: String,
     /// Inline fuzzy-completion text on the workspace step.
@@ -592,16 +592,16 @@ pub(super) struct HarnessPicker {
     /// that offers a single completion leaves the cursor on row zero however
     /// deliberately it was moved there. Set by the arrows, cleared whenever the
     /// query changes, and read by
-    /// [`selected_harness_workspace`](App::selected_harness_workspace) to decide
+    /// [`selected_picker_workspace`](App::selected_picker_workspace) to decide
     /// whether an entered directory outranks the completions listed under it.
     pub(super) workspace_picked: bool,
     /// Whether to spawn managed (orchestrator can dispatch) or unmanaged.
     pub(super) managed: bool,
 }
 
-/// Active stage of the manual harness launcher.
+/// Active stage of the manual session launcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum HarnessPickerStep {
+pub(super) enum AgentPickerStep {
     /// Choose an installed CLI or registered preset.
     Harness,
     /// Choose managed or unmanaged control mode.
@@ -619,13 +619,13 @@ pub(super) struct WorkspaceChoice {
     pub(super) source: &'static str,
 }
 
-/// The "you still hold this harness" confirmation shown on release.
+/// The "you still hold this session" confirmation shown on release.
 ///
 /// Modelled on an unsaved-changes prompt, and for the same reason: an operator
-/// who took a harness over and walked away has left the orchestrator locked out
+/// who took a session over and walked away has left the orchestrator locked out
 /// of it, and the moment they release the keyboard is the only moment they are
 /// certainly thinking about it. Silently handing it back would be worse — it
-/// would resume dispatch into a harness mid-thought.
+/// would resume dispatch into a session mid-thought.
 pub(super) struct HandbackPrompt {
     /// The session the operator is releasing.
     pub(super) session: String,
@@ -636,7 +636,7 @@ pub(super) struct HandbackPrompt {
     /// What the operator wants continued, typed into the prompt.
     ///
     /// This is the moment they actually have the context — they are leaving the
-    /// harness *now* — so it is the one place worth asking. `/handoff <note>`
+    /// session *now* — so it is the one place worth asking. `/handoff <note>`
     /// exists for the operator who already knows; this is for the one who is
     /// only reminded by being asked.
     pub(super) note: crate::ui::composer::Draft,
@@ -647,7 +647,7 @@ pub(super) struct HandbackPrompt {
     /// letter answer the question for them.
     pub(super) editing_note: bool,
     /// Which direction the question is about: `true` asks whether to take the
-    /// harness from the orchestrator, `false` whether to hand it back.
+    /// session from the orchestrator, `false` whether to hand it back.
     ///
     /// One prompt for both because they are the same decision seen from either
     /// side, and the answer is the same keystroke — but the sentence has to say
@@ -656,7 +656,7 @@ pub(super) struct HandbackPrompt {
     pub(super) is_takeover: bool,
 }
 
-/// What to do when the operator releases a harness they hold.
+/// What to do when the operator releases a session they hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HandbackPolicy {
     /// Ask, every time.
@@ -671,7 +671,7 @@ pub enum HandbackPolicy {
 impl HandbackPolicy {
     /// Parse the `[harness].handback` config value, falling back to
     /// [`Ask`](Self::Ask) for anything unrecognized — a typo in a config file
-    /// should not silently change who controls a harness.
+    /// should not silently change who controls a session.
     pub fn from_config(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "always" => HandbackPolicy::Always,
@@ -715,7 +715,7 @@ pub(super) enum PromptKind {
     /// and is the only kind that carries a name; a dispatched one is labelled
     /// from its task. Blank leaves it unnamed rather than inventing one.
     SessionName {
-        /// The agent whose harness and workspace the session inherits.
+        /// The agent whose harness type and workspace the session inherits.
         agent_id: String,
         /// Whether the orchestrator may dispatch into it — ownership at birth.
         managed: bool,
@@ -850,7 +850,7 @@ pub struct App {
     pub snapshot: RuntimeSnapshot,
     /// The active top-level tab index (into [`TABS`]).
     pub tab_index: usize,
-    /// Git changes from the selected harness or operator-chosen commit.
+    /// Git changes from the selected session or operator-chosen commit.
     pub(super) changes: super::changes::GitChangesState,
     pub(super) draft: Draft,
     pub(super) history: Vec<String>,
@@ -881,7 +881,7 @@ pub struct App {
     pub(super) chat_scroll: usize,
     /// Selected row in the command peek, while it is open.
     pub(super) command_index: usize,
-    /// Installed harnesses offered by the Add Host wizard, detected once.
+    /// Installed harness types offered by the Add Host wizard, detected once.
     ///
     /// Detection reads the environment and stat-checks every provider binary on
     /// `PATH`. The wizard asked on every render frame *and* every keypress, so a
@@ -902,7 +902,7 @@ pub struct App {
     pub(super) template_index: usize,
     /// OpenRouter-backed harness presets loaded from the active config.
     pub(super) custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
-    /// Selected row on the Routing Harnesses page.
+    /// Selected row on the Routing Harness Types page.
     pub(super) custom_harness_index: usize,
     /// Scroll offset inside the open agent-template popup.
     pub(super) template_scroll: usize,
@@ -949,11 +949,11 @@ pub struct App {
     /// Which kind of host the Add Host page is offering — a cursor into
     /// [`AddHostKind::ALL`].
     pub(super) add_host_kind: usize,
-    /// Which harness a new local host will run — a cursor into the detected
+    /// Which harness type a new local host will run — a cursor into the detected
     /// provider list.
     pub(super) add_host_harness: usize,
     /// Whether the kind picker has been answered, so the arrows move on to the
-    /// harness list rather than re-picking local versus remote.
+    /// harness-type list rather than re-picking local versus remote.
     pub(super) add_host_kind_chosen: bool,
     /// The active Routing subpage (index into [`ROUTING_SUBPAGES`]).
     pub(super) routing_index: usize,
@@ -1047,10 +1047,10 @@ pub struct App {
     /// belongs to. A row may wrap onto several lines, so a click resolves
     /// through this map rather than by adding an offset to a first-row index.
     pub(super) hit_agents: Option<(Rect, Vec<usize>)>,
-    // Where the embedded harness screen landed, and whose it is. Recorded so a
+    // Where the embedded session screen landed, and whose it is. Recorded so a
     // wheel event can be routed to the terminal under the pointer and given
     // coordinates relative to *its* origin rather than the screen's.
-    pub(super) hit_harness: Option<(Rect, String)>,
+    pub(super) hit_session: Option<(Rect, String)>,
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
     /// Where the orchestrator's "sessions started" block drew, and the task each
@@ -1095,42 +1095,42 @@ pub struct App {
     // move on the host's own schedule, and the snapshot is the *runtime's*
     // picture of the world — the host is a peer to it, not part of it.
     pub(super) host_obs: Option<medulla::daemon::embedded::HostObservation>,
-    // The live harness sessions this device is running. `None` when this machine
+    // The live sessions this device is running. `None` when this machine
     // does not host, in which case the Agents tab has no local screen to show
     // and falls back to a remote worker's streamed one, or to the transcript.
-    pub(super) harnesses: Option<crate::ui::harness_pane::LocalHarnesses>,
-    // Which of the TUI and the selected harness owns the keyboard. Reset to
+    pub(super) local_sessions: Option<crate::ui::harness_pane::LocalSessions>,
+    // Which of the TUI and the selected session owns the keyboard. Reset to
     // `Chrome` whenever the attached session stops being the selected one, so
-    // the operator's keys can never land in a harness they are not looking at.
+    // the operator's keys can never land in a session they are not looking at.
     pub(super) harness_focus: crate::ui::harness_pane::HarnessFocus,
-    // The harness session the Agents pane resolved on the last draw, and the
+    // The session the Agents pane resolved on the last draw, and the
     // only one the attach chord can act on. Recorded during render because that
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
-    pub(super) harness_pane_session: Option<String>,
-    // The harness selected on the Agents rail, retained while another tab is
-    // visible. Unlike `harness_pane_session`, this is navigation state rather
-    // than a keyboard-routing capability: Changes uses it to keep following
+    pub(super) pane_session: Option<String>,
+    // The session selected on the Agents rail, retained while another tab is
+    // visible. Unlike `pane_session`, this is navigation state rather than a
+    // keyboard-routing capability: Changes uses it to keep following
     // the repository the operator selected after an intervening tab draw.
-    pub(super) selected_harness_session: Option<String>,
-    /// The "start a harness" picker, while it is open.
-    pub(super) harness_picker: Option<HarnessPicker>,
-    /// The "you still hold this harness" confirmation, while it is open.
+    pub(super) rail_session: Option<String>,
+    /// The "start a session" picker, while it is open.
+    pub(super) agent_picker: Option<AgentPicker>,
+    /// The "you still hold this session" confirmation, while it is open.
     pub(super) handback_prompt: Option<HandbackPrompt>,
     /// How far the Help page is scrolled, in lines.
     pub(super) help_scroll: u16,
-    /// What releasing a held harness does, from `[harness].handback`.
+    /// What releasing a held session does, from `[harness].handback`.
     pub(super) handback_policy: HandbackPolicy,
-    /// Whether attaching is what took control of the current harness.
+    /// Whether attaching is what took control of the current session.
     ///
     /// Distinguishes "you picked this up by focusing in" from "you asked for it
     /// with /takecontrol", which the release prompt words differently: the
     /// second was a decision, and re-asking about it as though it were an
     /// accident is how a confirmation becomes noise.
-    pub(super) harness_took_control: bool,
+    pub(super) took_control_by_attach: bool,
     /// Commands raised by synchronous input handlers, drained by the event loop.
     ///
-    /// The key and mouse handlers that move harness control cannot return a
+    /// The key and mouse handlers that move session control cannot return a
     /// [`Cmd`] — `handle_handback_key` returns `()`, `handle_harness_key`
     /// returns `bool`, and the mouse path returns nothing — and threading an
     /// `Option<Cmd>` back through all three would be a wide, test-breaking
@@ -1138,7 +1138,7 @@ pub struct App {
     /// it right after the event that produced it. Commands run in submission
     /// order.
     pub(super) pending_cmds: std::collections::VecDeque<Cmd>,
-    /// Whether operator-started harnesses launch with the permission-bypass
+    /// Whether operator-started sessions launch with the permission-bypass
     /// flag, from `[harness].skipPermissions`.
     pub(super) harness_skip_permissions: bool,
 }

@@ -1,4 +1,4 @@
-//! Paste into the "start a harness" picker, which is a modal on its first step
+//! Paste into the "start a session" picker, which is a modal on its first step
 //! and a text field on its second — so it is the one overlay where "does this
 //! own a text field?" has two answers.
 
@@ -10,17 +10,17 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use medulla::protocol::HarnessProvider;
-use medulla_tui::ui::harness_pane::LocalHarnesses;
+use medulla_tui::ui::harness_pane::LocalSessions;
 use medulla_tui::worker::pty::PtyManager;
 
-/// An Agents-tab app that can offer a harness to start.
+/// An Agents-tab app that can offer a harness type to start.
 ///
 /// No child is ever launched here: the picker only needs a provider list to
 /// build its choices from, and every test stops before the Enter that would
 /// spawn one.
 fn picker_app() -> App {
     let mut app = demo_agents_app();
-    app.set_local_harnesses(LocalHarnesses {
+    app.set_local_sessions(LocalSessions {
         sessions: PtyManager::new(),
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),
@@ -52,13 +52,13 @@ fn open_picker(app: &mut App) {
         KeyModifiers::CONTROL,
     )));
     assert!(
-        rendered(app).contains("Choose harness"),
+        rendered(app).contains("Choose a harness type"),
         "the picker is open on its first step"
     );
 }
 
 #[test]
-fn the_harness_step_swallows_a_paste_instead_of_typing_it_behind_the_modal() {
+fn the_harness_type_step_swallows_a_paste_instead_of_typing_it_behind_the_modal() {
     // The first step is a list of providers with no field on it. It owns the
     // keyboard while it is up, so it owns the paste too — anything else
     // edits the composer hidden behind the modal, and the operator finds out

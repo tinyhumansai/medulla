@@ -44,12 +44,12 @@ impl App {
     /// Handle scroll and left-click mouse events for the active tab.
     pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
         if self.kill_armed.take().is_some() {
-            self.set_status("Harness kill cancelled");
+            self.set_status("Session kill cancelled");
         }
         // A modal swallows the mouse, the same way it swallows the keyboard.
-        // The harness picker is one: a click that navigated the rail behind it
+        // The session picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.
-        if self.resume_picker.is_some() || self.harness_picker.is_some() {
+        if self.resume_picker.is_some() || self.agent_picker.is_some() {
             return None;
         }
         // An attached harness is a terminal, and a terminal owns the pointer
@@ -68,7 +68,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
                     let inside_attached_pane =
-                        self.hit_harness.as_ref().is_some_and(|(rect, id)| {
+                        self.hit_session.as_ref().is_some_and(|(rect, id)| {
                             id == &session && rect.contains((m.column, m.row).into())
                         });
                     if !inside_attached_pane {
@@ -89,10 +89,10 @@ impl App {
                             // focus as Ctrl-]. Settle the configured hand-back policy
                             // before changing the selected tab or rail row; otherwise
                             // an Ask prompt would refer to a pane already hidden.
-                            if !self.begin_harness_release(&session) {
+                            if !self.begin_session_release(&session) {
                                 return None;
                             }
-                            self.release_harness();
+                            self.release_session();
                         }
                     }
                 }
@@ -137,7 +137,7 @@ impl App {
         let Some(session) = self.harness_focus.attached_to().map(str::to_string) else {
             return false;
         };
-        let Some((rect, id)) = self.hit_harness.clone() else {
+        let Some((rect, id)) = self.hit_session.clone() else {
             return false;
         };
         if id != session || !rect.contains((m.column, m.row).into()) {
@@ -146,7 +146,7 @@ impl App {
         let Some((button, motion)) = pointer_report(m.kind) else {
             return false;
         };
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             return false;
         };
         if !harnesses.takes_mouse(&session) {
@@ -171,9 +171,9 @@ impl App {
         // being attached: reading back through a harness's output is the most
         // common thing to want from one, and making it cost a chord first would
         // be the wrapper getting in the way.
-        if let Some((rect, session)) = self.hit_harness.clone() {
+        if let Some((rect, session)) = self.hit_session.clone() {
             if rect.contains((x, y).into()) {
-                if let Some(harnesses) = self.harnesses.clone() {
+                if let Some(harnesses) = self.local_sessions.clone() {
                     // Pane-relative: the child believes its screen starts at its
                     // own origin, and reporting our absolute position would put
                     // the event somewhere else entirely on it.
@@ -362,15 +362,15 @@ impl App {
                             if let Some(session) = row.session_id() {
                                 // Point the prompt at the row that was clicked,
                                 // not at whatever the last render left behind.
-                                // `harness_pane_session` is written during the
+                                // `pane_session` is written during the
                                 // draw, and no draw happens between the cursor
                                 // move above and this call — so without this the
                                 // prompt would offer to hand over the previously
                                 // visible harness, and confirming it would
                                 // transfer control of one the operator never
                                 // pointed at.
-                                self.harness_pane_session = Some(session.to_string());
-                                self.open_harness_enter_prompt();
+                                self.pane_session = Some(session.to_string());
+                                self.open_session_enter_prompt();
                                 // Drop whatever task the previous row was
                                 // watching, exactly as the fall-through below
                                 // does for every other row. This branch returns
@@ -390,12 +390,12 @@ impl App {
             // A click inside the embedded terminal means "type here", the same
             // as `Ctrl-]`. Checked after the rail so a click that changes rows
             // is a navigation, not an attach to whatever the last frame showed.
-            if let Some((rect, session)) = self.hit_harness.clone() {
+            if let Some((rect, session)) = self.hit_session.clone() {
                 if rect.contains((x, y).into())
-                    && self.harness_pane_session.as_deref() == Some(session.as_str())
+                    && self.pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.attach_to_pane_harness();
+                    self.attach_to_pane_session();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

@@ -89,7 +89,7 @@ fn the_new_agent_row_opens_the_picker_in_declare_mode() {
     assert!(app.on_new_agent_row());
 
     app.open_new_agent_picker();
-    let picker = app.harness_picker.as_ref().expect("the picker opened");
+    let picker = app.agent_picker.as_ref().expect("the picker opened");
     assert_eq!(picker.purpose, PickerPurpose::DeclareAgent);
 }
 
@@ -135,7 +135,7 @@ fn a_new_session_under_an_agent_asks_for_a_name_first() {
 fn a_named_session_opens_in_the_agents_own_harness_and_workspace() {
     let sessions = PtyManager::new();
     let mut app = hosting_app();
-    app.set_local_harnesses(shell_harnesses(sessions.clone()));
+    app.set_local_sessions(shell_harnesses(sessions.clone()));
     app.loaded.config.fleet.agent_declarations =
         vec![AgentDeclaration::new("shell", "", "codex", "/")];
 

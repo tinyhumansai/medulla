@@ -1,4 +1,4 @@
-//! Tests for attention cues in harness rows and lane state classification.
+//! Tests for attention cues in session rows and lane state classification.
 
 use medulla::ui::agents::{AgentLane, AgentRole, TaskState, TaskStatus};
 use ratatui::style::{Color, Modifier};
@@ -9,6 +9,7 @@ use super::rail_title;
 use super::state::{classify_lane, lane_waiting_session, task_waiting_session};
 use super::status::HarnessVisualState;
 use super::tests::{app, harness_row, NOW};
+use crate::ui::app::rail::RailRow;
 
 fn lane() -> AgentLane {
     AgentLane {
@@ -57,7 +58,7 @@ fn waiting_row(cwd: &str) -> SessionRow {
 #[test]
 fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
     let app = app();
-    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), false, 48, NOW);
+    let lines = app.own_session_lines(&waiting_row("/workspace/medulla"), false, 48, NOW);
 
     assert!(lines[0].to_string().starts_with("⚠ codex"), "{}", lines[0]);
     let style = lines[0].spans[0].style;
@@ -69,7 +70,7 @@ fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
 #[test]
 fn a_selected_harness_waiting_on_you_stays_blinking_yellow() {
     let app = app();
-    let lines = app.own_harness_lines(&waiting_row("/workspace/medulla"), true, 48, NOW);
+    let lines = app.own_session_lines(&waiting_row("/workspace/medulla"), true, 48, NOW);
     let style = lines[0].spans[0].style;
 
     assert_eq!(style.fg, Some(Color::Yellow));
@@ -85,7 +86,7 @@ fn a_long_attention_reason_wraps_without_losing_words() {
     row.attention = Some(HarnessAttention::new(AttentionKind::Dialog, reason, NOW));
 
     let rendered = app
-        .own_harness_lines(&row, false, 36, NOW)
+        .own_session_lines(&row, false, 36, NOW)
         .iter()
         .skip(1)
         .map(|line| line.to_string().trim().to_string())
@@ -103,7 +104,7 @@ fn the_pane_you_are_typing_in_does_not_blink_at_you() {
     let row = waiting_row("/workspace/medulla");
     app.harness_focus = crate::ui::harness_pane::HarnessFocus::Attached(row.id.clone());
 
-    let lines = app.own_harness_lines(&row, false, 48, NOW);
+    let lines = app.own_session_lines(&row, false, 48, NOW);
 
     assert_eq!(lines.len(), 1, "no second line: {lines:?}");
     assert!(!lines[0].spans[0]
@@ -118,7 +119,7 @@ fn an_exited_harness_stops_asking_for_anything() {
     let mut row = waiting_row("/workspace/medulla");
     row.state = PtyState::Exited { code: Some(0) };
 
-    let lines = app.own_harness_lines(&row, false, 48, NOW);
+    let lines = app.own_session_lines(&row, false, 48, NOW);
 
     assert_eq!(lines.len(), 1);
     assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);
@@ -174,12 +175,30 @@ fn task_attention_marks_only_the_exact_waiting_session() {
 }
 
 #[test]
-fn rail_title_reports_the_attention_snapshot_count() {
+fn rail_title_counts_the_agents_on_the_tree_not_the_lanes() {
+    // Two agents on the rail and one of them running a task. Counting lanes
+    // instead would report the agents that happen to have traffic — one — and
+    // read as "Agents · 1" on a machine that has two.
     let mut item = lane();
     item.tasks = vec![task(TaskStatus::Running, 1)];
+    let rows = vec![
+        RailRow::Agent(agent_row("busy")),
+        RailRow::Agent(agent_row("idle")),
+        RailRow::NewAgent,
+    ];
 
     assert_eq!(
-        rail_title(&[item], 2),
-        "Agents · 1 · 1 running · ⚠ 2 waiting on you"
+        rail_title(&rows, &[item], 2),
+        "Agents · 2 · 1 running · ⚠ 2 waiting on you"
     );
+}
+
+/// A bare agent row, as the tree produces one for a declared agent.
+fn agent_row(agent_id: &str) -> crate::ui::app::rail::AgentRailRow {
+    crate::ui::app::rail::AgentRailRow {
+        agent_id: agent_id.to_string(),
+        host_id: String::new(),
+        agent: None,
+        lane_index: None,
+    }
 }

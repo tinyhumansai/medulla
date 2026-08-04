@@ -51,7 +51,7 @@ use medulla::daemon::providers::{Abort, RunTaskOptions};
 use medulla::protocol::HarnessProvider;
 
 use super::super::executor::PtySessionExecutor;
-use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
+use super::super::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// Render a session's medulla-parsed screen as plain text (mirrors the private
 /// `pty::inject::screen_text`), for the paste-gap diagnostic below.
@@ -220,7 +220,7 @@ async fn experiment_codex_dialog_dismissal() {
             label: "exp".to_string(),
             session_id: None,
             model: None,
-            control: HarnessControl::Orchestrator,
+            control: SessionControl::Orchestrator,
             origin: crate::worker::pty::SessionOrigin::Orchestrator,
             name: None,
         })
@@ -303,7 +303,7 @@ async fn experiment_codex_startup_dialog_dismissal() {
             label: "trust".to_string(),
             session_id: None,
             model: None,
-            control: HarnessControl::Orchestrator,
+            control: SessionControl::Orchestrator,
             origin: crate::worker::pty::SessionOrigin::Orchestrator,
             name: None,
         })
@@ -377,7 +377,7 @@ async fn diagnose_codex_paste_rendering() {
             label: "diag".to_string(),
             session_id: None,
             model: None,
-            control: HarnessControl::Orchestrator,
+            control: SessionControl::Orchestrator,
             origin: crate::worker::pty::SessionOrigin::Orchestrator,
             name: None,
         })

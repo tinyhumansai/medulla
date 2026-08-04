@@ -440,11 +440,11 @@ impl App {
                 self.new_thread();
             }
             SlashCommand::Resume => return Some(Cmd::ListChats),
-            SlashCommand::NewHarness { provider, path } => {
-                self.start_harness_command(provider.as_deref(), path.as_deref());
+            SlashCommand::StartSession { provider, path } => {
+                self.start_session_command(provider.as_deref(), path.as_deref());
             }
-            SlashCommand::TakeControl => self.take_harness_control(),
-            SlashCommand::HandOff { note } => self.hand_harness_back(note),
+            SlashCommand::TakeControl => self.take_session_control(),
+            SlashCommand::HandOff { note } => self.hand_session_back(note),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");

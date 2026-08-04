@@ -686,123 +686,115 @@ fn the_nodes_sway_but_the_selected_one_holds_still() {
     }
 }
 
+/// A chain of `count` steps, each named with `name(index)`.
+fn chain(id: &str, count: usize, name: impl Fn(usize) -> String) -> WorkflowRecord {
+    let mut record = diamond(id);
+    record.graph = serde_json::from_value(json!({
+        "nodes": (0..count).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": name(index),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..count.saturating_sub(1)).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    record
+}
+
 #[test]
-fn columns_are_sized_to_the_graphs_own_labels() {
-    // Short names: every column is the minimum width, so more steps fit across
-    // the pane than a fixed column width would have allowed.
-    let mut long = diamond("long");
-    long.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("S{index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
-    let (_home, mut app) = app_with(&[long], &[]);
-    render_sized(&mut app, 140, 34);
-    let narrow = (app.node_width(), app.layers_per_band());
-    assert_eq!(narrow.0, super::MIN_NODE_WIDTH, "short names, narrow columns");
-
-    // The same graph with long names takes wider columns, and fewer of them.
-    let mut wordy = diamond("wordy");
-    wordy.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("A rather long step name {index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
+fn each_column_is_sized_to_its_own_label() {
+    // One wordy step among short ones. Only its own column widens: the rest
+    // keep their own width, so the graph is not padded out to the longest name
+    // in it and every connector stays short.
+    let wordy = chain("wordy", 4, |index| {
+        if index == 2 {
+            "A conspicuously long step name".into()
+        } else {
+            format!("S{index}")
+        }
+    });
     let (_home, mut app) = app_with(&[wordy], &[]);
-    render_sized(&mut app, 140, 34);
-    let wide = (app.node_width(), app.layers_per_band());
+    render_sized(&mut app, 160, 34);
 
-    assert_eq!(wide.0, super::MAX_NODE_WIDTH, "long names are capped");
+    assert_eq!(app.column_width(0), super::MIN_LABEL_WIDTH, "short name");
+    assert_eq!(app.column_width(2), super::MAX_NODE_WIDTH, "long name");
     assert!(
-        wide.1 < narrow.1,
-        "wider columns means fewer of them: {wide:?} against {narrow:?}"
+        app.column_width(1) < app.column_width(2),
+        "a short step keeps its own narrow column"
+    );
+}
+
+#[test]
+fn short_names_pack_more_steps_into_a_band() {
+    let (_home, mut app) = app_with(&[chain("terse", 12, |index| format!("S{index}"))], &[]);
+    render_sized(&mut app, 160, 34);
+    let terse = app.layers_per_band();
+
+    let (_home, mut app) = app_with(
+        &[chain("wordy", 12, |index| {
+            format!("A rather long step name {index}")
+        })],
+        &[],
+    );
+    render_sized(&mut app, 160, 34);
+    let wordy = app.layers_per_band();
+
+    assert!(
+        terse > wordy,
+        "narrow columns fit more per band: {terse} against {wordy}"
     );
 }
 
 #[test]
 fn a_band_never_runs_past_the_pane() {
-    let mut long = diamond("long");
-    long.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("Step {index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
-    let (_home, mut app) = app_with(&[long], &[]);
+    let (_home, mut app) = app_with(&[chain("long", 12, |index| format!("Step {index}"))], &[]);
 
     for width in [100u16, 140, 200] {
         let screen = render_sized(&mut app, width, 34);
-        let (per_band, node_width) = (app.layers_per_band(), app.node_width());
-        let canvas = app.canvas_width();
+        let (per_band, canvas) = (app.layers_per_band(), app.canvas_width());
 
-        assert!(
-            (super::MIN_NODE_WIDTH..=super::MAX_NODE_WIDTH).contains(&node_width),
-            "at {width} columns a node is {node_width} wide"
-        );
-        let (last, _) = app.graph_cell(per_band - 1, 0);
-        assert!(
-            last + node_width <= canvas + super::FOLD_MARGIN,
-            "at {width} columns the band overflows: ends at {} of {canvas}",
-            last + node_width
-        );
-        // Columns spread into the pane, but only so far: two short names either
-        // side of half a pane of connector read as unrelated.
-        if per_band > 1 {
-            let stride = app.graph_cell(1, 0).0 - app.graph_cell(0, 0).0;
+        for layer in 0..per_band {
+            let (x, _) = app.graph_cell(layer, 0);
+            let end = x + app.column_width(layer);
             assert!(
-                stride <= node_width + super::MAX_GUTTER_SPAN,
-                "at {width} columns the stride is {stride}: {screen}"
+                end <= canvas + super::FOLD_MARGIN,
+                "at {width} columns layer {layer} ends at {end} of {canvas}: {screen}"
+            );
+        }
+        // Connectors stay short: the gap between one column and the next is the
+        // gutter, never the padding of a column sized for another step's name.
+        if per_band > 1 {
+            let gap = app.graph_cell(1, 0).0 - (app.graph_cell(0, 0).0 + app.column_width(0));
+            assert_eq!(
+                gap,
+                super::GUTTER_SPAN,
+                "at {width} columns the gap is {gap}: {screen}"
             );
         }
     }
 }
 
 #[test]
-fn every_band_puts_its_columns_in_the_same_places() {
-    let mut long = diamond("long");
-    long.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("Step {index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
-    let (_home, mut app) = app_with(&[long], &[]);
+fn a_fold_picks_up_where_the_band_above_ended() {
+    let (_home, mut app) = app_with(&[chain("long", 12, |index| format!("Step {index}"))], &[]);
     render_sized(&mut app, 140, 34);
-
-    // Bands alternate direction, so the second band's columns are the first
-    // band's mirrored — the same set of x positions either way, which is what
-    // makes nodes line up vertically down the fold.
     let per_band = app.layers_per_band();
-    let first: Vec<usize> = (0..per_band).map(|c| app.graph_cell(c, 0).0).collect();
-    let mut second: Vec<usize> = (per_band..per_band * 2)
-        .map(|c| app.graph_cell(c, 0).0)
-        .collect();
-    second.sort_unstable();
-    assert_eq!(first, second);
+    assert!(per_band < 12, "the chain has to fold at all");
+
+    // The last column of a band and the first of the one below it are the two
+    // ends of a fold, and alternating the direction is what puts them in the
+    // same place — a fold is a hop down, not a run back across the pane.
+    let (last_x, last_row) = app.graph_cell(per_band - 1, 0);
+    let last_end = last_x + app.column_width(per_band - 1);
+    let (next_x, next_row) = app.graph_cell(per_band, 0);
+    let next_end = next_x + app.column_width(per_band);
+
+    assert!(next_row > last_row, "one band below the other");
+    assert!(
+        last_end.abs_diff(next_end) <= super::GUTTER_SPAN,
+        "the fold's two ends are within a gutter of each other: {last_end} then {next_end}"
+    );
 }

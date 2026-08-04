@@ -33,17 +33,17 @@ use super::{BAND_GAP, LAYER_STRIDE, NODE_WIDTH};
 /// leaves it.
 const NODE_GAP: usize = 1;
 
-/// The column inside a layer's gutter that wires run vertically in.
+/// Cells past a node's trailing edge that its outgoing wires turn down in.
 ///
 /// Near the source side, leaving the rest of the gutter for the port label —
 /// which is written on the *incoming* run rather than the outgoing one, because
 /// every edge out of one node shares that node's exit row and two labels there
 /// would overwrite each other.
-const GUTTER_COLUMN: usize = NODE_WIDTH + NODE_GAP + 1;
+const GUTTER_GAP: usize = NODE_GAP + 1;
 
 /// How many columns a port label has, between the gutter's vertical run and the
-/// arrowhead at the target's left edge.
-const LABEL_WIDTH: usize = LAYER_STRIDE - GUTTER_COLUMN - 2;
+/// arrowhead at the target's leading edge.
+const LABEL_WIDTH: usize = LAYER_STRIDE - NODE_WIDTH - GUTTER_GAP - 2;
 
 /// The row inside a node that wires attach to. A node is one row tall, so this
 /// is that row.
@@ -112,14 +112,6 @@ impl App {
         self.paint_edges(&mut canvas, layout, overlay.as_ref());
         self.paint_nodes(&mut canvas, layout, overlay.as_ref());
         f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
-    }
-
-    /// How many rows the whole folded graph occupies.
-    fn folded_rows(&self) -> usize {
-        let layers = self.workflow_layout().layers.max(1);
-        let bands = layers.div_ceil(self.layers_per_band());
-        // The last band needs no trailing gap, so one is taken back off.
-        (bands * self.band_stride()).saturating_sub(BAND_GAP)
     }
 
     /// The canvas panel's title: the workflow, and what is overlaid on it.
@@ -238,23 +230,40 @@ impl App {
             };
             let style = CellStyle::colored(wire_color).dimmed();
 
-            let exit = fx + NODE_WIDTH + NODE_GAP;
-            let gutter = fx + GUTTER_COLUMN;
-            let entry = tx.saturating_sub(1);
+            // Which way the two bands run. In a reversed band a forward edge
+            // travels leftward, so every "out of the source" and "into the
+            // target" column below is mirrored rather than assumed rightward.
+            let out_reversed = self.layer_reversed(from.layer);
+            let in_reversed = self.layer_reversed(to.layer);
+            let folds = self.band_of(to.layer) != self.band_of(from.layer);
+
+            let (exit, gutter) = if out_reversed {
+                (fx.saturating_sub(1 + NODE_GAP), fx.saturating_sub(GUTTER_GAP))
+            } else {
+                (fx + NODE_WIDTH + NODE_GAP, fx + NODE_WIDTH + GUTTER_GAP)
+            };
+            // The cell an arrowhead lands on: just outside the target's leading
+            // edge, which is its right edge on a band that runs right to left.
+            let entry = if in_reversed {
+                tx + NODE_WIDTH
+            } else {
+                tx.saturating_sub(1)
+            };
+            let head = if in_reversed { '◀' } else { '▶' };
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
-            // A folded edge is the one case where the target is left of the
-            // source and yet nothing has gone wrong: the chain ran out of pane
-            // and continued on the band below.
-            let folds = self.band_of(to.layer) > self.band_of(from.layer);
+            // Whether the target is ahead of the source along the band: a
+            // target behind it is a loop, and comes back into its trailing edge.
+            let forward = if out_reversed { tx < fx } else { tx > fx };
 
             // The wire as a polyline, corner to corner. Building it up front is
             // what lets the flow highlight ride the path that was actually
             // drawn rather than the straight line between the two nodes, which
             // is not where the wire is.
             let points: Vec<(usize, usize)> = if folds {
-                // Out, down into the blank row above the target's band, back
-                // left along it, then down into the target from above — so a
-                // fold never cuts across the band it is arriving at.
+                // Out, down into the blank row above the target's band, across
+                // to the target's column, then down into it. With alternating
+                // band directions that "across" is a short hop, because the
+                // next band picks up under where this one ended.
                 let link_row = to_row.saturating_sub(1);
                 vec![
                     (exit, from_row),
@@ -263,7 +272,7 @@ impl App {
                     (entry, link_row),
                     (entry, to_row),
                 ]
-            } else if gutter < entry {
+            } else if forward {
                 vec![
                     (exit, from_row),
                     (gutter, from_row),
@@ -271,19 +280,26 @@ impl App {
                     (entry, to_row),
                 ]
             } else {
-                // The target is left of the source within one band: a loop. It
-                // comes back the other way, into the node's right side.
+                // A loop back to an earlier step in the same band: it returns
+                // the way it came, into the node's trailing edge.
+                let tail = if in_reversed {
+                    tx.saturating_sub(1)
+                } else {
+                    tx + NODE_WIDTH
+                };
                 vec![
                     (exit, from_row),
                     (gutter, from_row),
                     (gutter, to_row),
-                    (tx + NODE_WIDTH, to_row),
+                    (tail, to_row),
                 ]
             };
             let route = paint_route(canvas, &points, style);
 
-            let (head_x, head) = if folds || gutter <= entry {
-                (entry, '▶')
+            let (head_x, head) = if folds || forward {
+                (entry, head)
+            } else if in_reversed {
+                (tx.saturating_sub(1), '▶')
             } else {
                 (tx + NODE_WIDTH, '◀')
             };
@@ -302,24 +318,22 @@ impl App {
             // dropped when a case name is long: its first letters still
             // distinguish it from its siblings.
             if let Some(label) = &edge.label {
-                if folds {
-                    // A folded arm writes its name along the row it comes back
-                    // on, just after the corner it turns at. Dropping it would
-                    // leave the reader unable to tell which arm of a branch
-                    // wrapped — the one thing the label exists to say.
-                    canvas.text(
-                        entry + 1,
-                        to_row.saturating_sub(1),
-                        &crate::ui::util::clip(label, LABEL_WIDTH),
-                        style,
-                    );
-                } else if gutter < entry {
-                    canvas.text(
-                        gutter + 1,
-                        to_row,
-                        &crate::ui::util::clip(label, LABEL_WIDTH),
-                        style,
-                    );
+                let label = crate::ui::util::clip(label, LABEL_WIDTH);
+                // Written along the run into the target — one label per target
+                // row, rather than every arm of a branch fighting for the
+                // source's single exit row. A folded arm writes its name on the
+                // row it comes across on instead; dropping it there would leave
+                // the reader unable to tell which arm of a branch wrapped, which
+                // is the one thing the label exists to say.
+                let (label_x, label_row) = if folds {
+                    (gutter.min(entry) + 1, to_row.saturating_sub(1))
+                } else if out_reversed {
+                    (entry + 1, to_row)
+                } else {
+                    (gutter + 1, to_row)
+                };
+                if forward || folds {
+                    canvas.text(label_x, label_row, &label, style);
                 }
             }
         }

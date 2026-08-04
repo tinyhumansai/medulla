@@ -50,8 +50,6 @@ mod tests;
 /// marker, a space and four characters.
 pub(in crate::ui::app) const MIN_LABEL_WIDTH: usize = 6;
 
-
-
 /// The widest a node's label is drawn, however much room there is.
 ///
 /// A node is a marker and a short name. Past this the extra columns are trailing

@@ -245,15 +245,16 @@ impl App {
         if !self.band_reversed(band) {
             return before;
         }
-        // Right to left, ending where the band above it ended. A band is only
-        // as wide as its own columns, so a short last band laid out within its
-        // own extent would start well to the left of the band above — and the
-        // fold between them, which should be a hop straight down, would reach
-        // back across the pane to find it.
+        // Right to left, ending at the same edge every reversed band ends at:
+        // the widest band's. A band laid out within its own extent would start
+        // wherever its own columns happened to reach — a short last band well
+        // to the left of the one above it, turning a fold that should be a hop
+        // straight down into a run back across the pane, and a band wider than
+        // that extent overlapping its own labels.
         let extent = widths
             .chunks(per_band)
-            .nth(band.saturating_sub(1))
             .map(band_width)
+            .max()
             .unwrap_or_else(|| band_width(members));
         extent.saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }

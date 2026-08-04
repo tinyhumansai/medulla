@@ -575,7 +575,7 @@ fn a_graph_wider_than_the_canvas_folds_into_view() {
     let first_of_second = app.graph_cell(per_band, 0);
     assert_eq!(
         last_of_first.0, first_of_second.0,
-        "the fold picks up in the same column it left off in"
+        "the fold picks up in the column it left off in"
     );
     assert!(
         first_of_second.1 > last_of_first.1,
@@ -797,17 +797,4 @@ fn a_fold_picks_up_where_the_band_above_ended() {
         last_end.abs_diff(next_end) <= super::GUTTER_SPAN,
         "the fold's two ends are within a gutter of each other: {last_end} then {next_end}"
     );
-}
-
-#[test]
-#[ignore]
-fn debug_metrics() {
-    let (_home, mut app) = app_with(&[chain("long", 12, |index| format!("Step {index}"))], &[]);
-    render_sized(&mut app, 140, 34);
-    let per_band = app.layers_per_band();
-    println!("canvas={} per_band={per_band}", app.canvas_width());
-    for layer in 0..12 {
-        let (x, row) = app.graph_cell(layer, 0);
-        println!("layer {layer}: x={x} row={row} width={}", app.column_width(layer));
-    }
 }

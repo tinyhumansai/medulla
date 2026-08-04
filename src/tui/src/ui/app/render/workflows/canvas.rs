@@ -26,7 +26,7 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::{LAYER_STRIDE, NODE_WIDTH};
+use super::GUTTER_SPAN;
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that
@@ -43,7 +43,7 @@ const GUTTER_GAP: usize = NODE_GAP + 1;
 
 /// How many columns a port label has, between the gutter's vertical run and the
 /// arrowhead at the target's leading edge.
-const LABEL_WIDTH: usize = LAYER_STRIDE - NODE_WIDTH - GUTTER_GAP - 2;
+const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 2;
 
 /// The row inside a node that wires attach to. A node is one row tall, so this
 /// is that row.
@@ -165,8 +165,9 @@ impl App {
             .collect()
     }
 
-    /// Paint one box per visible node.
+    /// Paint one marker and label per visible node.
     fn paint_nodes(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
+        let node_width = self.node_width();
         for (index, node) in layout.nodes.iter().enumerate() {
             let Some((x, y)) = self.cell_of(node) else {
                 continue;
@@ -199,12 +200,13 @@ impl App {
             // behind the name rather than striking it out.
             let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or("");
             let label = format!("{} {}{}", node.glyph, node.name, mark);
-            canvas.text(x, y, &pad(&label, NODE_WIDTH), style.bold());
+            canvas.text(x, y, &pad(&label, node_width), style.bold());
         }
     }
 
     /// Route and paint one wire per edge whose ends are both placed.
     fn paint_edges(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
+        let node_width = self.node_width();
         for (index, edge) in layout.edges.iter().enumerate() {
             let (Some(from), Some(to)) = (
                 layout.index_of(&edge.from).and_then(|i| layout.node(i)),
@@ -245,12 +247,12 @@ impl App {
                     fx.saturating_sub(GUTTER_GAP),
                 )
             } else {
-                (fx + NODE_WIDTH + NODE_GAP, fx + NODE_WIDTH + GUTTER_GAP)
+                (fx + node_width + NODE_GAP, fx + node_width + GUTTER_GAP)
             };
             // The cell an arrowhead lands on: just outside the target's leading
             // edge, which is its right edge on a band that runs right to left.
             let entry = if in_reversed {
-                tx + NODE_WIDTH
+                tx + node_width
             } else {
                 tx.saturating_sub(1)
             };
@@ -290,7 +292,7 @@ impl App {
                 let tail = if in_reversed {
                     tx.saturating_sub(1)
                 } else {
-                    tx + NODE_WIDTH
+                    tx + node_width
                 };
                 vec![
                     (exit, from_row),
@@ -306,7 +308,7 @@ impl App {
             } else if in_reversed {
                 (tx.saturating_sub(1), '▶')
             } else {
-                (tx + NODE_WIDTH, '◀')
+                (tx + node_width, '◀')
             };
             canvas.arrow(head_x, to_row, head, style);
 

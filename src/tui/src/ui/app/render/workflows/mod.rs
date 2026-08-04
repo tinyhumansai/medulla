@@ -43,19 +43,14 @@ mod rail_tests;
 #[cfg(test)]
 mod tests;
 
-/// The narrowest a node's label is ever drawn.
+/// The narrowest a column is ever made.
 ///
-/// Only reached on a pane too narrow to give one column its preferred width.
-/// Twelve columns still shows a marker and enough of a name to recognise it.
-pub(in crate::ui::app) const MIN_NODE_WIDTH: usize = 12;
+/// A column is sized to the longest label that lands in it, so this is only
+/// reached by a column whose every node has a very short name. Six columns is a
+/// marker, a space and four characters.
+pub(in crate::ui::app) const MIN_LABEL_WIDTH: usize = 6;
 
-/// The fewest columns a band is given, whenever the pane is wide enough to
-/// hold them.
-///
-/// A band of one column is a list, not a graph: every edge in it becomes a
-/// fold. So a long label is clipped rather than allowed to widen its column
-/// until only one fits.
-pub(in crate::ui::app) const MIN_COLUMNS: usize = 2;
+
 
 /// The widest a node's label is drawn, however much room there is.
 ///

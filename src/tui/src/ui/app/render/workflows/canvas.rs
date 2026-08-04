@@ -26,7 +26,7 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::{LANE_STRIDE, LAYER_STRIDE, NODE_WIDTH};
+use super::{BAND_GAP, LANE_STRIDE, LAYER_STRIDE, NODE_WIDTH};
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that
@@ -59,11 +59,13 @@ impl App {
     /// Draw the graph of the selected workflow.
     pub(super) fn draw_workflow_canvas(&mut self, f: &mut Frame, area: Rect) {
         let panes = if area.height >= 16 && self.selected_graph_node().is_some() {
-            // Tall enough for the lanes plus the panel's own borders, and no
-            // taller: a one-row-per-node graph that reserved the old box-sized
-            // floor would spend most of the pane on blank canvas while the
-            // inspector under it went short.
-            let graph_height = (self.workflow_layout().lanes as u16 * LANE_STRIDE as u16 + 2)
+            // Tall enough for every band the fold produced plus the panel's own
+            // borders, and no taller: a graph that reserved more would spend the
+            // difference on blank canvas while the inspector under it went
+            // short. Past half the pane the canvas scrolls instead of growing —
+            // the inspector is not worth starving for a graph nobody asked to
+            // see all of at once.
+            let graph_height = (self.folded_rows() as u16 + 2)
                 .max(5)
                 .min(area.height / 2);
             Layout::default()
@@ -110,6 +112,14 @@ impl App {
         self.paint_edges(&mut canvas, layout, overlay.as_ref());
         self.paint_nodes(&mut canvas, layout, overlay.as_ref());
         f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
+    }
+
+    /// How many rows the whole folded graph occupies.
+    fn folded_rows(&self) -> usize {
+        let layers = self.workflow_layout().layers.max(1);
+        let bands = layers.div_ceil(self.layers_per_band());
+        // The last band needs no trailing gap, so one is taken back off.
+        (bands * self.band_stride()).saturating_sub(BAND_GAP)
     }
 
     /// The canvas panel's title: the workflow, and what is overlaid on it.

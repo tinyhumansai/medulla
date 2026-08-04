@@ -118,6 +118,7 @@ pub fn frame(
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
+        session_id: None,
     }
 }
 

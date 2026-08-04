@@ -163,11 +163,16 @@ fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::Subscript
 fn roster_sink(
     home: &Path,
     log: medulla::hub::HubLog,
-    local_addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    local_hosts: medulla::hub::SharedLocalHosts,
 ) -> medulla::hub::RosterSink {
     let path = roster_path(home);
     Arc::new(move |workers: &[medulla::hub::HubWorker]| {
-        let local_addresses = local_addresses.lock().expect("host addresses").clone();
+        let local_addresses: Vec<String> = local_hosts
+            .lock()
+            .expect("local hosts")
+            .iter()
+            .map(|host| host.id.clone())
+            .collect();
         let rows: Vec<medulla::config::HubWorkerConfig> = workers
             .iter()
             .filter(|w| !local_addresses.contains(&w.address))
@@ -390,8 +395,8 @@ fn build_hub_config_with_host_and_link(
     let (local_network, local_address) = match &local {
         Some(dispatch) => {
             {
-                let local_addresses = dispatch.host_addresses.lock().expect("host addresses");
-                workers.retain(|worker| !local_addresses.contains(&worker.address));
+                let local_hosts = dispatch.local_hosts.lock().expect("local hosts");
+                workers.retain(|worker| !local_hosts.iter().any(|host| host.id == worker.address));
             }
             // Inserted in declaration order, so the primary leads and the
             // extras follow it the way they read in the config.
@@ -420,14 +425,16 @@ fn build_hub_config_with_host_and_link(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_MS);
     // The handle, not a copy of its contents: the sink reads it at save time,
-    // which is the only moment that knows which hosts this device is binding.
-    let persisted_local = local
+    // and the hub reads it at registration time, which are the only moments
+    // that know which hosts this device is binding.
+    let local_hosts = local
         .as_ref()
-        .map(|dispatch| dispatch.host_addresses.clone())
+        .map(|dispatch| dispatch.local_hosts.clone())
         .unwrap_or_default();
     Some(HubConfig {
         agent_templates,
-        persist: Some(roster_sink(home, log.clone(), persisted_local)),
+        local_hosts: local_hosts.clone(),
+        persist: Some(roster_sink(home, log.clone(), local_hosts)),
         log,
         backend_url: creds.base_url,
         jwt: creds.jwt,

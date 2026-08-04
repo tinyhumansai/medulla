@@ -8,7 +8,7 @@ use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::pty::PtyManager;
 
 use crate::local_host::{
-    all_host_addresses, display_name, extra_host_address, extra_options, host_address,
+    all_local_hosts, display_name, extra_host_address, extra_options, host_address,
     options_from_config, start_all,
 };
 
@@ -38,6 +38,12 @@ fn each_extra_host_gets_its_own_bus_address() {
     assert_eq!(extra_host_address(&explicit, 0), "chosen-by-hand");
 }
 
+/// The bus addresses of a declared-host list, which is what the roster filter
+/// keys on.
+fn addresses_of(hosts: &[medulla::config::LocalHostRef]) -> Vec<String> {
+    hosts.iter().map(|host| host.id.clone()).collect()
+}
+
 #[test]
 fn every_declared_address_is_known_without_starting_anything() {
     // Needed in exactly the case where none started: a roster saved while
@@ -54,7 +60,7 @@ fn every_declared_address_is_known_without_starting_anything() {
         },
     ];
     assert_eq!(
-        all_host_addresses(&primary, &extras),
+        addresses_of(&all_local_hosts(&primary, &extras)),
         vec![
             HostSection::default().address,
             "local-backend".to_string(),
@@ -196,7 +202,7 @@ fn an_unnamed_extras_address_is_derived_from_its_config_index() {
 
     assert_eq!(extra_host_address(&unnamed, 0), "local-host-1");
     assert_eq!(
-        all_host_addresses(&primary, std::slice::from_ref(&unnamed)),
+        addresses_of(&all_local_hosts(&primary, std::slice::from_ref(&unnamed))),
         vec![host_address(&primary), "local-host-1".to_string()],
     );
 }

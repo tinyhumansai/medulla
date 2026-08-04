@@ -13,6 +13,9 @@ pub struct HubHandle {
     pub(super) relay: Arc<dyn Relay>,
     /// The agent-role catalog, read when re-advertising the roster.
     pub(super) catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
+    /// The hosts this machine declares, read when re-advertising the roster so
+    /// a host started mid-session is registered as `local`.
+    pub(super) local_hosts: super::super::roster::SharedLocalHosts,
     /// Sender/receiver correlation used for lightweight worker probes.
     pub(super) runner: Arc<super::super::runner::TaskRunner>,
     /// Latest capacity details keyed by stable worker id.
@@ -47,6 +50,9 @@ pub(in super::super) struct HandleWiring {
     /// advertises. Shared and read-only: registration reads it, nothing here
     /// writes it.
     pub catalog: Arc<Vec<crate::runtime::AgentTemplate>>,
+    /// The hosts this machine declares, for the `hosts[]` block of every
+    /// re-registration this handle triggers.
+    pub local_hosts: super::super::roster::SharedLocalHosts,
     /// Runner used to request lightweight details from workers.
     pub runner: Arc<super::super::runner::TaskRunner>,
     /// Where roster mutations are narrated.

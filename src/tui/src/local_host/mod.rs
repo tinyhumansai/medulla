@@ -63,16 +63,21 @@ pub(crate) fn host_address(config: &HostSection) -> String {
     config.effective_address()
 }
 
-/// Every device-local address a host could bind, running or not.
+/// Every host this device declares, running or not — its bus address and its
+/// name.
 ///
 /// Known without starting anything, because it comes from the config rather
 /// than from a started host — and it is needed in exactly the case where none
 /// started, to recognise remembered local roster entries and drop them.
-pub(crate) fn all_host_addresses(primary: &HostSection, extras: &[HostSection]) -> Vec<String> {
+///
+/// The name rides along because the hub advertises this same list as the
+/// `hosts[]` block, where a host with an id and nothing to call it reads as a
+/// machine nobody named.
+pub(crate) fn all_local_hosts(
+    primary: &HostSection,
+    extras: &[HostSection],
+) -> Vec<medulla::config::LocalHostRef> {
     medulla::config::local_hosts(primary, extras)
-        .into_iter()
-        .map(|host| host.id)
-        .collect()
 }
 
 /// The bus address for an extra host — see
@@ -399,10 +404,11 @@ pub(crate) struct LocalHostSpawner {
     /// from. Carried rather than re-read so a host started now and one started
     /// at launch are built from the same list.
     declared: Vec<AgentDeclaration>,
-    /// Every device-local address, shared with the hub's roster filter. A host
-    /// bound here must be appended or the roster sink will persist it as a
-    /// remote entry.
-    addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Every host this device declares, shared with the hub's roster filter and
+    /// its `hosts[]` advert. A host bound here must be appended or the roster
+    /// sink will persist it as a remote entry — and the hub will advertise its
+    /// agents as running on somebody else's machine.
+    local_hosts: medulla::hub::SharedLocalHosts,
 }
 
 impl LocalHostSpawner {
@@ -419,7 +425,7 @@ impl LocalHostSpawner {
         env: HashMap<String, String>,
         runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
         started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
-        addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        local_hosts: medulla::hub::SharedLocalHosts,
         declared: Vec<AgentDeclaration>,
     ) -> Self {
         Self {
@@ -429,7 +435,7 @@ impl LocalHostSpawner {
             env,
             runtimes,
             started,
-            addresses,
+            local_hosts,
             declared,
         }
     }
@@ -439,7 +445,7 @@ impl LocalHostSpawner {
     /// rather than as one entry standing in for all of them.
     ///
     /// `index` is the entry's position within `[[hosts]]`, which is the basis
-    /// [`all_host_addresses`] and [`start_all`] derive an unnamed host's address
+    /// [`all_local_hosts`] and [`start_all`] derive an unnamed host's address
     /// from. It is passed in rather than counted here for exactly that reason:
     /// counting *started* hosts includes the primary, so a first unnamed extra
     /// bound `local-host-2` this run and `local-host-1` on the next launch —
@@ -460,12 +466,18 @@ impl LocalHostSpawner {
             &self.declared,
         )?;
         let specs = host.specs().to_vec();
-        // Before the roster entry exists, so the hub's save filter already knows
-        // this address is device-local by the time registration triggers one.
-        self.addresses
+        // Before the roster entry exists, so the hub's save filter and its
+        // `hosts[]` advert both already know this address is device-local by the
+        // time registration triggers one.
+        self.local_hosts
             .lock()
-            .expect("host addresses")
-            .push(host.address().to_string());
+            .expect("local hosts")
+            .push(medulla::config::LocalHostRef {
+                id: host.address().to_string(),
+                name: display_name(config, host.workspace(), false),
+                workspace: host.workspace().to_string(),
+                primary: false,
+            });
         self.runtimes
             .lock()
             .expect("local harness runtimes")

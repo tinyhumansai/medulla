@@ -97,6 +97,15 @@ pub struct HubConfig {
     /// already loads, and a second read could disagree with what the operator
     /// is looking at on the Agent Templates page.
     pub agent_templates: Vec<crate::runtime::AgentTemplate>,
+    /// The hosts *this machine* declares, advertised as the payload's `hosts[]`
+    /// block and used to decide which advertised agents run locally.
+    ///
+    /// Shared rather than owned so a host started mid-session joins the same
+    /// list the hub reads at registration time (see
+    /// [`SharedLocalHosts`](crate::hub::SharedLocalHosts)). Default-empty is the
+    /// honest answer for a hub that hosts nothing itself: every agent it fronts
+    /// then belongs to another machine, and the block says so.
+    pub local_hosts: crate::hub::SharedLocalHosts,
     /// How often the runner drains the inbox.
     pub poll: Duration,
     /// Where diagnostics go. Defaults to stderr; a TUI supplies its own so the

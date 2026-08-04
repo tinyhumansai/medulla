@@ -33,7 +33,9 @@ pub(super) fn hub_worker_to_info(
             .starts_with('@')
             .then(|| worker.address.clone()),
         id: worker.id,
-        workspace: worker.workspace,
+        // The path only: the UI row has always been a path, and the workspace
+        // *type* has no renderer yet.
+        workspace: worker.workspace.map(|workspace| workspace.path),
         address: worker.address,
         label: worker.label,
         harness: Some(worker.harness),

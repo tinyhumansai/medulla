@@ -45,12 +45,10 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     if !roles.is_empty() {
         metadata["roles"] = json!(roles.iter().map(|t| t.id.as_str()).collect::<Vec<_>>());
     }
-    if let Some(workspace) = w
-        .workspace
-        .as_deref()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    {
+    // The path, not the `{path, type}` object the entity model carries: the
+    // object is the wire change, and this advert stays byte-identical for a
+    // worker whose placement has not changed.
+    if let Some(workspace) = w.workspace_path() {
         metadata["workspace"] = json!(workspace);
     }
     // Who holds the harness, and only when that is a person. Absent means the
@@ -125,6 +123,41 @@ fn role_tags(roles: &[&crate::runtime::AgentTemplate]) -> Vec<String> {
         }
     }
     tags
+}
+
+/// The roster entry a [`WorkerSpec`](crate::hub::WorkerSpec) describes.
+///
+/// The one place a spec becomes a live roster row, so the declaration → advert
+/// chain has a single seam: an agent's `roles`, workspace and derived capacity
+/// arrive here from what the operator declared, and `to_agent` turns them into
+/// `metadata`. Before declarations existed this mapping hard-coded empty roles,
+/// which is why a host in this process advertised itself as a general worker
+/// however it was configured.
+///
+/// Lives here rather than beside the hub's boot wiring because it is pure data
+/// translation, and because everything downstream of it is tested here.
+pub(crate) fn worker_from_spec(spec: &crate::hub::WorkerSpec) -> HubWorker {
+    HubWorker {
+        id: spec.id.clone(),
+        host_id: spec.host_id.clone(),
+        address: spec.address.clone(),
+        harness: spec.harness.clone(),
+        // The placeholder name is not a label. It is what an env-seeded or
+        // remembered row carries when nobody named it, and promoting it to a
+        // label would put a constant on screen where the id belongs.
+        label: (spec.name != "medulla-worker").then(|| spec.name.clone()),
+        selected: false,
+        roles: spec.roles.clone(),
+        workspace: spec.workspace.clone(),
+        // A spec that states no capacity is a remembered roster row or a remote
+        // peer, not a declaration; the serial default is the safe reading.
+        max_sessions: if spec.max_sessions == 0 {
+            crate::runtime::WorkspaceStrategy::Checkout.max_sessions()
+        } else {
+            spec.max_sessions
+        },
+        ..Default::default()
+    }
 }
 
 /// The `register_agents` payload for the roster, minus anything known to be down.
@@ -209,6 +242,34 @@ pub(super) fn address_of(workers: &[HubWorker], agent_id: &str) -> Option<String
         .iter()
         .find(|w| w.id == wanted || w.address == wanted)
         .map(|w| w.address.clone())
+}
+
+/// The roster id a dispatch is grouped under — the lane the Agents view files
+/// its task in.
+///
+/// The targeted agent when the task named one, and only otherwise the first
+/// entry at the resolved `address`. The order matters now that a machine
+/// advertises several agents on one address: resolving by address alone files
+/// every task on that machine under whichever agent happens to be listed first,
+/// so work dispatched to `this-device-codex` would appear under `this-device`.
+///
+/// Falls back rather than failing, because a lane label is not worth dropping a
+/// task over: an unattributed dispatch has no id to prefer, and an unknown one
+/// has already been refused by [`address_of`].
+pub(super) fn lane_id(workers: &[HubWorker], agent_id: &str, address: Option<&str>) -> String {
+    let wanted = agent_id.trim();
+    if !wanted.is_empty() {
+        if let Some(worker) = workers
+            .iter()
+            .find(|w| w.id == wanted || w.address == wanted)
+        {
+            return worker.id.clone();
+        }
+    }
+    address
+        .and_then(|address| workers.iter().find(|w| w.address == address))
+        .map(|w| w.id.clone())
+        .unwrap_or_default()
 }
 
 /// Whether two roster entries name the same destination.

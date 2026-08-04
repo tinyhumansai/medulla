@@ -2,12 +2,14 @@
 //! section becomes start-up options, and what the hub is told to advertise.
 //!
 //! Split by responsibility: [`options`] covers config-to-options translation,
-//! [`lifecycle`] starting and advertising hosts, [`dispatch`] which executor a
-//! task reaches, and [`extras`] additional hosts on one machine. The helpers
-//! shared by more than one of them live here.
+//! [`lifecycle`] starting and advertising hosts, [`declarations`] the declared
+//! agents a host advertises, [`dispatch`] which executor a task reaches, and
+//! [`extras`] additional hosts on one machine. The helpers shared by more than
+//! one of them live here.
 
 use std::collections::HashMap;
 
+mod declarations;
 mod dispatch;
 mod extras;
 mod lifecycle;

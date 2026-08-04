@@ -17,7 +17,7 @@ fn worker() -> HubWorker {
         id: "this-device".to_string(),
         address: "GRVaddr".to_string(),
         harness: "claude".to_string(),
-        workspace: Some("/repos/acme".to_string()),
+        workspace: Some(crate::runtime::WorkspaceRef::checkout("/repos/acme")),
         ..Default::default()
     }
 }

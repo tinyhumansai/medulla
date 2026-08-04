@@ -38,6 +38,7 @@ async fn hosting_switched_off_is_a_choice_not_an_error() {
         &network,
         options,
         PtyManager::new(),
+        &[],
     )
     .unwrap();
 
@@ -70,13 +71,19 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
         &network,
         options,
         PtyManager::new(),
+        &[],
     )
     .unwrap()
     .expect("hosting is on by default");
 
     assert_eq!(host.address(), "this-device");
     assert_eq!(host.providers(), [HarnessProvider::Claude]);
-    let spec = host.spec();
+    // With nothing declared the daemon's own detection seeds one agent, and it
+    // keeps the id, address and label the single pre-declaration entry had.
+    assert_eq!(host.specs().len(), 1);
+    let spec = &host.specs()[0];
+    assert_eq!(spec.id, "this-device");
+    assert_eq!(spec.host_id, "this-device");
     assert_eq!(spec.address, "this-device");
     assert_eq!(spec.name, "this device");
     assert_eq!(spec.harness, "claude");
@@ -88,7 +95,14 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
     // Structured, not only prose: the backend places the agent from
     // `metadata.workspace`, and a path buried in the description does not
     // reach it — the orchestrator would see a host with no workspace at all.
-    assert_eq!(spec.workspace.as_deref(), Some(host.workspace()));
+    assert_eq!(
+        spec.workspace.as_ref().map(|w| w.path.as_str()),
+        Some(host.workspace())
+    );
+    assert_eq!(
+        spec.max_sessions, 1,
+        "a checkout runs one session at a time"
+    );
     assert_eq!(host.observation().stats().tasks_started, 0);
     assert_eq!(host.observation().address(), "this-device");
 }
@@ -116,6 +130,7 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         )
         .expect("valid config"),
         PtyManager::new(),
+        &[],
     )
     .unwrap()
     .expect("the first host starts");
@@ -137,6 +152,7 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         )
         .expect("valid config"),
         PtyManager::new(),
+        &[],
     )
     .unwrap_err();
 

@@ -84,12 +84,17 @@ impl HubHandle {
     /// whichever host happened to be selected would advertise work as available
     /// in a workspace that has nothing to do with it, and the orchestrator would
     /// dispatch somewhere the operator never was.
+    ///
+    /// Resolves to **one** agent even when several are declared in that
+    /// directory (the first exact match). Control is per-agent here and per
+    /// *session* in the target model, so making a hold cover every agent in a
+    /// checkout is part of the control work, not of declaring them.
     fn worker_for_workspace(&self, workspace: &str) -> anyhow::Result<String> {
         let path = workspace.trim_end_matches('/');
         let r = self.roster.lock().expect("roster lock");
         let mut best: Option<(usize, &str)> = None;
         for w in r.iter() {
-            let Some(declared) = w.workspace.as_deref().map(|d| d.trim_end_matches('/')) else {
+            let Some(declared) = w.workspace_path().map(|d| d.trim_end_matches('/')) else {
                 continue;
             };
             if declared == path {

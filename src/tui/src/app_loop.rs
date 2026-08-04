@@ -469,6 +469,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             &local_network,
             options,
             harness_sessions.clone(),
+            &loaded.config.fleet.agent_declarations,
         )
     }) {
         Ok((hosts, problems)) => {
@@ -574,6 +575,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     host_runtimes.clone(),
                     started_hosts.clone(),
                     local_addresses.clone(),
+                    loaded.config.fleet.agent_declarations.clone(),
                 )
             })
         })
@@ -584,11 +586,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
         host_addresses: local_addresses,
+        // Flattened: a host contributes one entry per agent declared on it, not
+        // one entry standing in for the machine.
         hosts: started_hosts
             .lock()
             .expect("started hosts")
             .iter()
-            .map(|host| host.spec().clone())
+            .flat_map(|host| host.specs().to_vec())
             .collect(),
     };
 

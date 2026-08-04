@@ -400,7 +400,7 @@ fn the_roster_mapping_carries_a_workers_roles_to_the_ui() {
         label: None,
         selected: false,
         roles: vec!["code-reviewer".into(), "test-writer".into()],
-        workspace: Some("/work".into()),
+        workspace: Some(crate::runtime::WorkspaceRef::checkout("/work")),
         ..Default::default()
     };
 

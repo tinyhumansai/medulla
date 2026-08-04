@@ -205,15 +205,32 @@ pub(super) fn run_cmd(
                 // address nothing answers on is the failure this whole feature
                 // exists to avoid — the orchestrator would dispatch to it and
                 // the task would vanish.
-                let spec = match spawner.spawn(&host, index) {
-                    Ok(spec) => spec,
+                let specs = match spawner.spawn(&host, index) {
+                    Ok(specs) => specs,
                     Err(error) => {
                         let _ =
                             tx.send(AppMsg::Status(format!("Local host did not start: {error}")));
                         return;
                     }
                 };
-                let workspace = spec.workspace.clone().unwrap_or_default();
+                // The host's first declared agent. The registry op below is
+                // keyed by address and replaces any entry sharing one, so
+                // registering the siblings here would leave exactly one anyway —
+                // a host added mid-run advertises its default agent until the
+                // add path is agent-keyed rather than address-keyed. Every agent
+                // is advertised on the next launch, where the roster is built
+                // from the declarations directly.
+                let Some(spec) = specs.into_iter().next() else {
+                    let _ = tx.send(AppMsg::Status(
+                        "Local host started, but declares no agent".to_string(),
+                    ));
+                    return;
+                };
+                let workspace = spec
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.path.clone())
+                    .unwrap_or_default();
                 // Registered through the same op a remote add uses, so both
                 // kinds reach the roster by one path.
                 let status = match rt

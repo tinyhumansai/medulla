@@ -162,7 +162,7 @@ impl App {
                 TLine::from(vec![
                     Span::styled(format!("   {branch} {} · ", task.task_id), style),
                     Span::styled(status.to_string(), status_style),
-                    Span::styled(format!(" · {} turns{chip}", task.turns), style),
+                    Span::styled(chip, style),
                 ])
             }
             AgentRow::Lane { lane_index } => {
@@ -211,10 +211,7 @@ impl App {
                 crate::ui::agent_lane::line(
                     marker,
                     format!("{}{title_note}", item.label),
-                    format!(
-                        " · {}{ctx}{state}{sessions_note}{work_note}",
-                        item.turns.len()
-                    ),
+                    format!("{ctx}{state}{sessions_note}{work_note}"),
                     style,
                 )
             }

@@ -227,6 +227,10 @@ fn workspace_scoped_stores_share_the_global_definition_lock() {
         .expect("save completes after unlock")
         .expect("save succeeds");
     writer.join().expect("writer thread");
+
+    let history = first.list_revisions("race").expect("shared history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].record.name, "v0");
 }
 
 #[test]

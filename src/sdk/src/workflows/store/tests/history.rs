@@ -63,13 +63,16 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
         .collect();
     assert_eq!(descriptions, ["current at upgrade", "legacy version"]);
 
-    let legacy_id = &history
+    let legacy = history
         .iter()
         .find(|revision| revision.record.description == "legacy version")
-        .expect("legacy revision remains addressable")
-        .id;
-    let restored = rollback(&store, "greet", legacy_id).unwrap();
+        .expect("legacy revision remains addressable");
+    let restored = rollback(&store, "greet", &legacy.id).expect("legacy rollback");
     assert_eq!(restored.description, "legacy version");
+    assert_eq!(
+        store.get("greet").unwrap().unwrap().description,
+        "legacy version"
+    );
 }
 
 #[test]

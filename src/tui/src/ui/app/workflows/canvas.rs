@@ -245,11 +245,17 @@ impl App {
         if !self.band_reversed(band) {
             return before;
         }
-        // Right to left, within the band's own extent rather than flush to the
-        // pane: a band is only as wide as its columns, and pinning the reversed
-        // ones to the right edge instead would leave the fold between them
-        // reaching across whatever the band above happened not to use.
-        band_width(members).saturating_sub(before + members.get(index).copied().unwrap_or(0))
+        // Right to left, ending where the band above it ended. A band is only
+        // as wide as its own columns, so a short last band laid out within its
+        // own extent would start well to the left of the band above — and the
+        // fold between them, which should be a hop straight down, would reach
+        // back across the pane to find it.
+        let extent = widths
+            .chunks(per_band)
+            .nth(band.saturating_sub(1))
+            .map(band_width)
+            .unwrap_or_else(|| band_width(members));
+        extent.saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }
 
     /// How many rows of canvas the graph panel has.

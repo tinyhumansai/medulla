@@ -139,6 +139,7 @@ impl App {
             hit_agents: None,
             hit_harness: None,
             hit_threads: None,
+            hit_started_sessions: None,
             hit_context: None,
             hit_workflow_preview: None,
             hit_nav: Default::default(),
@@ -557,14 +558,14 @@ impl App {
         let lanes = self.lanes();
         let rows = self.rail_rows();
         match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
-            Some(super::rail::RailRow::Agent(row)) => row
+            Some(super::rail::RailRow::Lane(row)) => row
                 .lane_index()
                 .and_then(|index| lanes.get(index))
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // An empty lane list means the orchestrator lane is all there is.
                 .unwrap_or(true),
-            // The action row and the operator's own harnesses are not lanes and
-            // have no conversation of their own.
+            // Hosts, agents, sessions and the action row are not lanes and have
+            // no conversation of their own.
             Some(_) => false,
             None => true,
         }
@@ -583,7 +584,7 @@ impl App {
     pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
         let lanes = self.lanes();
         self.rail_rows().iter().position(|row| match row {
-            super::rail::RailRow::Agent(AgentRow::Lane { lane_index }) => lanes
+            super::rail::RailRow::Lane(AgentRow::Lane { lane_index }) => lanes
                 .get(*lane_index)
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // Matches the same fallback `on_orchestrator_lane` makes: with

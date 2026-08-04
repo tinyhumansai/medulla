@@ -182,9 +182,14 @@ fn rail_measurement_includes_fields_visible_only_on_the_selected_row() {
         path_when: FieldVisibility::Active,
         ..StatusLineConfig::default()
     });
-    let row = crate::ui::app::rail::RailRow::Harness(harness_row(
-        "/workspace/tinyhumans/products/medulla-public",
-    ));
+    let row =
+        crate::ui::app::rail::RailRow::Session(Box::new(crate::ui::app::rail::SessionRailRow {
+            agent_id: None,
+            lane_index: None,
+            task: None,
+            local: Some(harness_row("/workspace/tinyhumans/products/medulla-public")),
+            last: true,
+        }));
     let measured = app.rail_row_measurement_lines(&row, &[]);
 
     assert!(measured.iter().any(|line| line.width() == 0));

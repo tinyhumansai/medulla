@@ -148,14 +148,12 @@ impl App {
         }
         let rows = self.rail_rows();
         let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
-        let RailRow::Agent(AgentRow::Sub {
-            task, lane_index, ..
-        }) = row
-        else {
+        let RailRow::Session(session) = row else {
             return None;
         };
+        let task = session.task.as_ref()?;
         let lanes = self.lanes();
-        let lane = lanes.get(*lane_index)?;
+        let lane = lanes.get(session.lane_index?)?;
         // `Agent` is main's name for a roster agent / delegated task / peer
         // session — the tiers above it (orchestrator, reasoning, compress) run
         // no watchable harness.
@@ -180,9 +178,7 @@ impl App {
     pub(in crate::ui::app) fn kill_target(&self) -> Option<(String, String)> {
         let rows = self.rail_rows();
         let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
-        let RailRow::Agent(AgentRow::Sub { task, .. }) = row else {
-            return None;
-        };
+        let task = row.task()?;
         (task.status == TaskStatus::Running)
             .then(|| self.watch_target())
             .flatten()

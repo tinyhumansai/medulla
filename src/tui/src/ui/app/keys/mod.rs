@@ -149,6 +149,21 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
+                // On the Agents tab, *away from the orchestrator*, this is the
+                // way back to the conversation after clicking through to a
+                // session (§A7): the rail cursor returns to the orchestrator and
+                // the composer takes the keyboard.
+                //
+                // Scoped to "not already there" rather than to the tab, because
+                // the chord's other job — releasing the mouse for native
+                // drag-select — is wanted most while reading that very
+                // transcript. So it returns you first and toggles the mouse once
+                // you have arrived, and `/mouse` reaches the toggle from
+                // anywhere either way.
+                KeyCode::Char('o') if tab == "Agents" && !self.on_orchestrator_lane() => {
+                    self.focus_orchestrator();
+                    return None;
+                }
                 KeyCode::Char('o') => {
                     self.toggle_mouse();
                     return None;
@@ -174,11 +189,18 @@ impl App {
                     self.new_thread();
                     return None;
                 }
-                // Start a harness of your own. `Ctrl-T` for terminal; `Ctrl-N`
-                // is already a new thread, which is the thing it would
-                // otherwise be confused with.
+                // Open a session. `Ctrl-T` for terminal; `Ctrl-N` is already a
+                // new thread, which is the thing it would otherwise be confused
+                // with. On a row that names an agent it opens a session *of that
+                // agent* — its declared harness in its declared workspace, named
+                // by the operator — because that is the whole point of having
+                // declared one. Anywhere else it falls back to the free-form
+                // picker, which declares nothing.
                 KeyCode::Char('t') => {
-                    self.open_harness_picker();
+                    match self.selected_agent_id().filter(|_| tab == "Agents") {
+                        Some(agent_id) => self.open_new_session(&agent_id),
+                        None => self.open_harness_picker(),
+                    }
                     return None;
                 }
                 // Grab or give: one chord for both directions, because the rail

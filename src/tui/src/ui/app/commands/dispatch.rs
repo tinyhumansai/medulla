@@ -1,6 +1,6 @@
 //! Runtime, prompt, clipboard, slash-command, and settings command dispatch.
 
-use crate::ui::agents::{AgentRow, TaskState};
+use crate::ui::agents::TaskState;
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
@@ -28,12 +28,9 @@ impl App {
     /// whichever row happened to share the offset.
     pub(in crate::ui::app) fn selected_agent_task(&self) -> Option<TaskState> {
         let rows = self.rail_rows();
-        match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
-            Some(super::super::rail::RailRow::Agent(AgentRow::Sub { task, .. })) => {
-                Some(task.clone())
-            }
-            _ => None,
-        }
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .and_then(|row| row.task())
+            .cloned()
     }
 
     /// Request cancellation of the selected running task, or note why it cannot.
@@ -150,6 +147,16 @@ impl App {
             },
             PromptKind::WorkspaceAdd => {
                 self.add_workspace(&text);
+                None
+            }
+            // Blank is an answer here, not a cancellation: the id minted from
+            // the directory is the name most agents keep.
+            PromptKind::AgentName { harness, workspace } => {
+                self.declare_new_agent(&harness, &workspace, &text);
+                None
+            }
+            PromptKind::SessionName { agent_id, managed } => {
+                self.start_agent_session(&agent_id, &text, managed);
                 None
             }
             PromptKind::CustomHarnessAdd => {

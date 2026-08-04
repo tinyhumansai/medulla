@@ -553,8 +553,25 @@ pub(super) enum Overlay {
     ResumePicker,
 }
 
-/// The modal state for the "start a harness" picker overlay.
+/// What the harness/workspace picker is being used for.
+///
+/// The same two steps — pick a CLI, pick a directory — answer both questions the
+/// Agents tab asks, and they differ only in what happens at the end. Declaring an
+/// agent writes `harness × workspace` to the config and starts nothing; spawning
+/// starts a session and declares nothing. Carrying the intent on the picker keeps
+/// one overlay rather than two that would drift apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PickerPurpose {
+    /// Start a session here and now, declaring nothing — the `/harness` path.
+    Spawn,
+    /// Declare an agent: `harness × workspace`, named on the step after.
+    DeclareAgent,
+}
+
+/// The modal state for the harness/workspace picker overlay.
 pub(super) struct HarnessPicker {
+    /// What confirming the last step will do.
+    pub(super) purpose: PickerPurpose,
     /// Installed providers and registered presets, in offer order.
     pub(super) choices: Vec<crate::ui::harness_pane::HarnessChoice>,
     /// The highlighted row.
@@ -681,6 +698,28 @@ pub(super) enum PromptKind {
     HostEditLabel(String),
     /// Declare another directory this device may work in.
     WorkspaceAdd,
+    /// Name the agent about to be declared for this `harness × workspace`.
+    ///
+    /// Blank accepts the id [`suggest_agent_id`](medulla::runtime::suggest_agent_id)
+    /// minted from the directory, which is how a person refers to the agent
+    /// anyway — the prompt exists for the case where it is not.
+    AgentName {
+        /// The CLI the agent runs.
+        harness: String,
+        /// The absolute directory its sessions work in.
+        workspace: String,
+    },
+    /// Name the session about to be opened under an already-declared agent.
+    ///
+    /// A session a person spins up is [`SessionOrigin::User`](crate::worker::pty::SessionOrigin)
+    /// and is the only kind that carries a name; a dispatched one is labelled
+    /// from its task. Blank leaves it unnamed rather than inventing one.
+    SessionName {
+        /// The agent whose harness and workspace the session inherits.
+        agent_id: String,
+        /// Whether the orchestrator may dispatch into it — ownership at birth.
+        managed: bool,
+    },
     /// Add a named OpenRouter-backed coding harness.
     CustomHarnessAdd,
     /// Edit the custom harness with the given stable id.
@@ -1014,6 +1053,13 @@ pub struct App {
     pub(super) hit_harness: Option<(Rect, String)>,
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
+    /// Where the orchestrator's "sessions started" block drew, and the task each
+    /// of its lines opens (§A7).
+    ///
+    /// Tasks rather than row indices: the rail is rebuilt every frame, so an
+    /// index recorded during the draw can name a different row by the time the
+    /// click lands. A task id either still has a session or does not.
+    pub(super) hit_started_sessions: Option<(Rect, Vec<String>)>,
     pub(super) hit_context: Option<Rect>,
     /// The selected workflow step's preview, for pointer-wheel scrolling.
     pub(super) hit_workflow_preview: Option<Rect>,

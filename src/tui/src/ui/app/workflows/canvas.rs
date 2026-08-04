@@ -245,12 +245,11 @@ impl App {
         if !self.band_reversed(band) {
             return before;
         }
-        // Right to left: the first layer of the band is its rightmost column.
-        // The same margin the left edge keeps is kept on the right, because a
-        // reversed band's wires arrive on that side and their arrowheads need a
-        // cell to land on.
-        self.canvas_width()
-            .saturating_sub(FOLD_MARGIN + before + members.get(index).copied().unwrap_or(0))
+        // Right to left, within the band's own extent rather than flush to the
+        // pane: a band is only as wide as its columns, and pinning the reversed
+        // ones to the right edge instead would leave the fold between them
+        // reaching across whatever the band above happened not to use.
+        band_width(members).saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }
 
     /// How many rows of canvas the graph panel has.

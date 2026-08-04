@@ -63,6 +63,27 @@ pub const CAPACITY_REJECTION_PREFIX: &str = "daemon at capacity";
 /// person is finished with it.
 pub const HARNESS_HELD_PREFIX: &str = "harness held by operator";
 
+/// The leading text of the `status` frame a worker sends when an operator takes
+/// a session that is *already running a task*.
+///
+/// A wire format in practice, like [`CAPACITY_REJECTION_PREFIX`]: the requesting
+/// hub matches on it to pause its no-progress watchdog for the duration of the
+/// hold (`crate::hub::runner`). A person reading their session is not a crashed
+/// worker, and a 30-minute hold must not be reaped as one — but the window must
+/// *pause* rather than be switched off, so a worker that dies while holding is
+/// still given up on once the session is handed back.
+///
+/// Distinct from [`HARNESS_HELD_PREFIX`], which is a *terminal* refusal ("I did
+/// not attempt this"). This one says the opposite: the task is alive, retained,
+/// and waiting on a human.
+pub const SESSION_HELD_STATUS_PREFIX: &str = "session held by operator";
+
+/// The leading text of the `status` frame that ends a hold.
+///
+/// Sent when control returns to the orchestrator and the hand-back turn starts,
+/// so the watchdog resumes on exactly the frame that says work has restarted.
+pub const SESSION_RESUMED_STATUS_PREFIX: &str = "session handed back";
+
 /// A lock-serialized encrypted send: `(to, body) -> ()`. Errors are handled by
 /// the transport (logged), so the runtime never observes a send failure.
 pub type SendFn =

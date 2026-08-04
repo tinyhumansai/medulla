@@ -120,6 +120,18 @@ impl App {
         }
         self.pane_session = selection.session.clone();
         self.rail_session = selection.session.clone();
+        // A session row this device is not running: watchable, but not takeable
+        // (§E7). Recorded here because this is the only place that can tell the
+        // difference — one row down the cursor, both cases are a `None` session.
+        self.pane_remote_session = match (&selection.session, selection.rows.get(selection.active))
+        {
+            (None, Some(RailRow::Session(row))) => Some(
+                row.agent_id
+                    .clone()
+                    .unwrap_or_else(|| "another host".to_string()),
+            ),
+            _ => None,
+        };
         selection
     }
 

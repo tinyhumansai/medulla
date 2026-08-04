@@ -1108,6 +1108,16 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) pane_session: Option<String>,
+    // The agent behind a selected session row that this device does NOT run,
+    // recorded alongside `pane_session` on the same draw.
+    //
+    // Its only purpose is to tell "the cursor is not on a session" apart from
+    // "the cursor is on somebody else's session", which `pane_session` cannot:
+    // both leave it `None`. Taking control resolves through the local workspace
+    // path, so a remote session can be watched but not taken (§E7), and an
+    // operator who presses the take chord on one deserves that answer rather
+    // than "no session on this row".
+    pub(super) pane_remote_session: Option<String>,
     // The session selected on the Agents rail, retained while another tab is
     // visible. Unlike `pane_session`, this is navigation state rather than a
     // keyboard-routing capability: Changes uses it to keep following

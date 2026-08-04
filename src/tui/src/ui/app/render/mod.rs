@@ -294,6 +294,9 @@ impl App {
         // tab was showing several frames ago. `draw_agents_pane` fills it back
         // in when it resolves a session.
         self.pane_session = None;
+        // Its counterpart, for the same reason: a remembered remote row would
+        // answer the take chord on a tab that is not showing it.
+        self.pane_remote_session = None;
         // Same reasoning as above: a stale rect would route the wheel into a
         // terminal that is no longer on screen.
         self.hit_session = None;

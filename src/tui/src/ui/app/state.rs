@@ -153,6 +153,7 @@ impl App {
             local_sessions: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
             pane_session: None,
+            pane_remote_session: None,
             rail_session: None,
             agent_picker: None,
             handback_prompt: None,

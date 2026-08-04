@@ -12,10 +12,18 @@ use super::super::providers::{Abort, RunTaskOptions};
 use super::super::status::{status_detail, work_detail};
 use super::super::types::{
     DaemonRuntime, FrameAttachments, RunningTask, CAPACITY_REJECTION_PREFIX,
+    SESSION_HELD_STATUS_PREFIX, SESSION_RESUMED_STATUS_PREFIX,
 };
 
 /// What a task waiting for a harness slot reports while it waits.
 const QUEUED_STATUS: &str = "queued for a harness slot";
+
+/// Whether a status detail is one of the two control markers the requester's
+/// watchdog reads (see [`SESSION_HELD_STATUS_PREFIX`]).
+fn is_control_marker(detail: &str) -> bool {
+    detail.starts_with(SESSION_HELD_STATUS_PREFIX)
+        || detail.starts_with(SESSION_RESUMED_STATUS_PREFIX)
+}
 
 /// What a running task reports through a stretch with no harness events —
 /// a single long tool call, typically.
@@ -279,7 +287,17 @@ impl DaemonRuntime {
                     semantic.event.decoded(),
                     HarnessEventKind::ToolCall(_) | HarnessEventKind::ToolResult(_)
                 );
-                if !changes_tool && current.saturating_sub(last_status_at) < throttle {
+                // Control changes are state transitions too, and the only ones
+                // the *requester* acts on: the hold marker is what pauses its
+                // no-progress watchdog, and the hand-back marker is what
+                // resumes it. Throttled away, a hold that began a second after
+                // the last tool call would never be announced, and the hub
+                // would reap a task a person is sitting in.
+                let changes_control = is_control_marker(&detail);
+                if !changes_tool
+                    && !changes_control
+                    && current.saturating_sub(last_status_at) < throttle
+                {
                     if is_thinking {
                         *pending_thinking.lock().unwrap() = Some((detail, Some(snapshot)));
                     }

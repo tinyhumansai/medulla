@@ -21,6 +21,7 @@ use super::executor::PtySessionExecutor;
 use super::pty::PtyManager;
 
 mod basic;
+mod control;
 mod live;
 mod plumbing;
 mod sessions;

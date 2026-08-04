@@ -159,8 +159,7 @@ pub struct RunTaskOptions {
     /// `attribution.commit` config value (on by default; see
     /// [`crate::config::AttributionConfig`]).
     pub attribution: bool,
-    /// Lifecycle hooks installed into this run's harness — the resolved
-    /// `[[hooks]]` config section (see [`crate::harness_hooks`]).
+    /// Lifecycle hooks carried to the provider-specific launch adapter.
     pub hooks: crate::harness_hooks::HooksConfig,
     /// Fired for each parsed semantic event — drives periodic status frames.
     pub on_event: Option<OnEvent>,

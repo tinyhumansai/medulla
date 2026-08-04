@@ -432,10 +432,15 @@ impl PtySessionExecutor {
         // as headless ones, so this path carries the same attribution.
         let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
         env.extend(attribution_env);
-        extra_args.extend(medulla::attribution::attribution_args(
+        let (launch_args, dropped) = medulla::harness_hooks::launch_args(
             options.provider,
             options.attribution,
-        ));
+            &options.hooks,
+        );
+        extra_args.extend(launch_args);
+        for hook in dropped {
+            tracing::warn!(event = ?hook.event, reason = %hook.reason, "dropping unsupported harness hook");
+        }
         // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
         // proxy, and the real key is scrubbed from `env` here, before any of it
         // reaches the child. A no-op for every other endpoint.

@@ -61,6 +61,8 @@ pub fn build_interactive_args(spec: &InteractiveSpec) -> Vec<String> {
         args.push("--dangerously-skip-permissions".to_string());
     }
     args.extend(spec.extra_args.iter().cloned());
+    let (launch_args, _) = crate::harness_hooks::launch_args(spec.provider, false, &spec.hooks);
+    args.extend(launch_args);
     args
 }
 

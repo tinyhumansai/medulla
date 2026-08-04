@@ -22,6 +22,8 @@ pub struct InteractiveSpec {
     pub skip_permissions: bool,
     /// Extra argv appended to the built base args.
     pub extra_args: Vec<String>,
+    /// Lifecycle hooks applied through the provider-specific launch adapter.
+    pub hooks: crate::harness_hooks::HooksConfig,
 }
 /// A live interactive harness process.
 pub struct InteractiveSession {

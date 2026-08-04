@@ -125,17 +125,15 @@ fn claude_delivery_passes_one_settings_flag_with_the_hook_document() {
 }
 
 #[test]
-fn codex_delivery_passes_an_inline_toml_override_and_the_trust_bypass() {
+fn codex_delivery_passes_an_inline_toml_override_without_bypassing_trust() {
     let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
     let injection = hook_injection(HarnessProvider::Codex, &hooks);
 
     assert_eq!(injection.args[0], "-c");
-    assert_eq!(
-        injection.args[1],
-        r#"hooks={"SessionStart"=[{"matcher"="*","hooks"=[{"type"="command","command"="echo hi"}]}]}"#
-    );
-    // Without this, Codex silently skips every hook it has not already trusted.
-    assert_eq!(injection.args[2], "--dangerously-bypass-hook-trust");
+    assert!(injection.args[1].starts_with("hooks="));
+    assert!(injection.args[1].contains("SessionStart"));
+    assert!(injection.args[1].contains("echo hi"));
+    assert!(!injection.args.iter().any(|arg| arg.contains("bypass-hook-trust")));
 }
 
 #[test]
@@ -209,7 +207,7 @@ fn codex_launch_args_keep_attribution_and_hooks_side_by_side() {
     let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
     let (args, _) = launch_args(HarnessProvider::Codex, true, &hooks);
     assert!(args.contains(&"-c".to_string()));
-    assert!(args.contains(&"--dangerously-bypass-hook-trust".to_string()));
+    assert!(!args.iter().any(|arg| arg.contains("bypass-hook-trust")));
 }
 
 #[test]

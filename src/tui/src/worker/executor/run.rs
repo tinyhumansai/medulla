@@ -376,8 +376,12 @@ impl PtySessionExecutor {
         // Medulla's own tools, on the same terms an ACP-dispatched session gets
         // them. A task frame that asked for a workflow to be run needs the verb
         // to run it with.
-        let mcp_grant_session =
-            super::super::pty::launch::attach_mcp(options.provider, &mut env, &mut extra_args);
+        let mcp_grant_session = super::super::pty::launch::attach_mcp(
+            options.provider,
+            &mut env,
+            &mut extra_args,
+            self.log.as_ref(),
+        );
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
             bin: medulla::protocol::env::provider_bin(options.provider, &self.env),

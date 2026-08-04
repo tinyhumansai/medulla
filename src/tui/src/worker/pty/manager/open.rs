@@ -100,6 +100,14 @@ impl PtyManager {
     /// worker for up to half a second per launch, which under a burst starved
     /// the runtime the inbox drain and the screen samplers also live on.
     pub fn open(&self, spec: LaunchSpec) -> Result<String, String> {
+        // Constructed before the *first* fallible call in this function, not
+        // just before `spawn_command`: `spec.mcp_grant_session` was already
+        // minted by the caller before `open` was ever reached, so even
+        // `open_pty()` failing — file descriptors exhausted, most likely —
+        // must not return with that grant live and nothing left to revoke it.
+        // See the type's own docs for what it does from here on.
+        let mut guard = LaunchGuard::new(spec.mcp_grant_session.clone());
+
         // Before the pty, because it shells out to `git`: one more reason this
         // whole function belongs on a blocking thread.
         let branch = git_branch(&spec.cwd);
@@ -137,19 +145,6 @@ impl PtyManager {
         if !spec.env.contains_key("TERM") {
             command.env("TERM", "xterm-256color");
         }
-
-        // Everything from here to the `SessionHandle` below is fallible, and
-        // `spec.mcp_grant_session` was already minted by the caller before this
-        // function was ever reached. A `?` between here and the handle used to
-        // return with the grant still live in the registry and, once the child
-        // is spawned, with nothing tracking it that could kill it — the
-        // fallible `try_clone_reader`/`take_writer` calls sit *after*
-        // `spawn_command`, so a spawned-then-abandoned child would keep
-        // running with a redeemable grant until something else happened to
-        // reap it. `guard` revokes the grant and kills the child on any early
-        // return; [`LaunchGuard::disarm`] hands both off once the handle
-        // exists to do that job instead.
-        let mut guard = LaunchGuard::new(spec.mcp_grant_session.clone());
 
         let child = pty
             .slave

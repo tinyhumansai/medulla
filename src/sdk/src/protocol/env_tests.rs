@@ -137,6 +137,32 @@ fn provider_bin_override_and_default() {
 }
 
 #[test]
+fn provider_bin_is_overridden_only_when_the_resolved_binary_actually_differs() {
+    // No override set at all: the default, not overridden.
+    assert!(!provider_bin_is_overridden(
+        HarnessProvider::Claude,
+        &env(&[])
+    ));
+    // A real override: this is exactly the case attach_cli must withhold the
+    // fleet grant for.
+    let e = env(&[("TINYVERSE_CLAUDE_BIN", "/opt/untrusted/claude")]);
+    assert!(provider_bin_is_overridden(HarnessProvider::Claude, &e));
+    // An override that merely spells out the default's own name — an operator
+    // setting it redundantly, or a launcher that always sets the variable —
+    // must not count as an override: nothing about the resolved binary
+    // differs, so there is nothing to withhold anything from.
+    let e = env(&[("TINYVERSE_CLAUDE_BIN", "claude")]);
+    assert!(!provider_bin_is_overridden(HarnessProvider::Claude, &e));
+    // Same, with the whitespace `provider_bin` itself trims away.
+    let e = env(&[("TINYPLACE_CODEX_BIN", "  codex  ")]);
+    assert!(!provider_bin_is_overridden(HarnessProvider::Codex, &e));
+    // A whitespace-only override resolves to the default and so is not an
+    // override either.
+    let e = env(&[("TINYPLACE_OPENCODE_BIN", "   ")]);
+    assert!(!provider_bin_is_overridden(HarnessProvider::Opencode, &e));
+}
+
+#[test]
 fn provider_args_whitespace_split() {
     assert!(provider_args(HarnessProvider::Codex, &env(&[])).is_empty());
     let e = env(&[("TINYPLACE_CODEX_ARGS", "  --foo   bar --baz ")]);

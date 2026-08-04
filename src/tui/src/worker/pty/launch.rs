@@ -17,10 +17,11 @@ use medulla::protocol::HarnessProvider;
 /// Hand a harness about to be launched here Medulla's own tools.
 ///
 /// The PTY door has no `session/new` to carry an offer in, so the registration
-/// goes on the child's argv and the grant into its environment — both of which
-/// this appends to the spawn the caller is assembling. Returns the key the
-/// session's fleet grant was minted under, for [`LaunchSpec::mcp_grant_session`]
-/// to carry to the reap that gives it back.
+/// goes on the child's argv and the grant into a file only its owner can read
+/// (see [`medulla::mcp::attach`] — both of which this appends to the spawn the
+/// caller is assembling. Returns the key the session's fleet grant was minted
+/// under, for [`LaunchSpec::mcp_grant_session`] to carry to the reap that
+/// gives it back.
 ///
 /// Called at both doors — the executor's dispatched session and the operator's
 /// hand-opened one — because a harness Medulla started is a harness Medulla
@@ -28,18 +29,25 @@ use medulla::protocol::HarnessProvider;
 /// Medulla-spawned Claude Code had skills telling the model to call
 /// `workflow_run` and no such tool in the session.
 ///
+/// `log`, when given, is where an operator learns *why* `fleet_*` did not
+/// attach to a provider binary they overrode — see `attach_cli`'s own docs on
+/// when that note actually fires. Routed to the log, never to the terminal:
+/// this crate owns the alternate screen, and a stray line on stdout/stderr
+/// corrupts whatever pane is drawn there.
+///
 /// [`LaunchSpec::mcp_grant_session`]: super::types::LaunchSpec::mcp_grant_session
 #[cfg(feature = "workflows")]
 pub fn attach_mcp(
     provider: HarnessProvider,
     env: &mut HashMap<String, String>,
     extra_args: &mut Vec<String>,
+    log: Option<&medulla::daemon::LogFn>,
 ) -> Option<String> {
     // Unique per launch: the key *is* the grant's identity, so two sessions
     // sharing one would share a capability and revoking either would revoke
     // both.
     let session = format!("pty-{}", uuid::Uuid::new_v4());
-    medulla::mcp::attach_cli(provider, &session, env, extra_args)
+    medulla::mcp::attach_cli(provider, &session, env, extra_args, log)
 }
 
 /// Without the engine compiled in there is no tool server to attach.
@@ -48,8 +56,9 @@ pub fn attach_mcp(
     provider: HarnessProvider,
     env: &mut HashMap<String, String>,
     extra_args: &mut Vec<String>,
+    log: Option<&medulla::daemon::LogFn>,
 ) -> Option<String> {
-    let _ = (provider, env, extra_args);
+    let _ = (provider, env, extra_args, log);
     None
 }
 

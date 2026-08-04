@@ -110,6 +110,27 @@ fn default_bin(provider: HarnessProvider) -> &'static str {
     }
 }
 
+/// Whether a provider's binary has been redirected from its verified default
+/// (`claude` / `codex` / `opencode` / `openhuman-core`) by one of
+/// [`bin_keys`]'s environment overrides.
+///
+/// This is what lets [`crate::mcp::attach_cli`] withhold the fleet grant from
+/// an overridden binary rather than hand it out: that binary is whatever the
+/// override names, executed as the harness `--mcp-config` registers Medulla's
+/// tools onto — so it receives that registration's argv itself and can open
+/// the file it names, same-user permissions notwithstanding, regardless of
+/// whether it behaves like the real Claude Code CLI once it does. Repository
+/// policy already calls a provider-binary override untrusted configuration to
+/// be validated at a boundary (see `AGENTS.md`'s security section); this is
+/// that boundary for the one credential this project hands a CLI-spawned
+/// harness.
+pub fn provider_bin_is_overridden(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+) -> bool {
+    provider_bin(provider, env) != default_bin(provider)
+}
+
 /// Resolve the provider binary: the first non-empty override, else the default
 /// (`claude` / `codex` / `opencode`). Overrides are trimmed.
 pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) -> String {

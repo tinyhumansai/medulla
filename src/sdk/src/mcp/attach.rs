@@ -58,6 +58,19 @@
 //! a process that exits without reaching that call — killed, or crashed —
 //! leaves its file behind; see [`sweep_stale_config_files`] for why that is
 //! survivable rather than a second leak.
+//!
+//! # What the file does not protect against
+//!
+//! Everything above assumes the process `--mcp-config` registers this onto
+//! *is* the verified Claude Code CLI, which only ever applies a server's `env`
+//! to that server's own spawn. That process necessarily receives the file's
+//! path on its own argv — that is how it knows what to read — so nothing
+//! about file permissions stops it from opening the file directly instead of
+//! behaving like Claude Code. A provider-binary override
+//! ([`crate::protocol::env::provider_bin_is_overridden`]) can name any
+//! executable there, so [`attach_cli`] withholds the fleet grant whenever one
+//! is in effect, per `AGENTS.md`'s "provider binary overrides are untrusted
+//! configuration."
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -418,19 +431,56 @@ pub fn server_spec(
 /// operator's tool mode) but never written: the secret half of a granted
 /// session goes into a [`ServerSpec::write_config_file`] file, not this
 /// process's or the harness's environment — see the module docs.
+///
+/// Withholds the fleet grant — but not workflow authoring, which carries no
+/// secret — when `provider`'s binary has been redirected by one of its
+/// [`crate::protocol::env`] overrides. Whatever that override names *is* the
+/// process this registers `--mcp-config` onto, so it receives the file's path
+/// on its own argv and can open it directly no matter how the secret reaches
+/// it; per `AGENTS.md`, a provider-binary override is untrusted configuration,
+/// so it is not handed a capability the real, verified CLI would only forward
+/// to the one subprocess it names. When that withholding actually costs this
+/// launch a grant it would otherwise have gotten — a control plane is
+/// running, so `fleet_*` would exist for anyone else — `log` is told, once per
+/// launch, so an operator running a legitimate wrapper binary sees *why*
+/// `fleet_*` is missing rather than silently doing without it. `None` (every
+/// caller with no log seam, and every test) means the note is simply not
+/// sent; nothing about the decision itself changes.
 pub fn attach_cli(
     provider: HarnessProvider,
     session: &str,
     env: &mut HashMap<String, String>,
     args: &mut Vec<String>,
+    log: Option<&crate::logging::LineSink>,
 ) -> Option<String> {
     if !supports_cli_attach(provider) {
         return None;
     }
     let workflows_on = workflows_enabled(env);
     let tool_mode = env.get(super::TOOL_MODE_ENV).cloned();
-    let fleet = local_fleet_grant(session, env, tool_mode.as_deref(), workflows_on);
+    let overridden = crate::protocol::env::provider_bin_is_overridden(provider, env);
+    // Known ahead of minting so the log note below can say "withheld" only
+    // when withholding actually cost this launch something: a host with no
+    // control plane bound would have gotten no grant either way, and telling
+    // an operator on such a host that their override "withheld" a fleet grant
+    // would blame the wrong setting for a tool surface nothing here ever had.
+    let would_serve_fleet = crate::control_socket::active().is_some();
+    let fleet = if overridden {
+        None
+    } else {
+        local_fleet_grant(session, env, tool_mode.as_deref(), workflows_on)
+    };
     let granted = fleet.is_some();
+    if overridden && would_serve_fleet {
+        if let Some(log) = log {
+            log(&format!(
+                "mcp: {} is running as {} (overridden); the fleet grant was withheld — \
+                 workflow tools are still attached",
+                provider.as_str(),
+                crate::protocol::env::provider_bin(provider, env),
+            ));
+        }
+    }
     let Some(spec) = server_spec(tool_mode.as_deref(), fleet, workflows_on) else {
         // A grant was minted for a session that will not carry it. Given back
         // rather than left in the registry, where it would be a live token

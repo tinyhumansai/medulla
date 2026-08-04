@@ -182,6 +182,7 @@ fn attaching_a_cli_registers_the_server_on_the_argv() {
         "pty-1",
         &mut env,
         &mut args,
+        None,
     );
 
     assert_eq!(args[0], "--resume", "the caller's own argv is preserved");
@@ -202,6 +203,7 @@ fn attaching_a_cli_leaves_an_unsupported_provider_untouched() {
         "pty-2",
         &mut env,
         &mut args,
+        None,
     );
     assert_eq!(attached, None);
     assert!(
@@ -220,6 +222,7 @@ fn attaching_a_cli_passes_the_operators_tool_mode_through() {
         "pty-3",
         &mut env,
         &mut args,
+        None,
     );
     let document: Value = serde_json::from_str(&args[1]).expect("a JSON document");
     assert_eq!(
@@ -390,6 +393,7 @@ fn attach_cli_never_writes_the_process_environment() {
         "attach-test-no-env-write",
         &mut env,
         &mut args,
+        None,
     );
     assert!(
         env.is_empty(),

@@ -54,8 +54,12 @@ impl LocalHarnesses {
         // The operator's own session gets Medulla's tools too. This is the door
         // a person is actually sitting in, so it is the one where a missing
         // `workflow_run` is noticed — and, until now, the one that never had it.
-        let mcp_grant_session =
-            crate::worker::pty::launch::attach_mcp(provider, &mut env, &mut extra_args);
+        let mcp_grant_session = crate::worker::pty::launch::attach_mcp(
+            provider,
+            &mut env,
+            &mut extra_args,
+            self.log.as_ref(),
+        );
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
         self.sessions.open(LaunchSpec {

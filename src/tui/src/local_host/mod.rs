@@ -161,9 +161,8 @@ pub(crate) fn options_from_config(
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
     attribution: bool,
-    hooks: medulla::harness_hooks::HooksConfig,
 ) -> Result<EmbeddedDaemonOptions, String> {
-    options_from_config_with_custom(config, env, router, budget, log, &[], attribution, hooks)
+    options_from_config_with_custom(config, env, router, budget, log, &[], attribution)
 }
 
 /// Translate host config and named custom-harness presets into start-up options.
@@ -173,6 +172,28 @@ pub(crate) fn options_from_config(
 /// explicit provider allowlist because declaring a custom harness is itself an
 /// explicit request to run that CLI.
 pub(crate) fn options_from_config_with_custom(
+    config: &HostSection,
+    env: &HashMap<String, String>,
+    router: Option<medulla::config::RouterConfig>,
+    budget: Option<medulla::config::BudgetConfig>,
+    log: Option<medulla::hub::HubLog>,
+    custom_harnesses: &[medulla::config::CustomHarnessConfig],
+    attribution: bool,
+) -> Result<EmbeddedDaemonOptions, String> {
+    options_from_config_with_custom_and_hooks(
+        config,
+        env,
+        router,
+        budget,
+        log,
+        custom_harnesses,
+        attribution,
+        medulla::harness_hooks::HooksConfig::default(),
+    )
+}
+
+/// Translate host configuration while retaining the loaded lifecycle hooks.
+pub(crate) fn options_from_config_with_custom_and_hooks(
     config: &HostSection,
     env: &HashMap<String, String>,
     router: Option<medulla::config::RouterConfig>,

@@ -90,6 +90,7 @@ fn config_becomes_settings_with_every_field_carried_across() {
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
         max_parallel_agents: 6,
+        max_loop_iterations: 12,
         evolve: Default::default(),
     };
 
@@ -102,6 +103,22 @@ fn config_becomes_settings_with_every_field_carried_across() {
     assert!(settings.http_host_allowed("api.github.com"));
     assert_eq!(settings.run_timeout_secs, 30);
     assert_eq!(settings.max_parallel_agents, 6);
+    assert_eq!(settings.max_loop_iterations, 12);
+}
+
+#[test]
+fn a_zero_loop_ceiling_falls_back_rather_than_clamping_every_loop_to_nothing() {
+    // Taking a zero literally would clamp every loop to no iterations at all,
+    // so a workflow that looks correct would quietly do nothing.
+    let config = WorkflowsConfig {
+        max_loop_iterations: 0,
+        ..Default::default()
+    };
+    let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
+    assert_eq!(
+        settings.max_loop_iterations,
+        crate::flow_engine::DEFAULT_MAX_LOOP_ITERATIONS
+    );
 }
 
 #[test]

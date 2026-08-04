@@ -3,9 +3,12 @@
 //! `sub_workflow` nodes name another workflow by id, and the engine asks the
 //! host to produce that graph through [`tinyflows::caps::WorkflowResolver`].
 //! This is the whole of that seam: a lookup, with absence and failure reported
-//! as capability errors. Cycle and depth limits belong to the engine
-//! ([`tinyflows::engine::MAX_SUB_WORKFLOW_DEPTH`]), not here — a resolver that
-//! tried to police recursion would only disagree with it.
+//! as capability errors. Cycle and depth limits belong to the engine, not here
+//! — a resolver that tried to police recursion would only disagree with it.
+//! The bound is [`tinyflows::engine::MAX_SUB_WORKFLOW_DEPTH`] by default, and a
+//! graph may raise or lower it with `max_sub_workflow_depth` on its trigger
+//! config; the engine forwards whatever the root run declared to every child,
+//! so the whole chain agrees on one number without this seam knowing it.
 //!
 //! **A resolved child keeps its own `defaults`.** The engine shares one
 //! [`tinyflows::caps::Capabilities`] bundle across a run and every

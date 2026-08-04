@@ -1,9 +1,11 @@
 # Workflows
 
 A Medulla task is one instruction handed to one harness. A **workflow** is a
-saved, multi-step plan: a directed acyclic graph whose `agent` steps each run as
-a real coding-harness session — Claude Code, Codex, or OpenCode — in the order
-and with the parallelism the graph declares.
+saved, multi-step plan: a directed graph whose `agent` steps each run as a real
+coding-harness session — Claude Code, Codex, or OpenCode — in the order and with
+the parallelism the graph declares. The graph is usually acyclic, but it may
+contain a **bounded loop**: a `loop` node repeats a section until its
+`max_iterations` cap or its `condition` says stop.
 
 The engine is [`tinyflows`](https://github.com/tinyhumansai/tinyflows), vendored
 under `vendor/tinyflows` (see [vendoring.md](vendoring.md)). Medulla supplies the

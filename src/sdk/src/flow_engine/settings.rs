@@ -65,6 +65,14 @@ pub struct CapabilitySettings {
     /// node's `concurrency` past this slows the run down instead of breaking
     /// it.
     pub max_parallel_agents: usize,
+    /// The ceiling this host puts on any one `loop` node's `max_iterations`.
+    ///
+    /// A loop's cap is an authoring decision, but on this host a pass through
+    /// the body can be a whole harness session, so a graph asking for a
+    /// thousand of them is asking for something the operator never agreed to.
+    /// Like `max_parallel_agents`, an over-ask is *clamped, never refused* —
+    /// the workflow still runs, just not for as long as it asked.
+    pub max_loop_iterations: u64,
     /// The fleet depth inherited by every harness node in this run.
     ///
     /// A workflow received through `fleet_dispatch` is already delegated work;
@@ -91,6 +99,13 @@ pub const DEFAULT_RUN_TIMEOUT_SECS: u64 = 600;
 /// many a graph feels like asking for. An operator with a bigger pool raises it.
 pub const DEFAULT_MAX_PARALLEL_AGENTS: usize = 4;
 
+/// A loop may run its body twenty-five times before this host clamps it.
+///
+/// Matches the engine's own default for a `loop` node that declares no cap, so
+/// the common case is unchanged and this only bites a graph that asked for
+/// noticeably more. An operator whose loops are cheap raises it.
+pub const DEFAULT_MAX_LOOP_ITERATIONS: u64 = 25;
+
 impl CapabilitySettings {
     /// Settings rooted under a Medulla home.
     ///
@@ -112,6 +127,7 @@ impl CapabilitySettings {
             http_allowlist: Vec::new(),
             run_timeout_secs: DEFAULT_RUN_TIMEOUT_SECS,
             max_parallel_agents: DEFAULT_MAX_PARALLEL_AGENTS,
+            max_loop_iterations: DEFAULT_MAX_LOOP_ITERATIONS,
             fleet_depth: 0,
             workspace: String::new(),
         }
@@ -211,6 +227,13 @@ impl CapabilitySettings {
             DEFAULT_MAX_PARALLEL_AGENTS
         } else {
             config.max_parallel_agents
+        };
+        // And again: a zero ceiling would clamp every loop to no iterations at
+        // all, so a workflow that looks correct would silently do nothing.
+        settings.max_loop_iterations = if config.max_loop_iterations == 0 {
+            DEFAULT_MAX_LOOP_ITERATIONS
+        } else {
+            config.max_loop_iterations
         };
         settings
     }

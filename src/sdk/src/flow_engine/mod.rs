@@ -42,4 +42,7 @@ pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer
 pub use execute::{Compiled, Outcome};
 pub use harness_choice::{HarnessChoice, HarnessPreference, HarnessSelector};
 pub use observability::{folding_sink, null_sink, WorkEventSink, WorkflowRunObserver};
-pub use settings::{CapabilitySettings, DEFAULT_MAX_PARALLEL_AGENTS, DEFAULT_RUN_TIMEOUT_SECS};
+pub use settings::{
+    CapabilitySettings, DEFAULT_MAX_LOOP_ITERATIONS, DEFAULT_MAX_PARALLEL_AGENTS,
+    DEFAULT_RUN_TIMEOUT_SECS,
+};

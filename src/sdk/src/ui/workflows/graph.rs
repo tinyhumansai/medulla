@@ -219,15 +219,23 @@ impl GraphLayout {
                     .min_by_key(|(_, node)| node.lane.abs_diff(current.lane))
                     .map(|(index, _)| index)
             }
+            // A loop's closing edge is a successor that sits *behind* its
+            // source, so following edge order blindly would send `Forward` back
+            // up the graph and `Back` down it — the cursor appearing to move
+            // the wrong way. Prefer an edge that actually travels the requested
+            // direction, and fall back to the layer scan otherwise; the loop is
+            // still reachable, by pressing the direction it genuinely lies in.
             Move::Forward => self
                 .successors(&current.id)
-                .first()
-                .and_then(|id| self.index_of(id))
+                .into_iter()
+                .filter_map(|id| self.index_of(id))
+                .find(|index| self.nodes[*index].layer > current.layer)
                 .or_else(|| self.nearest_in_layer(current, current.layer + 1)),
             Move::Back => self
                 .predecessors(&current.id)
-                .first()
-                .and_then(|id| self.index_of(id))
+                .into_iter()
+                .filter_map(|id| self.index_of(id))
+                .find(|index| self.nodes[*index].layer < current.layer)
                 .or_else(|| {
                     current
                         .layer
@@ -372,6 +380,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::SubWorkflow => "sub_workflow",
         NodeKind::Memory => "memory",
         NodeKind::Dedup => "dedup",
+        NodeKind::Loop => "loop",
     }
 }
 
@@ -400,6 +409,9 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // A filter that lets each key past once: what it drops is a repeat, so
         // the shape says "not equal to what already went through".
         NodeKind::Dedup => "≠",
+        // The one kind whose edges run backwards: the shape is the cycle it
+        // draws on the canvas.
+        NodeKind::Loop => "↺",
     }
 }
 
@@ -423,7 +435,8 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::Switch
         | NodeKind::Merge
         | NodeKind::SplitOut
-        | NodeKind::Dedup => "yellow",
+        | NodeKind::Dedup
+        | NodeKind::Loop => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }
@@ -487,6 +500,19 @@ pub fn node_summary(node: &Node) -> String {
         },
         // The key expression is the whole of what a dedup node decides by.
         NodeKind::Dedup => text("key").unwrap_or_default(),
+        // The cap is the number an operator scans for; the condition, when
+        // there is one, is why the loop might stop before reaching it.
+        NodeKind::Loop => {
+            let max = node
+                .config
+                .get("max_iterations")
+                .and_then(|value| value.as_u64())
+                .map_or_else(|| "default".to_string(), |n| n.to_string());
+            match text("condition") {
+                Some(condition) => format!("max {max} · while {condition}"),
+                None => format!("max {max}"),
+            }
+        }
         NodeKind::Merge => node
             .config
             .get("inputs")

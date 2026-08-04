@@ -1,8 +1,10 @@
 //! Authored, durable, multi-step work: workflow definitions and their runs.
 //!
-//! A workflow is a directed acyclic graph of typed nodes — trigger, agent, tool
-//! call, HTTP request, condition, merge, sub-workflow — executed by the
-//! [`tinyflows`] engine. Where a Medulla task is one instruction handed to one
+//! A workflow is a directed graph of typed nodes — trigger, agent, tool call,
+//! HTTP request, condition, merge, loop, sub-workflow — executed by the
+//! [`tinyflows`] engine. Usually acyclic; a `loop` node repeats a section a
+//! bounded number of times, and the edge closing that cycle is the one place a
+//! workflow runs backwards. Where a Medulla task is one instruction handed to one
 //! harness, a workflow is a plan an operator or an agent can write down, review,
 //! version, and re-run.
 //!

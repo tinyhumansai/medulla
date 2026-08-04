@@ -22,19 +22,23 @@ pub(crate) struct LocalDispatch {
     pub(crate) network: medulla::bridge::LocalBridgeNetwork,
     /// The address the hub itself binds on that bus.
     pub(crate) hub_address: String,
-    /// Every address a host on this device binds, whether or not one is
-    /// running.
+    /// Every host this device declares — its bus address and what to call it —
+    /// whether or not one is running.
     ///
-    /// Known even when hosting is off, because it comes from `[host].address`
-    /// and the `[[hosts]]` entries rather than from a started host — and it is
-    /// needed in exactly that case, to recognise a remembered local entry and
-    /// drop it.
+    /// Known even when hosting is off, because it comes from `[host]` and the
+    /// `[[hosts]]` entries rather than from a started host — and it is needed in
+    /// exactly that case, to recognise a remembered local entry and drop it.
     ///
     /// Shared and appended to rather than a launch-time snapshot: the roster
     /// sink filters against it at *save* time, so a host added mid-session was
     /// absent from a captured list and got written into the remembered roster —
     /// a device-local entry that survives to a run where nothing binds it.
-    pub(crate) host_addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ///
+    /// One list, two readers. The hub also advertises it as the `hosts[]` block
+    /// of `medulla:register_agents`, which is what marks its agents `local`;
+    /// keeping a second list for that would let "device-local for saving" and
+    /// "device-local on the wire" drift apart.
+    pub(crate) local_hosts: medulla::hub::SharedLocalHosts,
     /// The hosts running on this device, as roster entries. Empty when hosting
     /// is switched off — the bus is still shared, so hosts can appear later.
     pub(crate) hosts: Vec<WorkerSpec>,

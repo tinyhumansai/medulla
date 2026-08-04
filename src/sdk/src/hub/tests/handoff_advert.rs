@@ -40,7 +40,7 @@ fn brief() -> HarnessHandoff {
 
 /// The advert for one worker's `metadata`.
 fn metadata(w: HubWorker) -> serde_json::Value {
-    register_payload(&[w], &no_presence(), &[])["agents"][0]["metadata"].clone()
+    register_payload(&[w], &no_presence(), &[], &[])["agents"][0]["metadata"].clone()
 }
 
 #[test]

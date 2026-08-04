@@ -152,6 +152,7 @@ impl FleetOps for FakeFleet {
                     output_tokens: 20,
                 },
                 harness: None,
+                session_id: None,
             }),
             FakeOutcome::Fail(error) => Err(error),
             FakeOutcome::Hang => {

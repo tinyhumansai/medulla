@@ -22,9 +22,12 @@ mod types;
 mod tests;
 
 pub use decode::{decode_task_frame, parse_agent_capabilities};
-pub use encode::{encode_task_frame, encode_task_frame_with_usage, encode_task_frame_with_work};
+pub use encode::{
+    encode_task_frame, encode_task_frame_with_attachments, encode_task_frame_with_usage,
+    encode_task_frame_with_work,
+};
 pub use types::{
     AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
-    HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind, TokenUsage,
-    WorkflowAdvert, WorkflowInputAdvert, MEDULLA_TASK_PROTO,
+    FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind,
+    TokenUsage, WorkflowAdvert, WorkflowInputAdvert, MEDULLA_TASK_PROTO,
 };

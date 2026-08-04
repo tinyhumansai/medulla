@@ -30,6 +30,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
+        session_id: None,
     }
 }
 

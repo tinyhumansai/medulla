@@ -3,16 +3,23 @@
 
 use crate::harness_work::WorkSnapshot;
 
-use super::types::{EncodeFrameInput, TaskFrame, TokenUsage, MEDULLA_TASK_PROTO};
+use super::types::{EncodeFrameInput, FrameAttachments, TaskFrame, TokenUsage, MEDULLA_TASK_PROTO};
 
 /// Build and serialize a task frame body.
 pub fn encode_task_frame(input: EncodeFrameInput) -> String {
-    build(input, None, None).encode()
+    build(input, FrameAttachments::default()).encode()
 }
 
 /// [`encode_task_frame`] with reported token usage (reply frames).
 pub fn encode_task_frame_with_usage(input: EncodeFrameInput, usage: Option<TokenUsage>) -> String {
-    build(input, usage, None).encode()
+    build(
+        input,
+        FrameAttachments {
+            usage,
+            ..Default::default()
+        },
+    )
+    .encode()
 }
 
 /// [`encode_task_frame`] with the child harness's work snapshot attached
@@ -23,15 +30,33 @@ pub fn encode_task_frame_with_work(
     usage: Option<TokenUsage>,
     work: Option<WorkSnapshot>,
 ) -> String {
-    build(input, usage, work).encode()
+    build(
+        input,
+        FrameAttachments {
+            usage,
+            work,
+            session_id: None,
+        },
+    )
+    .encode()
+}
+
+/// [`encode_task_frame`] with everything a *response* may carry — usage, the
+/// work snapshot, and the session that served the task.
+///
+/// The entry point a worker daemon uses for its terminal frames. The others
+/// remain because most senders attach nothing (a `task` frame) or only usage,
+/// and naming what a frame carries at the call site is what keeps an inbound
+/// request from accidentally claiming a session.
+pub fn encode_task_frame_with_attachments(
+    input: EncodeFrameInput,
+    attachments: FrameAttachments,
+) -> String {
+    build(input, attachments).encode()
 }
 
 /// Assemble the frame from its input and optional attachments.
-fn build(
-    input: EncodeFrameInput,
-    usage: Option<TokenUsage>,
-    work: Option<WorkSnapshot>,
-) -> TaskFrame {
+fn build(input: EncodeFrameInput, attachments: FrameAttachments) -> TaskFrame {
     TaskFrame {
         proto: MEDULLA_TASK_PROTO.to_string(),
         kind: input.kind,
@@ -49,9 +74,19 @@ fn build(
         workflow_inputs: input.workflow_inputs,
         conversation: input.conversation,
         fleet_depth: input.fleet_depth,
-        usage,
+        usage: attachments.usage,
         // An empty snapshot says nothing and would only cost bytes on every
         // status frame, so it is dropped rather than sent.
-        work: work.filter(|snapshot| !snapshot.is_empty()).map(Box::new),
+        work: attachments
+            .work
+            .filter(|snapshot| !snapshot.is_empty())
+            .map(Box::new),
+        // Blank is not a session. A worker that never opened one must leave the
+        // key absent rather than claim `""`, which downstream would record as a
+        // session id nothing can resume.
+        session_id: attachments
+            .session_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty()),
     }
 }

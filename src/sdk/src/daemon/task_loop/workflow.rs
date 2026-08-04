@@ -119,6 +119,7 @@ impl HarnessDispatch for RuntimeDispatch {
                 output_tokens: 0,
             }),
             harness: Some(provider),
+            session_id: None,
         })
     }
 }
@@ -307,7 +308,14 @@ impl DaemonRuntime {
         .await;
 
         let work = fold.lock().ok().map(|fold| fold.snapshot().clone());
-        let attachments = FrameAttachments { usage: None, work };
+        // No session id: a workflow run is a graph, not one harness session —
+        // each `agent` node opens its own. There is no single session that
+        // served this task, so none is claimed.
+        let attachments = FrameAttachments {
+            usage: None,
+            work,
+            ..Default::default()
+        };
 
         match outcome {
             Ok(record) => {

@@ -87,6 +87,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
     TaskFrame {
         usage: None,
         work: None,
+        session_id: None,
         proto: MEDULLA_TASK_PROTO.to_string(),
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
@@ -111,6 +112,7 @@ pub(super) fn input_frame(task_id: &str, text: &str, correlation: Option<&str>) 
     TaskFrame {
         usage: None,
         work: None,
+        session_id: None,
         kind: TaskFrameKind::Input,
         ..task_frame(task_id, text, correlation)
     }
@@ -121,6 +123,7 @@ pub(super) fn abort_frame(task_id: &str, correlation: Option<&str>) -> TaskFrame
     TaskFrame {
         usage: None,
         work: None,
+        session_id: None,
         kind: TaskFrameKind::Abort,
         ..task_frame(task_id, "", correlation)
     }
@@ -415,6 +418,7 @@ pub(super) fn capabilities_frame(task_id: &str, correlation: Option<&str>) -> Ta
     TaskFrame {
         usage: None,
         work: None,
+        session_id: None,
         kind: TaskFrameKind::Capabilities,
         ..task_frame(task_id, "", correlation)
     }

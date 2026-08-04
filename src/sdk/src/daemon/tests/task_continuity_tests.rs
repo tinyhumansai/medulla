@@ -290,3 +290,44 @@ async fn two_frames_in_one_conversation_never_overlap_in_the_harness() {
         "both ran, strictly one after the other"
     );
 }
+
+#[tokio::test]
+async fn the_reply_names_the_session_that_served_the_task() {
+    // The worker is the only party that knows which session ran the work, and
+    // the terminal frame is the only place it can say so. Without this the id
+    // never leaves this process and nothing upstream can point at where a task
+    // actually happened.
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(
+        base_config(),
+        resume_runner(Arc::new(StdMutex::new(Vec::new())), "sess-1"),
+        send,
+    );
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "audit", None)),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    let reply = frames
+        .iter()
+        .find(|frame| frame.kind == crate::protocol::TaskFrameKind::Reply)
+        .expect("a terminal reply");
+    assert_eq!(reply.session_id.as_deref(), Some("sess-1"));
+
+    // Only the terminal frame claims it. An ack is sent before any session
+    // exists, and a status frame describes progress, not placement.
+    for frame in frames
+        .iter()
+        .filter(|frame| frame.kind != crate::protocol::TaskFrameKind::Reply)
+    {
+        assert_eq!(
+            frame.session_id, None,
+            "{:?} must not claim a session",
+            frame.kind
+        );
+    }
+}

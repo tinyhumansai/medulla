@@ -507,6 +507,7 @@ impl DaemonRuntime {
                         FrameAttachments {
                             usage: None,
                             work: snapshot,
+                            ..Default::default()
                         },
                     )
                     .await;
@@ -567,6 +568,11 @@ impl DaemonRuntime {
                     FrameAttachments {
                         usage: run.usage,
                         work: Some(final_work),
+                        // Which session did the work. Only this process knows —
+                        // it opened (or resumed) it — and the caller has no way
+                        // to derive it, so a task whose session goes unreported
+                        // is one nobody upstream can point at afterwards.
+                        session_id: run.session_id.clone(),
                     },
                 )
                 .await;

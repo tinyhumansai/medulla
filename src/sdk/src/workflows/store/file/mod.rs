@@ -373,10 +373,10 @@ fn absolute_path(path: &Path) -> PathBuf {
 /// destination—not a run scope—keeps locks and undo history coherent across
 /// workspaces without mixing unrelated catalogs.
 pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    let write_dir = dirs
+    let raw_write_dir = dirs
         .last()
         .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
-    let write_dir = canonical_path_identity(&write_dir);
+    let write_dir = canonical_path_identity(&raw_write_dir);
     let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
     let scope = format!(
         "{:x}",

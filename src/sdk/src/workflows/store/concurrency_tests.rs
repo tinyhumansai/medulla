@@ -269,6 +269,33 @@ fn explicit_stores_derive_locks_from_the_shared_definition_destination() {
 }
 
 #[test]
+fn lexical_catalog_aliases_derive_the_same_definition_state() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let direct = root.path().join("catalog");
+    let aliased = root.path().join("missing/../catalog");
+
+    assert_eq!(
+        super::file::definition_state_dir(&[direct]),
+        super::file::definition_state_dir(&[aliased])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_catalog_aliases_derive_the_same_definition_state() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let direct = root.path().join("catalog");
+    std::fs::create_dir(&direct).expect("catalog");
+    let alias = root.path().join("catalog-link");
+    std::os::unix::fs::symlink(&direct, &alias).expect("symlink");
+
+    assert_eq!(
+        super::file::definition_state_dir(&[direct]),
+        super::file::definition_state_dir(&[alias])
+    );
+}
+
+#[test]
 fn sibling_definition_catalogs_do_not_share_revision_history() {
     let root = tempfile::tempdir().expect("tempdir");
     let first = FileWorkflowStore::new(

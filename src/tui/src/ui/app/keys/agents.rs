@@ -58,6 +58,14 @@ impl App {
             .is_some_and(|row| row.is_new_agent())
     }
 
+    /// The agent whose `+ new session` action row the cursor sits on, if it does.
+    pub(in crate::ui::app) fn on_new_session_row(&self) -> Option<String> {
+        let rows = self.rail_rows();
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .and_then(|row| row.new_session_agent())
+            .map(str::to_string)
+    }
+
     /// Move the keyboard to the rail. Nothing else about the draft changes, so
     /// stepping out to look at a lane and back never costs a half-typed message.
     pub(in crate::ui::app) fn focus_agents_rail(&mut self) {
@@ -106,12 +114,19 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the rows that are themselves an action: the agent starter, and a
-            // lane's `+N more`, where it pages the hidden sublanes into view. A
-            // visible harness consumes it earlier and takes the keyboard instead.
+            // the rows that are themselves an action: `+ New agent`, an agent's
+            // `+ new session`, and a lane's `+N more`, where it pages the hidden
+            // sessions into view. A visible session pane consumes it earlier and
+            // takes the keyboard instead.
             KeyCode::Enter => {
                 if self.on_new_agent_row() {
                     self.open_new_agent_picker();
+                } else if let Some(agent_id) = self.on_new_session_row() {
+                    // The same flow `Ctrl-T` opens on an agent row: the name
+                    // prompt, then a session in that agent's declared harness
+                    // and directory. Enter is how a row that *is* an action is
+                    // taken, so the two doors lead to one place.
+                    self.open_new_session(&agent_id);
                 } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }

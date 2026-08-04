@@ -25,6 +25,10 @@ use super::types::App;
 pub(in crate::ui::app) struct StartedSession {
     /// The agent the session runs on — what the operator recognises it by.
     pub(in crate::ui::app) agent: String,
+    /// The harness that agent runs, when the tree knows one.
+    pub(in crate::ui::app) harness: Option<String>,
+    /// The directory it works in, when the tree knows one.
+    pub(in crate::ui::app) workspace: Option<String>,
     /// The task that created it. Empty for a session with no task of its own.
     pub(in crate::ui::app) task_id: String,
     /// The session's current state, in the task board's vocabulary.
@@ -42,25 +46,46 @@ impl App {
     /// person spun up was not "started by the orchestrator", and putting it in
     /// this block would claim the orchestrator did something it did not.
     pub(in crate::ui::app) fn started_sessions(&self) -> Vec<StartedSession> {
-        self.rail_rows()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(row_index, row)| {
-                let RailRow::Session(session) = &row else {
-                    return None;
-                };
-                if session.origin().is_user() {
-                    return None;
+        // The agent an entry describes is the row it sits under, which the walk
+        // is already passing: sessions are grouped under their agent, so the
+        // last agent row seen is this session's own. That is also where the
+        // harness and the workspace come from — the session row itself carries
+        // neither, and an entry that names only an id says less than the rail
+        // row beside it.
+        let mut agent: Option<super::rail::AgentRailRow> = None;
+        let mut started = Vec::new();
+        for (row_index, row) in self.rail_rows().into_iter().enumerate() {
+            match row {
+                RailRow::Agent(row) => agent = Some(row),
+                RailRow::Session(session) => {
+                    if session.origin().is_user() {
+                        continue;
+                    }
+                    let Some(task) = session.task.as_ref() else {
+                        continue;
+                    };
+                    // Only the agent this session is actually filed under: a
+                    // session with no agent sits outside every group, so the row
+                    // above it describes somebody else.
+                    let owner = agent.as_ref().filter(|owner| {
+                        Some(owner.agent_id.as_str()) == session.agent_id.as_deref()
+                    });
+                    started.push(StartedSession {
+                        agent: owner
+                            .map(|owner| owner.label())
+                            .or_else(|| session.agent_id.clone())
+                            .unwrap_or_default(),
+                        harness: owner.and_then(|owner| owner.harness().map(str::to_string)),
+                        workspace: owner.and_then(|owner| owner.workspace().map(str::to_string)),
+                        task_id: task.task_id.clone(),
+                        status: task.status.label(),
+                        row_index,
+                    });
                 }
-                let task = session.task.as_ref()?;
-                Some(StartedSession {
-                    agent: session.agent_id.clone().unwrap_or_default(),
-                    task_id: task.task_id.clone(),
-                    status: task.status.label(),
-                    row_index,
-                })
-            })
-            .collect()
+                _ => {}
+            }
+        }
+        started
     }
 
     /// Move focus to the session serving `task_id`, if the rail still lists it.

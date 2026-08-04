@@ -1088,13 +1088,19 @@ pub struct App {
     pub(super) hit_harness: Option<(Rect, String)>,
     /// The threads strip's hit box and its first visible row, for click-to-switch.
     pub(super) hit_threads: Option<(Rect, usize)>,
-    /// Where the orchestrator's "sessions started" block drew, and the task each
-    /// of its lines opens (§A7).
+    /// Where the orchestrator's conversation drew, and the task each of its
+    /// visible lines opens (§A7) — `None` for the lines that are transcript
+    /// rather than a session entry.
+    ///
+    /// One slot per drawn row rather than a dense list, because the entries are
+    /// interleaved with the conversation: each one sits under the turn that
+    /// started it, so the block is no longer contiguous and an offset from its
+    /// top no longer identifies an entry.
     ///
     /// Tasks rather than row indices: the rail is rebuilt every frame, so an
     /// index recorded during the draw can name a different row by the time the
     /// click lands. A task id either still has a session or does not.
-    pub(super) hit_started_sessions: Option<(Rect, Vec<String>)>,
+    pub(super) hit_started_sessions: Option<(Rect, Vec<Option<String>>)>,
     pub(super) hit_context: Option<Rect>,
     /// The selected workflow step's preview, for pointer-wheel scrolling.
     pub(super) hit_workflow_preview: Option<Rect>,

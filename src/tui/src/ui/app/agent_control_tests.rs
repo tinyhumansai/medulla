@@ -159,6 +159,75 @@ fn a_named_session_opens_in_the_agents_own_harness_and_workspace() {
 }
 
 #[test]
+fn every_agent_carries_a_new_session_row_that_opens_the_flow() {
+    // `open_new_session` shipped with the tree and was bound only to `^T`, so an
+    // operator who did not already know the chord could not reach it. The row is
+    // how it becomes visible — and selecting it must land in the same flow.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations = vec![
+        AgentDeclaration::new("api-codex", "", "codex", "/work/api"),
+        AgentDeclaration::new("web-codex", "", "codex", "/work/web"),
+    ];
+
+    let rows = app.rail_rows();
+    for agent_id in ["api-codex", "web-codex"] {
+        let agent = rows
+            .iter()
+            .position(|row| matches!(row, RailRow::Agent(agent) if agent.agent_id == agent_id))
+            .unwrap_or_else(|| panic!("{agent_id} has a row"));
+        let action = rows
+            .iter()
+            .position(|row| row.new_session_agent() == Some(agent_id))
+            .unwrap_or_else(|| panic!("{agent_id} offers a session: {rows:?}"));
+        assert!(action > agent, "the action sits under its agent");
+        // …and under that agent's own sessions: nothing between them belongs to
+        // anybody else.
+        assert!(
+            rows[agent + 1..action]
+                .iter()
+                .all(|row| matches!(row, RailRow::Session(_) | RailRow::Lane(_))),
+            "the action closes the agent's group: {rows:?}"
+        );
+        assert!(rows[action].selectable(), "and the cursor can reach it");
+    }
+
+    let index = rows
+        .iter()
+        .position(|row| row.new_session_agent() == Some("api-codex"))
+        .expect("the action row");
+    app.agent_index = index;
+    assert_eq!(app.on_new_session_row().as_deref(), Some("api-codex"));
+
+    app.open_new_session("api-codex");
+    let kind = app.prompt.as_ref().map(|prompt| &prompt.kind);
+    assert!(
+        matches!(kind, Some(PromptKind::SessionName { agent_id, managed })
+            if agent_id == "api-codex" && !managed),
+        "selecting it opens the named, user-owned flow"
+    );
+}
+
+#[test]
+fn an_agent_this_machine_does_not_declare_is_not_offered_a_session() {
+    // A session is started by the host that owns the agent, and the flow reads
+    // the declaration for the harness and the directory. An action row on a
+    // remote host's agent would be a button that refuses.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
+        "studio-codex",
+        "studio",
+        "codex",
+        "/work",
+    )];
+    assert!(
+        app.rail_rows()
+            .iter()
+            .all(|row| row.new_session_agent().is_none()),
+        "nothing local to start it on"
+    );
+}
+
+#[test]
 fn opening_a_session_for_an_undeclared_agent_says_so() {
     let mut app = hosting_app();
     app.open_new_session("nobody");

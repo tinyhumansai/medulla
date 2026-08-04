@@ -11,9 +11,11 @@
 //!
 //! Split by responsibility: [`types`] resolves what the cursor is on and where
 //! the panes landed, [`rail`] draws the threads strip and the lane/fleet list,
-//! [`transcript`] the pane beside it, [`work`] the panel showing what the
-//! selected agent is working on, and [`composer`] the input under that. This
-//! module owns only the layout that decides how much room each one gets.
+//! [`transcript`] the pane beside it, [`summary`] what that pane shows for a row
+//! with no transcript of its own, [`started`] the sessions each conversation
+//! turn spawned, [`work`] the panel showing what the selected agent is working
+//! on, and [`composer`] the input under that. This module owns only the layout
+//! that decides how much room each one gets.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
@@ -26,10 +28,14 @@ use super::super::types::App;
 mod composer;
 mod harness;
 mod rail;
+mod started;
+mod summary;
 mod transcript;
 mod types;
 mod work;
 
+#[cfg(test)]
+mod started_tests;
 #[cfg(test)]
 mod transcript_tests;
 #[cfg(test)]
@@ -79,21 +85,21 @@ impl App {
         let rows = self.rail_rows();
         let active = self.agent_index.min(rows.len().saturating_sub(1));
         self.agent_index = active;
-        let lane_index = rows
-            .get(active)
-            .and_then(|row| row.lane_index())
-            .unwrap_or(0);
+        // No fallback: a row with no lane keeps `None`, and the pane renders
+        // what that row *is* rather than whoever happens to hold lane 0 — which
+        // is the orchestrator, so the old `unwrap_or(0)` put its thinking under
+        // `+ New agent`, host headers and idle agents.
+        let lane_index = rows.get(active).and_then(|row| row.lane_index());
         let task = rows.get(active).and_then(|row| row.task()).cloned();
         // Only a *lane* row can be the orchestrator's. Agents, sessions, hosts
-        // and the action row fall back to lane 0 for the transcript behind them,
-        // and reading the role off that fallback claimed the orchestrator's
-        // composer for rows that are not it — a text box under a row with
-        // nothing to say to. Mirrors
+        // and the action rows are not lanes, and reading the role off the old
+        // lane-0 fallback claimed the orchestrator's composer for rows that are
+        // not it — a text box under a row with nothing to say to. Mirrors
         // [`App::on_orchestrator_lane`](crate::ui::app), which the keyboard
         // reads, so focus and layout cannot disagree.
         let on_orchestrator = match rows.get(active) {
-            Some(RailRow::Lane(AgentRow::Lane { .. })) => lanes
-                .get(lane_index)
+            Some(RailRow::Lane(AgentRow::Lane { .. })) => lane_index
+                .and_then(|index| lanes.get(index))
                 .map(|l| l.role == AgentRole::Orchestrator)
                 .unwrap_or(true),
             None => true,

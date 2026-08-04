@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use openhuman_core::openhuman::socket::medulla::payloads::{
+use openhuman_core::openhuman::platform::socket::medulla::payloads::{
     RegisterWorkflows, WorkflowOp, WorkflowRequest, WorkflowResult,
 };
 // Re-exported rather than redeclared: the trait is the embedded core's, shared
 // with the sibling openhuman host, and a second declaration here would be a
 // second contract free to drift from the one the backend actually talks to.
-pub use openhuman_core::openhuman::socket::medulla::workflows::WorkflowBridge;
+pub use openhuman_core::openhuman::platform::socket::medulla::workflows::WorkflowBridge;
 
 /// The installed store side of the workflow plane.
 pub type WorkflowPlane = Arc<dyn WorkflowBridge>;

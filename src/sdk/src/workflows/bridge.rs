@@ -2,7 +2,7 @@
 //!
 //! The transport — the advert batch, the `medulla:workflow_request` round trip,
 //! the deadlines the backend enforces — lives in the embedded OpenHuman core
-//! ([`openhuman_core::openhuman::socket::medulla::workflows`]), because two
+//! ([`openhuman_core::openhuman::platform::socket::medulla::workflows`]), because two
 //! hosts share it and only one of them is this crate. What the core cannot
 //! supply is the *store*: it deliberately knows nothing about a graph, a node
 //! kind, or a run record. So it asks for a [`WorkflowBridge`] and this module
@@ -30,10 +30,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use openhuman_core::openhuman::socket::medulla::payloads::{
+use openhuman_core::openhuman::platform::socket::medulla::payloads::{
     CopilotOutcome as WireCopilotOutcome, WorkflowDescriptor, WorkflowInputDescriptor,
 };
-use openhuman_core::openhuman::socket::medulla::workflows::WorkflowBridge;
+use openhuman_core::openhuman::platform::socket::medulla::workflows::WorkflowBridge;
 
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::protocol::HarnessProvider;
@@ -46,9 +46,9 @@ use crate::workflows::{
 /// JSON workflow store.
 ///
 /// Install it once with
-/// [`set_workflow_bridge`](openhuman_core::openhuman::socket::medulla::workflows::set_workflow_bridge)
+/// [`set_workflow_bridge`](openhuman_core::openhuman::platform::socket::medulla::workflows::set_workflow_bridge)
 /// and re-advertise with
-/// [`emit_register_workflows`](openhuman_core::openhuman::socket::medulla::workflows::emit_register_workflows)
+/// [`emit_register_workflows`](openhuman_core::openhuman::platform::socket::medulla::workflows::emit_register_workflows)
 /// whenever the store changes.
 ///
 /// **Install it only when workflows are enabled on this host.** Nothing in here

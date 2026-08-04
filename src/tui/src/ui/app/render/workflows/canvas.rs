@@ -252,16 +252,21 @@ impl App {
                 self.label_width(to, overlay),
             );
             let (exit, gutter) = if out_reversed {
-                (fx.saturating_sub(1), fx.saturating_sub(GUTTER_GAP))
+                (
+                    fx.saturating_sub(1 + NODE_GAP),
+                    fx.saturating_sub(GUTTER_GAP),
+                )
             } else {
-                (fx + from_width, fx + node_width + GUTTER_GAP)
+                (fx + from_width + NODE_GAP, fx + node_width + GUTTER_GAP)
             };
-            // The cell an arrowhead lands on: just outside the target's leading
-            // edge, which is its right edge on a band that runs right to left.
+            // The cell an arrowhead lands on: one clear cell outside the
+            // target's leading edge, which is its right edge on a band that runs
+            // right to left. The blank between the arrowhead and the marker is
+            // what stops a wire and a name reading as one run of characters.
             let entry = if in_reversed {
-                tx + to_width
+                tx + to_width + NODE_GAP
             } else {
-                tx.saturating_sub(1)
+                tx.saturating_sub(1 + NODE_GAP)
             };
             let head = if in_reversed { '◀' } else { '▶' };
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
@@ -297,9 +302,9 @@ impl App {
                 // A loop back to an earlier step in the same band: it returns
                 // the way it came, into the node's trailing edge.
                 let tail = if in_reversed {
-                    tx.saturating_sub(1)
+                    tx.saturating_sub(1 + NODE_GAP)
                 } else {
-                    tx + to_width
+                    tx + to_width + NODE_GAP
                 };
                 vec![
                     (exit, from_row),
@@ -313,9 +318,9 @@ impl App {
             let (head_x, head) = if folds || forward {
                 (entry, head)
             } else if in_reversed {
-                (tx.saturating_sub(1), '▶')
+                (tx.saturating_sub(1 + NODE_GAP), '▶')
             } else {
-                (tx + to_width, '◀')
+                (tx + to_width + NODE_GAP, '◀')
             };
             canvas.arrow(head_x, to_row, head, style);
 

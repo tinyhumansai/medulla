@@ -263,6 +263,24 @@ impl App {
     /// reason the attach chord does: an operator who pressed a key and saw no
     /// change cannot tell "wrong row" from "broken feature".
     fn selected_session(&mut self) -> Option<(crate::ui::harness_pane::LocalSessions, String)> {
+        // A session on another host is a real session the cursor is really on —
+        // it is just not one this machine can take (§E7). The hub resolves a
+        // hold by local workspace path, so there is nothing here to flip, and
+        // the honest answer names the machine rather than pretending the row is
+        // empty. Watching it is unaffected: the screen mirror is read-only by
+        // design either way.
+        //
+        // Asked before "is this device hosting", because it is the more specific
+        // answer and the two are not exclusive: a laptop that hosts nothing can
+        // still be looking at a remote host's session, and "this device is not
+        // hosting" would be a true sentence about the wrong machine.
+        if let Some(agent) = self.pane_remote_session.clone() {
+            self.set_status(format!(
+                "{agent} runs on another host — you can watch this session, but \
+                 taking control is local-only for now"
+            ));
+            return None;
+        }
         let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions");
             return None;

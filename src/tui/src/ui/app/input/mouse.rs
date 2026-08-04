@@ -180,7 +180,7 @@ impl App {
     /// of where the pointer is inside the screen it believes it owns — a release
     /// at a negative offset would wrap to the far side of the pane instead.
     fn deliver_pointer_grab(&mut self, m: &crossterm::event::MouseEvent) -> bool {
-        let Some(grab) = self.harness_pointer_grab.clone() else {
+        let Some(grab) = self.pointer_grab.clone() else {
             return false;
         };
         let Some((button, motion)) = pointer_report(m.kind) else {
@@ -194,7 +194,7 @@ impl App {
             return false;
         }
         if motion == Motion::Release {
-            self.harness_pointer_grab = None;
+            self.pointer_grab = None;
         }
         let Some(harnesses) = self.local_sessions.clone() else {
             return true;
@@ -263,14 +263,14 @@ impl App {
         // release re-routed to our own drag-selection is not.
         match motion {
             crate::ui::harness_pane::mouse::Motion::Press => {
-                self.harness_pointer_grab = Some(PointerGrab {
+                self.pointer_grab = Some(PointerGrab {
                     session,
                     button,
                     rect,
                 });
             }
             crate::ui::harness_pane::mouse::Motion::Release => {
-                self.harness_pointer_grab = None;
+                self.pointer_grab = None;
             }
             crate::ui::harness_pane::mouse::Motion::Drag => {}
         }

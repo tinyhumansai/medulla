@@ -35,7 +35,7 @@ use medulla::sessions::{SessionClass, TurnStream};
 use medulla::wrapper::tail::SessionTailer;
 
 use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin};
-use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, WorkspaceContext};
+use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, TurnSpec, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -146,10 +146,26 @@ impl PtySessionExecutor {
         // Two steps, and the split is load-bearing: `RunTaskOptions` is `Send`
         // but not `Sync`, so a borrow of it held across an await would make this
         // future un-spawnable. Deciding what to run is synchronous and gives the
-        // borrow back; only the owned [`LaunchSpec`] crosses the await.
-        let opened = match self.session_for(&options, class)? {
-            SessionPlan::Reuse(opened) => opened,
-            SessionPlan::Launch(spec) => self.launch(*spec).await?,
+        // borrow back — hence the `let` before the `match`, which ends the
+        // borrow at the semicolon rather than at the end of the match — and only
+        // owned values cross the awaits.
+        //
+        // A loop, because the third answer is "wait": a checkout with a person
+        // in it is planned again once they are done, not refused (see
+        // [`SessionPlan::Queue`]). The budget is the caller's own idle ceiling,
+        // so a queued task cannot outlive the deadline its requester set for it.
+        let queue_deadline = tokio::time::Instant::now() + self.queue_budget(options.timeout_ms);
+        let queue_abort = options.abort.clone();
+        let opened = loop {
+            let plan = self.session_for(&options, class)?;
+            match plan {
+                SessionPlan::Reuse(opened) => break opened,
+                SessionPlan::Launch(spec) => break self.launch(*spec).await?,
+                SessionPlan::Queue(cwd) => {
+                    self.await_checkout_release(&cwd, &queue_abort, queue_deadline)
+                        .await?;
+                }
+            }
         };
         if let Some(pinned) = &opened.harness_session_id {
             // A reused session's transcript already exists, so the fresh-session
@@ -236,14 +252,23 @@ impl PtySessionExecutor {
         let abort = options.abort.clone();
         let on_event = options.on_event;
         let timeout_ms = options.timeout_ms;
+        // Kept for the hand-back turn: if an operator takes this session
+        // mid-flight, what they hand back has to be finished against the task
+        // that was asked for, and this is the only copy of it that survives the
+        // borrow rules above.
+        let instruction = options.prompt.clone();
         let outcome = self
             .await_turn(
                 &id,
-                (provider, gh_repo_is_set),
+                TurnSpec {
+                    provider,
+                    gh_repo_is_set,
+                    timeout_ms,
+                    instruction,
+                },
                 tailer,
                 abort,
                 on_event,
-                timeout_ms,
             )
             .await;
         self.finish_turn(&id, class, outcome.is_ok());
@@ -314,34 +339,27 @@ impl PtySessionExecutor {
         );
     }
 
-    /// Decide which session serves this task: reuse an idle one, or launch.
+    /// Decide which session serves this task: reuse an idle one, launch, or
+    /// queue behind the person in the checkout.
     ///
-    /// Synchronous, and returns a plan rather than a session, because the launch
-    /// itself must not happen here — see [`PtySessionExecutor::launch`].
+    /// Synchronous, and returns a plan rather than a session, because neither
+    /// the launch nor the wait may happen here — see
+    /// [`PtySessionExecutor::launch`].
+    ///
+    /// **Candidacy (spec §4.1).** Only *orchestrator-owned* sessions are ever
+    /// candidates. A user-owned session — born that way as an unmanaged spawn,
+    /// or taken at runtime — is not one, so a person working in a session never
+    /// makes a dispatch fail: it is simply not among the things the dispatch can
+    /// pick up. That rule lives in
+    /// [`try_claim`](crate::worker::pty::PtyManager::claim_idle), which is why
+    /// reuse is consulted *first* here now. It used to come second, behind a
+    /// workspace-wide refusal that turned a person at a keyboard into a task
+    /// error — even when the agent had another session sitting idle beside them.
     fn session_for(
         &self,
         options: &RunTaskOptions,
         class: SessionClass,
     ) -> Result<SessionPlan, String> {
-        // Exclusivity, and it comes first. A workspace an operator is working in
-        // is not available to the orchestrator at all — not "reuse nothing in
-        // it", but "start nothing in it". Checked ahead of the reuse branch
-        // below on purpose: a folder with a person in it is not shared, however
-        // idle some other harness sitting in it happens to look.
-        //
-        // Refused with the shared prefix rather than silently routed around, so
-        // the hub can settle it as `RunError::Held` and the orchestrator is told
-        // *why* it cannot work here — a task that vanishes into a retry with no
-        // reason is the failure this replaces.
-        if let Some(held) = self.sessions.operator_hold(&options.cwd) {
-            return Err(format!(
-                "{}: an operator is working in {} ({} session {})",
-                medulla::daemon::HARNESS_HELD_PREFIX,
-                options.cwd,
-                held.provider.as_str(),
-                held.id,
-            ));
-        }
         if class == SessionClass::Unbound {
             // Reuse this peer's session only when it is *idle*. A harness serves
             // one turn at a time: a fan-out that pastes three prompts into one
@@ -360,6 +378,21 @@ impl PtySessionExecutor {
                     gh_repo_is_set: self.sessions.gh_repo_is_set(&row.id).unwrap_or(false),
                 }));
             }
+        }
+        // Nothing to reuse, so this dispatch needs a session of its own — and
+        // that is where the *second*, independent rule applies: under
+        // `strategy: checkout` the working tree takes one writer at a time
+        // (see [`checkout_writer`](Self::checkout_writer)), so a fresh harness
+        // cannot simply start beside the one that is there. The work queues
+        // instead — the same exclusivity the blanket refusal used to buy,
+        // without ending the dispatch to get it.
+        //
+        // Note what this is *not*: it is not "the workspace is held". Holds are
+        // on sessions, and rule 1 above has already dealt with those. This is
+        // the strategy's serialization, and under `worktree` it will not apply
+        // at all.
+        if self.checkout_writer(&options.cwd).is_some() {
+            return Ok(SessionPlan::Queue(options.cwd.clone()));
         }
         let label = if options.conversation.is_empty() {
             format!("task:{}", options.provider.as_str())
@@ -516,6 +549,62 @@ impl PtySessionExecutor {
         Ok((env, extra_args))
     }
 
+    /// Fold whatever the harness has written since the last poll, and answer
+    /// with the turn's result if that fold completed it.
+    ///
+    /// Shared by the polling loop and by the suspend path, and shared
+    /// deliberately: "read what is already there before doing anything else" has
+    /// to mean the same thing in both, or a turn that finished microseconds
+    /// before an operator took the session would have its answer read by one
+    /// path and dropped by the other.
+    ///
+    /// `last_line_at` is advanced per line rather than per call, because it is
+    /// the idle watchdog's clock and a batch of lines is progress at the time
+    /// each of them was read, not at the time the batch was drained.
+    fn fold_available(
+        &self,
+        id: &str,
+        provider: HarnessProvider,
+        tailer: &mut SessionTailer,
+        stream: &mut TurnStream,
+        on_event: &mut Option<medulla::daemon::providers::OnEvent>,
+        last_line_at: &mut i64,
+    ) -> Option<RunTaskResult> {
+        let poll = tailer.poll();
+        // Codex cannot be told its id, so it is learned from the rollout the
+        // first time the tailer locates one.
+        if let Some(located) = &poll.located {
+            self.sessions
+                .record_session_id(id, located.harness_session_id.clone());
+        }
+        for line in poll.lines {
+            *last_line_at = medulla::clock::now_millis();
+            let fold = stream.observe(&line.text);
+            self.workspace_context
+                .lock()
+                .expect("workspace context lock poisoned")
+                .insert(id.to_string(), stream.workspace_context());
+            // The peer watches its task through these. Dropping them would
+            // leave it with an ack, silence, then a reply — which is what
+            // this executor used to do.
+            if let Some(callback) = on_event.as_mut() {
+                for event in &fold.events {
+                    callback(event);
+                }
+            }
+            if let Some(reply) = fold.reply {
+                return Some(RunTaskResult {
+                    provider,
+                    reply,
+                    events: stream.events(),
+                    usage: stream.usage(),
+                    session_id: self.sessions.row(id).and_then(|row| row.session_id),
+                });
+            }
+        }
+        None
+    }
+
     /// Poll the transcript until the harness says the turn is over.
     ///
     /// `timeout_ms` is the caller's configured idle watchdog (`[host]
@@ -530,13 +619,17 @@ impl PtySessionExecutor {
     async fn await_turn(
         &self,
         id: &str,
-        mapper_context: (HarnessProvider, bool),
+        spec: TurnSpec,
         mut tailer: SessionTailer,
         abort: medulla::daemon::providers::Abort,
         mut on_event: Option<medulla::daemon::providers::OnEvent>,
-        timeout_ms: u64,
     ) -> Result<RunTaskResult, String> {
-        let (provider, gh_repo_is_set) = mapper_context;
+        let TurnSpec {
+            provider,
+            gh_repo_is_set,
+            timeout_ms,
+            instruction,
+        } = spec;
         let mut stream = TurnStream::new_with_gh_repo_override(provider, gh_repo_is_set);
         if let Some((cwd, branch, pull_request)) = self
             .workspace_context
@@ -552,20 +645,63 @@ impl PtySessionExecutor {
                 callback(&event);
             }
         }
-        let started = tokio::time::Instant::now();
+        let mut started = tokio::time::Instant::now();
         let mut last_line_at = medulla::clock::now_millis();
 
         loop {
             // Taking control is an ownership transfer, not merely a display
-            // preference. Yield before processing aborts or transcript output
-            // so the executor cannot send Ctrl-C, report a stale completion, or
-            // later close the PTY underneath the operator.
+            // preference, so it is answered before aborts or transcript output:
+            // from here the executor must not send Ctrl-C, report a stale
+            // completion, or close the PTY underneath the operator.
+            //
+            // What it does instead is **suspend** (spec §5). The turn used to
+            // return an error here, throwing away everything the harness had
+            // produced and telling the orchestrator its task had failed — for
+            // the entirely ordinary event of a person opening the session to
+            // look. Now the fold, its events, its usage and its workspace
+            // context all stay exactly where they are, the session keeps the
+            // work, and the task stays open.
             if self.sessions.control(id) == Some(SessionControl::User) {
-                return Err(format!(
-                    "{}: operator took control of the {} session",
-                    medulla::daemon::HARNESS_HELD_PREFIX,
-                    provider.as_str()
-                ));
+                // Everything already written belongs to *this* turn — the
+                // takeover cannot retroactively unwrite it. Folded out before
+                // suspending, so a turn that finished in the instant somebody
+                // took the session still reports the answer it had reached.
+                if let Some(result) = self.fold_available(
+                    id,
+                    provider,
+                    &mut tailer,
+                    &mut stream,
+                    &mut on_event,
+                    &mut last_line_at,
+                ) {
+                    return Ok(result);
+                }
+                super::hold::report_held(&mut on_event, provider);
+                self.await_handback(id, provider, &abort).await?;
+                // The lines the operator's own work wrote are theirs, not this
+                // turn's: dropped rather than folded, or the person's last
+                // exchange would settle the task as its answer. What they did is
+                // not lost — it is in the session, which is exactly what the
+                // hand-back turn is told to go and read.
+                let poll = tailer.poll();
+                if let Some(located) = &poll.located {
+                    self.sessions
+                        .record_session_id(id, located.harness_session_id.clone());
+                }
+                super::hold::report_resumed(&mut on_event, provider);
+                super::super::pty::inject_prompt(
+                    &self.sessions,
+                    id,
+                    &super::hold::handback_prompt(&instruction),
+                )
+                .await?;
+                // Both budgets restart with the hand-back turn, which is what
+                // "the watchdog is paused, not lengthened" means on this side:
+                // held time is excluded rather than counted, so a session held
+                // over lunch is not a task that timed out at the desk.
+                started = tokio::time::Instant::now();
+                last_line_at = medulla::clock::now_millis();
+                continue;
             }
             if abort.is_aborted() {
                 if abort.is_terminated() {
@@ -589,37 +725,15 @@ impl PtySessionExecutor {
                 ));
             }
 
-            let poll = tailer.poll();
-            // Codex cannot be told its id, so it is learned from the rollout the
-            // first time the tailer locates one.
-            if let Some(located) = &poll.located {
-                self.sessions
-                    .record_session_id(id, located.harness_session_id.clone());
-            }
-            for line in poll.lines {
-                last_line_at = medulla::clock::now_millis();
-                let fold = stream.observe(&line.text);
-                self.workspace_context
-                    .lock()
-                    .expect("workspace context lock poisoned")
-                    .insert(id.to_string(), stream.workspace_context());
-                // The peer watches its task through these. Dropping them would
-                // leave it with an ack, silence, then a reply — which is what
-                // this executor used to do.
-                if let Some(callback) = on_event.as_mut() {
-                    for event in &fold.events {
-                        callback(event);
-                    }
-                }
-                if let Some(reply) = fold.reply {
-                    return Ok(RunTaskResult {
-                        provider,
-                        reply,
-                        events: stream.events(),
-                        usage: stream.usage(),
-                        session_id: self.sessions.row(id).and_then(|row| row.session_id),
-                    });
-                }
+            if let Some(result) = self.fold_available(
+                id,
+                provider,
+                &mut tailer,
+                &mut stream,
+                &mut on_event,
+                &mut last_line_at,
+            ) {
+                return Ok(result);
             }
 
             if !tailer.is_located() && started.elapsed() > LOCATE_BUDGET {

@@ -1149,23 +1149,33 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) pane_session: Option<String>,
-    // The harness that took the press of the button currently held down, if any.
+    // The session that took the press of the button currently held down, if any.
     // A terminal grabs the pointer for the whole gesture: whoever received the
     // press receives the drags and the release too, wherever the pointer has
     // wandered to since. Without the grab a release outside the pane — or one
     // swallowed by a modal the click itself opened — never reaches the child,
     // which goes on believing the button is still down and misplaces everything
     // it draws in response to the pointer afterwards.
-    pub(super) harness_pointer_grab: Option<PointerGrab>,
+    pub(super) pointer_grab: Option<PointerGrab>,
     // Where the hand-back question drew each of its answers, and the key each
     // one stands for. Recorded during the draw so a click can be answered by
     // replaying the keystroke rather than by a second copy of the routing: the
     // two would drift, and the direction they would drift in is a pointer that
     // hands a harness back when the operator meant to keep it.
     pub(super) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
-    // The harness selected on the Agents rail, retained while another tab is
-    // visible. Unlike `pane_session`, this is navigation state rather
-    // than a keyboard-routing capability: Changes uses it to keep following
+    // The agent behind a selected session row that this device does NOT run,
+    // recorded alongside `pane_session` on the same draw.
+    //
+    // Its only purpose is to tell "the cursor is not on a session" apart from
+    // "the cursor is on somebody else's session", which `pane_session` cannot:
+    // both leave it `None`. Taking control resolves through the local workspace
+    // path, so a remote session can be watched but not taken (§E7), and an
+    // operator who presses the take chord on one deserves that answer rather
+    // than "no session on this row".
+    pub(super) pane_remote_session: Option<String>,
+    // The session selected on the Agents rail, retained while another tab is
+    // visible. Unlike `pane_session`, this is navigation state rather than a
+    // keyboard-routing capability: Changes uses it to keep following
     // the repository the operator selected after an intervening tab draw.
     pub(super) rail_session: Option<String>,
     /// The "start a session" picker, while it is open.

@@ -933,12 +933,17 @@ fn an_agent_with_no_declared_workspace_still_serializes() {
     assert_eq!(agent["metadata"]["harness"], "claude");
 }
 
-/// The keys the backend's per-agent control ingestion and the manager ledger's
-/// control folds read. A regression here is silent — the advert still parses,
-/// the folds just stop seeing a hold — so the whole metadata object is pinned
-/// rather than spot-checked.
+/// The whole metadata object, pinned — including what is **not** in it.
+///
+/// Control state (`control`, `controlReason`, `controlSince`) and the handback
+/// brief are per-*agent* keys describing a per-*session* fact, so a backend
+/// folding them by `agentId` would mark every task on the agent as held when a
+/// person took one session. They are therefore not advertised at all; see
+/// `hub::tests::handoff_advert` for the full reasoning and the local state that
+/// replaces them. The object is pinned rather than spot-checked because a
+/// regression either way is silent — the advert still parses.
 #[test]
-fn the_control_and_handoff_keys_keep_exactly_the_shape_the_backend_folds() {
+fn the_advert_metadata_carries_placement_and_never_control() {
     let mut held = placed("this-device", "this-device");
     held.workspace = Some(crate::runtime::WorkspaceRef::checkout("/repos/acme"));
     held.control = super::super::HandoffControl::Operator;
@@ -959,14 +964,13 @@ fn the_control_and_handoff_keys_keep_exactly_the_shape_the_backend_folds() {
             "harness": "claude",
             "maxSessions": 1,
             "workspace": "/repos/acme",
-            "control": "operator",
-            "controlReason": "pairing on the migration",
-            "controlSince": 1_753_420_600_000i64,
         }),
-        "control/controlReason/controlSince must not move, gain a wrapper, or change spelling"
+        "address/harness/maxSessions/workspace must not move, gain a wrapper, or \
+         change spelling — and control must not appear at any grain"
     );
 
-    // And the handoff brief, which only rides while the orchestrator holds it.
+    // Nor does the brief a handback produces: it names one session, this slot is
+    // one per agent, and it exists only because a person held something.
     let mut handed_back = worker("w1", "GRVaddr");
     handed_back.handoff = Some(super::super::HarnessHandoff {
         id: "w_3-1".to_string(),
@@ -982,8 +986,8 @@ fn the_control_and_handoff_keys_keep_exactly_the_shape_the_backend_folds() {
         transcript_truncated: false,
     });
     let payload = register_payload(&[handed_back], &no_presence(), &[], &[]);
-    let handoff = &payload["agents"][0]["metadata"]["handoff"];
-    assert_eq!(handoff["id"], "w_3-1");
-    assert_eq!(handoff["sessionId"], "w_3");
-    assert_eq!(handoff["workspacePath"], "/repos/acme");
+    assert!(
+        payload["agents"][0]["metadata"].get("handoff").is_none(),
+        "a per-session brief has no honest home on a per-agent advert"
+    );
 }

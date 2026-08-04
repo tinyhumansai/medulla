@@ -63,33 +63,29 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     if let Some(workspace) = w.workspace_path() {
         metadata["workspace"] = json!(workspace);
     }
-    // Who holds the harness, and only when that is a person. Absent means the
-    // orchestrator has it, which is both the common case and the one worth
-    // keeping byte-stable: this advert is re-emitted on every roster mutation,
-    // and a key that flips on each one is a diff nobody can read.
-    if w.control.is_operator() {
-        metadata["control"] = json!(w.control.as_str());
-        if let Some(reason) = w
-            .control_reason
-            .as_deref()
-            .map(str::trim)
-            .filter(|r| !r.is_empty())
-        {
-            metadata["controlReason"] = json!(reason);
-        }
-        if let Some(since) = w.control_since {
-            metadata["controlSince"] = json!(since);
-        }
-    }
-    // The brief from the last handback. Carried only while the orchestrator
-    // actually holds the harness: an invitation to continue work in a workspace
-    // the operator has since re-taken is one the orchestrator cannot act on, and
-    // planning against it wastes a pass.
-    if let (false, Some(handoff)) = (w.control.is_operator(), w.handoff.as_ref()) {
-        if let Ok(value) = serde_json::to_value(handoff) {
-            metadata["handoff"] = value;
-        }
-    }
+    // Control state is deliberately NOT advertised — not the hold, not its
+    // reason, not since when, and not the handback brief that only exists
+    // because of one.
+    //
+    // It used to be, and it was right when a worker *was* an agent *was* a
+    // machine *was* one implicit session: "this worker is held" and "this
+    // session is held" were the same sentence. They are not any more. An agent
+    // now runs N sessions ([`HubWorker::max_sessions`]), a person takes *one* of
+    // them, and this flag has no room to say which — so a backend that folds
+    // held-state onto its ledger by `agentId` would mark every pending task on
+    // the agent as held, including the ones running perfectly well in other
+    // sessions. Emitting something wrong is worse than emitting nothing: the
+    // wrong thing is acted on.
+    //
+    // Saying it correctly needs session identity on the wire, which is only
+    // actionable once a dispatch can name a session (spec §C3, deferred). Until
+    // then this stays local: [`HubWorker::control`] and the whole take /
+    // hand-back path are unchanged and still decide medulla's *own* dispatch
+    // (`session_for` skips a session an operator holds; a held in-flight task
+    // suspends and is delivered by the hand-back turn). None of it crosses the
+    // wire, and the backend learns what happened the only way that cannot be
+    // mis-keyed: through the task's own result.
+    //
     // The host this agent runs on, when this hub knows which one. The backend
     // prefers a supplied id and only synthesizes `host:${socketId}` as a last
     // resort, so saying it here is what stops five machines behind one hub

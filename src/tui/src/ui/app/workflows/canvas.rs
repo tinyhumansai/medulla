@@ -251,35 +251,6 @@ impl App {
             .saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }
 
-    /// How wide the canvas is, in cells, inside the panel's borders and the
-    /// margin the folded wires turn in.
-    ///
-    /// Arithmetic rather than a measurement, so the key handler can fold and
-    /// scroll without waiting for a frame to have been drawn. The sidebar is
-    /// measured exactly the way the layout measures it; everything left of the
-    /// panel's own borders is canvas, because the content pane now holds one
-    /// view rather than sharing the row with a copilot column.
-    pub(in crate::ui::app) fn canvas_width(&self) -> usize {
-        const BORDERS: usize = 2;
-        let rail = self.workflow_sidebar_width(self.area.width);
-        (self.area.width as usize)
-            .saturating_sub(rail as usize)
-            .saturating_sub(BORDERS)
-            .saturating_sub(FOLD_MARGIN)
-            .max(MIN_LABEL_WIDTH)
-    }
-
-    /// How many layers fit across the canvas before it folds.
-    pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
-        self.column_layout().0
-    }
-
-    /// The columns the label of a node in `layer` is drawn in.
-    pub(in crate::ui::app) fn column_width(&self, layer: usize) -> usize {
-        let (per_band, widths) = self.column_layout();
-        widths[self.column_index(layer, per_band)]
-    }
-
     /// How many rows of canvas the graph panel has.
     pub(in crate::ui::app) fn visible_rows(&self) -> usize {
         if self.wf.graph_rows > 0 {

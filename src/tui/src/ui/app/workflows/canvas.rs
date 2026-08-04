@@ -14,7 +14,7 @@
 use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
 use super::super::render::workflows::{
-    BAND_GAP, FOLD_MARGIN, LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT,
+    BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_NODE_WIDTH, MIN_NODE_WIDTH, NODE_HEIGHT,
 };
 use super::super::types::App;
 
@@ -109,7 +109,7 @@ impl App {
             column
         };
         (
-            FOLD_MARGIN + column * LAYER_STRIDE,
+            FOLD_MARGIN + self.column_x(column),
             self.band_top(band) + lane * LANE_STRIDE,
         )
     }
@@ -127,11 +127,6 @@ impl App {
     /// Whether the layer at `layer` sits on a band that runs right to left.
     pub(in crate::ui::app) fn layer_reversed(&self, layer: usize) -> bool {
         self.band_reversed(self.band_of(layer))
-    }
-
-    /// How many layers fit across the canvas before it folds.
-    pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
-        self.visible_layers()
     }
 
     /// The row each band starts on.
@@ -168,23 +163,62 @@ impl App {
             .saturating_sub(BAND_GAP)
     }
 
-    /// How many layers the canvas can show at the current terminal width.
+    /// How wide the canvas is, in cells, inside the panel's borders and the
+    /// margin the folded wires turn in.
     ///
-    /// A node plus the gutter between columns is a known number of cells, so
-    /// this is arithmetic rather than a measurement — which means the key
-    /// handler can fold and scroll without waiting for a frame to have been
-    /// drawn. The sidebar is measured exactly the way the layout measures it;
-    /// everything left of the panel's own borders is canvas, because the content
-    /// pane now holds one view rather than sharing the row with a copilot
-    /// column.
-    pub(in crate::ui::app) fn visible_layers(&self) -> usize {
+    /// Arithmetic rather than a measurement, so the key handler can fold and
+    /// scroll without waiting for a frame to have been drawn. The sidebar is
+    /// measured exactly the way the layout measures it; everything left of the
+    /// panel's own borders is canvas, because the content pane now holds one
+    /// view rather than sharing the row with a copilot column.
+    pub(in crate::ui::app) fn canvas_width(&self) -> usize {
         const BORDERS: usize = 2;
         let rail = self.workflow_sidebar_width(self.area.width);
-        let canvas = (self.area.width as usize)
+        (self.area.width as usize)
             .saturating_sub(rail as usize)
             .saturating_sub(BORDERS)
-            .saturating_sub(FOLD_MARGIN);
-        (canvas / super::super::render::workflows::LAYER_STRIDE).max(1)
+            .saturating_sub(FOLD_MARGIN)
+            .max(MIN_NODE_WIDTH)
+    }
+
+    /// How many layers fit across the canvas before it folds, and how wide each
+    /// one's label may be.
+    ///
+    /// Columns are sized to the pane rather than fixed: as many as will fit at
+    /// the minimum readable width, then every one widened into whatever is left
+    /// over, up to [`MAX_NODE_WIDTH`]. A graph with fewer layers than would fit
+    /// uses one column per layer rather than spreading itself thin.
+    fn column_metrics(&self) -> (usize, usize) {
+        let canvas = self.canvas_width();
+        let capacity = (canvas / (MIN_NODE_WIDTH + GUTTER_SPAN)).max(1);
+        let per_band = capacity.min(self.wf.layout.layers.max(1));
+        let width = (canvas / per_band)
+            .saturating_sub(GUTTER_SPAN)
+            .clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH);
+        (per_band, width)
+    }
+
+    /// How many layers fit across the canvas before it folds.
+    pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
+        self.column_metrics().0
+    }
+
+    /// The columns a node's label is drawn in.
+    pub(in crate::ui::app) fn node_width(&self) -> usize {
+        self.column_metrics().1
+    }
+
+    /// The left edge of a column, relative to the canvas.
+    ///
+    /// The multiply-then-divide spreads the remainder of an uneven split across
+    /// the whole band instead of piling it up after the last column, which is
+    /// what keeps a full band's right edge flush with the pane.
+    fn column_x(&self, column: usize) -> usize {
+        let (per_band, width) = self.column_metrics();
+        let span = column * self.canvas_width() / per_band;
+        // A capped column keeps its own width; the slack goes into the gutters
+        // rather than stretching a short name across half the pane.
+        span.min(column * (width + GUTTER_SPAN))
     }
 
     /// How many rows of canvas the graph panel has.

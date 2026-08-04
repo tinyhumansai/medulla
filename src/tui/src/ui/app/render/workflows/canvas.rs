@@ -26,7 +26,7 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::{BAND_GAP, LAYER_STRIDE, NODE_WIDTH};
+use super::{LAYER_STRIDE, NODE_WIDTH};
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that

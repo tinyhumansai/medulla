@@ -22,6 +22,7 @@ fn picker_app() -> App {
     let mut app = demo_agents_app();
     app.set_local_harnesses(LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: PtyManager::new(),
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),

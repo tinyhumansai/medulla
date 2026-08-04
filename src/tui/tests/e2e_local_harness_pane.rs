@@ -69,6 +69,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
     let config = DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/tmp".into(),
@@ -173,6 +174,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
     );
     let harnesses = LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -223,6 +225,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
     );
     let harnesses = LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),

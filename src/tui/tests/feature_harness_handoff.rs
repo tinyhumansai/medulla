@@ -27,6 +27,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
 
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),

@@ -54,6 +54,7 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
     let mut app = agents_app();
     app.set_local_harnesses(LocalHarnesses {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),

@@ -168,7 +168,6 @@ impl App {
 
     /// Paint one marker and label per visible node.
     fn paint_nodes(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
-        let node_width = self.node_width();
         for (index, node) in layout.nodes.iter().enumerate() {
             let Some((x, y)) = self.cell_of(node) else {
                 continue;
@@ -200,14 +199,13 @@ impl App {
             // the wires attach to the text, so padding would only push every
             // connector a few cells away from the name it belongs to.
             let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or("");
-            let label = label_of(node, mark, node_width);
+            let label = label_of(node, mark, self.column_width(node.layer));
             canvas.text(x, y, &label, style.bold());
         }
     }
 
     /// Route and paint one wire per edge whose ends are both placed.
     fn paint_edges(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
-        let node_width = self.node_width();
         for (index, edge) in layout.edges.iter().enumerate() {
             let (Some(from), Some(to)) = (
                 layout.index_of(&edge.from).and_then(|i| layout.node(i)),
@@ -257,7 +255,10 @@ impl App {
                     fx.saturating_sub(GUTTER_GAP),
                 )
             } else {
-                (fx + from_width + NODE_GAP, fx + node_width + GUTTER_GAP)
+                (
+                    fx + from_width + NODE_GAP,
+                    fx + self.column_width(from.layer) + GUTTER_GAP,
+                )
             };
             // The cell an arrowhead lands on: one clear cell outside the
             // target's leading edge, which is its right edge on a band that runs
@@ -379,7 +380,7 @@ impl App {
         let mark = overlay
             .map(|overlay| overlay.node(&node.id).state.glyph())
             .unwrap_or("");
-        label_of(node, mark, self.node_width()).width()
+        label_of(node, mark, self.column_width(node.layer)).width()
     }
 
     /// Where this edge's flow highlight sits on `route` this frame, if it is

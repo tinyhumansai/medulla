@@ -1,5 +1,5 @@
 //! The Overview tab: the logo, the this-device and orchestration panels, and
-//! the live-activity feed.
+//! the animated workflow graph.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -97,25 +97,10 @@ impl App {
             orch_area,
         );
 
-        // Live activity.
-        let take = self.visible_count().saturating_sub(1).max(5);
-        let start = self.snapshot.events.len().saturating_sub(take);
-        let recent: Vec<TLine> = self.snapshot.events[start..]
-            .iter()
-            .map(|e| self.event_line(e, area.width.saturating_sub(6) as usize, false))
-            .collect();
-        let body = if recent.is_empty() {
-            Text::from(TLine::from(Span::styled(
-                "No events yet.",
-                Style::default().add_modifier(Modifier::DIM),
-            )))
-        } else {
-            Text::from(recent)
-        };
-        f.render_widget(
-            Paragraph::new(body).block(self.panel("Live activity")),
-            rows[1],
-        );
+        // The workflow graph takes the rest of the tab. It replaced the live
+        // event feed, which the Trace tab already shows in full and which said
+        // nothing about the *shape* of a run.
+        self.draw_overview_graph(f, rows[1]);
     }
 
     /// The "This Device" column: what this machine will run for the fleet,

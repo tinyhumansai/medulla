@@ -13,16 +13,16 @@
 //! [`SessionOrigin`](crate::worker::pty::SessionOrigin) — so both collapse into
 //! [`RailRow::Session`] under the agent that owns them, and the divider is gone.
 
-use medulla::runtime::AgentDeclaration;
+use medulla::ui::hosts::HostAgentRow;
 
 use crate::ui::agents::{AgentRow, TaskState};
 use crate::worker::pty::{SessionOrigin, SessionRow};
 
 /// One host in the tree.
 ///
-/// Emitted **only when a remote host exists** (progressive disclosure): with just
-/// the local machine — the common case — agents sit at the top level and no host
-/// row wraps them.
+/// Emitted **only when there is a second host to tell apart** (progressive
+/// disclosure): with just the local machine — the common case — agents sit at the
+/// top level and no host row wraps them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRailRow {
     /// The host id agents are stamped with; the local bus address for this
@@ -30,59 +30,53 @@ pub struct HostRailRow {
     pub host_id: String,
     /// What the row says.
     pub label: String,
-    /// Whether this is the machine the TUI is running on.
+    /// Whether this is a machine the operator can act on from here — the local
+    /// device and any other host declared in this config.
     pub local: bool,
 }
 
 /// One agent in the tree — `harness × workspace` on a host.
 ///
-/// Sourced from the **declaration**, not from the event fold: an agent that has
-/// never been dispatched to still has a row, which is the whole point of
-/// declaring one. A lane the fold produced for an agent nothing declares (a
-/// tiny.place peer, an agent advertised by another machine) still gets a row, so
-/// the restructure never hides something that used to be visible.
+/// Sourced from the shared `Host → Agent` projection
+/// ([`medulla::ui::hosts::host_rows`]), which is the same tree the Hosts tab
+/// renders: an agent exists because it is declared (or because the roster
+/// advertises it), never because traffic happened to fold a lane for it. A lane
+/// the fold produced for an agent that projection does not know (a backend-side
+/// roster agent, a peer session) still gets a row, so the restructure never
+/// hides something that used to be visible.
 #[derive(Debug, Clone)]
 pub struct AgentRailRow {
     /// The `agentId` a dispatch targets — the key sessions are grouped under.
     pub agent_id: String,
     /// The host this agent runs on. Empty when nothing places it.
     pub host_id: String,
-    /// The declaration this row came from, when the agent is declared here.
-    pub declaration: Option<AgentDeclaration>,
+    /// The projection's row for this agent, when the tree knows it. `None` for a
+    /// lane-only agent, which is all the fold could tell us about.
+    pub agent: Option<HostAgentRow>,
     /// The lane the event fold produced for it, when it has traffic. `None` for
     /// a declared agent that has not run anything.
     pub lane_index: Option<usize>,
 }
 
 impl AgentRailRow {
-    /// The label an undeclared, laneless row would show — the id itself.
-    ///
-    /// A declared agent prefers its operator-chosen name, then the folder its
-    /// workspace sits in, because that is how a person refers to it.
+    /// What to call this agent: whatever the shared projection resolved (its
+    /// declared name, else its roster label), falling back to the id itself.
     pub fn label(&self) -> String {
-        let Some(declaration) = &self.declaration else {
-            return self.agent_id.clone();
-        };
-        if let Some(name) = declaration.name.as_deref().map(str::trim) {
-            if !name.is_empty() {
-                return name.to_string();
-            }
-        }
-        self.agent_id.clone()
+        self.agent
+            .as_ref()
+            .map(|agent| agent.label.clone())
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| self.agent_id.clone())
     }
 
-    /// The harness type this agent runs, when a declaration says.
+    /// The harness type this agent runs, when the tree knows one.
     pub fn harness(&self) -> Option<&str> {
-        self.declaration
-            .as_ref()
-            .map(|declaration| declaration.harness.as_str())
+        self.agent.as_ref()?.harness.as_deref()
     }
 
-    /// The directory this agent's sessions work in, when a declaration says.
+    /// The directory this agent's sessions work in, when the tree knows one.
     pub fn workspace(&self) -> Option<&str> {
-        self.declaration
-            .as_ref()
-            .and_then(|declaration| declaration.workspace.path())
+        self.agent.as_ref()?.workspace.as_deref()
     }
 }
 

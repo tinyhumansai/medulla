@@ -15,20 +15,25 @@
 //!     └ debug login         ← a session the operator started
 //! ```
 //!
-//! **Agents come from declarations**, not from traffic: a lane is folded from
-//! task events, so an agent nothing had been dispatched to produced no row at
-//! all — which made the rail a list of what happened rather than of what exists.
-//! Declarations are the source; lanes attach to them where they exist, and a lane
-//! nothing declares still gets a row of its own so nothing that used to be
-//! visible disappears.
+//! **Agents come from the tree, not from traffic**: a lane is folded from task
+//! events, so an agent nothing had been dispatched to produced no row at all —
+//! which made the rail a list of what happened rather than of what exists.
 //!
-//! Row shapes live in [`types`]; the two resolution rules (session → agent,
-//! agent → host) in [`resolve`]; this module is the assembly.
-
-use std::collections::HashSet;
+//! The host and agent levels are the shared `Host → Agent` projection
+//! ([`medulla::ui::hosts::host_rows`]) — literally the same call the Hosts tab
+//! renders, so the two lenses cannot disagree about what exists. Lanes attach to
+//! the agents it produces; a lane for an agent the projection does not know (a
+//! backend-side roster agent, a peer session) still gets a row of its own, so
+//! nothing that used to be visible disappears. **Sessions** are the rail's own
+//! level and are resolved here: a dispatched one by the roster id the hub filed
+//! its task under, an operator-started one by [`resolve::agent_for_session`].
+//!
+//! Row shapes live in [`types`]; the session → agent rule in [`resolve`]; this
+//! module is the assembly.
 
 use medulla::config::agent_declarations_for_host;
 use medulla::runtime::AgentDeclaration;
+use medulla::ui::hosts::{HostAgentRow, HostKind, HostRow};
 
 use super::types::App;
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow};
@@ -58,6 +63,14 @@ struct AgentGroup {
     sessions: Vec<SessionRailRow>,
     /// Sessions the fold's own cap already hid, carried so the counts add up.
     hidden: usize,
+}
+
+/// One host and the agents placed on it, before the tree is flattened.
+struct HostGroup {
+    /// The host row, drawn only once there is more than one of them.
+    row: HostRailRow,
+    /// Its agents, in the order the shared projection lists them.
+    agents: Vec<AgentGroup>,
 }
 
 impl App {
@@ -96,17 +109,18 @@ impl App {
     ///
     /// Assembled in three passes so each one answers a single question. First the
     /// fold is split — the orchestrator and the function lanes keep their rows,
-    /// the agent lanes become groups keyed by agent id. Then the declarations
-    /// this machine holds are folded in, adding every agent with no traffic. Last
-    /// the live PTY sessions are attached to whichever agent declares the
-    /// directory they run in, and the whole thing is flattened under host rows —
-    /// which appear only when there is more than one machine to tell apart.
+    /// the agent lanes become groups keyed by agent id. Then the shared
+    /// `Host → Agent` projection places those groups, adding every agent that has
+    /// no traffic and every host that holds one. Last the live PTY sessions are
+    /// attached to whichever agent declares the directory they run in, and the
+    /// whole thing is flattened under host rows — which appear only when there is
+    /// more than one host to tell apart.
     pub(super) fn rail_rows(&self) -> Vec<RailRow> {
         let lanes = self.lanes();
-        let (lane_rows, mut groups) = self.split_fold(&lanes);
-        self.add_declared_agents(&mut groups);
-        let orphans = self.attach_sessions(&mut groups);
-        self.flatten(lane_rows, groups, orphans)
+        let (lane_rows, folded) = self.split_fold(&lanes);
+        let mut hosts = place_agents(&self.host_tree(), folded);
+        let orphans = self.attach_sessions(&mut hosts);
+        self.flatten(lane_rows, hosts, orphans)
     }
 
     /// Split the folded rows into the non-agent ones and the per-agent groups.
@@ -153,29 +167,25 @@ impl App {
     /// The group an agent-role lane opens.
     ///
     /// The lane's `agent_id` is the roster id the hub filed its tasks under, so
-    /// it is also the key a declaration is looked up by — the two cannot drift,
-    /// because the roster is a projection of the declarations.
+    /// it is also the key the projection's agent is matched by — the two cannot
+    /// drift, because the roster is a projection of the declarations. The host id
+    /// here is only a hint for a lane the projection turns out not to know; a
+    /// placed agent takes its host from the tree.
     fn group_for_lane(&self, lane: &AgentLane, lane_index: usize) -> AgentGroup {
         let agent_id = lane
             .agent_id
             .clone()
             .unwrap_or_else(|| lane.key.trim_start_matches("agent:").to_string());
-        let declaration =
-            medulla::config::agent_declaration(self.agent_declarations(), &agent_id).cloned();
-        let host_id = declaration
+        let host_id = lane
+            .descriptor
             .as_ref()
-            .map(|declaration| declaration.host_id.clone())
-            .or_else(|| {
-                lane.descriptor
-                    .as_ref()
-                    .and_then(|descriptor| descriptor.host_id.clone())
-            })
+            .and_then(|descriptor| descriptor.host_id.clone())
             .unwrap_or_default();
         AgentGroup {
             row: AgentRailRow {
                 agent_id,
                 host_id,
-                declaration,
+                agent: None,
                 lane_index: Some(lane_index),
             },
             sessions: Vec::new(),
@@ -183,46 +193,18 @@ impl App {
         }
     }
 
-    /// Add a row for every declared agent that has no lane.
-    ///
-    /// This is the whole point of sourcing the rail from declarations: an agent
-    /// you declared and have not dispatched to is a real, targetable thing, and a
-    /// rail that only lists traffic cannot show it.
-    ///
-    /// Every declaration, not only this machine's: the tab *is* the topology, so
-    /// an agent declared against another host belongs on it — under that host's
-    /// row — even before the link handshake starts exchanging rosters. Creating
-    /// one is still local-only, which the create flow enforces rather than this.
-    fn add_declared_agents(&self, groups: &mut Vec<AgentGroup>) {
-        let seen: HashSet<String> = groups
-            .iter()
-            .map(|group| group.row.agent_id.trim().to_string())
-            .collect();
-        for declaration in self.agent_declarations().iter().cloned() {
-            if seen.contains(declaration.agent_id.trim()) {
-                continue;
-            }
-            groups.push(AgentGroup {
-                row: AgentRailRow {
-                    agent_id: declaration.agent_id.clone(),
-                    host_id: declaration.host_id.clone(),
-                    declaration: Some(declaration),
-                    lane_index: None,
-                },
-                sessions: Vec::new(),
-                hidden: 0,
-            });
-        }
-    }
-
     /// Attach the live local sessions to their agents, returning the unclaimed.
     ///
     /// An unclaimed session runs in a directory nothing declares. It is listed at
-    /// the end rather than dropped — a harness that is running, costing tokens
+    /// the end rather than dropped — a session that is running, costing tokens
     /// and invisible is the failure the old `── your harnesses ──` group existed
     /// to prevent — and it is what the inline create-agent offer is for.
-    fn attach_sessions(&self, groups: &mut [AgentGroup]) -> Vec<SessionRailRow> {
+    fn attach_sessions(&self, hosts: &mut [HostGroup]) -> Vec<SessionRailRow> {
         let declarations = self.local_agent_declarations();
+        let mut groups: Vec<&mut AgentGroup> = hosts
+            .iter_mut()
+            .flat_map(|host| host.agents.iter_mut())
+            .collect();
         let mut orphans = Vec::new();
         for row in self.own_session_rows() {
             let agent_id = resolve::agent_for_session(&declarations, &row)
@@ -251,7 +233,7 @@ impl App {
     fn flatten(
         &self,
         lane_rows: Vec<AgentRow>,
-        mut groups: Vec<AgentGroup>,
+        hosts: Vec<HostGroup>,
         orphans: Vec<SessionRailRow>,
     ) -> Vec<RailRow> {
         let mut rows: Vec<RailRow> = lane_rows.into_iter().map(RailRow::Lane).collect();
@@ -260,23 +242,15 @@ impl App {
         if self.harnesses.is_some() {
             rows.push(RailRow::NewAgent);
         }
-        let local = self.local_host_id();
-        let local = local.trim();
-        let show_hosts =
-            resolve::has_remote_host(groups.iter().map(|group| group.row.host_id.as_str()), local);
-        for host_id in host_order(&groups, local) {
+        // Progressive disclosure: one host is the common case, and a permanent
+        // `mac-studio ▸` wrapper would add a level of nesting to the surface an
+        // operator uses most.
+        let show_hosts = hosts.len() > 1;
+        for mut host in hosts {
             if show_hosts {
-                let is_local = host_id == local;
-                rows.push(RailRow::Host(HostRailRow {
-                    label: resolve::host_label(&host_id, is_local),
-                    host_id: host_id.clone(),
-                    local: is_local,
-                }));
+                rows.push(RailRow::Host(host.row));
             }
-            for group in groups
-                .iter_mut()
-                .filter(|group| placed_on(&group.row.host_id, local) == host_id)
-            {
+            for group in &mut host.agents {
                 push_group(&mut rows, group);
             }
         }
@@ -347,31 +321,90 @@ impl App {
     }
 }
 
-/// The host an agent is drawn under: its own, or the local one when it names
-/// none. An agent nothing places belongs to the machine looking at it.
-fn placed_on(host_id: &str, local: &str) -> String {
-    let host_id = host_id.trim();
-    if host_id.is_empty() {
-        local.to_string()
-    } else {
-        host_id.to_string()
-    }
-}
-
-/// The hosts to draw, local first and the rest in the order their agents appear.
+/// Place the folded lanes onto the shared `Host → Agent` tree.
 ///
-/// Sorting by host id would reorder the rail whenever a peer's key happened to
-/// sort differently from the last machine that connected.
-fn host_order(groups: &[AgentGroup], local: &str) -> Vec<String> {
-    let mut order: Vec<String> = Vec::new();
-    for group in groups {
-        let host_id = placed_on(&group.row.host_id, local);
-        if !order.contains(&host_id) {
-            order.push(host_id);
+/// The tree decides what exists and in what order — it is the same projection
+/// the Hosts tab renders, so the two lenses list the same agents under the same
+/// hosts. A lane is matched onto its agent by id and contributes only what the
+/// projection cannot know: the transcript behind the row, and the tasks folded
+/// under it.
+///
+/// A lane the tree does not know keeps a row of its own. That is not a leftover
+/// case: an agent the backend rosters is not necessarily one this hub declares
+/// or advertises, and a rail that dropped it would hide work that is running.
+fn place_agents(tree: &[HostRow], folded: Vec<AgentGroup>) -> Vec<HostGroup> {
+    let mut folded: Vec<Option<AgentGroup>> = folded.into_iter().map(Some).collect();
+    let mut hosts: Vec<HostGroup> = tree
+        .iter()
+        .map(|host| HostGroup {
+            row: HostRailRow {
+                host_id: host.id.clone(),
+                label: host.label.clone(),
+                local: host.kind == HostKind::Local,
+            },
+            agents: host
+                .agents
+                .iter()
+                .map(|agent| placed_agent(agent, &host.id, &mut folded))
+                .collect(),
+        })
+        .collect();
+    for group in folded.into_iter().flatten() {
+        match unplaced_host(&hosts, &group.row.host_id) {
+            Some(index) => hosts[index].agents.push(group),
+            None => hosts.push(HostGroup {
+                row: HostRailRow {
+                    host_id: group.row.host_id.clone(),
+                    label: "unplaced".to_string(),
+                    local: false,
+                },
+                agents: vec![group],
+            }),
         }
     }
-    order.sort_by_key(|host_id| host_id.as_str() != local);
-    order
+    hosts
+}
+
+/// One agent of the tree, with its folded lane taken if it has one.
+fn placed_agent(
+    agent: &HostAgentRow,
+    host_id: &str,
+    folded: &mut [Option<AgentGroup>],
+) -> AgentGroup {
+    let taken = folded
+        .iter_mut()
+        .find(|group| {
+            group
+                .as_ref()
+                .is_some_and(|group| group.row.agent_id.trim() == agent.agent_id.trim())
+        })
+        .and_then(Option::take);
+    let mut group = taken.unwrap_or_else(|| AgentGroup {
+        row: AgentRailRow {
+            agent_id: agent.agent_id.clone(),
+            host_id: host_id.to_string(),
+            agent: None,
+            lane_index: None,
+        },
+        sessions: Vec::new(),
+        hidden: 0,
+    });
+    group.row.host_id = host_id.to_string();
+    group.row.agent = Some(agent.clone());
+    group
+}
+
+/// Where a lane the tree does not know is drawn: the host it names if that host
+/// is on the tree, else the machine looking at it.
+///
+/// `None` only when there is no host at all to hang it from, which is a device
+/// that hosts nothing and has declared nothing.
+fn unplaced_host(hosts: &[HostGroup], host_id: &str) -> Option<usize> {
+    let host_id = host_id.trim();
+    hosts
+        .iter()
+        .position(|host| !host_id.is_empty() && host.row.host_id.trim() == host_id)
+        .or_else(|| hosts.iter().position(|host| host.row.local))
 }
 
 /// Push one agent row and the sessions under it, capped and tree-marked.

@@ -43,22 +43,27 @@ mod rail_tests;
 #[cfg(test)]
 mod tests;
 
-/// Width of one node's box, in columns.
-pub(in crate::ui::app) const NODE_WIDTH: usize = 18;
-
-/// Height of one node's box, in rows.
-pub(in crate::ui::app) const NODE_HEIGHT: usize = 4;
-
-/// Columns from one layer's left edge to the next: a node box plus the gutter
-/// its outgoing wires are routed through.
+/// Width of one node's slot, in columns: its marker, a space, and its name.
 ///
-/// The gutter is ten columns rather than the four a wire needs, because a
+/// A node is a marker and a label rather than a drawn box. Boxes cost four rows
+/// and twenty columns each to say what a coloured dot says in one row, and the
+/// graphs worth looking at are the ones with too many nodes to fit — so the
+/// space a box spends on its own border is exactly the space the graph needs.
+pub(in crate::ui::app) const NODE_WIDTH: usize = 17;
+
+/// Height of one node, in rows. A marker and its label are one line.
+pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
+
+/// Columns from one layer's left edge to the next: a node plus the gutter its
+/// outgoing wires are routed through.
+///
+/// The gutter is nine columns rather than the four a wire needs, because a
 /// branch's port name (`false`) is written along it — and a truncated port name
 /// tells a reader nothing about which arm they are following.
-pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 10;
+pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 9;
 
-/// Rows from one lane's top edge to the next: a node box plus a blank row, so
-/// two stacked boxes do not share a border line.
+/// Rows from one lane's top edge to the next: a node plus a blank row, so the
+/// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
 
 /// The most content columns the workflow rail may claim.

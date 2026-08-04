@@ -1,15 +1,20 @@
-//! The graph canvas: node boxes, routed wires, and the cursor.
+//! The graph canvas: node markers, routed wires, and the cursor.
 //!
 //! Geometry only lives here; the *ordering* — which node sits in which layer and
 //! lane — is the SDK's ([`medulla::ui::workflows::GraphLayout`]). This module
-//! turns that ordering into cells: a box per node, a wire per edge, and a
-//! viewport that scrolls to keep the cursor visible.
+//! turns that ordering into cells: a marker and a label per node, a wire per
+//! edge, and a viewport that scrolls to keep the cursor visible.
 //!
 //! Wires are routed rather than drawn straight. An edge leaves its source's
 //! right edge into the gutter after that layer, runs vertically to its target's
 //! lane, and comes back in horizontally — which is legible for a fan-out and
 //! survives an edge that spans several layers, because the painter tunnels
 //! behind any box in the way rather than writing over it.
+//!
+//! Wires also carry a moving highlight, so a plan reads as something work flows
+//! through rather than as a static diagram. With a run overlaid the highlight is
+//! literal — it only travels the edges that run actually took — and with no run
+//! it is an idle drift that makes the shape of the graph easier to follow.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Color;
@@ -21,7 +26,12 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::{LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT, NODE_WIDTH};
+use super::{LANE_STRIDE, LAYER_STRIDE, NODE_WIDTH};
+
+/// Columns of a node's slot that its name is allowed to fill before a wire is
+/// routed around it, leaving a gap between the longest label and the wire that
+/// leaves it.
+const NODE_GAP: usize = 1;
 
 /// The column inside a layer's gutter that wires run vertically in.
 ///
@@ -29,21 +39,32 @@ use super::{LANE_STRIDE, LAYER_STRIDE, NODE_HEIGHT, NODE_WIDTH};
 /// which is written on the *incoming* run rather than the outgoing one, because
 /// every edge out of one node shares that node's exit row and two labels there
 /// would overwrite each other.
-const GUTTER_COLUMN: usize = NODE_WIDTH + 3;
+const GUTTER_COLUMN: usize = NODE_WIDTH + NODE_GAP + 1;
 
 /// How many columns a port label has, between the gutter's vertical run and the
 /// arrowhead at the target's left edge.
 const LABEL_WIDTH: usize = LAYER_STRIDE - GUTTER_COLUMN - 2;
 
-/// The row inside a node's box that wires attach to.
-const ATTACH_ROW: usize = 2;
+/// The row inside a node that wires attach to. A node is one row tall, so this
+/// is that row.
+const ATTACH_ROW: usize = 0;
+
+/// How many cells the flow highlight advances per drawn frame.
+///
+/// Well under one: at the ~11fps the app redraws at, a whole cell per frame is
+/// a blur rather than a signal.
+const FLOW_SPEED: f64 = 0.45;
 
 impl App {
     /// Draw the graph of the selected workflow.
     pub(super) fn draw_workflow_canvas(&mut self, f: &mut Frame, area: Rect) {
         let panes = if area.height >= 16 && self.selected_graph_node().is_some() {
+            // Tall enough for the lanes plus the panel's own borders, and no
+            // taller: a one-row-per-node graph that reserved the old box-sized
+            // floor would spend most of the pane on blank canvas while the
+            // inspector under it went short.
             let graph_height = (self.workflow_layout().lanes as u16 * LANE_STRIDE as u16 + 2)
-                .max(8)
+                .max(5)
                 .min(area.height / 2);
             Layout::default()
                 .direction(Direction::Vertical)
@@ -86,7 +107,7 @@ impl App {
         // Wires first, so a box drawn over a wire's last cell wins — the
         // painter locks node cells, and an edge routed before its target exists
         // would otherwise have written into it.
-        self.paint_edges(&mut canvas, layout);
+        self.paint_edges(&mut canvas, layout, overlay.as_ref());
         self.paint_nodes(&mut canvas, layout, overlay.as_ref());
         f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
     }
@@ -164,38 +185,23 @@ impl App {
                 _ => style,
             };
 
-            let inner = NODE_WIDTH - 2;
-            canvas.text(x, y, &format!("╭{}╮", "─".repeat(inner)), style);
-            canvas.text(
-                x,
-                y + 1,
-                &format!("│{}│", pad(&format!("{} {}", node.glyph, node.name), inner)),
-                style,
-            );
-            let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or(" ");
-            let summary = if node.summary.is_empty() {
-                node.kind.clone()
-            } else {
-                node.summary.clone()
-            };
-            canvas.text(
-                x,
-                y + 2,
-                &format!("│{}{mark}│", pad(&summary, inner.saturating_sub(1))),
-                style,
-            );
-            canvas.text(
-                x,
-                y + NODE_HEIGHT - 1,
-                &format!("╰{}╯", "─".repeat(inner)),
-                style,
-            );
+            // A node is its marker, its name, and — under a run — the state
+            // glyph. The marker carries the kind and the colour carries the run
+            // state, so the box, the border and the kind subtitle the box used
+            // to hold are all saying something already said elsewhere.
+            //
+            // The whole slot is written as one padded string so the cells behind
+            // the label are locked: a wire routed through this lane tunnels
+            // behind the name rather than striking it out.
+            let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or("");
+            let label = format!("{} {}{}", node.glyph, node.name, mark);
+            canvas.text(x, y, &pad(&label, NODE_WIDTH), style.bold());
         }
     }
 
     /// Route and paint one wire per edge whose ends are both placed.
-    fn paint_edges(&self, canvas: &mut Canvas, layout: &GraphLayout) {
-        for edge in &layout.edges {
+    fn paint_edges(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
+        for (index, edge) in layout.edges.iter().enumerate() {
             let (Some(from), Some(to)) = (
                 layout.index_of(&edge.from).and_then(|i| layout.node(i)),
                 layout.index_of(&edge.to).and_then(|i| layout.node(i)),
@@ -211,16 +217,40 @@ impl App {
             };
             // A back edge is a loop, and a loop drawn as a rightward arrow reads
             // as a mistake in the graph rather than in the drawing.
-            let style = if edge.is_back_edge() {
-                CellStyle::colored(Color::Yellow).dimmed()
+            //
+            // Everything else takes its source node's colour, dimmed: a wire
+            // that belongs to the box it leaves is far easier to follow out of a
+            // branch than one more grey line among several.
+            let wire_color = if edge.is_back_edge() {
+                Color::Yellow
             } else {
-                CellStyle::colored(Color::DarkGray)
+                color_named(medulla::ui::workflows::graph::color_for_kind(&from.kind))
             };
+            let style = CellStyle::colored(wire_color).dimmed();
 
-            let exit = fx + NODE_WIDTH;
+            let exit = fx + NODE_WIDTH + NODE_GAP;
             let gutter = fx + GUTTER_COLUMN;
             let entry = tx.saturating_sub(1);
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
+
+            // The cells the wire occupies, in flow order, so the highlight can
+            // be placed on the routed path rather than on the straight line
+            // between the two boxes — which is not where the wire is.
+            let mut route: Vec<(usize, usize)> = Vec::new();
+            for x in exit.min(gutter)..=exit.max(gutter) {
+                route.push((x, from_row));
+            }
+            for y in from_row.min(to_row)..=from_row.max(to_row) {
+                route.push((gutter, y));
+            }
+            let (run_from, run_to) = if gutter < entry {
+                (gutter, entry)
+            } else {
+                (tx + NODE_WIDTH, gutter)
+            };
+            for x in run_from.min(run_to)..=run_from.max(run_to) {
+                route.push((x, to_row));
+            }
 
             canvas.horizontal(exit, gutter, from_row, style);
             if from_row != to_row {
@@ -240,6 +270,12 @@ impl App {
             };
             canvas.arrow(head_x, to_row, head, style);
 
+            // The moving highlight. Undimmed against the dim wire, so the eye
+            // follows it without the wire itself competing with the boxes.
+            if let Some((x, y)) = self.flow_cell(index, &route, overlay, edge) {
+                canvas.pulse(x, y, brightened(wire_color));
+            }
+
             // The port label is what tells a reader which arm of a branch they
             // are following, so it is written along the run into the target —
             // one label per target row, rather than every arm of a branch
@@ -257,6 +293,36 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Where this edge's flow highlight sits on `route` this frame, if it is
+    /// flowing at all.
+    ///
+    /// With a run overlaid only the edges that run actually travelled flow — a
+    /// highlight on a branch the run never took would claim something untrue.
+    /// Edges are offset from one another by an irrational stride so a fan-out
+    /// does not pulse in lockstep.
+    fn flow_cell(
+        &self,
+        index: usize,
+        route: &[(usize, usize)],
+        overlay: Option<&RunOverlay>,
+        edge: &medulla::ui::workflows::PlacedEdge,
+    ) -> Option<(usize, usize)> {
+        if route.is_empty() {
+            return None;
+        }
+        if let Some(overlay) = overlay {
+            let source = overlay.node(&edge.from).state;
+            let target = overlay.node(&edge.to).state;
+            let reached = |state| state != medulla::ui::workflows::NodeRunState::Pending;
+            if !reached(source) || !reached(target) {
+                return None;
+            }
+        }
+        let offset = (index as f64 * 0.618_034).fract();
+        let step = (self.frame as f64 * FLOW_SPEED + offset * route.len() as f64) as usize;
+        Some(route[step % route.len()])
     }
 
     /// The top-left cell of `node`'s box, or `None` when it is scrolled out.
@@ -279,6 +345,27 @@ fn pad(text: &str, width: usize) -> String {
         out.push_str(&" ".repeat(width - len));
     }
     out
+}
+
+/// The light variant of a colour, for the flow highlight.
+///
+/// The wire is drawn dim in its own colour, so the highlight has to be more than
+/// the same colour undimmed to be visible at a glance — but it also has to stay
+/// recognisably that wire's colour, or it reads as a separate thing crawling
+/// over the graph. The light variant is both. Colours with no lighter twin fall
+/// back to white, which is still clearly a highlight.
+fn brightened(color: Color) -> Color {
+    match color {
+        Color::Black | Color::DarkGray => Color::Gray,
+        Color::Red => Color::LightRed,
+        Color::Green => Color::LightGreen,
+        Color::Yellow => Color::LightYellow,
+        Color::Blue => Color::LightBlue,
+        Color::Magenta => Color::LightMagenta,
+        Color::Cyan => Color::LightCyan,
+        Color::Gray => Color::White,
+        other => other,
+    }
 }
 
 /// Map a colour name from the SDK's vocabulary to a ratatui colour.

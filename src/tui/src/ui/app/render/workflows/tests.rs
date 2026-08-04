@@ -2,8 +2,9 @@
 //!
 //! Every test draws the whole tab onto a [`TestBackend`] and reads the resulting
 //! screen, because the thing under test is what an operator sees: that the three
-//! panes are all present, that the graph is drawn as boxes joined by wires, and
-//! that a run overlaid on it marks the steps it reached.
+//! panes are all present, that the graph is drawn as marked nodes joined by
+//! wires, that its wires carry a moving flow highlight, and that a run overlaid
+//! on it marks the steps it reached.
 
 use std::sync::Arc;
 
@@ -219,21 +220,29 @@ fn long_workflow_names_cannot_widen_the_rail_past_the_agents_cap() {
 }
 
 #[test]
-fn the_graph_is_drawn_as_boxes_joined_by_wires() {
+fn the_graph_is_drawn_as_marked_nodes_joined_by_wires() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
     let screen = render(&mut app);
 
-    assert!(screen.contains("▶ Start"), "the trigger box is missing");
-    assert!(screen.contains("◆ Check"), "the condition box is missing");
+    assert!(screen.contains("▶ Start"), "the trigger node is missing");
+    assert!(screen.contains("◆ Check"), "the condition node is missing");
     assert!(
         screen.contains("Start · trigger") && screen.contains("wheel/Page scroll"),
         "the selected step's persistent detail pane is missing: {screen}"
     );
+    // One row per node, wires attaching on that same row: a node and the node
+    // it feeds share a line. This is what buys the canvas the four-fold density
+    // that drawing each node as a box cost.
+    let row = screen
+        .lines()
+        .find(|line| line.contains("▶ Start"))
+        .expect("the trigger is on some row");
     assert!(
-        screen.contains('╭') && screen.contains('╯'),
-        "nodes are drawn as boxes"
+        row.contains("◆ Check"),
+        "a node sits inline with the node it feeds: {row}"
     );
+    assert!(row.contains('─'), "joined by a wire on that row: {row}");
     assert!(screen.contains('▶'), "edges end in an arrowhead");
     assert!(
         screen.contains('│'),
@@ -565,4 +574,43 @@ fn a_graph_wider_than_the_canvas_scrolls_to_the_cursor() {
         end.contains("Step 11"),
         "the cursor pulled the canvas along"
     );
+}
+
+/// The foreground colours of the whole screen, cell by cell.
+///
+/// The flow highlight changes no characters — only which cell on a wire is lit —
+/// so a text dump cannot see it at all.
+fn colors(app: &mut App, width: u16, height: u16) -> Vec<Option<ratatui::style::Color>> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    buffer.content().iter().map(|cell| Some(cell.fg)).collect()
+}
+
+#[test]
+fn the_wires_carry_a_highlight_that_moves_between_frames() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    // The animation clock is the app's frame counter, which the event loop
+    // advances per tick; a test drives it directly so the frames it compares
+    // are the ones the terminal would have drawn.
+    let first = colors(&mut app, 160, 40);
+    app.frame = app.frame.wrapping_add(4);
+    let second = colors(&mut app, 160, 40);
+
+    assert_ne!(
+        first, second,
+        "the highlight moved along the wires between frames"
+    );
+}
+
+#[test]
+fn the_graph_is_still_the_same_drawing_while_the_highlight_moves() {
+    // Only colour may change with the frame. A wire whose glyph changed would be
+    // the drawing itself flickering, which is a different thing entirely.
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    let first = render(&mut app);
+    app.frame = app.frame.wrapping_add(7);
+    let second = render(&mut app);
+
+    assert_eq!(first, second);
 }

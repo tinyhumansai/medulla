@@ -102,10 +102,9 @@ impl App {
     /// Shared with the renderer so navigation and drawing can never disagree
     /// about where a node is.
     pub(in crate::ui::app) fn graph_cell(&self, layer: usize, lane: usize) -> (usize, usize) {
-        let per_band = self.layers_per_band();
         (
-            FOLD_MARGIN + self.column_x(self.column_index(layer, per_band)),
-            self.band_top(layer / per_band) + lane * LANE_STRIDE,
+            FOLD_MARGIN + self.column_x(layer),
+            self.band_top(self.band_of(layer)) + lane * LANE_STRIDE,
         )
     }
 
@@ -122,6 +121,134 @@ impl App {
     /// Whether the layer at `layer` sits on a band that runs right to left.
     pub(in crate::ui::app) fn layer_reversed(&self, layer: usize) -> bool {
         self.band_reversed(self.band_of(layer))
+    }
+
+    /// The row each band starts on.
+    ///
+    /// Bands are only as tall as the lanes they actually use, rather than as
+    /// tall as the widest band in the graph: one branch three lanes deep should
+    /// not put two blank rows under every other band in the fold.
+    pub(in crate::ui::app) fn band_top(&self, band: usize) -> usize {
+        self.band_heights().into_iter().take(band).sum()
+    }
+
+    /// The height of every band, in rows, in order.
+    pub(in crate::ui::app) fn band_heights(&self) -> Vec<usize> {
+        let per_band = self.layers_per_band();
+        let bands = self.wf.layout.layers.max(1).div_ceil(per_band);
+        let mut lanes = vec![1usize; bands];
+        for node in &self.wf.layout.nodes {
+            if let Some(slot) = lanes.get_mut(node.layer / per_band) {
+                *slot = (*slot).max(node.lane + 1);
+            }
+        }
+        lanes
+            .into_iter()
+            .map(|lanes| lanes * LANE_STRIDE + BAND_GAP)
+            .collect()
+    }
+
+    /// How many rows the whole folded graph occupies.
+    pub(in crate::ui::app) fn folded_rows(&self) -> usize {
+        // The last band needs no trailing gap, so one is taken back off.
+        self.band_heights()
+            .into_iter()
+            .sum::<usize>()
+            .saturating_sub(BAND_GAP)
+    }
+
+    /// How wide the canvas is, in cells, inside the panel's borders and the
+    /// margin the folded wires turn in.
+    ///
+    /// Arithmetic rather than a measurement, so the key handler can fold and
+    /// scroll without waiting for a frame to have been drawn. The sidebar is
+    /// measured exactly the way the layout measures it; everything left of the
+    /// panel's own borders is canvas, because the content pane now holds one
+    /// view rather than sharing the row with a copilot column.
+    pub(in crate::ui::app) fn canvas_width(&self) -> usize {
+        const BORDERS: usize = 2;
+        let rail = self.workflow_sidebar_width(self.area.width);
+        (self.area.width as usize)
+            .saturating_sub(rail as usize)
+            .saturating_sub(BORDERS)
+            .saturating_sub(FOLD_MARGIN)
+            .max(MIN_LABEL_WIDTH)
+    }
+
+    /// How the canvas is divided into columns: how many layers a band holds,
+    /// and the width of every layer's own column.
+    ///
+    /// Every column is sized to its own content — the longest label of any node
+    /// in that layer — rather than every column taking the width of the graph's
+    /// longest label. One wordy step used to widen every column in the fold,
+    /// and the difference came out as connector: a short name followed by
+    /// twenty cells of `─` before the next step.
+    fn column_layout(&self) -> (usize, Vec<usize>) {
+        let canvas = self.canvas_width();
+        let layers = self.wf.layout.layers.max(1);
+        let mut widths = vec![MIN_LABEL_WIDTH; layers];
+        for node in &self.wf.layout.nodes {
+            if let Some(slot) = widths.get_mut(node.layer) {
+                // Plus one for the run-state glyph a run overlay appends, so
+                // overlaying a run cannot change a column's width under the
+                // reader.
+                let label = format!("{} {}", node.glyph, node.name).width() + 1;
+                *slot = (*slot).max(label.min(MAX_NODE_WIDTH));
+            }
+        }
+        // The most columns the narrowest possible label would allow is the
+        // ceiling; the first count at or below it whose own bands all fit is
+        // the answer, so a band takes as many columns as its labels permit.
+        let ceiling = (canvas / (MIN_LABEL_WIDTH + GUTTER_SPAN)).clamp(1, layers);
+        for per_band in (1..=ceiling).rev() {
+            if widths
+                .chunks(per_band)
+                .all(|band| band_width(band) <= canvas)
+            {
+                return (per_band, widths);
+            }
+        }
+        (1, widths)
+    }
+
+    /// How many layers fit across the canvas before it folds.
+    pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
+        self.column_layout().0
+    }
+
+    /// The columns the label of a node in `layer` is drawn in.
+    pub(in crate::ui::app) fn column_width(&self, layer: usize) -> usize {
+        let (_, widths) = self.column_layout();
+        widths.get(layer).copied().unwrap_or(MIN_LABEL_WIDTH)
+    }
+
+    /// The left edge of a layer's column, relative to the canvas.
+    ///
+    /// Forward bands are laid from the left; reversed ones are laid from the
+    /// right, so both end flush against the edge the fold between them turns
+    /// at. Sizing each column to its own label and then packing the band this
+    /// way is what keeps the connectors short: a wire only ever crosses the
+    /// gutter, never the padding of a column sized for some other step's name.
+    fn column_x(&self, layer: usize) -> usize {
+        let (per_band, widths) = self.column_layout();
+        let band = layer / per_band;
+        let members = widths
+            .chunks(per_band)
+            .nth(band)
+            .unwrap_or(&widths[..1.min(widths.len())]);
+        let index = layer % per_band;
+        let before: usize = members
+            .iter()
+            .take(index)
+            .map(|width| width + GUTTER_SPAN)
+            .sum();
+        if !self.band_reversed(band) {
+            return before;
+        }
+        // Right to left: the first layer of the band is its rightmost column,
+        // and its right edge is the band's right edge.
+        self.canvas_width()
+            .saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }
 
     /// The row each band starts on.
@@ -227,33 +354,6 @@ impl App {
         widths[self.column_index(layer, per_band)]
     }
 
-    /// Which column of its band a layer occupies, mirrored on reversed bands.
-    fn column_index(&self, layer: usize, per_band: usize) -> usize {
-        let column = layer % per_band;
-        if self.band_reversed(layer / per_band) {
-            per_band - 1 - column
-        } else {
-            column
-        }
-    }
-
-    /// The left edge of a column, relative to the canvas.
-    ///
-    /// Columns sit at a fixed stride — a label's width plus the gutter its wire
-    /// and port name need — rather than being spread to fill the pane. Spreading
-    /// them puts the leftover width into the connectors, and a pane of
-    /// twenty-cell wires between short names reads as emptiness rather than as
-    /// structure. Whatever is left over stays at the right margin, and the way
-    /// to fill it is to fit another column in.
-    fn column_x(&self, column: usize) -> usize {
-        let (_, widths) = self.column_layout();
-        widths
-            .iter()
-            .take(column)
-            .map(|width| width + GUTTER_SPAN)
-            .sum()
-    }
-
     /// How many rows of canvas the graph panel has.
     pub(in crate::ui::app) fn visible_rows(&self) -> usize {
         if self.wf.graph_rows > 0 {
@@ -268,19 +368,12 @@ impl App {
     }
 }
 
-/// The width of each column of a band, given how many columns it holds.
-///
-/// A column is as wide as the widest layer that lands in it, on any band —
-/// including the mirrored position it takes on the bands that run backwards.
-fn fold_columns(layers: &[usize], per_band: usize) -> Vec<usize> {
-    let mut widths = vec![MIN_LABEL_WIDTH; per_band];
-    for (layer, width) in layers.iter().enumerate() {
-        let column = layer % per_band;
-        // The same layer sits at `column` on a forward band and at its mirror
-        // on a reversed one, so both positions have to hold it.
-        for position in [column, per_band - 1 - column] {
-            widths[position] = widths[position].max(*width);
-        }
-    }
-    widths
+/// The cells a band of these column widths occupies, gutters included.
+fn band_width(columns: &[usize]) -> usize {
+    columns
+        .iter()
+        .map(|width| width + GUTTER_SPAN)
+        .sum::<usize>()
+        // Nothing follows the last column, so it needs no gutter of its own.
+        .saturating_sub(GUTTER_SPAN)
 }

@@ -457,6 +457,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         Some(hub_logs.sink()),
         &custom_harnesses,
         loaded.config.attribution.commit,
+        loaded.config.hooks.clone(),
     )
     .map(|options| {
         crate::local_host::start_all(
@@ -556,6 +557,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 Some(hub_logs.sink()),
                 &custom_harnesses,
                 loaded.config.attribution.commit,
+                loaded.config.hooks.clone(),
             )
             .ok()
             .map(|options| {

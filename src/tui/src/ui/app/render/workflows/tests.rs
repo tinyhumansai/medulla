@@ -600,10 +600,13 @@ fn the_wires_carry_a_highlight_that_moves_between_frames() {
     // The animation clock is the app's frame counter, which the event loop
     // advances per tick; a test drives it directly so the frames it compares
     // are the ones the terminal would have drawn.
+    let first_drawing = render(&mut app);
     let first = colors(&mut app, 160, 40);
-    app.frame = app.frame.wrapping_add(4);
+    app.frame = app.frame.wrapping_add(1);
+    let second_drawing = render(&mut app);
     let second = colors(&mut app, 160, 40);
 
+    assert_eq!(first_drawing, second_drawing, "node drift stayed unchanged");
     assert_ne!(
         first, second,
         "the highlight moved along the wires between frames"

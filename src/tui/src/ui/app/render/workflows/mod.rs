@@ -43,23 +43,49 @@ mod rail_tests;
 #[cfg(test)]
 mod tests;
 
-/// Width of one node's box, in columns.
-pub(in crate::ui::app) const NODE_WIDTH: usize = 18;
-
-/// Height of one node's box, in rows.
-pub(in crate::ui::app) const NODE_HEIGHT: usize = 4;
-
-/// Columns from one layer's left edge to the next: a node box plus the gutter
-/// its outgoing wires are routed through.
+/// The narrowest a column is ever made.
 ///
-/// The gutter is ten columns rather than the four a wire needs, because a
-/// branch's port name (`false`) is written along it — and a truncated port name
-/// tells a reader nothing about which arm they are following.
-pub(in crate::ui::app) const LAYER_STRIDE: usize = NODE_WIDTH + 10;
+/// A column is sized to the longest label that lands in it, so this is only
+/// reached by a column whose every node has a very short name. Six columns is a
+/// marker, a space and four characters.
+pub(in crate::ui::app) const MIN_LABEL_WIDTH: usize = 6;
 
-/// Rows from one lane's top edge to the next: a node box plus a blank row, so
-/// two stacked boxes do not share a border line.
+/// The widest a node's label is drawn, however much room there is.
+///
+/// A node is a marker and a short name. Past this the extra columns are trailing
+/// blanks that push the next column further away for nothing.
+pub(in crate::ui::app) const MAX_NODE_WIDTH: usize = 24;
+
+/// Columns between one node's label and the next column's, for the wire routed
+/// through the gap and the port name written along it.
+///
+/// Nine rather than the four a wire needs, because a branch's port name
+/// (`false`) is written there — and a truncated port name tells a reader nothing
+/// about which arm they are following.
+pub(in crate::ui::app) const GUTTER_SPAN: usize = 9;
+
+/// Height of one node, in rows. A marker and its label are one line.
+pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
+
+/// Rows from one lane's top edge to the next: a node plus a blank row, so the
+/// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
+
+/// Columns kept clear down the left of the canvas.
+///
+/// A wire that folds onto the next band arrives from above and turns into its
+/// target's left side, and the first column of a band starts at the canvas edge
+/// — so without a margin there is nowhere for that turn to happen, and the fold
+/// arrives with no arrowhead at all.
+pub(in crate::ui::app) const FOLD_MARGIN: usize = 2;
+
+/// Extra blank rows between one band of the folded graph and the next.
+///
+/// None: every lane already ends with a blank row, and that row is the one a
+/// folded wire crosses on. A second blank row bought nothing but height, and
+/// stretched every fold's descent into a three-row drop for a hop that is one
+/// band deep.
+pub(in crate::ui::app) const BAND_GAP: usize = 0;
 
 /// The most content columns the workflow rail may claim.
 ///

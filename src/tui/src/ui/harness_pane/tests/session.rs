@@ -413,6 +413,61 @@ fn a_child_that_asks_for_the_mouse_has_wheel_notches_forwarded_to_it() {
 }
 
 #[test]
+fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Codex uses the terminal's alternate-scroll behaviour instead of mouse
+    // reporting: while mode 1007 is active, a terminal translates each wheel
+    // notch into cursor-key input for the child.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?1049h\\033[?1007h'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to enable alternate scrolling", || {
+        sessions
+            .alternate_scroll(&id)
+            .is_some_and(std::convert::identity)
+    });
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    wait_for("the child to receive translated wheel input", || {
+        text(&harnesses, &id).contains("^[[A^[[A^[[A")
+    });
+    harnesses.scroll(&id, 3, 4, false, 2);
+    wait_for("the child to receive downward wheel input", || {
+        text(&harnesses, &id).contains("^[[B^[[B")
+    });
+    sessions.close(&id);
+}
+
+#[test]
+fn alternate_screen_without_alternate_scroll_does_not_receive_arrows() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?1049h\\033[?1007lready'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to enter its alternate screen", || {
+        text(&harnesses, &id).contains("ready")
+    });
+    assert_eq!(sessions.alternate_scroll(&id), Some(false));
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        !text(&harnesses, &id).contains("^[[A"),
+        "mode 1049 alone must not synthesize cursor input"
+    );
+    sessions.close(&id);
+}
+
+#[test]
 fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());

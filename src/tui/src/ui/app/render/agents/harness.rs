@@ -150,11 +150,11 @@ impl App {
             format!("{what} · typing here · {FOCUS_CHORD_LABEL} to release")
         } else if let Some(cue) = waiting {
             format!(
-                "{what} · {ATTENTION_GLYPH} {} · Enter or {FOCUS_CHORD_LABEL} to answer",
+                "{what} · {ATTENTION_GLYPH} {} · Enter or {FOCUS_CHORD_LABEL} to answer · d diff",
                 cue.label(medulla::clock::now_millis())
             )
         } else {
-            format!("{what} · Enter or {FOCUS_CHORD_LABEL} to type")
+            format!("{what} · Enter or {FOCUS_CHORD_LABEL} to type · d diff")
         }
     }
 }

@@ -71,6 +71,33 @@ pub fn is_json(path: &Path) -> bool {
 /// Write `body` to `path` through a temporary file in the same directory, so a
 /// reader never observes a half-written document.
 pub fn write_atomic(path: &Path, body: &[u8]) -> Result<(), WorkflowError> {
+    stage_atomic(path, body)?.commit()
+}
+
+/// A complete temporary write waiting to be renamed over its destination.
+pub struct StagedWrite {
+    tmp: PathBuf,
+    path: PathBuf,
+}
+
+impl StagedWrite {
+    /// Publish the staged bytes atomically.
+    pub fn commit(self) -> Result<(), WorkflowError> {
+        std::fs::rename(&self.tmp, &self.path).map_err(|source| WorkflowError::Io {
+            path: self.path.clone(),
+            source,
+        })
+    }
+}
+
+impl Drop for StagedWrite {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.tmp);
+    }
+}
+
+/// Write all bytes into the target directory without replacing the target yet.
+pub fn stage_atomic(path: &Path, body: &[u8]) -> Result<StagedWrite, WorkflowError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|source| WorkflowError::Io {
             path: parent.to_path_buf(),
@@ -88,8 +115,8 @@ pub fn write_atomic(path: &Path, body: &[u8]) -> Result<(), WorkflowError> {
         path: tmp.clone(),
         source,
     })?;
-    std::fs::rename(&tmp, path).map_err(|source| WorkflowError::Io {
+    Ok(StagedWrite {
+        tmp,
         path: path.to_path_buf(),
-        source,
     })
 }

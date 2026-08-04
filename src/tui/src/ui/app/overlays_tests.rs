@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
@@ -110,6 +111,31 @@ fn every_overlay_is_reachable_and_owns_input_on_its_own() {
             "{overlay:?} is drawn over the content, so it owns input"
         );
     }
+}
+
+#[test]
+fn handback_prompt_swallows_clicks_behind_it() {
+    let mut app = app();
+    raise(&mut app, Overlay::HandbackPrompt);
+    app.hit_tabs_row = 1;
+    app.hit_tabs = vec![(0, 4), (5, 10)];
+    let original_tab = app.tab_index;
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 6,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert_eq!(
+        app.tab_index, original_tab,
+        "a handback prompt must not let a click navigate the UI behind it"
+    );
+    assert!(
+        app.handback_prompt.is_some(),
+        "the click must leave the pending harness decision intact"
+    );
 }
 
 #[test]

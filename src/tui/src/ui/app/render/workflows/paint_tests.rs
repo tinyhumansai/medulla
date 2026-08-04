@@ -222,3 +222,75 @@ fn a_dimmed_cell_renders_dim() {
 
     assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
 }
+
+/// The colours of one row, one entry per cell.
+fn colors(canvas: Canvas, row: usize) -> Vec<Option<Color>> {
+    canvas
+        .into_lines()
+        .into_iter()
+        .nth(row)
+        .expect("row is on the canvas")
+        .spans
+        .iter()
+        .flat_map(|span| span.content.chars().map(|_| span.style.fg))
+        .collect()
+}
+
+#[test]
+fn a_pulse_recolours_a_wire_without_changing_it() {
+    let mut canvas = Canvas::new(5, 1);
+    canvas.horizontal(0, 4, 0, CellStyle::colored(Color::Blue).dimmed());
+
+    canvas.pulse(2, 0, Color::White);
+
+    let mut lines = canvas.into_lines();
+    let line = lines.remove(0);
+    let drawn: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect();
+    assert_eq!(drawn, "─────", "the wire is unbroken");
+    let lit: Vec<Option<Color>> = line
+        .spans
+        .iter()
+        .flat_map(|span| span.content.chars().map(|_| span.style.fg))
+        .collect();
+    assert_eq!(lit[2], Some(Color::White), "the pulsed cell is lit");
+    assert_eq!(lit[1], Some(Color::Blue), "its neighbours are not");
+}
+
+#[test]
+fn a_pulse_never_lands_on_a_node_or_on_blank_canvas() {
+    let mut canvas = Canvas::new(6, 1);
+    canvas.text(0, 0, "box", CellStyle::colored(Color::Green));
+
+    // Over a node: the label must survive, since a highlight there would be
+    // claiming a wire runs through a box it only passes behind.
+    canvas.pulse(1, 0, Color::White);
+    // Over nothing: a highlight off its wire would be a dot in empty space.
+    canvas.pulse(5, 0, Color::White);
+
+    let lit = colors(canvas, 0);
+    assert_eq!(lit[1], Some(Color::Green), "the node keeps its colour");
+    assert_eq!(lit[5], None, "blank canvas stays blank");
+}
+
+#[test]
+fn bold_and_dim_survive_serialisation() {
+    let mut canvas = Canvas::new(6, 1);
+    canvas.text(0, 0, "ab", CellStyle::colored(Color::Green).bold());
+    canvas.text(2, 0, "cd", CellStyle::colored(Color::Green).dimmed());
+
+    let mut lines = canvas.into_lines();
+    let line = lines.remove(0);
+    let styles: Vec<Style> = line
+        .spans
+        .iter()
+        .flat_map(|span| span.content.chars().map(|_| span.style))
+        .collect();
+    assert!(styles[0].add_modifier.contains(Modifier::BOLD));
+    assert!(!styles[0].add_modifier.contains(Modifier::DIM));
+    assert!(styles[2].add_modifier.contains(Modifier::DIM));
+    assert!(!styles[2].add_modifier.contains(Modifier::BOLD));
+}

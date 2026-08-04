@@ -11,10 +11,10 @@
 //! the copilot, the `medulla workflow` subcommand, and the MCP tools all become
 //! undoable without any of them knowing revisions exist.
 //!
-//! Snapshots live in a dot-directory beside the definitions rather than in the
-//! state directory, so a workflow and its history move together when an operator
-//! copies a project. They are capped at [`MAX_REVISIONS`] per workflow: history
-//! is for taking back a mistake that was just made, not an archive.
+//! Snapshots live in the workflow state directory. They are host history rather
+//! than authored source, so syncing the definitions never pulls along undo
+//! state. They are capped at [`MAX_REVISIONS`] per workflow: history is for
+//! taking back a mistake that was just made, not an archive.
 
 use std::path::{Path, PathBuf};
 
@@ -30,13 +30,6 @@ use super::paths::{is_json, safe_component, write_atomic};
 /// undoing an edit they just watched happen — they want the version control the
 /// project is already in.
 pub const MAX_REVISIONS: usize = 20;
-
-/// The directory holding every workflow's history, beside the definitions.
-///
-/// Dot-prefixed so [`super::FileWorkflowStore::load`] — which reads `*.json`
-/// entries of the definition directories, not their subdirectories — cannot
-/// mistake a snapshot for a definition.
-const REVISIONS_DIR: &str = ".revisions";
 
 /// Tie-breaker for snapshots taken inside the same millisecond.
 ///
@@ -59,10 +52,8 @@ struct StoredRevision {
 }
 
 /// Where one workflow's snapshots live.
-fn dir_for(write_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowError> {
-    Ok(write_dir
-        .join(REVISIONS_DIR)
-        .join(safe_component(workflow_id)?))
+fn dir_for(revisions_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowError> {
+    Ok(revisions_dir.join(safe_component(workflow_id)?))
 }
 
 /// Snapshot `record` as a superseded version, then prune to [`MAX_REVISIONS`].
@@ -72,7 +63,7 @@ fn dir_for(write_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowError
 /// Fails when the id is not a usable filename, or when the snapshot cannot be
 /// written — the caller is about to overwrite the only copy, so a history it
 /// could not record is a failure rather than something to log past.
-pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<(), WorkflowError> {
+pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<PathBuf, WorkflowError> {
     let dir = dir_for(write_dir, &record.id)?;
     let superseded_at = now_ms();
     // Three parts, and each earns its place. The zero-padded stamp leads so a
@@ -99,8 +90,19 @@ pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<(), Workflow
     };
     let body = serde_json::to_vec_pretty(&stored)
         .map_err(|err| WorkflowError::Malformed(err.to_string()))?;
-    write_atomic(&dir.join(format!("{revision_id}.json")), &body)?;
-    prune(&dir)
+    let path = dir.join(format!("{revision_id}.json"));
+    write_atomic(&path, &body)?;
+    Ok(path)
+}
+
+/// Commit a captured snapshot after its matching source mutation succeeds.
+pub fn commit_capture(path: &Path) -> Result<(), WorkflowError> {
+    prune(path.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+/// Remove a snapshot whose matching source mutation failed.
+pub fn rollback_capture(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 /// Every snapshot of `workflow_id`, newest first.
@@ -115,6 +117,23 @@ pub fn list(write_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowRevision>
         .filter_map(|path| load(&path).ok().flatten())
         .collect();
     revisions.sort_by(|a, b| b.id.cmp(&a.id));
+    Ok(revisions)
+}
+
+/// Merge snapshots from the current state directory and a legacy directory.
+///
+/// Revision identifiers are globally unique in normal operation. Deduplicating
+/// them also makes a partially migrated history harmless.
+pub(super) fn list_merged(
+    current_dir: &Path,
+    legacy_dir: &Path,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowRevision>, WorkflowError> {
+    let mut revisions = list(current_dir, workflow_id)?;
+    revisions.extend(list(legacy_dir, workflow_id)?);
+    revisions.sort_by(|a, b| b.id.cmp(&a.id));
+    revisions.dedup_by(|a, b| a.id == b.id);
+    revisions.truncate(MAX_REVISIONS);
     Ok(revisions)
 }
 

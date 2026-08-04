@@ -544,7 +544,7 @@ fn a_terminal_too_small_to_draw_anything_does_not_panic() {
 }
 
 #[test]
-fn a_graph_wider_than_the_canvas_scrolls_to_the_cursor() {
+fn a_graph_wider_than_the_canvas_folds_into_view() {
     let mut long = diamond("long");
     long.graph = serde_json::from_value(json!({
         "nodes": (0..12).map(|index| json!({
@@ -560,17 +560,26 @@ fn a_graph_wider_than_the_canvas_scrolls_to_the_cursor() {
     .expect("graph parses");
     let (_home, mut app) = app_with(&[long], &[]);
 
-    let start = render(&mut app);
-    assert!(start.contains("Step 0"));
-    assert!(!start.contains("Step 11"), "the far end is off screen");
+    // Twelve steps do not fit across the pane, so the chain wraps onto further
+    // bands instead of running off the side. Nothing has to be scrolled to.
+    let screen = render(&mut app);
+    assert!(screen.contains("Step 0"));
+    assert!(screen.contains("Step 11"), "the far end folded into view");
+    assert_eq!(app.wf.canvas_row, 0, "and nothing had to scroll: {screen}");
 
-    for _ in 0..11 {
-        app.move_graph_cursor(Move::Forward);
-    }
-    let end = render(&mut app);
+    // Alternate bands run backwards, so the second band's first step is on the
+    // right — directly under where the first band ran out.
+    let per_band = app.layers_per_band();
+    assert!(per_band < 12, "the chain has to fold at all");
+    let last_of_first = app.graph_cell(per_band - 1, 0);
+    let first_of_second = app.graph_cell(per_band, 0);
+    assert_eq!(
+        last_of_first.0, first_of_second.0,
+        "the fold picks up in the same column it left off in"
+    );
     assert!(
-        end.contains("Step 11"),
-        "the cursor pulled the canvas along"
+        first_of_second.1 > last_of_first.1,
+        "one band below the other"
     );
 }
 

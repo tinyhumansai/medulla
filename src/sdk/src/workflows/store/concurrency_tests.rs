@@ -128,6 +128,28 @@ fn a_save_racing_a_delete_leaves_the_deletion_recoverable() {
 }
 
 #[test]
+fn failed_definition_publish_does_not_leave_a_revision() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let lower = root.path().join("defaults");
+    let upper = root.path().join("workflows");
+    std::fs::create_dir_all(&lower).expect("lower definitions");
+    let seed = document("blocked", "v0");
+    let seed_store = FileWorkflowStore::new(vec![lower.clone()], root.path().join("seed-runs"));
+    seed_store.save(&seed).expect("seed lower definition");
+
+    std::fs::create_dir_all(upper.join("blocked.json")).expect("blocking destination directory");
+    let store = FileWorkflowStore::new(vec![lower, upper], root.path().join("runs"));
+    assert!(store.save(&document("blocked", "v1")).is_err());
+    assert!(
+        store
+            .list_revisions("blocked")
+            .expect("list revisions")
+            .is_empty(),
+        "a source version that was never superseded must not enter history"
+    );
+}
+
+#[test]
 fn separate_store_instances_use_the_same_definition_lock() {
     let root = tempfile::tempdir().expect("tempdir");
     let first = store_in(root.path());

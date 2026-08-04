@@ -63,7 +63,7 @@ fn dir_for(revisions_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowE
 /// Fails when the id is not a usable filename, or when the snapshot cannot be
 /// written — the caller is about to overwrite the only copy, so a history it
 /// could not record is a failure rather than something to log past.
-pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<(), WorkflowError> {
+pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<PathBuf, WorkflowError> {
     let dir = dir_for(write_dir, &record.id)?;
     let superseded_at = now_ms();
     // Three parts, and each earns its place. The zero-padded stamp leads so a
@@ -90,8 +90,19 @@ pub fn capture(write_dir: &Path, record: &WorkflowRecord) -> Result<(), Workflow
     };
     let body = serde_json::to_vec_pretty(&stored)
         .map_err(|err| WorkflowError::Malformed(err.to_string()))?;
-    write_atomic(&dir.join(format!("{revision_id}.json")), &body)?;
-    prune(&dir)
+    let path = dir.join(format!("{revision_id}.json"));
+    write_atomic(&path, &body)?;
+    Ok(path)
+}
+
+/// Commit a captured snapshot after its matching source mutation succeeds.
+pub fn commit_capture(path: &Path) -> Result<(), WorkflowError> {
+    prune(path.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+/// Remove a snapshot whose matching source mutation failed.
+pub fn rollback_capture(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 /// Every snapshot of `workflow_id`, newest first.

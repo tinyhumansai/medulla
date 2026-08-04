@@ -40,7 +40,7 @@ fn codex_omits_notification_and_session_end() {
         assert!(event.supported_by(HarnessProvider::Claude), "{event:?}");
         assert_eq!(
             event.supported_by(HarnessProvider::Codex),
-            !matches!(event, HookEvent::Notification | HookEvent::SessionEnd),
+            event != HookEvent::Notification,
             "{event:?}",
         );
         assert!(!event.supported_by(HarnessProvider::Opencode), "{event:?}");
@@ -155,13 +155,16 @@ fn codex_drops_notification_with_a_reason_and_keeps_the_rest() {
 }
 
 #[test]
-fn codex_drops_session_end_because_the_cli_does_not_expose_that_event() {
+fn codex_installs_session_end_because_the_cli_does_raise_that_event() {
+    // Verified against Codex 0.146 by running a `SessionEnd` command hook
+    // end-to-end: it fires. `session_end` is also in the binary's own hook-event
+    // vocabulary and in Codex's published hook documentation. Dropping it would
+    // silently disable a hook that works.
     let hooks = config(vec![hook(HookEvent::SessionEnd, "*", "cleanup")]);
     let injection = hook_injection(HarnessProvider::Codex, &hooks);
 
-    assert!(injection.args.is_empty());
-    assert_eq!(injection.dropped.len(), 1);
-    assert_eq!(injection.dropped[0].event, HookEvent::SessionEnd);
+    assert!(injection.dropped.is_empty());
+    assert!(injection.args[1].contains("SessionEnd"));
 }
 
 #[test]

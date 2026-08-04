@@ -18,19 +18,30 @@
 //!
 //! # Where the secret goes
 //!
-//! The fleet grant is a bearer token. It is passed to the child in its
-//! *environment*, never on its argv: `/proc/<pid>/cmdline` is world-readable on
-//! Linux while `/proc/<pid>/environ` is readable only by the owner, so an argv
-//! registration would hand every local user this session's capability. The
-//! registration itself (binary path, `mcp` argument, tool mode) holds no secret
-//! and goes on argv.
+//! The fleet grant is a bearer token, and two different processes must never
+//! see it: another local user, and any of the harness's *other* children.
 //!
-//! That the MCP subprocess sees the variables at all is inheritance: the harness
-//! inherits the environment we spawn it with, and spawns its stdio servers from
-//! that. It is the same chain the ACP path already relies on for `MEDULLA_HOME`.
+//! It cannot go on argv: `/proc/<pid>/cmdline` is world-readable on Linux while
+//! `/proc/<pid>/environ` is readable only by the owner, so an argv registration
+//! would hand every local user this session's capability. The registration
+//! itself (binary path, `mcp` argument, tool mode) holds no secret and goes on
+//! argv freely.
+//!
+//! Nor can it go on the *harness's own environment*, the way [`Self::env`]
+//! does: that environment is inherited by every subprocess the harness spawns,
+//! not just the `medulla mcp` server it is meant for — a configured
+//! provider-binary override, a shell command, or another project's MCP server
+//! sharing that environment could redeem it against the control socket for as
+//! long as the session runs. So [`ServerSpec::secret_env`] instead reaches
+//! Claude Code through a `--mcp-config` *file* ([`ServerSpec::write_config_file`])
+//! that only its owner can read, naming the grant in the one server entry's own
+//! `env` block. Claude Code applies a server's `env` only when spawning that
+//! server, so the grant reaches the one subprocess it is for and nothing else
+//! the harness starts. [`revoke_session`] removes the file along with the
+//! grant it names.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
@@ -90,6 +101,88 @@ impl ServerSpec {
         }
         json!({ "mcpServers": { self.name: Value::Object(entry) } }).to_string()
     }
+
+    /// Write this server's full registration — [`Self::secret_env`] included —
+    /// to a file only its owner can read, and return the path.
+    ///
+    /// This is how the secret half reaches Claude Code without ever landing on
+    /// an argv or the harness's own environment; see the module docs for why
+    /// both of those are unsafe for it. `--mcp-config` accepts a file path as
+    /// readily as an inline document, and Claude Code applies a server's `env`
+    /// only when spawning *that* server — so a grant recorded here reaches the
+    /// `medulla mcp` subprocess and nothing else the harness starts.
+    ///
+    /// Named after `session` so [`revoke_session`] can find and remove it with
+    /// no plumbing back from wherever this was called: reconstructing the same
+    /// path from the same key is enough.
+    ///
+    /// # Errors
+    ///
+    /// Whatever creating or writing the file returns. The caller's fallback is
+    /// the non-secret inline document — see [`attach_cli`].
+    pub fn write_config_file(&self, session: &str) -> std::io::Result<PathBuf> {
+        let mut entry = Map::new();
+        entry.insert(
+            "command".to_string(),
+            Value::String(self.command.display().to_string()),
+        );
+        entry.insert(
+            "args".to_string(),
+            Value::Array(self.args.iter().cloned().map(Value::String).collect()),
+        );
+        let mut env: Map<String, Value> = self
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+            .collect();
+        for (key, value) in &self.secret_env {
+            env.insert(key.clone(), Value::String(value.clone()));
+        }
+        if !env.is_empty() {
+            entry.insert("env".to_string(), Value::Object(env));
+        }
+        let document = json!({ "mcpServers": { self.name: Value::Object(entry) } }).to_string();
+        let path = config_file_path(session);
+        write_owner_only(&path, &document)?;
+        Ok(path)
+    }
+}
+
+/// Where a session's [`ServerSpec::write_config_file`] output would be, if it
+/// wrote one.
+///
+/// Deterministic from the session key alone: [`revoke_session`] needs to find
+/// and remove the same file without any caller having to hand the path back.
+fn config_file_path(session: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("medulla-mcp-{session}.json"))
+}
+
+/// Write `contents` to `path`, created with permissions only its owner can
+/// read.
+///
+/// On Unix the mode is set at creation (`O_CREAT` with the mode already
+/// applied), not with a follow-up `chmod`, so there is no window where the
+/// file briefly exists world-readable. Windows has no equivalent bit; the
+/// threat this defends against — `/proc/<pid>/environ` and world-readable
+/// temp files — is a Unix one, as the module docs describe.
+#[cfg(unix)]
+fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(contents.as_bytes())
+}
+
+/// Windows fallback: no owner-only creation mode to apply.
+#[cfg(not(unix))]
+fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
+    std::fs::write(path, contents)
 }
 
 /// Whether workflow authoring is switched on for this host.
@@ -159,16 +252,19 @@ pub fn local_fleet_grant(
     Some((plane.socket.clone(), plane.grants.mint(grant)))
 }
 
-/// Give back a session's grant once that session is over.
+/// Give back a session's grant once that session is over, and remove the
+/// `--mcp-config` file it may have been minted into.
 ///
-/// Best effort by design: a process with no control plane has nothing to revoke
-/// against, and a session that ended twice must not be an error. Called when a
-/// harness exits so its token stops working, rather than living until the
-/// process does.
+/// Best effort by design: a process with no control plane has nothing to
+/// revoke against, a session that ended twice must not be an error, and a
+/// session that never wrote a config file (no fleet grant, or the inline
+/// document was enough) leaves nothing to remove. Called when a harness exits
+/// so its token stops working, rather than living until the process does.
 pub fn revoke_session(session: &str) {
     if let Some(plane) = crate::control_socket::active() {
         plane.grants.revoke(session);
     }
+    let _ = std::fs::remove_file(config_file_path(session));
 }
 
 /// The server to offer a session, or `None` when no family would be served.
@@ -239,6 +335,11 @@ pub fn server_spec(
 /// have verified; see [`supports_cli_attach`]. That is a real gap rather than a
 /// silent one: those providers still receive the tools over ACP, which is the
 /// transport the orchestrator uses for delegated work.
+///
+/// `env` is read to resolve the session's policy (`workflows.enabled`, the
+/// operator's tool mode) but never written: the secret half of a granted
+/// session goes into a [`ServerSpec::write_config_file`] file, not this
+/// process's or the harness's environment — see the module docs.
 pub fn attach_cli(
     provider: HarnessProvider,
     session: &str,
@@ -261,12 +362,32 @@ pub fn attach_cli(
         }
         return None;
     };
-    for (key, value) in &spec.secret_env {
-        env.insert(key.clone(), value.clone());
-    }
     args.push("--mcp-config".to_string());
-    args.push(spec.claude_mcp_config());
-    granted.then(|| session.to_string())
+    if spec.secret_env.is_empty() {
+        // Nothing secret to keep off argv or out of the harness's own
+        // environment, so the simplest registration — inline, no file to
+        // clean up later — is also the safe one.
+        args.push(spec.claude_mcp_config());
+        return granted.then(|| session.to_string());
+    }
+    match spec.write_config_file(session) {
+        Ok(path) => {
+            args.push(path.display().to_string());
+            granted.then(|| session.to_string())
+        }
+        Err(_) => {
+            // Could not write the file the grant would have gone in. The
+            // inline document is still safe to fall back to — it never
+            // renders `secret_env` — but a session with no way to reach its
+            // grant has no use for one, so it is given back rather than left
+            // a live token nothing can ever redeem.
+            args.push(spec.claude_mcp_config());
+            if granted {
+                revoke_session(session);
+            }
+            None
+        }
+    }
 }
 
 /// Whether a provider's CLI can be handed an MCP registration on its argv.

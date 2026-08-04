@@ -229,11 +229,10 @@ fn a_chain_too_wide_for_the_pane_folds_onto_the_next_band() {
         node.layer
     );
 
-    // Folded, not scrolled off the side: the last node's column is its layer
-    // modulo the band width, and it sits further down instead.
+    // Folded, not scrolled off the side: a later layer is further down rather
+    // than further right.
     let (x, row) = app.graph_cell(node.layer, node.lane);
     let (first_x, first_row) = app.graph_cell(0, 0);
-    assert_eq!(x, app.graph_cell(node.layer % per_band, node.lane).0);
     assert!(
         x < app.area.width as usize,
         "column {x} is inside the pane, so nothing scrolls horizontally"

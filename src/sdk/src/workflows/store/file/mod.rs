@@ -185,7 +185,12 @@ impl FileWorkflowStore {
             std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
         let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
         let scope = format!("{digest:x}");
-        Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]))
+        let mut store = Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]));
+        // Definitions are global even though runs, proposals, and revisions
+        // are workspace-scoped. Every workspace writing that shared catalog
+        // must therefore contend on the same filesystem locks.
+        store.definition_locks_dir = state_dir.join("locks");
+        store
     }
 
     /// A store over the conventional locations for this environment and working
@@ -516,14 +521,14 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn list_revisions(&self, workflow_id: &str) -> Result<Vec<WorkflowRevision>, WorkflowError> {
-        let revisions = revisions::list(&self.revisions_dir, workflow_id)?;
-        if revisions.is_empty() {
-            // Releases before the source/state split kept undo snapshots in a
-            // hidden directory beside definitions. Keep that history readable
-            // without writing any new runtime data there.
-            return revisions::list(&self.write_dir().join(".revisions"), workflow_id);
-        }
-        Ok(revisions)
+        // Releases before the source/state split kept undo snapshots beside
+        // definitions. Merge that history with new workspace-scoped snapshots
+        // so the first post-upgrade edit does not hide the older entries.
+        revisions::list_merged(
+            &self.revisions_dir,
+            &self.write_dir().join(".revisions"),
+            workflow_id,
+        )
     }
 
     fn revision(

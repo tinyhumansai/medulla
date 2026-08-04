@@ -129,6 +129,21 @@ fn a_snapshot_forgets_where_the_record_was_read_from() {
 }
 
 #[test]
+fn current_and_legacy_histories_are_merged_newest_first() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let current = root.path().join("current");
+    let legacy = root.path().join("legacy");
+    capture(&legacy, &record("greet", "legacy")).expect("legacy capture");
+    capture(&current, &record("greet", "current")).expect("current capture");
+
+    let listed = list_merged(&current, &legacy, "greet").expect("merged history");
+
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].record.description, "current");
+    assert_eq!(listed[1].record.description, "legacy");
+}
+
+#[test]
 fn an_id_that_would_escape_the_history_directory_is_refused() {
     let root = tempfile::tempdir().expect("tempdir");
 

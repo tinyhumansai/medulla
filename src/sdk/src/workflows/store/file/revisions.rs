@@ -109,6 +109,22 @@ pub fn list(write_dir: &Path, workflow_id: &str) -> Result<Vec<WorkflowRevision>
     Ok(revisions)
 }
 
+/// Merge snapshots from the current state directory and a legacy directory.
+///
+/// Revision identifiers are globally unique in normal operation. Deduplicating
+/// them also makes a partially migrated history harmless.
+pub(super) fn list_merged(
+    current_dir: &Path,
+    legacy_dir: &Path,
+    workflow_id: &str,
+) -> Result<Vec<WorkflowRevision>, WorkflowError> {
+    let mut revisions = list(current_dir, workflow_id)?;
+    revisions.extend(list(legacy_dir, workflow_id)?);
+    revisions.sort_by(|a, b| b.id.cmp(&a.id));
+    revisions.dedup_by(|a, b| a.id == b.id);
+    Ok(revisions)
+}
+
 /// One snapshot by id, scoped to its workflow.
 ///
 /// Scoped deliberately: a revision id is enough to name a file, and letting one

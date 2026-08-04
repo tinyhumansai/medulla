@@ -163,6 +163,51 @@ fn separate_store_instances_use_the_same_definition_lock() {
 }
 
 #[test]
+fn workspace_scopes_share_the_global_definition_lock() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dirs = vec![root.path().join("workflows")];
+    let state = root.path().join("state");
+    let first = FileWorkflowStore::with_workspace_state(
+        dirs.clone(),
+        &state,
+        &root.path().join("workspace-a"),
+    );
+    let second = FileWorkflowStore::with_workspace_state(
+        dirs,
+        &state,
+        &root.path().join("workspace-b"),
+    );
+    first.save(&document("race", "v0")).expect("seed save");
+
+    let lock_path = state.join("locks/.race.lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .expect("global definition lock exists");
+    lock.lock_exclusive().expect("claim definition lock");
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        sent.send(second.save(&document("race", "v1")))
+            .expect("report save");
+    });
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "a different workspace scope must wait for the global definition lock"
+    );
+
+    FileExt::unlock(&lock).expect("release definition lock");
+    received
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("save completes after unlock")
+        .expect("save succeeds");
+    writer.join().expect("writer thread");
+}
+
+#[test]
 fn separate_store_instances_serialize_proposal_decisions() {
     let root = tempfile::tempdir().expect("tempdir");
     let first = store_in(root.path());

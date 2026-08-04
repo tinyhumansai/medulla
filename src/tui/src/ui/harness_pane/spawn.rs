@@ -120,6 +120,16 @@ impl LocalHarnesses {
         // the pane, and the coverage a hook actually got belongs on screen rather
         // than in a log nobody reads mid-session.
         let _ = dropped_hooks;
+        if let Some(log) = &self.log {
+            for dropped in &dropped_hooks {
+                log(&format!(
+                    "hook {} not installed for {}: {}",
+                    dropped.event.as_str(),
+                    dropped.provider.as_str(),
+                    dropped.reason
+                ));
+            }
+        }
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
         // OpenRouter-bound sessions are re-pointed at Medulla's loopback
         // attribution proxy and the real key is scrubbed from `env`. A hand-opened

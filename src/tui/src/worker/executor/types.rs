@@ -62,4 +62,6 @@ pub struct PtySessionExecutor {
     pub(super) claims: Arc<Mutex<HashSet<PathBuf>>>,
     /// Checkout context retained across turns in each reusable PTY session.
     pub(super) workspace_context: Arc<Mutex<HashMap<String, WorkspaceContext>>>,
+    /// TUI-safe diagnostic sink for hook coverage warnings.
+    pub(super) log: Option<medulla::daemon::LogFn>,
 }

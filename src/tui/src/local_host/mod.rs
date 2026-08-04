@@ -550,8 +550,11 @@ fn start_at(
     // tasks will run; it resolves the same configured workspace the host is
     // about to resolve. The two must agree — this is the directory the session
     // tailer searches for the harness's transcript.
-    let executor =
+    let mut executor =
         PtySessionExecutor::new(sessions, env.clone(), resolve_workspace(&options.workspace));
+    if let Some(log) = options.log.clone() {
+        executor = executor.with_log(log);
+    }
     let daemon = EmbeddedDaemon::start_with_executor(
         std::sync::Arc::new(bridge) as std::sync::Arc<dyn Bridge>,
         &address,

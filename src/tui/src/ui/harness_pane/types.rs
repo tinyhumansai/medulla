@@ -114,6 +114,8 @@ pub struct LocalHarnesses {
     /// harness the operator opened by hand would silently depend on which door
     /// the session came through.
     pub hooks: medulla::harness_hooks::HooksConfig,
+    /// TUI-safe diagnostic sink for hook coverage warnings.
+    pub log: Option<medulla::daemon::LogFn>,
 }
 
 impl LocalHarnesses {

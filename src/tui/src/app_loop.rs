@@ -539,6 +539,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             router: loaded.config.router.clone(),
             attribution: loaded.config.attribution.commit,
             hooks: loaded.config.hooks.clone(),
+            log: Some(hub_logs.sink()),
         }
     });
     // Shared with the hub's roster filter and appended to by the spawner, so a

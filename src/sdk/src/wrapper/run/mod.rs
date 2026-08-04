@@ -118,6 +118,17 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
 
     // Extra args from `TINYPLACE_<P>_ARGS` are prepended to the child argv.
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
+    if config.provider == crate::protocol::HarnessProvider::Claude
+        && config
+            .child_args
+            .iter()
+            .chain(child_args.iter())
+            .any(|arg| arg == "--settings" || arg.starts_with("--settings="))
+    {
+        anyhow::bail!(
+            "Claude --settings cannot be combined with Medulla attribution/hooks; move those settings into the normal Claude configuration"
+        );
+    }
     // Attribute commits made through this session to Medulla. Injected per-spawn,
     // so the operator's own `settings.json` is never touched.
     // Commit attribution and the operator's Medulla hooks share Claude Code's

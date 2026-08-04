@@ -74,7 +74,14 @@ impl PtySessionExecutor {
             workspace,
             claims: Arc::new(Mutex::new(HashSet::new())),
             workspace_context: Arc::new(Mutex::new(HashMap::new())),
+            log: None,
         }
+    }
+
+    /// Route executor diagnostics into the owning TUI's log surface.
+    pub fn with_log(mut self, log: medulla::daemon::LogFn) -> Self {
+        self.log = Some(log);
+        self
     }
 
     /// Adapt this executor into the [`RunTaskFn`] the daemon runtime takes.
@@ -446,6 +453,16 @@ impl PtySessionExecutor {
         // the pane, and the coverage a hook actually got belongs on screen rather
         // than in a log nobody reads mid-session.
         let _ = dropped_hooks;
+        if let Some(log) = &self.log {
+            for dropped in &dropped_hooks {
+                log(&format!(
+                    "hook {} not installed for {}: {}",
+                    dropped.event.as_str(),
+                    dropped.provider.as_str(),
+                    dropped.reason
+                ));
+            }
+        }
         // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
         // proxy, and the real key is scrubbed from `env` here, before any of it
         // reaches the child. A no-op for every other endpoint.

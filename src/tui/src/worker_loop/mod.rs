@@ -243,6 +243,7 @@ pub(super) fn worker_runtime(
         }) as medulla::daemon::providers::RunTaskFn,
         ExecutionMode::Interactive => {
             PtySessionExecutor::new(sessions.clone(), env.clone(), workspace.to_string())
+                .with_log(logs.sink())
                 .into_run_task()
         }
     };

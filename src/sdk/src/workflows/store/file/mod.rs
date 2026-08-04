@@ -368,19 +368,24 @@ fn absolute_path(path: &Path) -> PathBuf {
 
 /// Host state shared by every store that writes the same definition catalog.
 ///
-/// The write directory is conventionally `<medulla home>/workflows`, making
-/// this `<medulla home>/state/workflows`. Deriving it from the destination—not
-/// a run scope—keeps locks and undo history coherent across workspaces and
-/// across callers of every public constructor.
-fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    let Some(write_dir) = dirs.last() else {
-        return PathBuf::from("state/workflows");
-    };
+/// The write directory is conventionally `<medulla home>/workflows`, placing
+/// this beneath `<medulla home>/state/workflows`. Deriving it from the full
+/// destination—not a run scope—keeps locks and undo history coherent across
+/// workspaces without mixing unrelated catalogs.
+pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
+    let write_dir = dirs
+        .last()
+        .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
     let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
-    let catalog = write_dir
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("workflows"));
-    parent.join("state").join(catalog)
+    let scope = format!(
+        "{:x}",
+        Sha256::digest(write_dir.as_os_str().as_encoded_bytes())
+    );
+    parent
+        .join("state")
+        .join("workflows")
+        .join("definitions")
+        .join(scope)
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

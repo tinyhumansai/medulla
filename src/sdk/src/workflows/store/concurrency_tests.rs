@@ -163,17 +163,20 @@ fn separate_store_instances_use_the_same_definition_lock() {
 }
 
 #[test]
-fn workspace_scopes_share_the_global_definition_lock() {
+fn workspace_scoped_stores_share_the_global_definition_lock() {
     let root = tempfile::tempdir().expect("tempdir");
-    let dirs = vec![root.path().join("workflows")];
+    let definitions = vec![root.path().join("workflows")];
     let state = root.path().join("state");
     let first = FileWorkflowStore::with_workspace_state(
-        dirs.clone(),
+        definitions.clone(),
         &state,
         &root.path().join("workspace-a"),
     );
-    let second =
-        FileWorkflowStore::with_workspace_state(dirs, &state, &root.path().join("workspace-b"));
+    let second = FileWorkflowStore::with_workspace_state(
+        definitions,
+        &state,
+        &root.path().join("workspace-b"),
+    );
     first.save(&document("race", "v0")).expect("seed save");
 
     let lock_path = state.join("locks/.race.lock");
@@ -193,7 +196,7 @@ fn workspace_scopes_share_the_global_definition_lock() {
         received
             .recv_timeout(std::time::Duration::from_millis(100))
             .is_err(),
-        "a different workspace scope must wait for the global definition lock"
+        "a store for another workspace must wait on the shared definition lock"
     );
 
     FileExt::unlock(&lock).expect("release definition lock");

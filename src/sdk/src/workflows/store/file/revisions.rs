@@ -122,6 +122,7 @@ pub(super) fn list_merged(
     revisions.extend(list(legacy_dir, workflow_id)?);
     revisions.sort_by(|a, b| b.id.cmp(&a.id));
     revisions.dedup_by(|a, b| a.id == b.id);
+    revisions.truncate(MAX_REVISIONS);
     Ok(revisions)
 }
 

@@ -442,25 +442,18 @@ impl PtySessionExecutor {
         // Attribution and the operator's configured hooks share Claude Code's
         // single `--settings` flag, so both are built together — a watched PTY
         // session runs the same lifecycle policy a headless one does.
-        let (launch_args, dropped_hooks) = medulla::harness_hooks::launch_args(
+        let (launch_args, hook_notes) = medulla::harness_hooks::launch_args(
             options.provider,
             options.attribution,
             &options.hooks,
         );
         extra_args.extend(launch_args);
-        // Unsupported (harness, event) pairs are dropped here without a line of
-        // their own: this crate renders a full-screen TUI, so stderr would corrupt
-        // the pane, and the coverage a hook actually got belongs on screen rather
-        // than in a log nobody reads mid-session.
-        let _ = dropped_hooks;
+        // Routed to the log rather than stderr: this crate draws a full-screen
+        // TUI, where a stray line corrupts the pane. Covers both hooks the
+        // harness cannot run and hooks it will not run until trusted.
         if let Some(log) = &self.log {
-            for dropped in &dropped_hooks {
-                log(&format!(
-                    "hook {} not installed for {}: {}",
-                    dropped.event.as_str(),
-                    dropped.provider.as_str(),
-                    dropped.reason
-                ));
+            for note in &hook_notes {
+                log(note);
             }
         }
         // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution

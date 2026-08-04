@@ -40,7 +40,7 @@ fn codex_omits_notification_and_session_end() {
         assert!(event.supported_by(HarnessProvider::Claude), "{event:?}");
         assert_eq!(
             event.supported_by(HarnessProvider::Codex),
-            !matches!(event, HookEvent::Notification | HookEvent::SessionEnd),
+            event != HookEvent::Notification,
             "{event:?}",
         );
         assert!(!event.supported_by(HarnessProvider::Opencode), "{event:?}");
@@ -155,13 +155,16 @@ fn codex_drops_notification_with_a_reason_and_keeps_the_rest() {
 }
 
 #[test]
-fn codex_drops_session_end_because_the_cli_does_not_expose_that_event() {
+fn codex_installs_session_end_because_the_cli_does_raise_that_event() {
+    // Verified against Codex 0.146 by running a `SessionEnd` command hook
+    // end-to-end: it fires. `session_end` is also in the binary's own hook-event
+    // vocabulary and in Codex's published hook documentation. Dropping it would
+    // silently disable a hook that works.
     let hooks = config(vec![hook(HookEvent::SessionEnd, "*", "cleanup")]);
     let injection = hook_injection(HarnessProvider::Codex, &hooks);
 
-    assert!(injection.args.is_empty());
-    assert_eq!(injection.dropped.len(), 1);
-    assert_eq!(injection.dropped[0].event, HookEvent::SessionEnd);
+    assert!(injection.dropped.is_empty());
+    assert!(injection.args[1].contains("SessionEnd"));
 }
 
 #[test]
@@ -302,4 +305,37 @@ fn every_spawn_seam_uses_the_merged_launch_builder() {
              would not reach the harness it launches",
         );
     }
+}
+
+#[test]
+fn codex_reports_that_its_hooks_are_inert_until_trusted() {
+    // Codex skips hooks absent from its trust store, and a per-spawn injection
+    // always is. Medulla does not pass `--dangerously-bypass-hook-trust`,
+    // because that flag is invocation-wide and would also authorize whatever
+    // hooks the checked-out repository declares. The cost is that the feature
+    // does nothing until the operator trusts it — which must be said, or this
+    // module reproduces the exact silent failure it exists to prevent.
+    let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
+    let injection = hook_injection(HarnessProvider::Codex, &hooks);
+
+    assert!(
+        !injection
+            .args
+            .iter()
+            .any(|arg| arg.contains("bypass-hook-trust")),
+        "the invocation-wide trust bypass must never be passed",
+    );
+    assert_eq!(injection.warnings.len(), 1);
+    assert!(injection.warnings[0].contains("trust"));
+    // The warning reaches callers through the same channel dropped hooks do.
+    assert!(injection.notes().iter().any(|note| note.contains("trust")));
+}
+
+#[test]
+fn claude_needs_no_trust_warning() {
+    // Claude Code runs `--settings` hooks without prompting, so there is nothing
+    // for the operator to do and nothing to warn about.
+    let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
+    let injection = hook_injection(HarnessProvider::Claude, &hooks);
+    assert!(injection.warnings.is_empty());
 }

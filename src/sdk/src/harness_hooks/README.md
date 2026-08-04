@@ -41,8 +41,12 @@ Two behaviours are load-bearing and easy to regress silently:
 - Claude Code accepts **one** `--settings`; a second replaces the first. Hooks and
   attribution therefore share a single merged object.
 - Codex **silently skips** hooks absent from its trust store, which a per-spawn
-  injection always is — hence `--dangerously-bypass-hook-trust`. Without it every
-  Medulla hook is dropped without a word.
+  injection always is, so a Medulla hook does nothing there until the operator
+  trusts it once (`/hooks`). Medulla deliberately does not pass
+  `--dangerously-bypass-hook-trust` — it is invocation-wide and would also
+  authorize hooks the workspace ships in its own `.codex/hooks.json`. Because
+  that means the feature is inert until trusted, the requirement is reported as
+  a warning rather than left silent.
 
 ## Maintenance
 

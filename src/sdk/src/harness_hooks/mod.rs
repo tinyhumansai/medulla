@@ -25,21 +25,25 @@
 //!   the user's `settings.json`. Medulla already spends that flag on attribution,
 //!   so the two share one JSON object — see [`launch_args`], which is why callers
 //!   must not add `--settings` separately.
-//! - **Codex** takes it as a `-c hooks=<inline TOML>` config override, plus
-//!   `--dangerously-bypass-hook-trust`. Codex records trust against a hook's
-//!   hash and *silently skips* hooks it has not seen before; since a per-spawn
-//!   injection is by construction never in the operator's trust store, without
-//!   that flag every Medulla hook would be dropped without a word. Config layers
-//!   are additive in Codex, so this adds to the operator's own `hooks.json`
-//!   rather than replacing it.
+//! - **Codex** takes it as a `-c hooks=<inline TOML>` config override. Config
+//!   layers are additive in Codex, so this adds to the operator's own
+//!   `hooks.json` rather than replacing it. Codex records trust against a hook's
+//!   hash and *silently skips* hooks it has not seen before, and a per-spawn
+//!   injection is by construction never in that store — so a Medulla hook does
+//!   nothing on Codex until the operator trusts it once (`/hooks`). Medulla does
+//!   **not** pass `--dangerously-bypass-hook-trust`: it is invocation-wide and
+//!   would also authorize hooks the checked-out repository ships in its own
+//!   `.codex/hooks.json`. Requiring one explicit trust is the safe direction to
+//!   fail, and the requirement is reported through
+//!   [`HookInjection::warnings`] rather than left to be discovered.
 //! - **OpenCode** exposes hooks as a scripted plugin API rather than a
 //!   declarative command hook, and is not adapted yet; its hooks are reported as
 //!   [`DroppedHook`]s rather than silently ignored.
 //! - **OpenHuman** runs in-process and has no external harness to configure.
 //!
 //! Both delivery paths were verified end-to-end against the versions named
-//! above: a `SessionStart` hook injected this way fires, and on Codex fires
-//! alongside the operator's own.
+//! above: a `SessionStart` hook injected this way fires on Claude Code, and on
+//! Codex fires alongside the operator's own once trusted.
 
 use crate::protocol::HarnessProvider;
 
@@ -73,11 +77,15 @@ pub fn hook_injection(provider: HarnessProvider, hooks: &HooksConfig) -> HookInj
         return injection;
     }
     let document = native::hook_document(&applicable);
-    injection.args = match provider {
-        HarnessProvider::Claude => claude::settings_args(&document),
-        HarnessProvider::Codex => codex::config_args(&document),
-        HarnessProvider::Opencode | HarnessProvider::Openhuman => Vec::new(),
-    };
+    match provider {
+        HarnessProvider::Claude => injection.args = claude::settings_args(&document),
+        HarnessProvider::Codex => {
+            let (args, warning) = codex::config_args(&document);
+            injection.args = args;
+            injection.warnings.push(warning);
+        }
+        HarnessProvider::Opencode | HarnessProvider::Openhuman => {}
+    }
     injection
 }
 
@@ -94,12 +102,12 @@ pub fn launch_args(
     provider: HarnessProvider,
     attribution: bool,
     hooks: &HooksConfig,
-) -> (Vec<String>, Vec<DroppedHook>) {
+) -> (Vec<String>, Vec<String>) {
     let injection = hook_injection(provider, hooks);
     if provider != HarnessProvider::Claude {
         let mut args = crate::attribution::attribution_args(provider, attribution);
-        args.extend(injection.args);
-        return (args, injection.dropped);
+        args.extend(injection.args.iter().cloned());
+        return (args, injection.notes());
     }
 
     let mut settings = serde_json::Map::new();
@@ -121,7 +129,7 @@ pub fn launch_args(
             serde_json::Value::Object(settings).to_string(),
         ]
     };
-    (args, injection.dropped)
+    (args, injection.notes())
 }
 
 /// The hooks `provider` cannot run, with the reason for each.

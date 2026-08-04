@@ -55,6 +55,7 @@ impl FleetOps for RecordingFleet {
                 output_tokens: 22,
             },
             harness: None,
+            session_id: None,
         })
     }
 

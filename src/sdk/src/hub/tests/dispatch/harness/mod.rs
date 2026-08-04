@@ -15,9 +15,17 @@ use tokio::sync::Mutex;
 use crate::bridge::InboundMessage;
 use crate::hub::{Relay, TaskRequest};
 use crate::protocol::{
-    decode_task_frame, encode_task_frame_with_usage, AgentCapabilities, EncodeFrameInput,
-    TaskFrameKind, TokenUsage, WorkerSystemInfo,
+    decode_task_frame, encode_task_frame_with_attachments, encode_task_frame_with_usage,
+    AgentCapabilities, EncodeFrameInput, FrameAttachments, TaskFrameKind, TokenUsage,
+    WorkerSystemInfo,
 };
+
+/// The harness session this fake worker reports on every terminal `reply`.
+///
+/// A real daemon opens exactly one session per task and names it on the reply,
+/// which is the only way the id ever travels back up. Stamping it here keeps the
+/// fake honest about that.
+pub(in crate::hub::tests) const FAKE_SESSION_ID: &str = "sess-fake-01";
 
 impl FakeWorker {
     /// The kinds of frame the runner has sent us, in order.
@@ -152,6 +160,35 @@ impl Relay for FakeWorker {
                 usage,
             ),
         };
+        // A terminal reply names the session that served the task; nothing else
+        // does. `mk` stays session-free so an ack or a status cannot claim one.
+        let reply = |text: &str, usage| InboundMessage {
+            from: to.to_string(),
+            text: encode_task_frame_with_attachments(
+                EncodeFrameInput {
+                    kind: TaskFrameKind::Reply,
+                    task_id: task_id.clone(),
+                    text: text.to_string(),
+                    ts: "T".to_string(),
+                    correlation_id: cid.clone(),
+                    harness: None,
+                    provider: None,
+                    custom_harness: None,
+                    model: None,
+                    tool_mode: None,
+                    workflow: None,
+                    workflow_fingerprint: None,
+                    workflow_inputs: Default::default(),
+                    conversation: None,
+                    fleet_depth: 0,
+                },
+                FrameAttachments {
+                    usage,
+                    work: None,
+                    session_id: Some(FAKE_SESSION_ID.to_string()),
+                },
+            ),
+        };
         let mut q = self.inbox.lock().await;
         // A message the pump cannot decode must be skipped, not fatal — queue one
         // ahead of everything so the pump's skip-and-continue path runs first.
@@ -196,16 +233,9 @@ impl Relay for FakeWorker {
         q.push_back(mk(TaskFrameKind::Ack, "accepted", None));
         q.push_back(mk(TaskFrameKind::Status, "running python audit.py", None));
         match &self.mode {
-            Mode::ImpostorThenReply { reply, .. } => q.push_back(mk(
-                TaskFrameKind::Reply,
-                reply,
-                Some(TokenUsage {
-                    input_tokens: 3,
-                    output_tokens: 5,
-                }),
-            )),
-            Mode::Reply(text) | Mode::RecoverAfterReset(text) => q.push_back(mk(
-                TaskFrameKind::Reply,
+            Mode::ImpostorThenReply { reply: text, .. }
+            | Mode::Reply(text)
+            | Mode::RecoverAfterReset(text) => q.push_back(reply(
                 text,
                 Some(TokenUsage {
                     input_tokens: 3,
@@ -213,12 +243,15 @@ impl Relay for FakeWorker {
                 }),
             )),
             Mode::Error(text) => q.push_back(mk(TaskFrameKind::Error, text, None)),
-            Mode::GarbageThenReply(text) => q.push_back(mk(TaskFrameKind::Reply, text, None)),
-            Mode::Chatty { statuses, reply } => {
+            Mode::GarbageThenReply(text) => q.push_back(reply(text, None)),
+            Mode::Chatty {
+                statuses,
+                reply: reply_text,
+            } => {
                 for n in 0..*statuses {
                     q.push_back(mk(TaskFrameKind::Status, &format!("working {n}"), None));
                 }
-                q.push_back(mk(TaskFrameKind::Reply, reply, None));
+                q.push_back(reply(reply_text, None));
             }
             // Ack + status already queued above; no terminal frame follows.
             Mode::Silent | Mode::AckOnly => {}

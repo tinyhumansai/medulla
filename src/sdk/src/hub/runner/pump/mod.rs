@@ -140,6 +140,10 @@ pub(super) async fn route_frame(
                         output_tokens: 0,
                     }),
                     harness: frame.harness,
+                    // Carried through rather than re-derived: the worker is the
+                    // only party that knows which session ran the task, and
+                    // this frame is the only place it says so.
+                    session_id: frame.session_id,
                 }));
             }
         }

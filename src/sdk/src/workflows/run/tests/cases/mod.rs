@@ -40,6 +40,7 @@ impl HarnessDispatch for StubDispatch {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         })
     }
 }
@@ -74,6 +75,7 @@ impl HarnessDispatch for ErrorThenHangDispatch {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         })
     }
 }

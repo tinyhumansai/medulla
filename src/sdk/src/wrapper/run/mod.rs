@@ -134,23 +134,11 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     // Commit attribution and the operator's Medulla hooks share Claude Code's
     // single `--settings` flag, so they are built together rather than appended
     // independently — see `harness_hooks::launch_args`.
-    let (launch_args, dropped_hooks) =
+    let (launch_args, hook_notes) =
         crate::harness_hooks::launch_args(config.provider, config.attribution, &config.hooks);
     child_args.extend(launch_args);
-    if config.provider == crate::protocol::HarnessProvider::Codex
-        && !config.hooks.for_provider(config.provider).is_empty()
-    {
-        tracing::warn!(
-            "Codex hook overrides remain subject to Codex's persisted hook trust; untrusted hooks will be skipped"
-        );
-    }
-    for dropped in &dropped_hooks {
-        tracing::warn!(
-            event = dropped.event.as_str(),
-            provider = dropped.provider.as_str(),
-            reason = %dropped.reason,
-            "medulla hook not installed",
-        );
+    for note in &hook_notes {
+        tracing::warn!(provider = config.provider.as_str(), "{note}");
     }
     // Every provider gets the prepare-commit-msg hook env vars; see the
     // attribution module docs for why the CLI flag alone is not enough.

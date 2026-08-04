@@ -230,11 +230,32 @@ pub struct HookInjection {
     pub env: HashMap<String, String>,
     /// Hooks that this harness cannot run.
     pub dropped: Vec<DroppedHook>,
+    /// Conditions that stop a *supported* hook from taking effect, phrased for
+    /// an operator. Distinct from [`Self::dropped`], which records a hook the
+    /// harness has no event for at all.
+    pub warnings: Vec<String>,
 }
 
 impl HookInjection {
     /// Whether this injection changes anything about the spawn.
     pub fn is_empty(&self) -> bool {
         self.args.is_empty() && self.env.is_empty()
+    }
+
+    /// Every operator-facing note this injection produced — dropped hooks and
+    /// warnings alike — as lines ready for a log or status surface.
+    pub fn notes(&self) -> Vec<String> {
+        self.dropped
+            .iter()
+            .map(|dropped| {
+                format!(
+                    "hook {} not installed for {}: {}",
+                    dropped.event.as_str(),
+                    dropped.provider.as_str(),
+                    dropped.reason,
+                )
+            })
+            .chain(self.warnings.iter().cloned())
+            .collect()
     }
 }

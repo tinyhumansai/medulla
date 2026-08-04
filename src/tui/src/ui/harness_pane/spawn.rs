@@ -112,22 +112,15 @@ impl LocalHarnesses {
         // attribution depended on which door the session came through.
         let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
         env.extend(attribution_env);
-        let (launch_args, dropped_hooks) =
+        let (launch_args, hook_notes) =
             medulla::harness_hooks::launch_args(choice.provider, self.attribution, &self.hooks);
         extra_args.extend(launch_args);
-        // Unsupported (harness, event) pairs are dropped here without a line of
-        // their own: this crate renders a full-screen TUI, so stderr would corrupt
-        // the pane, and the coverage a hook actually got belongs on screen rather
-        // than in a log nobody reads mid-session.
-        let _ = dropped_hooks;
+        // Routed to the log rather than stderr: this crate draws a full-screen
+        // TUI, where a stray line corrupts the pane. Covers both hooks the
+        // harness cannot run and hooks it will not run until trusted.
         if let Some(log) = &self.log {
-            for dropped in &dropped_hooks {
-                log(&format!(
-                    "hook {} not installed for {}: {}",
-                    dropped.event.as_str(),
-                    dropped.provider.as_str(),
-                    dropped.reason
-                ));
+            for note in &hook_notes {
+                log(note);
             }
         }
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());

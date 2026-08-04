@@ -303,3 +303,36 @@ fn every_spawn_seam_uses_the_merged_launch_builder() {
         );
     }
 }
+
+#[test]
+fn codex_reports_that_its_hooks_are_inert_until_trusted() {
+    // Codex skips hooks absent from its trust store, and a per-spawn injection
+    // always is. Medulla does not pass `--dangerously-bypass-hook-trust`,
+    // because that flag is invocation-wide and would also authorize whatever
+    // hooks the checked-out repository declares. The cost is that the feature
+    // does nothing until the operator trusts it — which must be said, or this
+    // module reproduces the exact silent failure it exists to prevent.
+    let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
+    let injection = hook_injection(HarnessProvider::Codex, &hooks);
+
+    assert!(
+        !injection
+            .args
+            .iter()
+            .any(|arg| arg.contains("bypass-hook-trust")),
+        "the invocation-wide trust bypass must never be passed",
+    );
+    assert_eq!(injection.warnings.len(), 1);
+    assert!(injection.warnings[0].contains("trust"));
+    // The warning reaches callers through the same channel dropped hooks do.
+    assert!(injection.notes().iter().any(|note| note.contains("trust")));
+}
+
+#[test]
+fn claude_needs_no_trust_warning() {
+    // Claude Code runs `--settings` hooks without prompting, so there is nothing
+    // for the operator to do and nothing to warn about.
+    let hooks = config(vec![hook(HookEvent::SessionStart, "*", "echo hi")]);
+    let injection = hook_injection(HarnessProvider::Claude, &hooks);
+    assert!(injection.warnings.is_empty());
+}

@@ -170,22 +170,11 @@ async fn run_provider_attempt(
     // Attribution and the operator's Medulla hooks share Claude Code's single
     // `--settings` flag, so they are built together — see
     // `harness_hooks::launch_args`.
-    let (launch_args, dropped_hooks) =
+    let (launch_args, hook_notes) =
         crate::harness_hooks::launch_args(spec.provider, spec.attribution, &spec.hooks);
     extra_args.extend(launch_args);
-    if spec.provider == HarnessProvider::Codex && !spec.hooks.for_provider(spec.provider).is_empty()
-    {
-        tracing::warn!(
-            "Codex hook overrides remain subject to Codex's persisted hook trust; untrusted hooks will be skipped"
-        );
-    }
-    for dropped in &dropped_hooks {
-        tracing::warn!(
-            event = dropped.event.as_str(),
-            provider = dropped.provider.as_str(),
-            reason = %dropped.reason,
-            "medulla hook not installed",
-        );
+    for note in &hook_notes {
+        tracing::warn!(provider = spec.provider.as_str(), "{note}");
     }
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.

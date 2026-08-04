@@ -38,10 +38,31 @@ fn authored_directory_contains_only_workflow_sources_after_edits() {
         .map(|entry| entry.expect("entry").file_name())
         .collect();
     assert_eq!(source_entries, vec![std::ffi::OsString::from("clean.json")]);
-    let definition_state =
-        super::super::file::definition_state_dir(&[root.path().join("workflows")]);
+    let definition_state = super::super::file::definition_state_dir(
+        &root.path().join("state/workflows"),
+        &[root.path().join("workflows")],
+    );
     assert!(definition_state.join("revisions/clean").is_dir());
     assert!(definition_state.join("locks/.clean.lock").is_file());
+}
+
+#[test]
+fn explicit_state_root_owns_definition_history_and_locks() {
+    let root = tempfile::tempdir().unwrap();
+    let catalog_parent = tempfile::tempdir().unwrap();
+    let definitions = catalog_parent.path().join("authored");
+    let state = root.path().join("host-state");
+    let store = FileWorkflowStore::with_state(vec![definitions.clone()], &state);
+    let mut record = parse_workflow(&valid_document("placed"), "placed").unwrap();
+    store.save(&record).unwrap();
+    record.description = "edited".into();
+    store.save(&record).unwrap();
+
+    let definition_state =
+        super::super::file::definition_state_dir(&state, std::slice::from_ref(&definitions));
+    assert!(definition_state.join("revisions/placed").is_dir());
+    assert!(definition_state.join("locks/.placed.lock").is_file());
+    assert!(!catalog_parent.path().join("state").exists());
 }
 
 #[test]

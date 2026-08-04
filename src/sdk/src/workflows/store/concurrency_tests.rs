@@ -156,7 +156,11 @@ fn separate_store_instances_use_the_same_definition_lock() {
     let second = store_in(root.path());
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
+    let lock_path = definition_state_dir(
+        &root.path().join("state/workflows"),
+        &[root.path().join("workflows")],
+    )
+    .join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -201,7 +205,8 @@ fn workspace_scoped_stores_share_the_global_definition_lock() {
     );
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
+    let lock_path =
+        definition_state_dir(&state, &[root.path().join("workflows")]).join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -241,7 +246,11 @@ fn explicit_stores_derive_locks_from_the_shared_definition_destination() {
     let second = FileWorkflowStore::new(definitions, root.path().join("b/runs"));
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
+    let lock_path = definition_state_dir(
+        &root.path().join("state/workflows"),
+        &[root.path().join("workflows")],
+    )
+    .join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -275,8 +284,8 @@ fn lexical_catalog_aliases_derive_the_same_definition_state() {
     let aliased = root.path().join("missing/../catalog");
 
     assert_eq!(
-        super::file::definition_state_dir(&[direct]),
-        super::file::definition_state_dir(&[aliased])
+        super::file::definition_state_dir(root.path(), &[direct]),
+        super::file::definition_state_dir(root.path(), &[aliased])
     );
 }
 
@@ -290,8 +299,8 @@ fn symlinked_catalog_aliases_derive_the_same_definition_state() {
     std::os::unix::fs::symlink(&direct, &alias).expect("symlink");
 
     assert_eq!(
-        super::file::definition_state_dir(&[direct]),
-        super::file::definition_state_dir(&[alias])
+        super::file::definition_state_dir(root.path(), &[direct]),
+        super::file::definition_state_dir(root.path(), &[alias])
     );
 }
 

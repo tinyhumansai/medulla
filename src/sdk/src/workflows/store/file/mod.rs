@@ -43,6 +43,7 @@ use crate::workflows::types::{
     WorkflowSummary,
 };
 
+pub(super) use dirs::definition_state_dir;
 use document::{read_workflow, to_document};
 use paths::{is_json, stage_atomic, write_atomic};
 // Re-exported within the crate rather than merely imported: the identifier
@@ -140,17 +141,20 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("proposals"))
             .unwrap_or_else(|| PathBuf::from("proposals"));
-        let definition_state_dir = definition_state_dir(&dirs);
-        let revisions_dir = definition_state_dir.join("revisions");
-        let definition_locks_dir = definition_state_dir.join("locks");
+        let definition_root = dirs
+            .last()
+            .and_then(|write_dir| write_dir.parent())
+            .unwrap_or_else(|| Path::new("."))
+            .join("state/workflows");
+        let definition_state = definition_state_dir(&definition_root, &dirs);
         let decision_scope = file_store_scope(&proposals_dir);
         Self {
             dirs,
             runs_dir,
             journal_dir,
             proposals_dir,
-            revisions_dir,
-            definition_locks_dir,
+            revisions_dir: definition_state.join("revisions"),
+            definition_locks_dir: definition_state.join("locks"),
             decision_scope,
             write_lock: Arc::new(Mutex::new(())),
         }
@@ -161,14 +165,19 @@ impl FileWorkflowStore {
     /// The explicit form of [`FileWorkflowStore::new`], for callers that know
     /// where state belongs rather than only where runs go.
     pub fn with_state(dirs: Vec<PathBuf>, state_dir: &Path) -> Self {
-        let proposals_dir = state_dir.join("proposals");
-        let definition_state_dir = definition_state_dir(&dirs);
+        Self::with_state_roots(dirs, state_dir, state_dir)
+    }
+
+    /// Build with independently selected run and shared definition state roots.
+    fn with_state_roots(dirs: Vec<PathBuf>, run_state: &Path, definition_state: &Path) -> Self {
+        let proposals_dir = run_state.join("proposals");
+        let definition_state = definition_state_dir(definition_state, &dirs);
         Self {
             dirs,
-            runs_dir: state_dir.join("runs"),
-            journal_dir: state_dir.join("journal"),
-            revisions_dir: definition_state_dir.join("revisions"),
-            definition_locks_dir: definition_state_dir.join("locks"),
+            runs_dir: run_state.join("runs"),
+            journal_dir: run_state.join("journal"),
+            revisions_dir: definition_state.join("revisions"),
+            definition_locks_dir: definition_state.join("locks"),
             decision_scope: file_store_scope(&proposals_dir),
             proposals_dir,
             write_lock: Arc::new(Mutex::new(())),
@@ -181,7 +190,11 @@ impl FileWorkflowStore {
             std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
         let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
         let scope = format!("{digest:x}");
-        Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]))
+        Self::with_state_roots(
+            dirs,
+            &state_dir.join("scopes").join(&scope[..16]),
+            state_dir,
+        )
     }
 
     /// A store over the conventional locations for this environment and working
@@ -364,62 +377,6 @@ fn absolute_path(path: &Path) -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(path)
-}
-
-/// Host state shared by every store that writes the same definition catalog.
-///
-/// The write directory is conventionally `<medulla home>/workflows`, placing
-/// this beneath `<medulla home>/state/workflows`. Deriving it from the full
-/// destination—not a run scope—keeps locks and undo history coherent across
-/// workspaces without mixing unrelated catalogs.
-pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    let raw_write_dir = dirs
-        .last()
-        .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
-    let write_dir = canonical_path_identity(&raw_write_dir);
-    let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
-    let scope = format!(
-        "{:x}",
-        Sha256::digest(write_dir.as_os_str().as_encoded_bytes())
-    );
-    parent
-        .join("state")
-        .join("workflows")
-        .join("definitions")
-        .join(scope)
-}
-
-/// Resolve aliases in the deepest existing prefix, retaining a missing tail.
-fn canonical_path_identity(path: &Path) -> PathBuf {
-    let normalized = path
-        .components()
-        .fold(PathBuf::new(), |mut result, component| {
-            match component {
-                std::path::Component::ParentDir => {
-                    result.pop();
-                }
-                std::path::Component::CurDir => {}
-                other => result.push(other.as_os_str()),
-            }
-            result
-        });
-    let mut existing = normalized.as_path();
-    let mut missing = Vec::new();
-    while !existing.exists() {
-        let Some(name) = existing.file_name() else {
-            break;
-        };
-        missing.push(name.to_os_string());
-        let Some(parent) = existing.parent() else {
-            break;
-        };
-        existing = parent;
-    }
-    let mut resolved = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
-    for component in missing.into_iter().rev() {
-        resolved.push(component);
-    }
-    resolved
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

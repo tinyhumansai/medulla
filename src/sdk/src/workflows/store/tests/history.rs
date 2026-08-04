@@ -47,8 +47,11 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
     let legacy_dir = root.path().join("workflows/.revisions/greet");
     std::fs::create_dir_all(legacy_dir.parent().unwrap()).unwrap();
     std::fs::rename(
-        super::super::file::definition_state_dir(&[root.path().join("workflows")])
-            .join("revisions/greet"),
+        super::super::file::definition_state_dir(
+            &root.path().join("state/workflows"),
+            &[root.path().join("workflows")],
+        )
+        .join("revisions/greet"),
         &legacy_dir,
     )
     .unwrap();

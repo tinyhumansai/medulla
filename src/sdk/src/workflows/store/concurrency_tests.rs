@@ -134,7 +134,7 @@ fn separate_store_instances_use_the_same_definition_lock() {
     let second = store_in(root.path());
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = root.path().join("locks").join(".race.lock");
+    let lock_path = root.path().join("state/workflows/locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -179,7 +179,7 @@ fn workspace_scoped_stores_share_the_global_definition_lock() {
     );
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = state.join("locks/.race.lock");
+    let lock_path = root.path().join("state/workflows/locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -199,6 +199,41 @@ fn workspace_scoped_stores_share_the_global_definition_lock() {
         "a store for another workspace must wait on the shared definition lock"
     );
 
+    FileExt::unlock(&lock).expect("release definition lock");
+    received
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("save completes after unlock")
+        .expect("save succeeds");
+    writer.join().expect("writer thread");
+}
+
+#[test]
+fn explicit_stores_derive_locks_from_the_shared_definition_destination() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let definitions = vec![root.path().join("workflows")];
+    let first = FileWorkflowStore::new(definitions.clone(), root.path().join("a/runs"));
+    let second = FileWorkflowStore::new(definitions, root.path().join("b/runs"));
+    first.save(&document("race", "v0")).expect("seed save");
+
+    let lock_path = root.path().join("state/workflows/locks/.race.lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .expect("definition-derived lock exists");
+    lock.lock_exclusive().expect("claim definition lock");
+
+    let (sent, received) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        sent.send(second.save(&document("race", "v1")))
+            .expect("report save");
+    });
+    assert!(
+        received
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "different run roots must not split the shared definition lock"
+    );
     FileExt::unlock(&lock).expect("release definition lock");
     received
         .recv_timeout(std::time::Duration::from_secs(2))

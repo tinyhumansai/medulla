@@ -140,14 +140,9 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("proposals"))
             .unwrap_or_else(|| PathBuf::from("proposals"));
-        let revisions_dir = runs_dir
-            .parent()
-            .map(|state| state.join("revisions"))
-            .unwrap_or_else(|| PathBuf::from("revisions"));
-        let definition_locks_dir = runs_dir
-            .parent()
-            .map(|state| state.join("locks"))
-            .unwrap_or_else(|| PathBuf::from("locks"));
+        let definition_state_dir = definition_state_dir(&dirs);
+        let revisions_dir = definition_state_dir.join("revisions");
+        let definition_locks_dir = definition_state_dir.join("locks");
         let decision_scope = file_store_scope(&proposals_dir);
         Self {
             dirs,
@@ -167,12 +162,13 @@ impl FileWorkflowStore {
     /// where state belongs rather than only where runs go.
     pub fn with_state(dirs: Vec<PathBuf>, state_dir: &Path) -> Self {
         let proposals_dir = state_dir.join("proposals");
+        let definition_state_dir = definition_state_dir(&dirs);
         Self {
             dirs,
             runs_dir: state_dir.join("runs"),
             journal_dir: state_dir.join("journal"),
-            revisions_dir: state_dir.join("revisions"),
-            definition_locks_dir: state_dir.join("locks"),
+            revisions_dir: definition_state_dir.join("revisions"),
+            definition_locks_dir: definition_state_dir.join("locks"),
             decision_scope: file_store_scope(&proposals_dir),
             proposals_dir,
             write_lock: Arc::new(Mutex::new(())),
@@ -185,12 +181,7 @@ impl FileWorkflowStore {
             std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
         let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
         let scope = format!("{digest:x}");
-        let mut store = Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]));
-        // Definitions are global even though runs, proposals, and revisions
-        // are workspace-scoped. Every workspace writing that shared catalog
-        // must therefore contend on the same filesystem locks.
-        store.definition_locks_dir = state_dir.join("locks");
-        store
+        Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]))
     }
 
     /// A store over the conventional locations for this environment and working
@@ -368,6 +359,20 @@ fn absolute_path(path: &Path) -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(path)
+}
+
+/// Host state shared by every store that writes the same definition catalog.
+///
+/// The write directory is conventionally `<medulla home>/workflows`, making
+/// this `<medulla home>/state/workflows`. Deriving it from the destination—not
+/// a run scope—keeps locks and undo history coherent across workspaces and
+/// across callers of every public constructor.
+fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
+    dirs.last()
+        .and_then(|write_dir| write_dir.parent())
+        .unwrap_or_else(|| Path::new("."))
+        .join("state")
+        .join("workflows")
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

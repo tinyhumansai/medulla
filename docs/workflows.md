@@ -36,6 +36,12 @@ This makes `<medulla home>/workflows/` safe to sync on its own: it contains only
 the current authored `*.json` source files. Syncing it does not copy runs,
 checkpoints, logs, locks, or other machine-local state.
 
+Homes first used by a release before this split may still contain a legacy
+`.revisions/` directory and hidden `.*.lock` files. They remain readable for
+compatibility but are never written again; exclude those two legacy patterns
+when syncing an existing home, or remove them while Medulla is stopped once
+their undo history is no longer needed.
+
 ## Writing one
 
 The smallest useful workflow is a trigger and a step:

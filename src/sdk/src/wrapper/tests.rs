@@ -109,8 +109,11 @@ async fn missing_binary_is_a_clear_error() {
 #[tokio::test]
 async fn claude_rejects_ambiguous_duplicate_settings() {
     let mut env = HashMap::new();
-    env.insert("PATH".to_string(), "/bin:/usr/bin".to_string());
-    env.insert("TINYPLACE_CLAUDE_BIN".to_string(), "/bin/sh".to_string());
+    let existing_binary = std::env::current_exe().expect("the test executable has a path");
+    env.insert(
+        "TINYPLACE_CLAUDE_BIN".to_string(),
+        existing_binary.to_string_lossy().into_owned(),
+    );
     let err = run_wrapper_with(WrapperConfig {
         provider: HarnessProvider::Claude,
         child_args: vec!["--settings".to_string(), "{}".to_string()],

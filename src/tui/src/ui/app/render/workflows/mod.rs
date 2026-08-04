@@ -86,12 +86,13 @@ pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
 /// arrives with no arrowhead at all.
 pub(in crate::ui::app) const FOLD_MARGIN: usize = 2;
 
-/// Blank rows between one band of the folded graph and the next.
+/// Extra blank rows between one band of the folded graph and the next.
 ///
-/// One row, on top of the blank row every lane already ends with. That is the
-/// row a folded wire runs back along, so it does not have to cut across the
-/// band it is arriving at.
-pub(in crate::ui::app) const BAND_GAP: usize = 1;
+/// None: every lane already ends with a blank row, and that row is the one a
+/// folded wire crosses on. A second blank row bought nothing but height, and
+/// stretched every fold's descent into a three-row drop for a hop that is one
+/// band deep.
+pub(in crate::ui::app) const BAND_GAP: usize = 0;
 
 /// The most content columns the workflow rail may claim.
 ///

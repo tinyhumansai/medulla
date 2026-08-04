@@ -96,6 +96,9 @@ impl App {
         let block = crate::ui::widgets::panel(&self.theme, self.canvas_title(), focused);
         let inner = block.inner(area);
         self.wf.graph_rows = inner.height as usize;
+        // A width change can refold the selected node onto another row. Anchor
+        // the viewport to that recomputed row before painting the new layout.
+        self.scroll_canvas_to_cursor();
         f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 {
             return;

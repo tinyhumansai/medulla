@@ -82,7 +82,7 @@ impl App {
     ///
     /// Only vertically: the graph folds to the pane's width, so a node is never
     /// off to the side — a later layer is further *down*, on the next band.
-    fn scroll_canvas_to_cursor(&mut self) {
+    pub(in crate::ui::app) fn scroll_canvas_to_cursor(&mut self) {
         let Some(node) = self.wf.layout.node(self.wf.node_index) else {
             return;
         };

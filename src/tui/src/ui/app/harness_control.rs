@@ -25,6 +25,7 @@ use crate::worker::pty::HarnessControl;
 
 use super::types::{
     tab_pos, App, Cmd, HandbackPolicy, HandbackPrompt, HarnessPicker, HarnessPickerStep,
+    PickerPurpose,
 };
 
 impl App {
@@ -51,6 +52,7 @@ impl App {
                     return;
                 }
                 self.harness_picker = Some(HarnessPicker {
+                    purpose: PickerPurpose::Spawn,
                     choices,
                     index: 0,
                     step: HarnessPickerStep::Harness,
@@ -87,7 +89,7 @@ impl App {
         match harnesses.open_unmanaged(&choice, &workspace, skip) {
             Ok(id) => {
                 self.tab_index = tab_pos("Agents");
-                self.select_harness_row(&id);
+                self.select_session_row(&id);
                 let label = if managed { "managed" } else { "unmanaged" };
                 let mut status = format!(
                     "Started {} · {label}, the orchestrator will{} use it",
@@ -106,23 +108,16 @@ impl App {
                     self.hand_back_session(&id, None);
                 }
                 self.set_status(status);
+                // The quick path always leaves a declared agent behind if the
+                // operator wants one: a session in a directory nothing declares
+                // is a real thing running that the rail can only list loose.
+                self.offer_agent_declaration(choice.id(), &workspace);
             }
             // Surfaced, never swallowed: a spawn that fails silently leaves the
             // operator waiting for a pane that is never coming.
             Err(err) => {
                 self.set_status(format!("Could not start {}: {err}", choice.display_name()))
             }
-        }
-    }
-
-    /// Put the rail cursor on the row for `session_id`, if it has one.
-    fn select_harness_row(&mut self, session_id: &str) {
-        if let Some(index) = self
-            .rail_rows()
-            .iter()
-            .position(|row| row.session_id() == Some(session_id))
-        {
-            self.agent_index = index;
         }
     }
 
@@ -562,8 +557,29 @@ impl App {
                 self.refresh_harness_workspace_choices();
             }
             KeyCode::Enter => {
-                if self.selected_harness_workspace().is_none() {
+                let Some(workspace) = self.selected_harness_workspace() else {
                     self.set_status("Choose an existing directory");
+                    return;
+                };
+                let purpose = self
+                    .harness_picker
+                    .as_ref()
+                    .map(|picker| picker.purpose.clone())
+                    .unwrap_or(PickerPurpose::Spawn);
+                // Declaring is finished by naming, not by choosing an owner:
+                // nothing starts, so there is nobody to own it yet.
+                if purpose == PickerPurpose::DeclareAgent {
+                    let harness = self
+                        .harness_picker
+                        .as_ref()
+                        .and_then(|picker| picker.choices.get(picker.index))
+                        .map(|choice| choice.id().to_string());
+                    let Some(harness) = harness else {
+                        self.set_status("Choose a harness first");
+                        return;
+                    };
+                    self.harness_picker = None;
+                    self.prompt_agent_name(&harness, &workspace);
                     return;
                 }
                 if let Some(picker) = &mut self.harness_picker {

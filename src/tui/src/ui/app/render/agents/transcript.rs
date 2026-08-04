@@ -84,6 +84,41 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         let mut header: Vec<TLine> = Vec::new();
+        // §A7: the orchestrator says what it started, and each entry is a way in.
+        // Drawn first so its screen rows are the top of the pane and the hit map
+        // below can be computed from a fixed offset.
+        self.hit_started_sessions = None;
+        if on_orchestrator {
+            let started = self.started_sessions();
+            if !started.is_empty() {
+                header.push(TLine::from(Span::styled(
+                    format!("sessions started · {} · click to open", started.len()),
+                    Style::default().fg(Color::Cyan),
+                )));
+                for session in &started {
+                    header.push(TLine::from(Span::styled(
+                        format!(
+                            "  ↳ {} · {} · {}",
+                            session.agent, session.task_id, session.status
+                        ),
+                        Style::default().add_modifier(Modifier::DIM),
+                    )));
+                }
+                self.hit_started_sessions = Some((
+                    Rect {
+                        // The heading is not a destination; only the entries under
+                        // it are, so the box starts one row down.
+                        y: inner.y.saturating_add(1),
+                        height: (started.len() as u16).min(inner.height.saturating_sub(1)),
+                        ..inner
+                    },
+                    started
+                        .iter()
+                        .map(|session| session.task_id.clone())
+                        .collect(),
+                ));
+            }
+        }
         // What the selected agent is working on, in one line. The Work panel
         // beside this shows the whole picture, but it needs columns a narrow
         // terminal does not have — and the single most useful fact, what the

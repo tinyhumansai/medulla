@@ -41,6 +41,7 @@ fn raise(app: &mut App, overlay: Overlay) {
         }
         Overlay::HarnessPicker => {
             app.harness_picker = Some(HarnessPicker {
+                purpose: super::types::PickerPurpose::Spawn,
                 choices: Vec::new(),
                 index: 0,
                 step: HarnessPickerStep::Harness,

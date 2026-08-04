@@ -49,7 +49,17 @@ impl App {
             TLine::from(format!(
                 "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
             )),
-            TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from(
+                "Agents rail: Enter on + New agent declares one (harness type × workspace dir)",
+            ),
+            TLine::from(
+                "Ctrl-T opens a session of the selected agent · elsewhere it starts a loose harness",
+            ),
+            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
+            TLine::from(
+                "Click a line of the orchestrator's \"sessions started\" block to open that session",
+            ),
+            TLine::from("Ctrl-O returns to the orchestrator (and, once there, releases the mouse)"),
             TLine::from(format!(
                 "From an empty composer Esc focuses the rail · from a harness {FOCUS_CHORD_LABEL} releases to it"
             )),

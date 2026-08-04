@@ -58,7 +58,7 @@ fn select_overflow_row(app: &mut App) {
     let index = app
         .rail_rows()
         .iter()
-        .position(|row| matches!(row, RailRow::Agent(AgentRow::More { .. })))
+        .position(|row| matches!(row, RailRow::Lane(AgentRow::More { .. })))
         .expect("a lane with hidden sublanes has an overflow row");
     app.agent_index = index;
 }
@@ -67,7 +67,7 @@ fn select_overflow_row(app: &mut App) {
 fn on_overflow_row(app: &App) -> bool {
     matches!(
         app.rail_rows().get(app.agent_index),
-        Some(RailRow::Agent(AgentRow::More { .. }))
+        Some(RailRow::Lane(AgentRow::More { .. }))
     )
 }
 
@@ -87,7 +87,7 @@ fn click_overflow_row(app: &mut App) -> Option<Cmd> {
     let overflow = app
         .rail_rows()
         .iter()
-        .position(|row| matches!(row, RailRow::Agent(AgentRow::More { .. })))
+        .position(|row| matches!(row, RailRow::Lane(AgentRow::More { .. })))
         .expect("a lane with hidden sublanes has an overflow row");
     let (rect, owners) = app.hit_agents.clone().expect("the rail was drawn");
     let line = owners

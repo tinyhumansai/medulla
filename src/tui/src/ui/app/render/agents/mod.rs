@@ -79,23 +79,20 @@ impl App {
         let rows = self.rail_rows();
         let active = self.agent_index.min(rows.len().saturating_sub(1));
         self.agent_index = active;
-        let lane_index = match rows.get(active) {
-            Some(RailRow::Agent(row)) => row.lane_index().unwrap_or(0),
-            _ => 0,
-        };
-        let task = match rows.get(active) {
-            Some(RailRow::Agent(AgentRow::Sub { task, .. })) => Some(task.clone()),
-            _ => None,
-        };
-        // Only a *lane* row can be the orchestrator's. The action row and the
-        // operator's own harnesses fall back to lane 0 for the transcript
-        // behind them, and reading the role off that fallback claimed the
-        // orchestrator's composer for rows that are not it — a text box under a
-        // row with nothing to say to. Mirrors
+        let lane_index = rows
+            .get(active)
+            .and_then(|row| row.lane_index())
+            .unwrap_or(0);
+        let task = rows.get(active).and_then(|row| row.task()).cloned();
+        // Only a *lane* row can be the orchestrator's. Agents, sessions, hosts
+        // and the action row fall back to lane 0 for the transcript behind them,
+        // and reading the role off that fallback claimed the orchestrator's
+        // composer for rows that are not it — a text box under a row with
+        // nothing to say to. Mirrors
         // [`App::on_orchestrator_lane`](crate::ui::app), which the keyboard
         // reads, so focus and layout cannot disagree.
         let on_orchestrator = match rows.get(active) {
-            Some(RailRow::Agent(_)) => lanes
+            Some(RailRow::Lane(AgentRow::Lane { .. })) => lanes
                 .get(lane_index)
                 .map(|l| l.role == AgentRole::Orchestrator)
                 .unwrap_or(true),

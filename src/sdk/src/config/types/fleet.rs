@@ -25,6 +25,17 @@ pub struct FleetConfig {
     /// Durable agent identities deployed into them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub agents: Vec<AgentDescriptor>,
+    /// The agents this operator has declared on their own machines.
+    ///
+    /// Distinct from [`agents`](Self::agents), which is the *manager's*
+    /// descriptor for an agent it already knows about — a roster shape, read
+    /// from a fleet somebody else published. This list is the writable one: it
+    /// is what this client declares, and the local roster is built from it
+    /// rather than synthesized from whatever CLIs happened to be installed
+    /// (spec §2.1, "declared, never discovered"). See
+    /// [`crate::config::declare_agent`] for the read/write path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent_declarations: Vec<AgentDeclaration>,
     /// Kinds of agent that may be provisioned onto this chain.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub agent_templates: Vec<AgentTemplate>,
@@ -37,6 +48,7 @@ impl Default for FleetConfig {
             harnesses: Vec::new(),
             workspaces: Vec::new(),
             agents: Vec::new(),
+            agent_declarations: Vec::new(),
             agent_templates: crate::agents::default_templates(),
         }
     }
@@ -49,6 +61,7 @@ impl FleetConfig {
             && self.harnesses.is_empty()
             && self.workspaces.is_empty()
             && self.agents.is_empty()
+            && self.agent_declarations.is_empty()
             && self.agent_templates.is_empty()
     }
 
@@ -65,6 +78,7 @@ impl FleetConfig {
             && self.harnesses.is_empty()
             && self.workspaces.is_empty()
             && self.agents.is_empty()
+            && self.agent_declarations.is_empty()
     }
 
     /// The declared chain as the UI-facing roll-up (agents excluded — they reach

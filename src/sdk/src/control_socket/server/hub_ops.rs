@@ -117,7 +117,9 @@ impl FleetOps for HubFleetOps {
                         harness: worker.harness,
                         label: worker.label,
                         roles: worker.roles,
-                        workspace: worker.workspace,
+                        // The path only: this surface renders a directory, and
+                        // the workspace type has no reader here.
+                        workspace: worker.workspace.map(|workspace| workspace.path),
                         selected: worker.selected,
                         held,
                         held_reason: worker.control_reason,

@@ -15,7 +15,8 @@ use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
 use super::AppearanceConfig;
 use crate::protocol::{BudgetWindow, HarnessProvider};
 use crate::runtime::fleet::{
-    AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor, WorkspaceDescriptor,
+    AgentDeclaration, AgentTemplate, CapacitySnapshot, HarnessDescriptor, HostDescriptor,
+    WorkspaceDescriptor,
 };
 use crate::runtime::{AgentDescriptor, RoutingStrategy, SubscriptionRoutingStrategy};
 

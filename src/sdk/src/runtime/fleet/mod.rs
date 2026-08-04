@@ -17,11 +17,22 @@
 //! backend; nothing in this module reads it. The default agent-template catalog
 //! and its on-disk store live in [`crate::agents`], which owns everything about
 //! where templates come from.
+//!
+//! `declaration` is the writable end of the same chain: the agents an operator
+//! declares on *this* machine, which are the source of the local roster rather
+//! than a description of somebody else's.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod declaration;
+#[cfg(test)]
+mod declaration_tests;
 mod demo;
+pub use declaration::{
+    seed_declarations, suggest_agent_id, AgentDeclaration, WorkspaceRef, WorkspaceStrategy,
+    SELECTABLE_STRATEGIES, WORKSPACE_TYPE_CHECKOUT, WORKTREE_MAX_SESSIONS,
+};
 pub use demo::{
     demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, DEMO_FLEET_ENV,
 };

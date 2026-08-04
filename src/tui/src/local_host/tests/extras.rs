@@ -114,6 +114,7 @@ async fn a_failing_extra_does_not_take_the_other_hosts_down() {
         &network,
         options,
         PtyManager::new(),
+        &[],
     );
 
     assert_eq!(hosts.len(), 2, "the primary and the first extra both start");

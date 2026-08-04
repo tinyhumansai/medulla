@@ -13,8 +13,10 @@ pub(crate) struct LocalHost {
     /// The running host. Kept private so the UI reads it through this type's
     /// accessors rather than reaching into the SDK handle.
     pub(super) daemon: EmbeddedDaemon,
-    /// A roster entry naming this host, for the hub to advertise.
-    pub(super) spec: WorkerSpec,
+    /// One roster entry per agent declared on this host, for the hub to
+    /// advertise. Never empty: a host with no declarations is seeded from what
+    /// its daemon detected (see [`specs_for`](super::specs_for)).
+    pub(super) specs: Vec<WorkerSpec>,
 }
 
 impl LocalHost {
@@ -42,9 +44,10 @@ impl LocalHost {
         self.daemon.observation()
     }
 
-    /// The roster entry the hub should advertise for this host.
-    pub(crate) fn spec(&self) -> &WorkerSpec {
-        &self.spec
+    /// The roster entries the hub should advertise for this host — one per
+    /// declared agent.
+    pub(crate) fn specs(&self) -> &[WorkerSpec] {
+        &self.specs
     }
 
     /// A clone of the host's task state machine.

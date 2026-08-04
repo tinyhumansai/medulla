@@ -40,10 +40,18 @@ pub struct HubLinkConfig {
 }
 
 /// One worker the hub fronts on the backend roster.
-#[derive(Debug, Clone)]
+///
+/// A projection of an [`AgentDeclaration`](crate::runtime::AgentDeclaration) for
+/// a host in this process, and of a remembered roster row for a remote peer.
+/// Several specs may share one `address`: a machine advertises one entry per
+/// declared agent, and `id` is what tells them apart.
+#[derive(Debug, Clone, Default)]
 pub struct WorkerSpec {
     /// The `agentId` the backend targets (defaults to the worker's node name).
     pub id: String,
+    /// The host this worker runs on. Empty when the hub has no opinion — a
+    /// remote peer the operator added by address.
+    pub host_id: String,
     /// The worker's bridge address — its link node name, or a device-local name.
     pub address: String,
     /// Display name for the roster entry.
@@ -52,12 +60,22 @@ pub struct WorkerSpec {
     pub description: String,
     /// The coding-agent harness the worker runs (`claude`/`codex`/`opencode`).
     pub harness: String,
-    /// Absolute path of the workspace this worker runs tasks in, when the hub
-    /// knows it — which is the case for a host in this same process, and not for
-    /// a remote host the operator merely named.
+    /// The workspace this worker runs tasks in, when the hub knows it — which is
+    /// the case for a host in this same process, and not for a remote host the
+    /// operator merely named.
     ///
-    /// Advertised as `metadata.workspace`; see [`HubWorker::workspace`].
-    pub workspace: Option<String>,
+    /// Its path is advertised as `metadata.workspace`; see
+    /// [`HubWorker::workspace`](crate::hub::HubWorker::workspace).
+    pub workspace: Option<crate::runtime::WorkspaceRef>,
+    /// Agent-template ids this worker is offered for. Empty means unspecified.
+    ///
+    /// Sourced from the agent's declaration, which is what finally gives
+    /// `metadata.roles` something to carry for a host in this process.
+    pub roles: Vec<String>,
+    /// Sessions this worker may run at once, derived from its declared
+    /// strategy. Zero means unstated and is normalised to the serial default
+    /// when the roster entry is built.
+    pub max_sessions: u32,
 }
 /// Everything [`start_hub`] needs to bridge the backend to remote workers.
 /// Not `Debug`: the log sink is a boxed closure with no useful representation,

@@ -13,7 +13,7 @@ use rust_socketio::Payload;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::super::roster::{address_of, SharedRoster, SharedSubscriptionStrategy};
+use super::super::roster::{address_of, lane_id, SharedRoster, SharedSubscriptionStrategy};
 use super::super::runner::TaskRunner;
 use super::super::types::{HubLog, RunError, TaskOutcome, TaskRequest};
 use super::super::ActivityLog;
@@ -133,10 +133,7 @@ pub(super) async fn handle_task_run(
         let addr = address_of(&r, &agent_id);
         // The roster id this resolved to, which is the lane the Agents view
         // groups the task under — not the raw `agentId`, which may be absent.
-        let id = addr
-            .as_ref()
-            .and_then(|a| r.iter().find(|w| &w.address == a).map(|w| w.id.clone()))
-            .unwrap_or_default();
+        let id = lane_id(&r, &agent_id, addr.as_deref());
         (addr, id, known)
     };
     let Some(worker_address) = worker_address else {

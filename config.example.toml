@@ -336,6 +336,26 @@ tokenEnv = "MEDULLA_TOKEN"
 # workspaceId = "medulla"
 # templateId = "implementer"
 
+# agentDeclarations — the agents *you* declare on your own machines, and the
+# source of this client's roster. One per (harness × workspace): a machine with
+# claude and codex in two checkouts declares four, and each is separately
+# addressable by the orchestrator. Distinct from [[fleet.agents]] above, which
+# describes a fleet somebody else published.
+#
+# hostId matches the local bus address of the [host] / [[hosts]] entry that runs
+# it ("this-device" by default). strategy = "checkout" is the only implemented
+# one: sessions share the directory, so one runs at a time and the next queues.
+# Declare nothing and each host seeds one agent per CLI it detects, so an
+# install that predates this keeps exactly the roster it had.
+# [[fleet.agentDeclarations]]
+# agentId = "medulla-claude"
+# hostId = "this-device"
+# harness = "claude"           # claude · codex · opencode · a custom harness id
+# name = "medulla"             # optional; the rail falls back to the host's name
+# roles = ["implementer"]      # optional agentTemplate ids this agent is offered for
+# strategy = "checkout"
+# workspace = { path = "/srv/repos/medulla", type = "checkout" }
+
 # [[fleet.agentTemplates]]
 # id = "implementer"
 # name = "Implementer"

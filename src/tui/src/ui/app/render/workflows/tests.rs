@@ -712,19 +712,30 @@ fn columns_are_sized_to_the_pane_and_tile_it() {
             (super::MIN_NODE_WIDTH..=super::MAX_NODE_WIDTH).contains(&node_width),
             "at {width} columns a node is {node_width} wide"
         );
-        // A full band fills the pane: the last column ends within one column's
-        // slack of the right edge rather than leaving a ragged margin.
+        // A full band never overflows the pane, and unless its columns hit the
+        // maximum width it fills the pane rather than leaving a ragged margin.
         let (last, _) = app.graph_cell(per_band - 1, 0);
         let end = last + node_width;
         assert!(
             end <= canvas + super::FOLD_MARGIN,
             "at {width} columns the band overflows: ends at {end} of {canvas}"
         );
-        assert!(
-            end + super::GUTTER_SPAN >= canvas,
-            "at {width} columns the band leaves {} unused",
-            canvas.saturating_sub(end)
-        );
+        if node_width < super::MAX_NODE_WIDTH {
+            assert!(
+                end + super::GUTTER_SPAN >= canvas,
+                "at {width} columns the band leaves {} unused",
+                canvas.saturating_sub(end)
+            );
+        } else {
+            // Capped: the slack is in the gutters, and the columns keep their
+            // own stride rather than being stretched apart to fill the pane.
+            let (first, _) = app.graph_cell(0, 0);
+            assert_eq!(
+                last - first,
+                (per_band - 1) * (super::MAX_NODE_WIDTH + super::GUTTER_SPAN),
+                "at {width} columns the capped stride is kept"
+            );
+        }
     }
 }
 

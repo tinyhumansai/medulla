@@ -376,6 +376,7 @@ pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
     let write_dir = dirs
         .last()
         .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
+    let write_dir = canonical_path_identity(&write_dir);
     let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
     let scope = format!(
         "{:x}",
@@ -386,6 +387,39 @@ pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
         .join("workflows")
         .join("definitions")
         .join(scope)
+}
+
+/// Resolve aliases in the deepest existing prefix, retaining a missing tail.
+fn canonical_path_identity(path: &Path) -> PathBuf {
+    let normalized = path
+        .components()
+        .fold(PathBuf::new(), |mut result, component| {
+            match component {
+                std::path::Component::ParentDir => {
+                    result.pop();
+                }
+                std::path::Component::CurDir => {}
+                other => result.push(other.as_os_str()),
+            }
+            result
+        });
+    let mut existing = normalized.as_path();
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            break;
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = existing.parent() else {
+            break;
+        };
+        existing = parent;
+    }
+    let mut resolved = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    for component in missing.into_iter().rev() {
+        resolved.push(component);
+    }
+    resolved
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

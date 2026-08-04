@@ -293,6 +293,29 @@ fn sibling_definition_catalogs_do_not_share_revision_history() {
         .is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinked_catalog_paths_share_definition_state() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let real = root.path().join("real/workflows");
+    std::fs::create_dir_all(&real).expect("real catalog");
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(root.path().join("real"), &alias).expect("catalog alias");
+    let first = FileWorkflowStore::new(vec![real], root.path().join("runs-a"));
+    let second = FileWorkflowStore::new(vec![alias.join("workflows")], root.path().join("runs-b"));
+
+    first
+        .save(&document("same", "v0"))
+        .expect("seed definition");
+    second
+        .save(&document("same", "v1"))
+        .expect("edit through alias");
+    assert_eq!(
+        first.list_revisions("same").expect("shared history").len(),
+        1
+    );
+}
+
 #[test]
 fn separate_store_instances_serialize_proposal_decisions() {
     let root = tempfile::tempdir().expect("tempdir");

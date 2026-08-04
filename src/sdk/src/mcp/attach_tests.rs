@@ -179,6 +179,7 @@ fn attaching_a_cli_registers_the_server_on_the_argv() {
     let mut args = vec!["--resume".to_string()];
     attach_cli(
         crate::protocol::HarnessProvider::Claude,
+        "claude",
         "pty-1",
         &mut env,
         &mut args,
@@ -200,6 +201,7 @@ fn attaching_a_cli_leaves_an_unsupported_provider_untouched() {
     let mut args = Vec::new();
     let attached = attach_cli(
         crate::protocol::HarnessProvider::Codex,
+        "codex",
         "pty-2",
         &mut env,
         &mut args,
@@ -219,6 +221,7 @@ fn attaching_a_cli_passes_the_operators_tool_mode_through() {
     let mut args = Vec::new();
     attach_cli(
         crate::protocol::HarnessProvider::Claude,
+        "claude",
         "pty-3",
         &mut env,
         &mut args,
@@ -446,6 +449,7 @@ fn attach_cli_never_writes_the_process_environment() {
     let mut args = Vec::new();
     attach_cli(
         crate::protocol::HarnessProvider::Claude,
+        "claude",
         "attach-test-no-env-write",
         &mut env,
         &mut args,

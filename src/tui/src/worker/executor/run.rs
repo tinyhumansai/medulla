@@ -373,18 +373,25 @@ impl PtySessionExecutor {
         // same conversation is the same trade the headless executor's own resume
         // path accepts.
         let (mut env, mut extra_args) = self.spawn_env(options)?;
+        // Resolved once, from `self.env`, and then both *used* to launch and
+        // *shown* to the trust decision below. Deriving it twice from two
+        // different environments is what let an override live in `self.env`,
+        // select the executable, and still be invisible to `attach_mcp`
+        // reading the per-run child environment.
+        let bin = medulla::protocol::env::provider_bin(options.provider, &self.env);
         // Medulla's own tools, on the same terms an ACP-dispatched session gets
         // them. A task frame that asked for a workflow to be run needs the verb
         // to run it with.
         let mcp_grant_session = super::super::pty::launch::attach_mcp(
             options.provider,
+            &bin,
             &mut env,
             &mut extra_args,
             self.log.as_ref(),
         );
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
-            bin: medulla::protocol::env::provider_bin(options.provider, &self.env),
+            bin,
             cwd: options.cwd.clone(),
             env,
             extra_args,

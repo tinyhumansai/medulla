@@ -56,6 +56,7 @@ impl LocalHarnesses {
         // `workflow_run` is noticed — and, until now, the one that never had it.
         let mcp_grant_session = crate::worker::pty::launch::attach_mcp(
             provider,
+            &bin,
             &mut env,
             &mut extra_args,
             self.log.as_ref(),

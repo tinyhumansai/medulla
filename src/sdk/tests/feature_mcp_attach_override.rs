@@ -87,19 +87,23 @@ fn ensure_control_plane() {
     });
 }
 
+/// The environment here is deliberately *empty* while the binary is
+/// overridden. That is the regression: `PtySessionExecutor` selects its
+/// executable from `self.env` and hands the child a separately derived
+/// environment, so a decision that re-derived the binary from the environment
+/// it was passed would see no override and hand a wrapper the live grant
+/// (medulla#177). The binary is the only thing asked about.
 #[test]
 fn an_overridden_provider_binary_gets_no_fleet_grant() {
     let _home = scratch_home();
     ensure_control_plane();
 
-    let mut env = HashMap::from([(
-        "TINYVERSE_CLAUDE_BIN".to_string(),
-        "/opt/untrusted/claude".to_string(),
-    )]);
+    let mut env = HashMap::new();
     let mut args = Vec::new();
 
     let granted = attach_cli(
         HarnessProvider::Claude,
+        "/opt/untrusted/claude",
         "override-test-session",
         &mut env,
         &mut args,
@@ -139,6 +143,7 @@ fn the_default_provider_binary_still_gets_its_fleet_grant() {
 
     let granted = attach_cli(
         HarnessProvider::Claude,
+        "claude",
         "default-bin-test-session",
         &mut env,
         &mut args,
@@ -170,10 +175,7 @@ fn an_overridden_binary_with_a_bound_plane_logs_why_the_grant_was_withheld() {
     let _home = scratch_home();
     ensure_control_plane();
 
-    let mut env = HashMap::from([(
-        "TINYPLACE_CLAUDE_BIN".to_string(),
-        "/opt/wrapper/claude".to_string(),
-    )]);
+    let mut env = HashMap::new();
     let mut args = Vec::new();
     let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = lines.clone();
@@ -183,6 +185,7 @@ fn an_overridden_binary_with_a_bound_plane_logs_why_the_grant_was_withheld() {
 
     let granted = attach_cli(
         HarnessProvider::Claude,
+        "/opt/wrapper/claude",
         "override-log-test-session",
         &mut env,
         &mut args,
@@ -200,7 +203,7 @@ fn an_overridden_binary_with_a_bound_plane_logs_why_the_grant_was_withheld() {
     );
 }
 
-/// The redundant case from `provider_bin_is_overridden_only_when_the_resolved_binary_actually_differs`
+/// The redundant case from `bin_is_overridden_only_when_the_resolved_binary_actually_differs`
 /// (`protocol::env`'s own unit tests) carried through end to end: naming the
 /// default binary's own name changes nothing, so nothing is withheld and
 /// nothing is logged.
@@ -209,7 +212,7 @@ fn naming_the_default_binary_via_the_override_key_logs_nothing() {
     let _home = scratch_home();
     ensure_control_plane();
 
-    let mut env = HashMap::from([("TINYVERSE_CLAUDE_BIN".to_string(), "claude".to_string())]);
+    let mut env = HashMap::new();
     let mut args = Vec::new();
     let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = lines.clone();
@@ -219,6 +222,9 @@ fn naming_the_default_binary_via_the_override_key_logs_nothing() {
 
     let granted = attach_cli(
         HarnessProvider::Claude,
+        // What `provider_bin` resolves a redundant `TINYVERSE_CLAUDE_BIN=claude`
+        // to: the default's own name, which is not an override.
+        "claude",
         "redundant-override-test-session",
         &mut env,
         &mut args,

@@ -42,6 +42,7 @@ fn sweeping_this_instance_never_touches_a_sibling_sockets_directory() {
     let mut args = Vec::new();
     attach_cli(
         HarnessProvider::Claude,
+        "claude",
         "instance-a-orphan",
         &mut env,
         &mut args,

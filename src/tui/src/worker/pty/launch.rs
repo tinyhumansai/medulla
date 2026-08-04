@@ -29,6 +29,10 @@ use medulla::protocol::HarnessProvider;
 /// Medulla-spawned Claude Code had skills telling the model to call
 /// `workflow_run` and no such tool in the session.
 ///
+/// `bin` is the executable the caller has already resolved and is about to
+/// launch — passed rather than re-derived, because that is the one the trust
+/// decision has to be about; see [`medulla::protocol::env::bin_is_overridden`].
+///
 /// `log`, when given, is where an operator learns *why* `fleet_*` did not
 /// attach to a provider binary they overrode — see `attach_cli`'s own docs on
 /// when that note actually fires. Routed to the log, never to the terminal:
@@ -39,6 +43,7 @@ use medulla::protocol::HarnessProvider;
 #[cfg(feature = "workflows")]
 pub fn attach_mcp(
     provider: HarnessProvider,
+    bin: &str,
     env: &mut HashMap<String, String>,
     extra_args: &mut Vec<String>,
     log: Option<&medulla::daemon::LogFn>,
@@ -47,18 +52,19 @@ pub fn attach_mcp(
     // sharing one would share a capability and revoking either would revoke
     // both.
     let session = format!("pty-{}", uuid::Uuid::new_v4());
-    medulla::mcp::attach_cli(provider, &session, env, extra_args, log)
+    medulla::mcp::attach_cli(provider, bin, &session, env, extra_args, log)
 }
 
 /// Without the engine compiled in there is no tool server to attach.
 #[cfg(not(feature = "workflows"))]
 pub fn attach_mcp(
     provider: HarnessProvider,
+    bin: &str,
     env: &mut HashMap<String, String>,
     extra_args: &mut Vec<String>,
     log: Option<&medulla::daemon::LogFn>,
 ) -> Option<String> {
-    let _ = (provider, env, extra_args, log);
+    let _ = (provider, bin, env, extra_args, log);
     None
 }
 

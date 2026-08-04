@@ -76,7 +76,7 @@
 //! path on its own argv — that is how it knows what to read — so nothing
 //! about file permissions stops it from opening the file directly instead of
 //! behaving like Claude Code. A provider-binary override
-//! ([`crate::protocol::env::provider_bin_is_overridden`]) can name any
+//! ([`crate::protocol::env::bin_is_overridden`]) can name any
 //! executable there, so [`attach_cli`] withholds the fleet grant whenever one
 //! is in effect, per `AGENTS.md`'s "provider binary overrides are untrusted
 //! configuration."
@@ -530,6 +530,7 @@ pub fn server_spec(
 /// sent; nothing about the decision itself changes.
 pub fn attach_cli(
     provider: HarnessProvider,
+    bin: &str,
     session: &str,
     env: &mut HashMap<String, String>,
     args: &mut Vec<String>,
@@ -540,7 +541,12 @@ pub fn attach_cli(
     }
     let workflows_on = workflows_enabled(env);
     let tool_mode = env.get(super::TOOL_MODE_ENV).cloned();
-    let overridden = crate::protocol::env::provider_bin_is_overridden(provider, env);
+    // The binary the caller is *actually about to launch*, not one re-derived
+    // from `env`. A caller can hold two environments — the executor selects
+    // its executable from `self.env` and hands the child a separately derived
+    // one — and re-deriving here would clear a wrapper named only in the
+    // other.
+    let overridden = crate::protocol::env::bin_is_overridden(provider, bin);
     // Known ahead of minting so the log note below can say "withheld" only
     // when withholding actually cost this launch something: a host with no
     // control plane bound would have gotten no grant either way, and telling
@@ -555,11 +561,20 @@ pub fn attach_cli(
     let granted = fleet.is_some();
     if overridden && would_serve_fleet {
         if let Some(log) = log {
+            // What is left depends on whether authoring survived: with
+            // workflows off too, `server_spec` below returns `None` and this
+            // launch gets no MCP server at all. Saying "workflow tools are
+            // still attached" there would send an operator looking for a tool
+            // surface that is entirely absent.
+            let remainder = if workflows_on {
+                "workflow tools are still attached"
+            } else {
+                "and workflows are off on this host, so no MCP tools are attached at all"
+            };
             log(&format!(
-                "mcp: {} is running as {} (overridden); the fleet grant was withheld — \
-                 workflow tools are still attached",
+                "mcp: {} is running as {bin} (overridden); the fleet grant was withheld — \
+                 {remainder}",
                 provider.as_str(),
-                crate::protocol::env::provider_bin(provider, env),
             ));
         }
     }

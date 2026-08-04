@@ -217,10 +217,13 @@ impl App {
     /// what keeps a full band's right edge flush with the pane.
     fn column_x(&self, column: usize) -> usize {
         let (per_band, width) = self.column_metrics();
-        let span = column * self.canvas_width() / per_band;
-        // A capped column keeps its own width; the slack goes into the gutters
-        // rather than stretching a short name across half the pane.
-        span.min(column * (width + GUTTER_SPAN))
+        if width >= MAX_NODE_WIDTH {
+            // Columns that hit the cap keep their own stride: the pane has more
+            // room than the labels can use, and spreading them to fill it would
+            // put half a pane of blank between two short names.
+            return column * (width + GUTTER_SPAN);
+        }
+        column * self.canvas_width() / per_band
     }
 
     /// How many rows of canvas the graph panel has.

@@ -172,11 +172,8 @@ fn workspace_scopes_share_the_global_definition_lock() {
         &state,
         &root.path().join("workspace-a"),
     );
-    let second = FileWorkflowStore::with_workspace_state(
-        dirs,
-        &state,
-        &root.path().join("workspace-b"),
-    );
+    let second =
+        FileWorkflowStore::with_workspace_state(dirs, &state, &root.path().join("workspace-b"));
     first.save(&document("race", "v0")).expect("seed save");
 
     let lock_path = state.join("locks/.race.lock");

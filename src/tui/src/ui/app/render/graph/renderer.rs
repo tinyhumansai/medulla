@@ -16,9 +16,9 @@ use ratatui::widgets::{Paragraph, Widget};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
+use super::super::super::types::App;
 use super::charmap::{elbow_path, mix, point_along, rgb, scale, CharMap, UNITS_H, UNITS_W};
 use super::{layout, Graph, NodeKind};
-use super::super::super::types::App;
 
 /// Columns kept clear on the left and right of the canvas, for the labels of
 /// the nodes pressed against those edges. Sized for the longest label the mock

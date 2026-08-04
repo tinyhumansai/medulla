@@ -56,7 +56,11 @@ fn every_node_is_reachable_from_the_hub_or_feeds_it() {
         } else {
             (0, i)
         };
-        assert!(directed_path_exists(&graph, from, to), "{} is reachable", node.label);
+        assert!(
+            directed_path_exists(&graph, from, to),
+            "{} is reachable",
+            node.label
+        );
     }
 }
 
@@ -71,7 +75,13 @@ fn directed_path_exists(graph: &Graph, from: usize, to: usize) -> bool {
         if std::mem::replace(&mut seen[node], true) {
             continue;
         }
-        pending.extend(graph.edges.iter().filter(|edge| edge.from == node).map(|edge| edge.to));
+        pending.extend(
+            graph
+                .edges
+                .iter()
+                .filter(|edge| edge.from == node)
+                .map(|edge| edge.to),
+        );
     }
     false
 }

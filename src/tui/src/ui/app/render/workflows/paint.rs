@@ -37,6 +37,8 @@ struct Cell {
     color: Option<Color>,
     /// Whether the cell renders dim.
     dim: bool,
+    /// Whether the cell renders bold.
+    bold: bool,
     /// Whether the cell is reversed — how the cursor marks the selected box.
     selected: bool,
     /// Whether a node owns this cell. Wires never paint over one.
@@ -50,6 +52,7 @@ impl Default for Cell {
             wire: 0,
             color: None,
             dim: false,
+            bold: false,
             selected: false,
             locked: false,
         }
@@ -91,6 +94,7 @@ impl Canvas {
             cell.ch = ch;
             cell.color = style.color;
             cell.dim = style.dim;
+            cell.bold = style.bold;
             cell.selected = style.selected;
             cell.locked = true;
         }
@@ -148,6 +152,24 @@ impl Canvas {
         cell.dim = style.dim;
     }
 
+    /// Recolour a wire cell without changing what it draws.
+    ///
+    /// This is how the flow highlight moves along an edge: the wire keeps the
+    /// glyph its routing gave it, so the line stays unbroken, and only the one
+    /// cell the packet currently occupies is lit. Node cells and cells no wire
+    /// reached are left alone, so a highlight can never appear off its own wire.
+    pub(super) fn pulse(&mut self, x: usize, y: usize, color: Color) {
+        let Some(cell) = self.at(x, y) else {
+            return;
+        };
+        if cell.locked || cell.wire == 0 {
+            return;
+        }
+        cell.color = Some(color);
+        cell.dim = false;
+        cell.bold = true;
+    }
+
     /// Record that a wire leaves `(x, y)` by `sides`.
     fn wire(&mut self, x: usize, y: usize, sides: u8, style: CellStyle) {
         let Some(cell) = self.at(x, y) else {
@@ -174,14 +196,14 @@ impl Canvas {
         for row in self.cells.chunks(self.width) {
             let mut spans: Vec<Span<'static>> = Vec::new();
             let mut run = String::new();
-            let mut run_style: Option<(Option<Color>, bool, bool)> = None;
+            let mut run_style: Option<(Option<Color>, bool, bool, bool)> = None;
             for cell in row {
                 let ch = if cell.wire != 0 && cell.ch == ' ' {
                     wire_char(cell.wire)
                 } else {
                     cell.ch
                 };
-                let style = (cell.color, cell.dim, cell.selected);
+                let style = (cell.color, cell.dim, cell.bold, cell.selected);
                 // Runs of identically styled cells become one span, so a row of
                 // canvas is a handful of spans rather than one per column.
                 if run_style != Some(style) && !run.is_empty() {
@@ -207,6 +229,8 @@ pub(super) struct CellStyle {
     pub(super) color: Option<Color>,
     /// Whether the cell renders dim.
     pub(super) dim: bool,
+    /// Whether the cell renders bold.
+    pub(super) bold: bool,
     /// Whether the cell renders reversed.
     pub(super) selected: bool,
 }
@@ -217,6 +241,7 @@ impl CellStyle {
         Self {
             color: Some(color),
             dim: false,
+            bold: false,
             selected: false,
         }
     }
@@ -226,6 +251,11 @@ impl CellStyle {
         Self { dim: true, ..self }
     }
 
+    /// The same style, bold.
+    pub(super) fn bold(self) -> Self {
+        Self { bold: true, ..self }
+    }
+
     /// The same style, marked as the cursor's.
     pub(super) fn selected(self, selected: bool) -> Self {
         Self { selected, ..self }
@@ -233,14 +263,17 @@ impl CellStyle {
 }
 
 /// A styled span for one run of identically styled cells.
-fn span(text: &str, style: Option<(Option<Color>, bool, bool)>) -> Span<'static> {
-    let (color, dim, selected) = style.unwrap_or((None, false, false));
+fn span(text: &str, style: Option<(Option<Color>, bool, bool, bool)>) -> Span<'static> {
+    let (color, dim, bold, selected) = style.unwrap_or((None, false, false, false));
     let mut out = Style::default();
     if let Some(color) = color {
         out = out.fg(color);
     }
     if dim {
         out = out.add_modifier(Modifier::DIM);
+    }
+    if bold {
+        out = out.add_modifier(Modifier::BOLD);
     }
     if selected {
         out = out.add_modifier(Modifier::REVERSED);

@@ -47,9 +47,14 @@ impl App {
             self.set_status("Harness kill cancelled");
         }
         // A modal swallows the mouse, the same way it swallows the keyboard.
-        // The harness picker is one: a click that navigated the rail behind it
-        // left an overlay on screen describing a row nobody was pointing at.
-        if self.resume_picker.is_some() || self.harness_picker.is_some() {
+        // Pickers and the hand-back question are modal: a click that navigated
+        // the rail behind one would leave an overlay describing a row nobody
+        // was pointing at. In particular, do not let a second harness click
+        // replace the session named by an already-visible hand-back prompt.
+        if self.resume_picker.is_some()
+            || self.harness_picker.is_some()
+            || self.handback_prompt.is_some()
+        {
             return None;
         }
         // An attached harness is a terminal, and a terminal owns the pointer

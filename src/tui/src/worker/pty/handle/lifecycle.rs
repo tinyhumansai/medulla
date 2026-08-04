@@ -9,7 +9,8 @@ use portable_pty::{Child, MasterPty};
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
 use super::types::{
-    AttentionState, ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING,
+    AttentionState, ColdFields, SessionIo, SessionMeta, TerminalModes, NO_EXIT_CODE, STATE_EXITED,
+    STATE_RUNNING,
 };
 use super::SessionHandle;
 
@@ -63,6 +64,7 @@ impl SessionHandle {
                 checked_at: started_at,
             }),
             screen: Mutex::new(screen),
+            modes: Mutex::new(TerminalModes::default()),
             io: Mutex::new(Some(SessionIo { master, writes })),
             child: Mutex::new(Some(child)),
         }

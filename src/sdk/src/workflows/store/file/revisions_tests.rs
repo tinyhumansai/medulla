@@ -78,7 +78,8 @@ fn history_is_capped_and_the_oldest_go_first() {
     let root = tempfile::tempdir().expect("tempdir");
 
     for n in 0..MAX_REVISIONS + 5 {
-        capture(root.path(), &record("greet", &format!("v{n}"))).expect("capture");
+        let captured = capture(root.path(), &record("greet", &format!("v{n}"))).expect("capture");
+        commit_capture(&captured).expect("commit capture");
     }
 
     let listed = list(root.path(), "greet").expect("list");
@@ -126,6 +127,21 @@ fn a_snapshot_forgets_where_the_record_was_read_from() {
     // that by then holds something else.
     let listed = list(root.path(), "greet").expect("list");
     assert_eq!(listed[0].record.source_path, None);
+}
+
+#[test]
+fn current_and_legacy_histories_are_merged_newest_first() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let current = root.path().join("current");
+    let legacy = root.path().join("legacy");
+    capture(&legacy, &record("greet", "legacy")).expect("legacy capture");
+    capture(&current, &record("greet", "current")).expect("current capture");
+
+    let listed = list_merged(&current, &legacy, "greet").expect("merged history");
+
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].record.description, "current");
+    assert_eq!(listed[1].record.description, "legacy");
 }
 
 #[test]

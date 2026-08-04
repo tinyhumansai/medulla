@@ -82,6 +82,13 @@ impl App {
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
         match k.code {
+            // A harness row has an immutable launch snapshot. Jump straight to
+            // its diff rather than making the operator tab across and rely on
+            // the Changes view to remember which of several harnesses they had
+            // selected. When no harness is shown, `d` remains ordinary typing.
+            KeyCode::Char('d') if !ctrl && !alt && self.harness_pane_session.is_some() => {
+                AgentsKey::Handled(self.open_selected_harness_changes())
+            }
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);

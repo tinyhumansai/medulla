@@ -26,9 +26,26 @@ repository copy, so edits never have to create untracked files in the checkout.
 A malformed document costs only itself: the rest of the catalogue still loads
 and the failure is reported.
 
-Run records live under `<medulla home>/state/workflows/runs/`, and the engine's
-checkpoints — what lets a paused run survive a restart — under
-`state/workflows/checkpoints/`.
+Everything produced by running or editing those sources is kept separately
+under `<medulla home>/state/workflows/`: run records, checkpoints, persistent
+step state, evolution notes and proposals, undo revisions, and coordination
+locks. The run history is scoped by workspace, so its concrete path is
+`state/workflows/scopes/<workspace-id>/runs/`. Revision history and locks are
+scoped by a stable digest of the authored catalog's full path under
+`state/workflows/definitions/`, so distinct catalogs cannot mix their history.
+
+For new installations, this makes `<medulla home>/workflows/` safe to sync on
+its own: it contains only the current authored `*.json` source files. Homes
+upgraded from an earlier release may retain a legacy `.revisions/` directory or
+`.workflow.lock` file there for compatibility; exclude those legacy artifacts
+when syncing. Newly written runs, revisions, locks, and other machine-local
+state always use `state/workflows/`.
+
+Homes first used by a release before this split may still contain a legacy
+`.revisions/` directory and hidden `.*.lock` files. They remain readable for
+compatibility but are never written again; exclude those two legacy patterns
+when syncing an existing home, or remove them while Medulla is stopped once
+their undo history is no longer needed.
 
 ## Writing one
 

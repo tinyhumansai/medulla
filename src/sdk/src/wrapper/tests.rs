@@ -106,6 +106,27 @@ async fn missing_binary_is_a_clear_error() {
     assert!(err.to_string().contains("not found on PATH"), "got: {err}");
 }
 
+#[tokio::test]
+async fn claude_rejects_ambiguous_duplicate_settings() {
+    let mut env = HashMap::new();
+    env.insert("PATH".to_string(), "/bin:/usr/bin".to_string());
+    env.insert("TINYPLACE_CLAUDE_BIN".to_string(), "/bin/sh".to_string());
+    let err = run_wrapper_with(WrapperConfig {
+        provider: HarnessProvider::Claude,
+        child_args: vec!["--settings".to_string(), "{}".to_string()],
+        env,
+        cwd: ".".to_string(),
+        no_bridge: true,
+        session_id: Some("wsid-settings".to_string()),
+        pty_spawner: None,
+        attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
+    })
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("--settings cannot be combined"));
+}
+
 /// Two pinned tailers, one directory, two transcripts — each latches only its
 /// own. This is the mechanism that makes **claude** immune to the concurrent
 /// swap that afflicts codex: claude is launched with a minted `--session-id`, so

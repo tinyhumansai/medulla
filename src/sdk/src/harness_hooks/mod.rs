@@ -32,7 +32,7 @@
 //!   that flag every Medulla hook would be dropped without a word. Config layers
 //!   are additive in Codex, so this adds to the operator's own `hooks.json`
 //!   rather than replacing it.
-//! - **OpenCode** exposes hooks as a TypeScript plugin API rather than a
+//! - **OpenCode** exposes hooks as a scripted plugin API rather than a
 //!   declarative command hook, and is not adapted yet; its hooks are reported as
 //!   [`DroppedHook`]s rather than silently ignored.
 //! - **OpenHuman** runs in-process and has no external harness to configure.
@@ -145,7 +145,7 @@ fn dropped_for(provider: HarnessProvider, hooks: &HooksConfig) -> Vec<DroppedHoo
 fn unsupported_reason(provider: HarnessProvider, event: HookEvent) -> String {
     match provider {
         HarnessProvider::Opencode => {
-            "OpenCode exposes hooks through its TypeScript plugin API, which Medulla does not \
+            "OpenCode exposes hooks through its scripted plugin API, which Medulla does not \
              translate to yet"
                 .to_string()
         }

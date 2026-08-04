@@ -373,11 +373,14 @@ fn absolute_path(path: &Path) -> PathBuf {
 /// a run scope—keeps locks and undo history coherent across workspaces and
 /// across callers of every public constructor.
 fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    dirs.last()
-        .and_then(|write_dir| write_dir.parent())
-        .unwrap_or_else(|| Path::new("."))
-        .join("state")
-        .join("workflows")
+    let Some(write_dir) = dirs.last() else {
+        return PathBuf::from("state/workflows");
+    };
+    let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
+    let catalog = write_dir
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("workflows"));
+    parent.join("state").join(catalog)
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

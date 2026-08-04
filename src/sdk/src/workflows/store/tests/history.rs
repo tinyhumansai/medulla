@@ -100,6 +100,37 @@ fn workspace_scoped_stores_share_definition_revision_history() {
 }
 
 #[test]
+fn sibling_definition_catalogs_do_not_share_revision_history() {
+    let root = tempfile::tempdir().unwrap();
+    let first = FileWorkflowStore::new(
+        vec![root.path().join("catalog-a")],
+        root.path().join("runs-a"),
+    );
+    let second = FileWorkflowStore::new(
+        vec![root.path().join("catalog-b")],
+        root.path().join("runs-b"),
+    );
+
+    let mut first_record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    first.save(&first_record).unwrap();
+    first_record.description = "catalog a edit".into();
+    first.save(&first_record).unwrap();
+
+    let mut second_record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    second_record.description = "catalog b original".into();
+    second.save(&second_record).unwrap();
+    second_record.description = "catalog b edit".into();
+    second.save(&second_record).unwrap();
+
+    let first_history = first.list_revisions("greet").unwrap();
+    let second_history = second.list_revisions("greet").unwrap();
+    assert_eq!(first_history.len(), 1);
+    assert_eq!(first_history[0].record.description, "says hello");
+    assert_eq!(second_history.len(), 1);
+    assert_eq!(second_history[0].record.description, "catalog b original");
+}
+
+#[test]
 fn undo_restores_the_previous_version_and_is_itself_undoable() {
     let root = tempfile::tempdir().unwrap();
     let store = store_in(root.path());

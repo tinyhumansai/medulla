@@ -820,7 +820,7 @@ pub struct App {
     /// The Overview tab's animated workflow graph. Held on the app because its
     /// simulation has to survive between frames; it is advanced by the draw
     /// path, which is the only thing that looks at it.
-    pub(super) graph: super::render::graph::types::Graph,
+    pub(super) graph: super::render::graph::Graph,
     pub(super) status: String,
     /// A persistent "update vX.Y.Z available" banner, set by the background
     /// update checker; shown in the header until the app exits.

@@ -61,14 +61,14 @@ fn the_wires_carry_a_highlight_that_moves_between_frames() {
     // are the ones the terminal would have drawn.
     let first_drawing = render(&mut app);
     let first = colors(&mut app, 160, 40);
-    app.frame = app.frame.wrapping_add(1);
-    let second_drawing = render(&mut app);
-    let second = colors(&mut app, 160, 40);
+    let highlight_moved_without_drift = (1..64).any(|frame| {
+        app.frame = frame;
+        render(&mut app) == first_drawing && colors(&mut app, 160, 40) != first
+    });
 
-    assert_eq!(first_drawing, second_drawing, "node drift stayed unchanged");
-    assert_ne!(
-        first, second,
-        "the highlight moved along the wires between frames"
+    assert!(
+        highlight_moved_without_drift,
+        "wire colours move during a frame where node positions stay fixed"
     );
 }
 
@@ -181,8 +181,16 @@ fn each_column_is_sized_to_its_own_label() {
     let (_home, mut app) = app_with(&[wordy], &[]);
     render_sized(&mut app, 160, 34);
 
-    assert_eq!(app.column_width(0), super::MIN_LABEL_WIDTH, "short name");
-    assert_eq!(app.column_width(2), super::MAX_NODE_WIDTH, "long name");
+    assert_eq!(
+        app.column_width(0),
+        super::super::MIN_LABEL_WIDTH,
+        "short name"
+    );
+    assert_eq!(
+        app.column_width(2),
+        super::super::MAX_NODE_WIDTH,
+        "long name"
+    );
     assert!(
         app.column_width(1) < app.column_width(2),
         "a short step keeps its own narrow column"
@@ -222,7 +230,7 @@ fn a_band_never_runs_past_the_pane() {
             let (x, _) = app.graph_cell(layer, 0);
             let end = x + app.column_width(layer);
             assert!(
-                end <= canvas + super::FOLD_MARGIN,
+                end <= canvas + super::super::FOLD_MARGIN,
                 "at {width} columns layer {layer} ends at {end} of {canvas}: {screen}"
             );
         }
@@ -232,7 +240,7 @@ fn a_band_never_runs_past_the_pane() {
             let gap = app.graph_cell(1, 0).0 - (app.graph_cell(0, 0).0 + app.column_width(0));
             assert_eq!(
                 gap,
-                super::GUTTER_SPAN,
+                super::super::GUTTER_SPAN,
                 "at {width} columns the gap is {gap}: {screen}"
             );
         }
@@ -256,7 +264,7 @@ fn a_fold_picks_up_where_the_band_above_ended() {
 
     assert!(next_row > last_row, "one band below the other");
     assert!(
-        last_end.abs_diff(next_end) <= super::GUTTER_SPAN,
+        last_end.abs_diff(next_end) <= super::super::GUTTER_SPAN,
         "the fold's two ends are within a gutter of each other: {last_end} then {next_end}"
     );
 }

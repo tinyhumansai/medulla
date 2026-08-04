@@ -11,4 +11,5 @@ mod renderer;
 mod tests;
 mod types;
 
+#[allow(unused_imports)]
 pub(crate) use types::{Edge, EdgeKind, Graph, Node, NodeKind};

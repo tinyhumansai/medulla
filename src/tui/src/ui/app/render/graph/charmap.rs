@@ -105,7 +105,11 @@ impl CharMap {
         colors: (Rgb, Rgb),
     ) {
         let path = elbow_path(from, to, bias);
-        let turn_cells = [path[1], path[2]].map(|point| self.cell_of(point));
+        let corners = [
+            (path[1], corner_glyph(path[0], path[1], path[2])),
+            (path[2], corner_glyph(path[1], path[2], path[3])),
+        ];
+        let turn_cells = corners.map(|(point, glyph)| glyph.and_then(|_| self.cell_of(point)));
         let total = path_length(&path).max(f64::EPSILON);
         let mut travelled = 0.0;
         for pair in path.windows(2) {
@@ -143,10 +147,7 @@ impl CharMap {
             travelled += span;
         }
         // Corners last, so they are not overwritten by the runs meeting there.
-        for (corner, glyph) in [
-            (path[1], corner_glyph(path[0], path[1], path[2])),
-            (path[2], corner_glyph(path[1], path[2], path[3])),
-        ] {
+        for (corner, glyph) in corners {
             if let Some(glyph) = glyph {
                 self.put(
                     corner,

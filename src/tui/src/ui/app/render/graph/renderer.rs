@@ -51,7 +51,7 @@ impl App {
     /// only clock is the render tick, and the graph owns no state that anything
     /// else reads. Below a few rows the canvas cannot say anything useful, so a
     /// cramped panel gets a plain note instead of an unreadable smear.
-    pub(super) fn draw_overview_graph(&mut self, f: &mut Frame, area: Rect) {
+    pub(in crate::ui::app::render) fn draw_overview_graph(&mut self, f: &mut Frame, area: Rect) {
         let block = self.panel("Workflow");
         let inner = block.inner(area);
         f.render_widget(block, area);

@@ -177,7 +177,7 @@ impl App {
                 } else {
                     StepState::Live
                 };
-                lines.push(header(2, "Which harness it runs", state));
+                lines.push(header(2, "Which harness type it runs", state));
                 lines.push(TLine::from(""));
                 let providers = self.add_host_providers();
                 for (index, provider) in providers.iter().enumerate() {
@@ -233,7 +233,7 @@ impl App {
                     "Enter continue · Esc start over · c copy the install line"
                 }
                 (false, AddHostKind::Local) => {
-                    "↑↓ choose a harness · Enter continue · Esc start over"
+                    "↑↓ choose a harness type · Enter continue · Esc start over"
                 }
             },
             dim,

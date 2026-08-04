@@ -1,10 +1,10 @@
 //! Data types for the `harness_pane` module: the handle onto this device's
-//! live harnesses, and where the operator's keyboard is pointed.
+//! live sessions, and where the operator's keyboard is pointed.
 
 #[allow(unused_imports)]
 use super::*;
 
-/// One launchable entry in the operator's harness picker.
+/// One harness type the operator may start a session on.
 ///
 /// Native entries point directly at an installed CLI. Custom entries retain
 /// the registered preset so spawning can apply its model, endpoint, and
@@ -50,7 +50,8 @@ impl HarnessChoice {
     }
 }
 
-/// The local harness sessions the Agents tab reads and types into.
+/// The live sessions this device is running — what the Agents tab reads and
+/// types into.
 ///
 /// Two halves that are only useful together: [`sessions`](Self::sessions) holds
 /// the screens and the write side, and [`runtime`](Self::runtime) answers which
@@ -61,7 +62,7 @@ impl HarnessChoice {
 /// the host alive. When the host goes away the sessions simply stop being
 /// resolvable, which is the truth the pane should be showing.
 #[derive(Clone)]
-pub struct LocalHarnesses {
+pub struct LocalSessions {
     /// Every PTY-backed harness running on this device.
     pub sessions: PtyManager,
     /// Each host's task state machine, for
@@ -89,23 +90,23 @@ pub struct LocalHarnesses {
     /// would make "it works when I run it myself" a real and confusing
     /// difference rather than a figure of speech.
     pub env: std::collections::HashMap<String, String>,
-    /// The host's workspace, used as the default directory for a new harness.
+    /// The host's workspace, used as the default directory for a new session.
     pub workspace: String,
     /// The coding-agent CLIs this device actually has, in the order the picker
     /// should offer them.
     pub providers: Vec<medulla::protocol::HarnessProvider>,
     /// Registered presets attached to this local host.
     pub custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
-    /// The configured `[router]`, injected into an operator-started harness the
+    /// The configured `[router]`, injected into an operator-started session the
     /// same way the executor injects it into a task's.
     pub router: Option<medulla::config::RouterConfig>,
-    /// Whether commits made in an operator-started harness are attributed to
+    /// Whether commits made in an operator-started session are attributed to
     /// Medulla — the resolved `attribution.commit` config value (on by
     /// default).
     ///
     /// Held here for the same reason `router` is: this is the one spawn seam
     /// the executor does not own, and a setting that applied to dispatched work
-    /// but not to a harness the operator opened by hand would make attribution
+    /// but not to a session the operator opened by hand would make attribution
     /// depend on which door the session came through.
     pub attribution: bool,
     /// Lifecycle hooks supplied to a supported operator-started harness — the resolved
@@ -118,7 +119,7 @@ pub struct LocalHarnesses {
     pub log: Option<medulla::daemon::LogFn>,
 }
 
-impl LocalHarnesses {
+impl LocalSessions {
     /// Every launchable native CLI and registered preset in picker order.
     pub fn choices(&self) -> Vec<HarnessChoice> {
         let openhuman = medulla::protocol::HarnessProvider::Openhuman;

@@ -56,7 +56,7 @@ fn choosing_a_harness_baseline_clears_comments_when_repository_changes() {
         "first repository",
     );
 
-    state.choose_harness_baseline().expect("switch repository");
+    state.choose_session_baseline().expect("switch repository");
 
     assert_eq!(state.root.as_deref(), Some(second_root.as_path()));
     assert_eq!(state.baseline.as_deref(), Some(second_baseline.as_str()));
@@ -70,7 +70,7 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
     let first = output(directory.path(), &["rev-parse", "HEAD"]);
     let mut state = GitChangesState::default();
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
-    state.follow_harness(directory.path(), &first, &identity);
+    state.follow_session(directory.path(), &first, &identity);
     state
         .comments
         .upsert(Path::new("src/main.rs"), CommentAnchor::File, "keep this");
@@ -80,7 +80,7 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
     );
     let second = output(directory.path(), &["rev-parse", "HEAD"]);
 
-    state.follow_harness(directory.path(), &second, &identity);
+    state.follow_session(directory.path(), &second, &identity);
 
     assert_eq!(state.baseline.as_deref(), Some(second.as_str()));
     assert_eq!(state.comments.count_for(Path::new("src/main.rs")), 1);
@@ -98,18 +98,18 @@ fn choosing_harness_launch_replaces_an_operator_selected_baseline() {
     let manual = output(directory.path(), &["rev-parse", "HEAD"]);
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
     let mut state = GitChangesState::default();
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.follow_session(directory.path(), &launch, &identity);
     state
         .choose_baseline(&manual, BaselineSource::Manual)
         .expect("manual baseline");
 
     // Opening a selected harness with `d` uses this explicit activation after
     // following it; an ordinary refresh deliberately preserves Manual mode.
-    state.follow_harness(directory.path(), &launch, &identity);
-    state.choose_harness_baseline().expect("harness baseline");
+    state.follow_session(directory.path(), &launch, &identity);
+    state.choose_session_baseline().expect("harness baseline");
 
     assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
-    assert_eq!(state.baseline_source, BaselineSource::HarnessLaunch);
+    assert_eq!(state.baseline_source, BaselineSource::SessionLaunch);
 }
 
 #[test]
@@ -119,33 +119,33 @@ fn returning_from_a_non_git_harness_preserves_same_repository_comments() {
     let launch = output(directory.path(), &["rev-parse", "HEAD"]);
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
     let mut state = GitChangesState::default();
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.follow_session(directory.path(), &launch, &identity);
     state
         .comments
         .upsert(Path::new("src/main.rs"), CommentAnchor::File, "keep this");
 
-    state.clear_repository("selected harness is outside Git".to_owned());
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.clear_repository("selected session is outside Git".to_owned());
+    state.follow_session(directory.path(), &launch, &identity);
 
     assert_eq!(state.comments.count_for(Path::new("src/main.rs")), 1);
 }
 
 #[test]
-fn applying_harness_launch_revalidates_the_checkout_marker() {
+fn applying_session_launch_revalidates_the_checkout_marker() {
     let directory = tempdir().expect("repository");
     init_repo(directory.path());
     let launch = output(directory.path(), &["rev-parse", "HEAD"]);
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
     let mut state = GitChangesState::default();
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.follow_session(directory.path(), &launch, &identity);
     fs::remove_dir_all(directory.path().join(".git")).expect("remove checkout metadata");
     git(directory.path(), &["init"]);
 
     let error = state
-        .choose_harness_baseline()
+        .choose_session_baseline()
         .expect_err("replacement checkout must be rejected");
 
-    assert_eq!(error, "Harness Git checkout changed since launch");
+    assert_eq!(error, "Session Git checkout changed since launch");
 }
 
 #[test]
@@ -251,12 +251,12 @@ fn a_valid_harness_recovers_after_a_non_git_selection_clears_manual_state() {
         ..GitChangesState::default()
     };
 
-    state.clear_repository("selected harness is outside Git".to_owned());
+    state.clear_repository("selected session is outside Git".to_owned());
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.follow_session(directory.path(), &launch, &identity);
     state.refresh();
 
-    assert_eq!(state.baseline_source, BaselineSource::HarnessLaunch);
+    assert_eq!(state.baseline_source, BaselineSource::SessionLaunch);
     assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
     assert_eq!(state.error, None);
 }
@@ -268,7 +268,7 @@ fn row(
     launch_commit: Option<String>,
     started_at: i64,
 ) -> crate::worker::pty::SessionRow {
-    use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+    use crate::worker::pty::{PtyState, SessionControl, SessionRow};
     SessionRow {
         id: id.to_owned(),
         label: label.to_owned(),
@@ -288,7 +288,7 @@ fn row(
         last_output_at: started_at,
         last_error: None,
         busy: false,
-        control: HarnessControl::User,
+        control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
         name: None,
         attention: None,

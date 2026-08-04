@@ -34,7 +34,7 @@ use medulla::session_history::SessionAgentKind;
 use medulla::sessions::{SessionClass, TurnStream};
 use medulla::wrapper::tail::SessionTailer;
 
-use super::super::pty::{HarnessControl, LaunchSpec, PtyManager, SessionOrigin};
+use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin};
 use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
@@ -267,7 +267,7 @@ impl PtySessionExecutor {
                 .expect("workspace context lock poisoned")
                 .remove(id);
         }
-        if class == SessionClass::Bounded && control != Some(HarnessControl::User) {
+        if class == SessionClass::Bounded && control != Some(SessionControl::User) {
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
@@ -281,7 +281,7 @@ impl PtySessionExecutor {
                 // unconditionally: attention sampling is asynchronous and may
                 // not have latched a brand-new cue yet. User-held sessions have
                 // a direct rail row and cannot be reclaimed behind their back.
-                self.sessions.set_control(id, HarnessControl::User);
+                self.sessions.set_control(id, SessionControl::User);
                 self.sessions.release(id);
             }
         }
@@ -403,7 +403,7 @@ impl PtySessionExecutor {
             // Opened to serve a task frame, so the orchestrator holds it. An
             // operator can still take it over later; that is what stops the
             // next frame landing in a composer they are typing in.
-            control: HarnessControl::Orchestrator,
+            control: SessionControl::Orchestrator,
             // …and that later takeover does *not* touch this: the session was
             // auto-created by a dispatch (§4.1), which is true for the rest of
             // its life however many times control changes hands. Unnamed on
@@ -560,7 +560,7 @@ impl PtySessionExecutor {
             // preference. Yield before processing aborts or transcript output
             // so the executor cannot send Ctrl-C, report a stale completion, or
             // later close the PTY underneath the operator.
-            if self.sessions.control(id) == Some(HarnessControl::User) {
+            if self.sessions.control(id) == Some(SessionControl::User) {
                 return Err(format!(
                     "{}: operator took control of the {} session",
                     medulla::daemon::HARNESS_HELD_PREFIX,
@@ -689,10 +689,10 @@ impl PtySessionExecutor {
 /// Retain mapper state only while the PTY can serve a later turn.
 pub(super) fn retains_workspace_context(
     class: SessionClass,
-    control: Option<HarnessControl>,
+    control: Option<SessionControl>,
     running: bool,
 ) -> bool {
-    running && (class == SessionClass::Unbound || control == Some(HarnessControl::User))
+    running && (class == SessionClass::Unbound || control == Some(SessionControl::User))
 }
 
 /// Forget mapper state only when the orchestrator actually won the stop race.

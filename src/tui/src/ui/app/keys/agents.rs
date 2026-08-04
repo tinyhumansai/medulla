@@ -37,7 +37,7 @@ impl App {
     /// [`agents_panes`](crate::ui::app::render) lays out from, so the keyboard
     /// and the screen cannot disagree about whether there is somewhere to type.
     pub fn agents_composer_shown(&self) -> bool {
-        self.on_orchestrator_lane() && self.harness_pane_session.is_none()
+        self.on_orchestrator_lane() && self.pane_session.is_none()
     }
 
     /// Whether the Agents rail currently holds the keyboard.
@@ -94,14 +94,14 @@ impl App {
             // its diff rather than making the operator tab across and rely on
             // the Changes view to remember which of several harnesses they had
             // selected. When no harness is shown, `d` remains ordinary typing.
-            KeyCode::Char('d') if !ctrl && !alt && self.harness_pane_session.is_some() => {
+            KeyCode::Char('d') if !ctrl && !alt && self.pane_session.is_some() => {
                 AgentsKey::Handled(self.open_selected_harness_changes())
             }
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
                 } else {
-                    self.set_status("Select a running harness task first");
+                    self.set_status("Select a running session first");
                 }
                 AgentsKey::Handled(None)
             }

@@ -39,7 +39,7 @@ fn task_excerpt(task: Option<&TrackedTask>) -> Option<String> {
         .or_else(|| Some(task.title.clone()))
 }
 
-/// Fold harness escalations and pending lane questions into one stable queue.
+/// Fold agent escalations and pending lane questions into one stable queue.
 ///
 /// Questions are ordered by lane/task order before free-form escalations.
 /// Duplicate escalation strings collapse to one item. A question disappears as
@@ -86,7 +86,7 @@ pub fn decision_items(status: Option<&HarnessStatus>, lanes: &[AgentLane]) -> Ve
                 id: format!("escalation:{:016x}", stable_hash(message)),
                 kind: DecisionKind::Escalation,
                 question: message.to_string(),
-                lane_context: "harness escalation".into(),
+                lane_context: "agent escalation".into(),
                 contract_excerpt: None,
                 answer_target: None,
             });

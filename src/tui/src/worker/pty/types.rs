@@ -56,12 +56,12 @@ impl PtyState {
     }
 }
 
-/// Who is allowed to drive a harness session right now.
+/// Who is allowed to drive an agent session right now.
 ///
 /// Keyboard focus ([`HarnessFocus`](crate::ui::harness_pane::HarnessFocus)) says
 /// where *keystrokes* go; this says who holds *authority*. They are not the same
 /// thing, and conflating them is what let the orchestrator paste a task prompt
-/// into a composer the operator was already typing in — a harness serves one turn
+/// into a composer the operator was already typing in — a session serves one turn
 /// at a time, so two writers produce one confidently wrong answer rather than an
 /// error.
 ///
@@ -72,11 +72,11 @@ impl PtyState {
 /// this one gates dispatch.
 ///
 /// This is the single gate on dispatch: [`claim_idle`](super::PtyManager::claim_idle)
-/// only ever returns an orchestrator-held session. An "unmanaged" harness is not a
+/// only ever returns an orchestrator-held session. An "unmanaged" session is not a
 /// separate kind of thing — it is one that was born [`User`](Self::User)-held and
 /// has not been handed over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum HarnessControl {
+pub enum SessionControl {
     /// The orchestrator may dispatch task frames into this session.
     #[default]
     Orchestrator,
@@ -84,28 +84,28 @@ pub enum HarnessControl {
     User,
 }
 
-impl HarnessControl {
+impl SessionControl {
     /// The display string, from the operator's point of view.
     ///
-    /// "you" rather than "user" because it is rendered next to a harness the
+    /// "you" rather than "user" because it is rendered next to a session the
     /// person reading it is looking at.
     pub fn as_str(self) -> &'static str {
         match self {
-            HarnessControl::Orchestrator => "orchestrator",
-            HarnessControl::User => "you",
+            SessionControl::Orchestrator => "orchestrator",
+            SessionControl::User => "you",
         }
     }
 
     /// Whether the orchestrator may dispatch into a session in this state.
     pub fn is_orchestrator(self) -> bool {
-        matches!(self, HarnessControl::Orchestrator)
+        matches!(self, SessionControl::Orchestrator)
     }
 
     /// The other side of the handover, for a toggle.
     pub fn toggled(self) -> Self {
         match self {
-            HarnessControl::Orchestrator => HarnessControl::User,
-            HarnessControl::User => HarnessControl::Orchestrator,
+            SessionControl::Orchestrator => SessionControl::User,
+            SessionControl::User => SessionControl::Orchestrator,
         }
     }
 }
@@ -157,10 +157,10 @@ pub struct LaunchSpec {
     pub session_id: Option<String>,
     /// Who holds the session the moment it opens.
     ///
-    /// A task frame opens an [`Orchestrator`](HarnessControl::Orchestrator)
+    /// A task frame opens an [`Orchestrator`](SessionControl::Orchestrator)
     /// session; an operator spawning one from the TUI opens a
-    /// [`User`](HarnessControl::User) one, which is what makes it unmanaged.
-    pub control: HarnessControl,
+    /// [`User`](SessionControl::User) one, which is what makes it unmanaged.
+    pub control: SessionControl,
     /// Who is starting this session — see [`SessionOrigin`].
     ///
     /// Display and labelling only — never gate behaviour on it. Control is the
@@ -235,8 +235,8 @@ pub struct SessionRow {
     /// completion. So a busy session is not reusable, however idle its pty
     /// looks.
     pub busy: bool,
-    /// Who holds this session right now — see [`HarnessControl`].
-    pub control: HarnessControl,
+    /// Who holds this session right now — see [`SessionControl`].
+    pub control: SessionControl,
     /// Who started it — see [`SessionOrigin`]. Immutable, and independent of
     /// [`SessionRow::control`]: taking a dispatched session does not make it
     /// yours to have started.

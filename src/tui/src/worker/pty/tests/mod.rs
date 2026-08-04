@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use medulla::protocol::HarnessProvider;
 
 use super::manager::PtyManager;
-use super::types::{HarnessControl, LaunchSpec, PtyState};
+use super::types::{LaunchSpec, PtyState, SessionControl};
 
 mod attention;
 mod checkout;
@@ -58,7 +58,7 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,

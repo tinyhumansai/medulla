@@ -2,7 +2,7 @@
 
 use crossterm::event::KeyModifiers;
 
-use super::harness_control::is_text_input;
+use super::session_control::is_text_input;
 
 #[test]
 fn workspace_text_accepts_altgr_but_rejects_control_shortcuts() {

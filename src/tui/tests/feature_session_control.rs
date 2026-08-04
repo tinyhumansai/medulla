@@ -1,4 +1,4 @@
-//! Starting a harness the orchestrator will not touch, and moving control of
+//! Starting a session the orchestrator will not touch, and moving control of
 //! one between the operator and the orchestrator.
 //!
 //! The load-bearing assertion in most of these is not what is on screen but what
@@ -21,8 +21,8 @@ use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::{App, TABS};
-use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// An Agents-tab app with a live session manager behind it.
 ///
@@ -75,7 +75,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     // override — so "start codex" starts a shell that sits there instead.
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
-    app.set_local_harnesses(LocalHarnesses {
+    app.set_local_sessions(LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions,
@@ -164,7 +164,7 @@ fn user_session(sessions: &PtyManager) -> String {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
             mcp_grant_session: None,
@@ -179,7 +179,7 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
 
     let _ = app.on_event(ctrl('t'));
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("Choose harness"), "{out}");
+    assert!(out.contains("Choose a harness type"), "{out}");
     assert!(
         out.contains("the orchestrator will not dispatch into it"),
         "the picker must say what unmanaged means: {out}"
@@ -202,7 +202,7 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
 
     let row = sessions.rows().remove(0);
     assert!(row.origin.is_user());
-    assert_eq!(row.control, HarnessControl::User);
+    assert_eq!(row.control, SessionControl::User);
     assert!(!row.busy, "nothing is running in it yet");
     assert!(
         app.status().contains("unmanaged"),
@@ -243,7 +243,7 @@ fn the_picker_cancels_without_starting_anything() {
     let _ = app.on_event(key(KeyCode::Esc));
 
     let out = render(&mut app, 140, 44);
-    assert!(!out.contains("Choose harness"), "{out}");
+    assert!(!out.contains("Choose a harness type"), "{out}");
     assert!(sessions.rows().is_empty(), "Esc must not start a harness");
 }
 
@@ -387,7 +387,7 @@ fn ctrl_g_hands_a_harness_over_and_back() {
     let _ = app.on_event(ctrl('g'));
     assert_eq!(
         sessions.row(&id).unwrap().control,
-        HarnessControl::Orchestrator,
+        SessionControl::Orchestrator,
         "give: {}",
         app.status()
     );
@@ -399,7 +399,7 @@ fn ctrl_g_hands_a_harness_over_and_back() {
     sessions.release(&id);
 
     let _ = app.on_event(ctrl('g'));
-    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+    assert_eq!(sessions.row(&id).unwrap().control, SessionControl::User);
     assert!(
         sessions
             .claim_idle("you:codex", HarnessProvider::Codex)
@@ -416,17 +416,17 @@ fn attaching_takes_control_and_releasing_asks_for_it_back() {
     let mut app = app_with_harnesses(sessions.clone());
     let id = user_session(&sessions);
     // Start it under the orchestrator, so attaching is what takes it.
-    sessions.set_control(&id, HarnessControl::Orchestrator);
+    sessions.set_control(&id, SessionControl::Orchestrator);
 
     let _ = render(&mut app, 140, 44);
     select_harness_row(&mut app);
     let _ = render(&mut app, 140, 44);
 
     let _ = app.on_event(focus_chord());
-    assert_eq!(app.attached_harness(), Some(id.as_str()));
+    assert_eq!(app.attached_session(), Some(id.as_str()));
     assert_eq!(
         sessions.row(&id).unwrap().control,
-        HarnessControl::User,
+        SessionControl::User,
         "focusing in takes the harness: {}",
         app.status()
     );
@@ -434,18 +434,18 @@ fn attaching_takes_control_and_releasing_asks_for_it_back() {
     // Releasing asks rather than deciding.
     let _ = app.on_event(focus_chord());
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("You still have this harness"), "{out}");
+    assert!(out.contains("You still have this session"), "{out}");
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(id.as_str()),
         "the keyboard stays put until the question is answered"
     );
 
     let _ = app.on_event(key(KeyCode::Char('y')));
-    assert_eq!(app.attached_harness(), None);
+    assert_eq!(app.attached_session(), None);
     assert_eq!(
         sessions.row(&id).unwrap().control,
-        HarnessControl::Orchestrator
+        SessionControl::Orchestrator
     );
 
     sessions.shutdown();
@@ -456,7 +456,7 @@ fn keeping_a_harness_releases_the_keyboard_but_not_control() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = user_session(&sessions);
-    sessions.set_control(&id, HarnessControl::Orchestrator);
+    sessions.set_control(&id, SessionControl::Orchestrator);
 
     let _ = render(&mut app, 140, 44);
     select_harness_row(&mut app);
@@ -465,10 +465,10 @@ fn keeping_a_harness_releases_the_keyboard_but_not_control() {
     let _ = app.on_event(focus_chord());
 
     let _ = app.on_event(key(KeyCode::Char('n')));
-    assert_eq!(app.attached_harness(), None, "the keyboard comes back");
+    assert_eq!(app.attached_session(), None, "the keyboard comes back");
     assert_eq!(
         sessions.row(&id).unwrap().control,
-        HarnessControl::User,
+        SessionControl::User,
         "but the harness does not"
     );
     assert!(app.status().contains("still hold"), "{}", app.status());
@@ -481,7 +481,7 @@ fn escape_from_the_question_stays_attached() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = user_session(&sessions);
-    sessions.set_control(&id, HarnessControl::Orchestrator);
+    sessions.set_control(&id, SessionControl::Orchestrator);
 
     let _ = render(&mut app, 140, 44);
     select_harness_row(&mut app);
@@ -491,13 +491,13 @@ fn escape_from_the_question_stays_attached() {
     let _ = app.on_event(key(KeyCode::Esc));
 
     assert_eq!(
-        app.attached_harness(),
+        app.attached_session(),
         Some(id.as_str()),
         "Esc is 'I did not mean to leave'"
     );
-    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+    assert_eq!(sessions.row(&id).unwrap().control, SessionControl::User);
     let out = render(&mut app, 140, 44);
-    assert!(!out.contains("You still have this harness"), "{out}");
+    assert!(!out.contains("You still have this session"), "{out}");
 
     sessions.shutdown();
 }
@@ -507,29 +507,29 @@ fn clicking_away_from_an_attached_harness_honors_handback_policy() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let id = user_session(&sessions);
-    sessions.set_control(&id, HarnessControl::Orchestrator);
+    sessions.set_control(&id, SessionControl::Orchestrator);
 
     let _ = render(&mut app, 140, 44);
     select_harness_row(&mut app);
     let _ = render(&mut app, 140, 44);
     let _ = app.on_event(focus_chord());
-    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+    assert_eq!(sessions.row(&id).unwrap().control, SessionControl::User);
 
     // The Overview tab begins at column zero on the second screen row.
     let _ = app.on_event(click(1, 1));
     let out = render(&mut app, 140, 44);
     assert!(
-        out.contains("You still have this harness"),
+        out.contains("You still have this session"),
         "pointer navigation must ask before hiding the held pane: {out}"
     );
-    assert_eq!(app.attached_harness(), Some(id.as_str()));
+    assert_eq!(app.attached_session(), Some(id.as_str()));
     assert_eq!(app.tab(), "Agents", "the pending release blocks navigation");
 
     let _ = app.on_event(key(KeyCode::Char('y')));
-    assert_eq!(app.attached_harness(), None);
+    assert_eq!(app.attached_session(), None);
     assert_eq!(
         sessions.row(&id).unwrap().control,
-        HarnessControl::Orchestrator
+        SessionControl::Orchestrator
     );
 
     sessions.shutdown();
@@ -545,7 +545,7 @@ fn the_slash_command_starts_a_named_provider_directly() {
     wait_for("the harness to open", || sessions.rows().len() == 1);
 
     let row = sessions.rows().remove(0);
-    assert_eq!(row.control, HarnessControl::User);
+    assert_eq!(row.control, SessionControl::User);
     assert_eq!(row.cwd, "/");
 
     sessions.shutdown();
@@ -559,7 +559,7 @@ fn a_misspelled_provider_reports_usage_rather_than_starting_one() {
     type_str(&mut app, "/harness claud");
     let _ = app.on_event(key(KeyCode::Enter));
 
-    assert!(app.status().contains("Usage: /harness"), "{}", app.status());
+    assert!(app.status().contains("Usage: /session"), "{}", app.status());
     assert!(sessions.rows().is_empty(), "nothing should have started");
 }
 
@@ -587,7 +587,7 @@ fn starting_a_harness_in_a_missing_directory_says_so() {
 fn select_harness_row(app: &mut App) {
     for _ in 0..64 {
         let _ = render(app, 140, 44);
-        if app.harness_pane_session_for_test().is_some() {
+        if app.pane_session_for_test().is_some() {
             return;
         }
         let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));

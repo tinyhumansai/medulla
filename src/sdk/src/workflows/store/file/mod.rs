@@ -43,6 +43,7 @@ use crate::workflows::types::{
     WorkflowSummary,
 };
 
+use dirs::catalog_identity;
 pub(super) use dirs::definition_state_dir;
 use document::{read_workflow, to_document};
 use paths::{is_json, stage_atomic, write_atomic};
@@ -141,9 +142,8 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("proposals"))
             .unwrap_or_else(|| PathBuf::from("proposals"));
-        let definition_root = dirs
-            .last()
-            .and_then(|write_dir| write_dir.parent())
+        let definition_root = catalog_identity(&dirs)
+            .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("state/workflows");
         let definition_state = definition_state_dir(&definition_root, &dirs);

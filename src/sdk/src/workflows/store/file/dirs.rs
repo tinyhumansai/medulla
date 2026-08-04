@@ -28,7 +28,17 @@ pub fn workflow_dirs(env: &HashMap<String, String>, cwd: &Path) -> Vec<PathBuf> 
 
 /// State shared by stores writing the same catalog, beneath the caller's root.
 pub(crate) fn definition_state_dir(state_root: &Path, dirs: &[PathBuf]) -> PathBuf {
-    let raw_write_dir = dirs.last().map_or_else(
+    let write_dir = catalog_identity(dirs);
+    let scope = format!(
+        "{:x}",
+        Sha256::digest(write_dir.as_os_str().as_encoded_bytes())
+    );
+    state_root.join("definitions").join(scope)
+}
+
+/// Canonical identity of the catalog's write destination.
+pub(crate) fn catalog_identity(dirs: &[PathBuf]) -> PathBuf {
+    let raw = dirs.last().map_or_else(
         || PathBuf::from("."),
         |dir| {
             if dir.is_absolute() {
@@ -40,43 +50,28 @@ pub(crate) fn definition_state_dir(state_root: &Path, dirs: &[PathBuf]) -> PathB
             }
         },
     );
-    let write_dir = canonical_path_identity(&raw_write_dir);
-    let scope = format!(
-        "{:x}",
-        Sha256::digest(write_dir.as_os_str().as_encoded_bytes())
-    );
-    state_root.join("definitions").join(scope)
+    canonical_path_identity(&raw)
 }
 
-/// Resolve aliases in the deepest existing prefix, retaining a missing tail.
+/// Resolve existing symlinks while retaining lexical semantics for missing parts.
 fn canonical_path_identity(path: &Path) -> PathBuf {
-    let normalized = path
-        .components()
-        .fold(PathBuf::new(), |mut result, component| {
-            match component {
-                std::path::Component::ParentDir => {
-                    result.pop();
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if resolved.exists() {
+                    resolved = std::fs::canonicalize(&resolved).unwrap_or(resolved);
                 }
-                std::path::Component::CurDir => {}
-                other => result.push(other.as_os_str()),
+                resolved.pop();
             }
-            result
-        });
-    let mut existing = normalized.as_path();
-    let mut missing = Vec::new();
-    while !existing.exists() {
-        let Some(name) = existing.file_name() else {
-            break;
-        };
-        missing.push(name.to_os_string());
-        let Some(parent) = existing.parent() else {
-            break;
-        };
-        existing = parent;
-    }
-    let mut resolved = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
-    for component in missing.into_iter().rev() {
-        resolved.push(component);
+            other => {
+                resolved.push(other.as_os_str());
+                if resolved.exists() {
+                    resolved = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+                }
+            }
+        }
     }
     resolved
 }

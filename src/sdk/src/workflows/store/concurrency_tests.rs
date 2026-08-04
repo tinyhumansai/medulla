@@ -352,6 +352,46 @@ fn symlinked_catalog_paths_share_definition_state() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinked_catalog_destination_shares_inferred_state_root() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let real = root.path().join("real/catalog");
+    let alias_parent = root.path().join("alias");
+    std::fs::create_dir_all(&real).expect("real catalog");
+    std::fs::create_dir(&alias_parent).expect("alias parent");
+    let alias = alias_parent.join("catalog-link");
+    std::os::unix::fs::symlink(&real, &alias).expect("catalog symlink");
+    let first = FileWorkflowStore::new(vec![real], root.path().join("runs-a"));
+    let second = FileWorkflowStore::new(vec![alias], root.path().join("runs-b"));
+    first
+        .save(&document("same", "v0"))
+        .expect("seed definition");
+    second
+        .save(&document("same", "v1"))
+        .expect("edit through alias");
+    assert_eq!(
+        first.list_revisions("same").expect("shared history").len(),
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn parent_after_symlink_uses_filesystem_catalog_identity() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let other = root.path().join("other");
+    std::fs::create_dir_all(other.join("inner")).expect("symlink target");
+    std::fs::create_dir(other.join("catalog")).expect("real catalog");
+    std::os::unix::fs::symlink(other.join("inner"), root.path().join("link"))
+        .expect("directory symlink");
+    let aliased = root.path().join("link/../catalog");
+    assert_eq!(
+        definition_state_dir(root.path(), &[aliased]),
+        definition_state_dir(root.path(), &[other.join("catalog")])
+    );
+}
+
 #[test]
 fn separate_store_instances_serialize_proposal_decisions() {
     let root = tempfile::tempdir().expect("tempdir");

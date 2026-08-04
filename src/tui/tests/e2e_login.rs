@@ -236,6 +236,18 @@ async fn start_auth_stub(me: &'static str) -> (String, tokio::task::JoinHandle<(
 /// The credential and endpoint variables are cleared rather than inherited: a
 /// developer's real `MEDULLA_API_URL` would otherwise point this at production
 /// and redeem a token there.
+///
+/// The core's own variables are cleared for the same reason, and they are the
+/// ones that actually bite. `medulla login` stores the session through the
+/// embedded core, which validates it against `/auth/me` on whatever
+/// `BACKEND_URL` / `VITE_BACKEND_URL` names — and `core_host::bind_*` treats an
+/// exported value as the operator aiming the core somewhere on purpose, so it
+/// does *not* override it with the stub this test just started. A developer with
+/// `BACKEND_URL=https://staging-api…` in their shell therefore had the stub's
+/// token checked against staging, which rejects it, and the test failed on their
+/// machine while passing in a bare CI environment. `OPENHUMAN_WORKSPACE` is
+/// cleared alongside them because it outranks the derived path the same way, and
+/// would put this run's session in the developer's real workspace.
 async fn run_medulla(
     args: Vec<String>,
     home: std::path::PathBuf,
@@ -257,6 +269,10 @@ async fn run_medulla(
             .env_remove("MEDULLA_STAGING")
             .env_remove("MEDULLA_BACKEND_URL")
             .env_remove("OPENROUTER_API_KEY")
+            .env_remove("BACKEND_URL")
+            .env_remove("VITE_BACKEND_URL")
+            .env_remove("OPENHUMAN_MEDULLA_BASE_URL")
+            .env_remove("OPENHUMAN_WORKSPACE")
             .output()
             .expect("the medulla binary should run")
     })

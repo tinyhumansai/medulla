@@ -188,9 +188,19 @@ pub(crate) fn options_from_config_with_custom(
         budget,
         log,
         custom_harnesses,
-        attribution,
-        medulla::harness_hooks::HooksConfig::default(),
+        HarnessLaunchPolicy {
+            attribution,
+            hooks: medulla::harness_hooks::HooksConfig::default(),
+        },
     )
+}
+
+/// Launch policy shared by every harness spawned for a local host.
+pub(crate) struct HarnessLaunchPolicy {
+    /// Whether commits carry Medulla attribution.
+    pub(crate) attribution: bool,
+    /// Lifecycle hooks supplied to supported harnesses.
+    pub(crate) hooks: medulla::harness_hooks::HooksConfig,
 }
 
 /// Translate host configuration while retaining the loaded lifecycle hooks.
@@ -201,8 +211,7 @@ pub(crate) fn options_from_config_with_custom_and_hooks(
     budget: Option<medulla::config::BudgetConfig>,
     log: Option<medulla::hub::HubLog>,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
-    attribution: bool,
-    hooks: medulla::harness_hooks::HooksConfig,
+    launch: HarnessLaunchPolicy,
 ) -> Result<EmbeddedDaemonOptions, String> {
     let address = host_address(config);
     let mut providers = config
@@ -242,8 +251,8 @@ pub(crate) fn options_from_config_with_custom_and_hooks(
         custom_harnesses,
         budget,
         log,
-        attribution,
-        hooks,
+        attribution: launch.attribution,
+        hooks: launch.hooks,
         ..Default::default()
     })
 }

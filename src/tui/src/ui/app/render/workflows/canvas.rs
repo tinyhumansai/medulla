@@ -232,38 +232,47 @@ impl App {
             let gutter = fx + GUTTER_COLUMN;
             let entry = tx.saturating_sub(1);
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
+            // A folded edge is the one case where the target is left of the
+            // source and yet nothing has gone wrong: the chain ran out of pane
+            // and continued on the band below.
+            let folds = self.band_of(to.layer) > self.band_of(from.layer);
 
-            // The cells the wire occupies, in flow order, so the highlight can
-            // be placed on the routed path rather than on the straight line
-            // between the two boxes — which is not where the wire is.
-            let mut route: Vec<(usize, usize)> = Vec::new();
-            for x in exit.min(gutter)..=exit.max(gutter) {
-                route.push((x, from_row));
-            }
-            for y in from_row.min(to_row)..=from_row.max(to_row) {
-                route.push((gutter, y));
-            }
-            let (run_from, run_to) = if gutter < entry {
-                (gutter, entry)
+            // The wire as a polyline, corner to corner. Building it up front is
+            // what lets the flow highlight ride the path that was actually
+            // drawn rather than the straight line between the two nodes, which
+            // is not where the wire is.
+            let points: Vec<(usize, usize)> = if folds {
+                // Out, down into the blank row above the target's band, back
+                // left along it, then down into the target from above — so a
+                // fold never cuts across the band it is arriving at.
+                let link_row = to_row.saturating_sub(1);
+                vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, link_row),
+                    (entry, link_row),
+                    (entry, to_row),
+                ]
+            } else if gutter < entry {
+                vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, to_row),
+                    (entry, to_row),
+                ]
             } else {
-                (tx + NODE_WIDTH, gutter)
+                // The target is left of the source within one band: a loop. It
+                // comes back the other way, into the node's right side.
+                vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, to_row),
+                    (tx + NODE_WIDTH, to_row),
+                ]
             };
-            for x in run_from.min(run_to)..=run_from.max(run_to) {
-                route.push((x, to_row));
-            }
+            let route = paint_route(canvas, &points, style);
 
-            canvas.horizontal(exit, gutter, from_row, style);
-            if from_row != to_row {
-                canvas.vertical(gutter, from_row, to_row, style);
-            }
-            if gutter < entry {
-                canvas.horizontal(gutter, entry, to_row, style);
-            } else if gutter > entry {
-                // The target is left of the source: the wire comes back the
-                // other way, into the box's right edge.
-                canvas.horizontal(tx + NODE_WIDTH, gutter, to_row, style);
-            }
-            let (head_x, head) = if gutter <= entry {
+            let (head_x, head) = if folds || gutter <= entry {
                 (entry, '▶')
             } else {
                 (tx + NODE_WIDTH, '◀')
@@ -271,7 +280,7 @@ impl App {
             canvas.arrow(head_x, to_row, head, style);
 
             // The moving highlight. Undimmed against the dim wire, so the eye
-            // follows it without the wire itself competing with the boxes.
+            // follows it without the wire itself competing with the nodes.
             if let Some((x, y)) = self.flow_cell(index, &route, overlay, edge) {
                 canvas.pulse(x, y, brightened(wire_color));
             }
@@ -283,7 +292,7 @@ impl App {
             // dropped when a case name is long: its first letters still
             // distinguish it from its siblings.
             if let Some(label) = &edge.label {
-                if gutter < entry {
+                if !folds && gutter < entry {
                     canvas.text(
                         gutter + 1,
                         to_row,
@@ -325,15 +334,13 @@ impl App {
         Some(route[step % route.len()])
     }
 
-    /// The top-left cell of `node`'s box, or `None` when it is scrolled out.
+    /// The top-left cell of `node`, or `None` when it is scrolled out.
     ///
-    /// A node partially off the right or bottom edge still gets a position: the
-    /// painter clips it, and half a box at the edge is what tells the operator
-    /// the graph continues.
+    /// The horizontal position comes from the fold, so it is never off the side;
+    /// only the vertical scroll can put a node out of view.
     fn cell_of(&self, node: &PlacedNode) -> Option<(usize, usize)> {
-        let layer = node.layer.checked_sub(self.wf.canvas_layer)?;
-        let lane = node.lane.checked_sub(self.wf.canvas_lane)?;
-        Some((layer * LAYER_STRIDE, lane * LANE_STRIDE))
+        let (x, row) = self.graph_cell(node.layer, node.lane);
+        Some((x, row.checked_sub(self.wf.canvas_row)?))
     }
 }
 
@@ -345,6 +352,40 @@ fn pad(text: &str, width: usize) -> String {
         out.push_str(&" ".repeat(width - len));
     }
     out
+}
+
+/// Paint a polyline as axis-aligned runs, returning the cells it covers in
+/// flow order.
+///
+/// Every segment must be horizontal or vertical; a diagonal is a bug in the
+/// caller's routing, and is dropped rather than approximated.
+fn paint_route(
+    canvas: &mut Canvas,
+    points: &[(usize, usize)],
+    style: CellStyle,
+) -> Vec<(usize, usize)> {
+    let mut route: Vec<(usize, usize)> = Vec::new();
+    for pair in points.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if y0 == y1 {
+            canvas.horizontal(x0, x1, y0, style);
+            let step: Box<dyn Iterator<Item = usize>> = if x0 <= x1 {
+                Box::new(x0..=x1)
+            } else {
+                Box::new((x1..=x0).rev())
+            };
+            route.extend(step.map(|x| (x, y0)));
+        } else if x0 == x1 {
+            canvas.vertical(x0, y0, y1, style);
+            let step: Box<dyn Iterator<Item = usize>> = if y0 <= y1 {
+                Box::new(y0..=y1)
+            } else {
+                Box::new((y1..=y0).rev())
+            };
+            route.extend(step.map(|y| (x0, y)));
+        }
+    }
+    route
 }
 
 /// The light variant of a colour, for the flow highlight.

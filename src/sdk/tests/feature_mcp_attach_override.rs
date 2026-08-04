@@ -21,14 +21,54 @@ use medulla::control_socket::{ActiveControlPlane, GrantRegistry};
 use medulla::mcp::attach_cli;
 use medulla::protocol::HarnessProvider;
 
-/// Point `MEDULLA_HOME` at a scratch directory before any grant is minted:
-/// `write_config_file`/`revoke_session` resolve it from this process's real
-/// environment (see `mcp::attach`'s module docs), and this test binary has no
-/// other test to race it against.
-fn scratch_home() -> tempfile::TempDir {
+/// Serialises the tests in this binary against the one thing they all mutate.
+///
+/// `MEDULLA_HOME` is process-global and the test harness runs these four
+/// concurrently, so without this one test can retarget another's home
+/// mid-flight — or drop the scratch directory underneath it — and the
+/// default-provider case then intermittently observes a failed config write
+/// and no grant.
+static HOME: Mutex<()> = Mutex::new(());
+
+/// A scratch `MEDULLA_HOME`, held for the whole of one test.
+///
+/// `write_config_file`/`revoke_session` resolve the home from this process's
+/// real environment (see `mcp::attach`'s module docs), so it has to be set
+/// rather than passed. Dropping this restores whatever was there before and
+/// releases the lock, in that order, so the next test sets its own home
+/// against a clean slate.
+struct ScratchHome {
+    // Never read: it exists to keep the directory alive for the test's
+    // lifetime and delete it on drop.
+    _dir: tempfile::TempDir,
+    previous: Option<std::ffi::OsString>,
+    // Declared last so it is dropped last: the guard must outlive the restore
+    // above it, or the next test could observe this one's value.
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for ScratchHome {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("MEDULLA_HOME", value),
+            None => std::env::remove_var("MEDULLA_HOME"),
+        }
+    }
+}
+
+fn scratch_home() -> ScratchHome {
+    // A poisoned lock means some earlier test panicked while holding it. That
+    // is a failure already reported; taking the guard anyway keeps this test
+    // from failing for someone else's reason.
+    let lock = HOME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = std::env::var_os("MEDULLA_HOME");
     let dir = tempfile::tempdir().expect("a scratch home");
     std::env::set_var("MEDULLA_HOME", dir.path());
-    dir
+    ScratchHome {
+        _dir: dir,
+        previous,
+        _lock: lock,
+    }
 }
 
 /// Install a control plane exactly once for this process: `install` is a

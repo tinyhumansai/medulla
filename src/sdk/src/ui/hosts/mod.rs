@@ -1,0 +1,230 @@
+//! The Hosts surface: `Host → Agents`, the topology the advert is a projection
+//! of (spec §2.4).
+//!
+//! The page used to render the worker roster flat and call each row a host. That
+//! was true only while a machine advertised exactly one worker; now one machine
+//! declares one entry per agent, so a flat roster is a list of *agents* with the
+//! host level collapsed out of it. This module puts the level back: the hosts
+//! this machine runs (always present, running or not), then every remote host
+//! the roster reaches, each carrying the agents known to be on it.
+//!
+//! Two sources, deliberately not merged into one:
+//!
+//! - **declarations** (`[fleet].agentDeclarations`) are the truth for a local
+//!   host — an agent exists because it is written down, not because something is
+//!   running (spec §2.1);
+//! - **the roster** is the truth for a remote host, because a remote host does
+//!   not yet share its declared agent list over the link (plan §D1). Until it
+//!   does, a remote host shows what the roster knows about it and says so,
+//!   rather than pretending this machine declared anything over there.
+
+use crate::config::LocalHostRef;
+use crate::runtime::{AgentDeclaration, WorkerInfo};
+
+mod types;
+pub use types::{HostAgentRow, HostKind, HostRow};
+
+#[cfg(test)]
+mod tests;
+
+/// Build the `Host → Agents` tree.
+///
+/// `locals` is every host this machine declares (see
+/// [`local_hosts`](crate::config::local_hosts)); it leads the result in that
+/// order, whether or not anything is running on it — a declared host with
+/// nothing in the roster is still where its agents live, and hiding it would
+/// make "the local host is always present" false exactly when the operator needs
+/// to see why nothing is being dispatched.
+///
+/// `workers` is the live roster. Entries whose address matches a local host fill
+/// in what is running there; the rest are grouped by address into one remote
+/// host each, in first-seen order.
+///
+/// A declaration naming a host that `locals` does not contain still gets a host
+/// row of its own, after the configured ones: it was declared on this machine,
+/// so it is local and editable, and dropping it would hide agents the operator
+/// wrote down.
+pub fn host_rows(
+    workers: &[WorkerInfo],
+    declarations: &[AgentDeclaration],
+    locals: &[LocalHostRef],
+) -> Vec<HostRow> {
+    let mut rows: Vec<HostRow> = Vec::new();
+    let mut claimed: Vec<&str> = Vec::new();
+
+    for local in locals {
+        rows.push(local_row(
+            &local.id,
+            &local.name,
+            workers,
+            declarations,
+            &mut claimed,
+        ));
+    }
+    // Declared, but on a host id this config does not (or no longer) describes.
+    for declaration in declarations {
+        let host_id = declaration.host_id.trim();
+        if host_id.is_empty() || rows.iter().any(|row| row.id == host_id) {
+            continue;
+        }
+        rows.push(local_row(
+            host_id,
+            host_id,
+            workers,
+            declarations,
+            &mut claimed,
+        ));
+    }
+    // Everything left in the roster is somebody else's machine.
+    for worker in workers {
+        if claimed.contains(&worker.id.as_str()) {
+            continue;
+        }
+        let address = worker.address.trim();
+        match rows
+            .iter_mut()
+            .find(|row| row.kind == HostKind::Remote && row.id == address)
+        {
+            Some(row) => {
+                row.detail_worker.get_or_insert_with(|| worker.id.clone());
+                row.agents.push(agent_from_worker(worker, false));
+            }
+            None => rows.push(HostRow {
+                id: address.to_string(),
+                label: remote_label(worker),
+                kind: HostKind::Remote,
+                agents: vec![agent_from_worker(worker, false)],
+                detail_worker: Some(worker.id.clone()),
+            }),
+        }
+    }
+    rows
+}
+
+/// One local host: its declared agents first, then anything the roster has at
+/// its address that no declaration claims.
+///
+/// The undeclared tail is the migration seed (an install that predates
+/// declarations advertises agents nobody wrote down) and it stays editable:
+/// assigning it a role is what writes the declaration that makes the role stick.
+fn local_row<'a>(
+    id: &str,
+    label: &str,
+    workers: &'a [WorkerInfo],
+    declarations: &[AgentDeclaration],
+    claimed: &mut Vec<&'a str>,
+) -> HostRow {
+    let mut agents: Vec<HostAgentRow> = Vec::new();
+    for declaration in declarations.iter().filter(|d| d.on_host(id)) {
+        let worker = workers
+            .iter()
+            .find(|worker| worker.id.trim() == declaration.agent_id.trim());
+        agents.push(agent_from_declaration(declaration, worker));
+    }
+    let mut detail_worker = None;
+    for worker in workers.iter().filter(|worker| worker.address.trim() == id) {
+        if detail_worker.is_none() && has_probe_details(worker) {
+            detail_worker = Some(worker.id.clone());
+        }
+        if agents.iter().any(|agent| agent.agent_id == worker.id) {
+            continue;
+        }
+        agents.push(agent_from_worker(worker, true));
+    }
+    // Claim by agent id rather than by address: a declaration may name an agent
+    // whose roster entry is registered under another address, and it must not
+    // then be listed a second time as a remote host of its own.
+    for agent in &agents {
+        if let Some(worker) = workers.iter().find(|worker| worker.id == agent.agent_id) {
+            claimed.push(worker.id.as_str());
+        }
+    }
+    if detail_worker.is_none() {
+        detail_worker = agents
+            .iter()
+            .find(|agent| agent.live)
+            .map(|agent| agent.agent_id.clone());
+    }
+    HostRow {
+        id: id.to_string(),
+        label: label.to_string(),
+        kind: HostKind::Local,
+        agents,
+        detail_worker,
+    }
+}
+
+/// Whether a roster entry carries a capability probe worth previewing.
+fn has_probe_details(worker: &WorkerInfo) -> bool {
+    worker.cpu_cores.is_some()
+        || worker.memory_total_bytes.is_some()
+        || worker.memory_available_bytes.is_some()
+        || worker.ip_address.is_some()
+        || !worker.readiness.is_empty()
+        || !worker.budgets.is_empty()
+}
+
+/// An agent row from the declaration that defines it, with whatever the roster
+/// knows about it folded in.
+///
+/// Roles come from the declaration, not from the live entry: the declaration is
+/// what survives a restart, so showing it is what makes the checkbox honest.
+fn agent_from_declaration(
+    declaration: &AgentDeclaration,
+    worker: Option<&WorkerInfo>,
+) -> HostAgentRow {
+    let workspace = declaration
+        .workspace
+        .path()
+        .map(str::to_string)
+        .or_else(|| worker.and_then(|worker| worker.workspace.clone()));
+    HostAgentRow {
+        agent_id: declaration.agent_id.clone(),
+        label: declaration
+            .name
+            .clone()
+            .or_else(|| worker.and_then(|worker| worker.label.clone()))
+            .unwrap_or_else(|| declaration.agent_id.clone()),
+        harness: Some(declaration.harness.clone()),
+        workspace,
+        roles: declaration.roles.clone(),
+        max_sessions: Some(declaration.max_sessions()),
+        declared: true,
+        editable: true,
+        live: worker.is_some(),
+        selected: worker.is_some_and(|worker| worker.selected),
+    }
+}
+
+/// An agent row for a roster entry no declaration on this machine covers.
+///
+/// `local` says whether it sits on a host this machine runs, which is the only
+/// thing that decides whether its roles can be assigned here.
+fn agent_from_worker(worker: &WorkerInfo, local: bool) -> HostAgentRow {
+    HostAgentRow {
+        agent_id: worker.id.clone(),
+        label: worker
+            .label
+            .clone()
+            .or_else(|| worker.handle.clone())
+            .unwrap_or_else(|| worker.id.clone()),
+        harness: worker.harness.clone(),
+        workspace: worker.workspace.clone(),
+        roles: worker.roles.clone(),
+        max_sessions: None,
+        declared: false,
+        editable: local,
+        live: true,
+        selected: worker.selected,
+    }
+}
+
+/// What to call a remote host: the operator's label, its handle, else the raw
+/// address they typed.
+fn remote_label(worker: &WorkerInfo) -> String {
+    worker
+        .label
+        .clone()
+        .or_else(|| worker.handle.clone())
+        .unwrap_or_else(|| worker.address.clone())
+}

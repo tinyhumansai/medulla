@@ -8,7 +8,8 @@
 //! [`feedback`] the feedback-board subpage's actions and setters,
 //! [`settings_edit`] the Config subpage's editable settings, [`account`] the
 //! logout action, [`templates`] the agent-template store's install/reload
-//! actions, and [`render`] the ratatui draw for each view. Public items
+//! actions, [`hosts`] the Hosts page's `Host → Agents` tree and its edits,
+//! and [`render`] the ratatui draw for each view. Public items
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
@@ -25,6 +26,7 @@ mod harness_control_tests;
 mod harness_workspace;
 #[cfg(test)]
 mod harness_workspace_tests;
+mod hosts;
 mod input;
 mod keys;
 mod overlays;

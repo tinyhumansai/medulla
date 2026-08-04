@@ -345,7 +345,19 @@ impl App {
                 // the reader unable to tell which arm of a branch wrapped, which
                 // is the one thing the label exists to say.
                 let (label_x, label_row) = if folds {
-                    (gutter.min(entry) + 1, to_row.saturating_sub(1))
+                    // A fold's corner sits directly above its arrowhead and its
+                    // run is short — often only a cell or two, which is the
+                    // whole point of alternating the bands. So the name goes
+                    // beside the corner on the side the run does *not* come
+                    // from, where there is empty canvas, rather than over the
+                    // couple of wire cells there are.
+                    let corner = entry;
+                    let x = if gutter > corner {
+                        corner.saturating_sub(label.width())
+                    } else {
+                        corner + 1
+                    };
+                    (x, to_row.saturating_sub(1))
                 } else if out_reversed {
                     (entry + 1, to_row)
                 } else {

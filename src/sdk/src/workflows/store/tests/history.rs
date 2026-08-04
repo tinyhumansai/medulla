@@ -54,7 +54,7 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
     let history = store.list_revisions("greet").unwrap();
     let descriptions: Vec<_> = history
         .iter()
-        .map(|revision| revision.record.description)
+        .map(|revision| revision.record.description.as_str())
         .collect();
     assert_eq!(descriptions, ["current at upgrade", "legacy version"]);
 

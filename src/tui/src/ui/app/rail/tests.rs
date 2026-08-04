@@ -200,7 +200,7 @@ fn a_session_in_an_undeclared_directory_is_still_listed() {
 }
 
 #[test]
-fn host_rows_appear_only_once_a_remote_host_exists() {
+fn host_rows_appear_only_once_a_second_host_exists() {
     let mut app = app();
     app.loaded.config.fleet.agent_declarations =
         vec![AgentDeclaration::new("local-claude", "", "claude", "/work")];
@@ -221,23 +221,68 @@ fn host_rows_appear_only_once_a_remote_host_exists() {
             "claude",
             "/work",
         ));
-    let hosts: Vec<String> = app
+    let hosts: Vec<(String, bool)> = app
         .rail_rows()
         .into_iter()
         .filter_map(|row| match row {
-            RailRow::Host(host) => Some(host.host_id),
+            RailRow::Host(host) => Some((host.host_id, host.local)),
             _ => None,
         })
         .collect();
     assert!(
-        hosts.contains(&"studio".to_string()),
-        "the remote machine gets a header: {hosts:?}"
+        hosts.iter().any(|(host_id, _)| host_id == "studio"),
+        "the second machine gets a header: {hosts:?}"
     );
     assert!(
         hosts.len() >= 2,
-        "so does the local one, once there is a second: {hosts:?}"
+        "so does this one, once there is a second: {hosts:?}"
     );
-    assert_eq!(hosts.first().map(String::as_str), Some(""), "local first");
+    let local = app.local_host_refs();
+    assert_eq!(
+        hosts.first().map(|(host_id, _)| host_id.as_str()),
+        local.first().map(|host| host.id.as_str()),
+        "this device leads, in the order the shared tree lists: {hosts:?}"
+    );
+}
+
+#[test]
+fn the_rail_and_the_hosts_tab_list_the_same_agents_under_the_same_hosts() {
+    // The unification, asserted directly: both tabs render `host_rows`, so the
+    // Agents rail cannot claim an agent the Hosts tab does not have, place it on
+    // another host, or order them differently. The rail may hold *more* — a lane
+    // for a backend-side agent this hub never advertised — and those are the
+    // rows the tree does not cover, so they are excluded rather than asserted
+    // away.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations = vec![
+        AgentDeclaration::new("api-claude", "", "claude", "/work/api"),
+        AgentDeclaration::new("web-codex", "", "codex", "/work/web"),
+        AgentDeclaration::new("studio-claude", "studio", "claude", "/work"),
+    ];
+
+    let expected: Vec<(String, String)> = app
+        .host_tree()
+        .into_iter()
+        .flat_map(|host| {
+            host.agents
+                .into_iter()
+                .map(move |agent| (host.id.clone(), agent.agent_id))
+        })
+        .collect();
+    let known: Vec<String> = expected.iter().map(|(_, agent)| agent.clone()).collect();
+    let railed: Vec<(String, String)> = app
+        .rail_rows()
+        .into_iter()
+        .filter_map(|row| match row {
+            RailRow::Agent(agent) if known.contains(&agent.agent_id) => {
+                Some((agent.host_id, agent.agent_id))
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert!(!expected.is_empty(), "the fixture declares agents");
+    assert_eq!(railed, expected, "one tree, two lenses");
 }
 
 #[test]
@@ -256,28 +301,45 @@ fn the_create_action_is_absent_on_a_device_that_hosts_nothing() {
 
 #[test]
 fn an_agent_is_labelled_by_its_name_and_falls_back_to_its_id() {
+    // The label, the harness and the workspace all come from the shared tree, so
+    // an agent reads the same on both tabs. A row the tree does not cover has
+    // only its id, and says nothing about the harness rather than guessing.
+    let mut app = app();
     let mut declaration = AgentDeclaration::new("api-codex", "", "codex", "/work/api");
-    let mut row = super::AgentRailRow {
-        agent_id: declaration.agent_id.clone(),
-        host_id: String::new(),
-        declaration: None,
-        lane_index: None,
-    };
-    // Undeclared: the id is all there is, and it says nothing about the harness.
-    assert_eq!(row.label(), "api-codex");
-    assert_eq!(row.harness(), None);
-    assert_eq!(row.workspace(), None);
+    app.loaded.config.fleet.agent_declarations = vec![declaration.clone()];
 
-    row.declaration = Some(declaration.clone());
-    assert_eq!(row.label(), "api-codex", "no name means the id");
+    let row = |app: &App| {
+        app.rail_rows()
+            .into_iter()
+            .find_map(|row| match row {
+                RailRow::Agent(agent) if agent.agent_id == "api-codex" => Some(agent),
+                _ => None,
+            })
+            .expect("the declared agent has a row")
+    };
+
+    let declared = row(&app);
+    assert_eq!(declared.label(), "api-codex", "no name means the id");
+    assert_eq!(declared.harness(), Some("codex"));
+    assert_eq!(declared.workspace(), Some("/work/api"));
 
     declaration.name = Some("   ".into());
-    row.declaration = Some(declaration.clone());
-    assert_eq!(row.label(), "api-codex", "a blank name is not a name");
+    app.loaded.config.fleet.agent_declarations = vec![declaration.clone()];
+    assert_eq!(row(&app).label(), "api-codex", "a blank name is not a name");
 
     declaration.name = Some("API".into());
-    row.declaration = Some(declaration);
-    assert_eq!(row.label(), "API");
+    app.loaded.config.fleet.agent_declarations = vec![declaration];
+    assert_eq!(row(&app).label(), "API");
+
+    let bare = super::AgentRailRow {
+        agent_id: "api-codex".into(),
+        host_id: String::new(),
+        agent: None,
+        lane_index: None,
+    };
+    assert_eq!(bare.label(), "api-codex");
+    assert_eq!(bare.harness(), None);
+    assert_eq!(bare.workspace(), None);
 }
 
 #[test]

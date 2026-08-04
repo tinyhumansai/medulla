@@ -121,6 +121,19 @@ fn remote_peers_group_under_their_address_and_are_read_only() {
 }
 
 #[test]
+fn one_peer_registered_twice_is_one_agent() {
+    // The same peer reached the registry from two directions — added by hand and
+    // advertised. Listing it twice would read as two machines' worth of capacity.
+    let rows = host_rows(
+        &[worker("addr-1", "addr-1"), worker("addr-1", "addr-1")],
+        &[],
+        &[this_device()],
+    );
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].agents.len(), 1, "{rows:?}");
+}
+
+#[test]
 fn the_preview_reads_capacity_from_whichever_entry_probed_the_machine() {
     // Capacity belongs to the machine, so the host row points at the entry that
     // reported it rather than at whichever agent happens to be first.
@@ -144,6 +157,54 @@ fn a_declaration_naming_an_unconfigured_host_still_gets_a_local_row() {
     assert_eq!(rows[1].kind, HostKind::Local);
     assert_eq!(rows[1].agents[0].agent_id, "ghost");
     assert!(rows[1].agents[0].editable);
+}
+
+#[test]
+fn an_agent_that_names_no_host_belongs_to_the_machine_looking_at_it() {
+    // Both tabs draw this tree, and the Agents rail has always drawn an unplaced
+    // agent beside the local ones. Dropping it here would mean the two lenses
+    // disagree about what exists — and on the Hosts tab it would simply vanish.
+    let unplaced = AgentDeclaration::new("drifter", "", "claude", "/w/drifter");
+    let rows = host_rows(&[], &[unplaced], &[this_device()]);
+
+    assert_eq!(rows.len(), 1, "no second machine is conjured: {rows:?}");
+    assert_eq!(rows[0].agents[0].agent_id, "drifter");
+    assert!(rows[0].agents[0].editable);
+}
+
+#[test]
+fn an_unplaced_agent_survives_a_config_with_no_local_host_at_all() {
+    let unplaced = AgentDeclaration::new("drifter", "", "claude", "/w/drifter");
+    let rows = host_rows(&[], &[unplaced], &[]);
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, "this device");
+    assert_eq!(rows[0].kind, HostKind::Local);
+    assert_eq!(rows[0].agents[0].agent_id, "drifter");
+}
+
+#[test]
+fn only_the_first_local_host_claims_the_unplaced() {
+    // Two local hosts and one agent naming neither: it must appear once, under
+    // the primary, not under every host on the machine.
+    let mut second = this_device();
+    second.id = "local-api".into();
+    second.name = "api".into();
+    second.primary = false;
+    let unplaced = AgentDeclaration::new("drifter", "", "claude", "/w/drifter");
+
+    let rows = host_rows(&[], &[unplaced], &[this_device(), second]);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].agents.len(), 1);
+    assert!(rows[1].agents.is_empty(), "claimed once: {rows:?}");
+}
+
+#[test]
+fn a_blank_declared_name_falls_back_to_the_agent_id() {
+    let mut declared = AgentDeclaration::new("a1", "this-device", "claude", "/w");
+    declared.name = Some("   ".into());
+    let rows = host_rows(&[], &[declared], &[this_device()]);
+    assert_eq!(rows[0].agents[0].label, "a1");
 }
 
 #[test]

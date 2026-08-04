@@ -1,7 +1,9 @@
-//! Resolving a session to the agent that owns it, and an agent to its host.
+//! Resolving a session to the agent that owns it.
 //!
-//! Two directions, one rule each, kept apart from the assembly in
-//! [`super`] so both can be tested without building an [`App`](super::super::types::App).
+//! The rail's own level, and the only one it resolves for itself: hosts and
+//! agents come from the shared projection (see [`super`]). Kept apart from the
+//! assembly so the rule can be tested without building an
+//! [`App`](super::super::types::App).
 //!
 //! A **dispatched** session already knows its agent: the hub files a task under
 //! the roster id the dispatch named ([`lane_id`]), and that id is the lane's
@@ -13,14 +15,6 @@
 //! matched back to the declaration whose `harness × workspace` it is a session
 //! of. No match means the directory is undeclared, which is a real state the
 //! rail shows rather than hides — and the prompt for inline agent creation.
-//!
-//! **Follow-up (host level only).** The Hosts tab grew a shared `Host → Agent`
-//! projection (`medulla::ui::hosts::host_rows`, with device-local resolution in
-//! `medulla::config::local_hosts`) after this branch was cut, and it is not on
-//! this tree yet. Once the two are merged, [`has_remote_host`] and
-//! [`host_label`] here — and the agent level in [`super::App::rail_rows`] —
-//! should source from it, so the two lenses can never disagree about what
-//! exists. Session rows stay here: they are the Agents tab's own level.
 //!
 //! [`lane_id`]: https://docs.rs/medulla
 
@@ -63,38 +57,6 @@ fn normalize_path(path: &str) -> &str {
         trimmed
     } else {
         stripped
-    }
-}
-
-/// Whether the rail should draw host headers at all.
-///
-/// Progressive disclosure: with only the local host, agents sit at the top level
-/// and a permanent `mac-studio ▸` wrapper would add a level of nesting to the
-/// surface an operator uses most. A single *unknown* host id does not count as a
-/// remote — an agent nothing places is drawn beside the local ones rather than
-/// conjuring a second machine out of a missing field.
-pub fn has_remote_host<'a>(host_ids: impl IntoIterator<Item = &'a str>, local: &str) -> bool {
-    let local = local.trim();
-    host_ids
-        .into_iter()
-        .map(str::trim)
-        .any(|host_id| !host_id.is_empty() && host_id != local)
-}
-
-/// The display label for a host row.
-///
-/// The local machine says so in words; a remote one is named by its address,
-/// shortened when the address is a raw key — a 44-character base58 public key is
-/// the widest thing the rail would ever hold.
-pub fn host_label(host_id: &str, local: bool) -> String {
-    if local {
-        return "this device".to_string();
-    }
-    let host_id = host_id.trim();
-    if host_id.is_empty() {
-        "unplaced".to_string()
-    } else {
-        crate::ui::util::short_if_address(host_id)
     }
 }
 
@@ -187,22 +149,5 @@ mod tests {
             &session(HarnessProvider::Claude, "/elsewhere")
         )
         .is_none());
-    }
-
-    #[test]
-    fn only_a_second_named_host_counts_as_remote() {
-        assert!(!has_remote_host(["local", "local", ""], "local"));
-        assert!(has_remote_host(["local", "studio"], "local"));
-        assert!(
-            !has_remote_host(["", ""], "local"),
-            "an unplaced agent is not a machine of its own"
-        );
-    }
-
-    #[test]
-    fn the_local_host_says_so_and_a_remote_one_is_named() {
-        assert_eq!(host_label("anything", true), "this device");
-        assert_eq!(host_label("studio", false), "studio");
-        assert_eq!(host_label("  ", false), "unplaced");
     }
 }

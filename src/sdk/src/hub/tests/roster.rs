@@ -659,11 +659,48 @@ fn a_declared_agents_roles_and_placement_survive_into_the_advert() {
     // Placement still rides `metadata.workspace` as a path — the `{path, type}`
     // object is deferred, and the backend reads both anyway.
     assert_eq!(agent["metadata"]["workspace"], "/srv/api");
-    // The declared host and capacity now reach the wire. `hostId` sits on the
-    // agent, not inside its metadata: that is where the backend reads it.
-    assert_eq!(agent["hostId"], "this-device");
+    // A workspace-backed agent carries NO `hostId`. The library's contract for
+    // `AgentDescriptor.hostId` is that it names the host a *local* agent runs
+    // on and "must NEVER be set on a harness-backed agent", whose host is
+    // derived by walking up from its workspace. Emitting it here made the
+    // server take its `a supplied workspaceId or hostId always wins` early
+    // return and skip synthesizing a `workspaceId` from `metadata.workspace` —
+    // which orphaned every agent from the agent→workspace→harness→host chain:
+    // `host_list` still rendered them, but placement answered "no agent inside
+    // <host> is available (none declared there)" and nothing could dispatch.
+    // The host still reaches the wire, once, in the `hosts[]` block.
+    assert!(agent.get("hostId").is_none());
     assert!(agent["metadata"].get("hostId").is_none());
+    assert_eq!(payload["hosts"][0]["hostId"], "this-device");
     assert_eq!(agent["metadata"]["maxSessions"], 1);
+}
+
+/// The mirror of the rule above: an agent with no workspace has nothing to walk
+/// up from, so `hostId` is the only thing that can place it — and it is exactly
+/// the case the library reserves the field for.
+#[test]
+fn a_workspaceless_agent_still_carries_its_host_id() {
+    let spec = crate::hub::WorkerSpec {
+        id: "this-device-codex".to_string(),
+        host_id: "this-device".to_string(),
+        address: "this-device".to_string(),
+        name: "codex".to_string(),
+        description: "codex on this machine".to_string(),
+        harness: "codex".to_string(),
+        workspace: None,
+        roles: vec![],
+        max_sessions: 1,
+    };
+    let w = super::super::roster::worker_from_spec(&spec);
+    let payload = register_payload(
+        &[w],
+        &no_presence(),
+        &crate::agents::default_templates(),
+        &[],
+    );
+    let agent = &payload["agents"][0];
+    assert!(agent["metadata"].get("workspace").is_none());
+    assert_eq!(agent["hostId"], "this-device");
 }
 
 /// A remembered roster row and an env-seeded one state no capacity at all.

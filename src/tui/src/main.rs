@@ -11,7 +11,7 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 use crate::app_loop::run_tui;
 use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
 #[cfg(feature = "workflows")]
-use crate::commands::{run_mcp_cmd, run_workflow_cmd};
+use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
 use crate::run::run_core;
 
 mod app_loop;
@@ -96,6 +96,8 @@ async fn async_main() -> anyhow::Result<()> {
         #[cfg(feature = "workflows")]
         Command::Workflow => run_workflow_cmd(&raw[1..]).await,
         #[cfg(feature = "workflows")]
+        Command::Skills => run_skills_cmd(&raw[1..]),
+        #[cfg(feature = "workflows")]
         Command::Mcp => run_mcp_cmd(&raw[1..]).await,
         #[cfg(not(feature = "workflows"))]
         Command::Mcp => {
@@ -105,6 +107,14 @@ async fn async_main() -> anyhow::Result<()> {
         // TUI, which is what an unhandled subcommand would otherwise do.
         #[cfg(not(feature = "workflows"))]
         Command::Workflow => {
+            anyhow::bail!(
+                "this build has no workflow support (built without the `workflows` feature)"
+            )
+        }
+        // Same reasoning as `Workflow` above: there are no workflows to
+        // generate skills for, so say so instead of opening the TUI.
+        #[cfg(not(feature = "workflows"))]
+        Command::Skills => {
             anyhow::bail!(
                 "this build has no workflow support (built without the `workflows` feature)"
             )

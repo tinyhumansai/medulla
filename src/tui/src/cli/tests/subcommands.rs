@@ -1,16 +1,13 @@
-//! Unit tests for the CLI plumbing: subcommand dispatch, the per-subcommand
-//! flag parsers, help text, and the `sessions` JSON.
+//! Unit tests for subcommand dispatch, the login/init/workspace/workflow flag
+//! parsers, help text, and the `sessions` JSON.
 
 use std::collections::HashMap;
 
 use medulla::auth::Provider;
 use medulla::protocol::HarnessProvider;
 
-use super::*;
-
-fn argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
-}
+use super::argv;
+use crate::cli::*;
 
 #[test]
 fn dispatches_subcommands() {

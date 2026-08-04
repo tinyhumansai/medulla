@@ -99,6 +99,7 @@ async fn missing_binary_is_a_clear_error() {
         session_id: Some("wsid-test".to_string()),
         pty_spawner: None,
         attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
     })
     .await
     .unwrap_err();

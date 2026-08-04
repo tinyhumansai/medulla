@@ -52,6 +52,7 @@ fn sh(script: &str) -> LaunchSpec {
 /// so the runtime is inert on purpose.
 fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),

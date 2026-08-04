@@ -92,6 +92,7 @@ fn live_options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         conversation: peer.to_string(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,

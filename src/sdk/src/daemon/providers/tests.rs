@@ -52,6 +52,7 @@ async fn direct_runs_report_the_session_before_workspace_context() {
         abort: Abort::new(),
         router: None,
         attribution: false,
+        hooks: crate::harness_hooks::HooksConfig::default(),
         on_event: None,
         on_stdin: None,
         on_session: Some({

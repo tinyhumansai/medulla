@@ -296,6 +296,9 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         // `[router]` leaves this `None` and every harness spawns unrouted.
         router: loaded.config.router.clone(),
         attribution: loaded.config.attribution.commit,
+        // Standardized lifecycle hooks from the layered `[[hooks]]` config,
+        // installed into whichever harness this worker launches.
+        hooks: loaded.config.hooks.clone(),
         // Operator-declared per-provider budgets from the layered `[budget]`
         // config. Absent leaves every harness advertising an estimate.
         budget: loaded.config.budget.clone(),

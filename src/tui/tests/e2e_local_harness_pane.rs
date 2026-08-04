@@ -68,6 +68,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// record is the only thing that lets the pane resolve a screen at all.
 fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
     let config = DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/tmp".into(),

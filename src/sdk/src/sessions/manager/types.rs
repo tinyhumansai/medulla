@@ -40,6 +40,9 @@ pub struct SessionConfig {
     /// — the resolved `attribution.commit` config value (on by default; see
     /// [`crate::config::AttributionConfig`]).
     pub attribution: bool,
+    /// Lifecycle hooks installed into every harness launched here — the
+    /// resolved `[[hooks]]` config section (see [`crate::harness_hooks`]).
+    pub hooks: crate::harness_hooks::HooksConfig,
 }
 
 impl Default for SessionConfig {
@@ -56,6 +59,7 @@ impl Default for SessionConfig {
             turn_timeout_ms: 300_000,
             router: None,
             attribution: true,
+            hooks: crate::harness_hooks::HooksConfig::default(),
         }
     }
 }

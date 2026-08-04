@@ -85,6 +85,7 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         abort: options.abort,
         router,
         attribution: options.attribution,
+        hooks: options.hooks,
         on_workspace_context: options.on_workspace_context,
     };
     let mut attempt: u32 = 1;
@@ -150,10 +151,20 @@ async fn run_provider_attempt(
     // Medulla-launched harnesses attribute their commits to Medulla via a
     // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
     // this child's argv. Empty for providers with no such knob.
-    extra_args.extend(crate::attribution::attribution_args(
-        spec.provider,
-        spec.attribution,
-    ));
+    // Attribution and the operator's Medulla hooks share Claude Code's single
+    // `--settings` flag, so they are built together — see
+    // `harness_hooks::launch_args`.
+    let (launch_args, dropped_hooks) =
+        crate::harness_hooks::launch_args(spec.provider, spec.attribution, &spec.hooks);
+    extra_args.extend(launch_args);
+    for dropped in &dropped_hooks {
+        tracing::warn!(
+            event = dropped.event.as_str(),
+            provider = dropped.provider.as_str(),
+            reason = %dropped.reason,
+            "medulla hook not installed",
+        );
+    }
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();

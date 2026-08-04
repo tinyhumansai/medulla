@@ -71,6 +71,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// thing that lets a subscription resolve.
 fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
     let config = DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/tmp".into(),

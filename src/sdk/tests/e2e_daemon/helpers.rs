@@ -65,6 +65,7 @@ pub fn config(
     env: HashMap<String, String>,
 ) -> DaemonConfig {
     DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![provider],
         default_provider: provider,
         accessible_dirs: vec![workspace.clone()],

@@ -92,6 +92,7 @@ impl HarnessDispatch for RuntimeDispatch {
             skip_permissions: inner.config.skip_permissions,
             router: inner.config.router.clone(),
             attribution: inner.config.attribution,
+            hooks: inner.config.hooks.clone(),
             abort: Abort::new(),
             // The run observer already reports progress per node; forwarding a
             // harness's token-level chatter as well would double-report it.

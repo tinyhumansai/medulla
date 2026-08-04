@@ -40,6 +40,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: workspace.to_string(),

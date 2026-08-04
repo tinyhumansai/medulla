@@ -369,6 +369,7 @@ impl SessionManager {
             abort: abort.clone(),
             router: self.inner.config.router.clone(),
             attribution: self.inner.config.attribution,
+            hooks: self.inner.config.hooks.clone(),
             on_event: None,
             on_stdin: None,
             on_session: None,

@@ -14,6 +14,7 @@ use crate::local_host::run_task;
 /// conversation, just enough to reach the executor the dispatcher picks.
 fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOptions {
     RunTaskOptions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         provider,
         prompt: "hi".to_string(),
         cwd: ".".to_string(),

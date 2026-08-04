@@ -379,6 +379,62 @@ fn sweep_stale_config_files_removes_every_leftover_json_file() {
     );
 }
 
+/// `write_config_file` is public API, and the internal caller's session keys
+/// are UUID-derived, but nothing stops an external one from handing it a `/`
+/// or a `..` — which `PathBuf::join` would otherwise turn into a path outside
+/// [`mcp_state_dir`] entirely (an absolute joinee even *replaces* the base).
+#[test]
+fn write_config_file_refuses_a_session_that_is_not_a_plain_filename() {
+    let _home = ScratchHome::install();
+    let spec = server_spec(
+        None,
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        false,
+    )
+    .expect("a fleet grant is served here");
+
+    for unsafe_session in [
+        "../escaped",
+        "nested/path",
+        "/etc/cron.d/evil",
+        "..",
+        "",
+        "back\\slash",
+    ] {
+        let result = spec.write_config_file(unsafe_session);
+        assert!(
+            result.is_err(),
+            "{unsafe_session:?} must be refused, not turned into a path"
+        );
+    }
+}
+
+/// The same refusal on the revoke side: a caller-supplied session that fails
+/// validation must not make `revoke_session` guess a path and delete
+/// whatever it happens to name.
+///
+/// Reproduces the exact escape a naive `mcp_state_dir().join(format!("{session}.json"))`
+/// would take: `session` set to an *absolute* path with no extension, so the
+/// `.json` this always appends lands on a real file's exact name, and
+/// `PathBuf::join`'s own rule for an absolute argument — it replaces the base
+/// outright rather than nesting under it — puts the "escaped" path exactly on
+/// that file.
+#[test]
+fn revoke_session_refuses_to_delete_for_an_unsafe_session_key() {
+    let _home = ScratchHome::install();
+    let outside = tempfile::tempdir().expect("a directory outside any mcp directory");
+    let sentinel_path = outside.path().join("important.json");
+    std::fs::write(&sentinel_path, "do not delete me").expect("the sentinel file is writable");
+    let session_without_extension = outside.path().join("important");
+
+    revoke_session(&session_without_extension.display().to_string());
+
+    assert!(
+        sentinel_path.exists(),
+        "an unrelated file named by an unsafe (absolute) session key must survive revoke_session"
+    );
+}
+
 /// The end-to-end property `an_operator_started_claude_is_handed_medullas_own_tools`
 /// (`src/tui/src/ui/harness_pane/tests/session.rs`) cannot exercise on its own,
 /// because that test never installs a control plane: with a real grant,

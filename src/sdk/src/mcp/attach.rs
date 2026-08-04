@@ -57,7 +57,16 @@
 //! Revoking a session removes the file the same way it revokes the grant, but
 //! a process that exits without reaching that call — killed, or crashed —
 //! leaves its file behind; see [`sweep_stale_config_files`] for why that is
-//! survivable rather than a second leak.
+//! survivable rather than a second leak, and [`instance_key`] for why sweeping
+//! is namespaced per control-plane socket rather than shared account-wide —
+//! two Medullas on one machine can legitimately share this account and bind
+//! different sockets, and one restarting must never sweep the other's still-
+//! live files. `session` itself is validated
+//! ([`is_safe_session_component`]) before it ever reaches a path: this module
+//! mints it as a UUID internally, but [`attach_cli`] and
+//! [`ServerSpec::write_config_file`] are public API, and an unchecked `/` or
+//! `..` in a caller-supplied session would let it name a file — or, for
+//! [`revoke_session`], *delete* one — outside this directory entirely.
 //!
 //! # What the file does not protect against
 //!
@@ -76,6 +85,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::protocol::HarnessProvider;
 
@@ -150,9 +160,19 @@ impl ServerSpec {
     ///
     /// # Errors
     ///
-    /// Whatever creating or writing the file returns. The caller's fallback is
-    /// the non-secret inline document — see [`attach_cli`].
+    /// `InvalidInput` when `session` is not [`is_safe_session_component`] — a
+    /// `/`, a `..`, or an absolute path would otherwise let a caller-supplied
+    /// key write this secret outside [`mcp_state_dir`] entirely. Every other
+    /// error is whatever creating or writing the file returned. Either way the
+    /// caller's fallback is the non-secret inline document — see
+    /// [`attach_cli`].
     pub fn write_config_file(&self, session: &str) -> std::io::Result<PathBuf> {
+        let path = config_file_path(session).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("session is not a safe filename component: {session:?}"),
+            )
+        })?;
         let mut entry = Map::new();
         entry.insert(
             "command".to_string(),
@@ -175,7 +195,6 @@ impl ServerSpec {
         }
         let document = json!({ "mcpServers": { self.name: Value::Object(entry) } }).to_string();
         std::fs::create_dir_all(mcp_state_dir())?;
-        let path = config_file_path(session);
         write_owner_only(&path, &document)?;
         Ok(path)
     }
@@ -197,18 +216,75 @@ fn process_env() -> HashMap<String, String> {
     std::env::vars().collect()
 }
 
-/// Where this account's MCP config files live: `<medulla_home>/mcp`.
+/// The subdirectory this process's own control plane's files are namespaced
+/// under, keyed off the socket it bound.
+///
+/// Two Medulla processes can legitimately share one account home while bound
+/// to two different sockets — `control_plane::start` in the `medulla-tui`
+/// crate already documents that as a real, supported case ("a machine running
+/// two Medullas"). Keying the subdirectory to *this* process's own socket
+/// means [`sweep_stale_config_files`] only ever reads and removes files under
+/// that same key: a sibling process bound to a different socket writes into a
+/// different subdirectory entirely, so restarting one instance can never
+/// delete a file the other still needs. Hashed rather than used verbatim so
+/// an arbitrary configured socket path — which can contain anything a
+/// filesystem allows — always yields one safe path component, the same
+/// technique `workflows::store::file::dirs` already uses to scope a write
+/// destination.
+///
+/// `"no-plane"` when this process bound none: reachable only if a caller
+/// outside this crate reaches [`ServerSpec::write_config_file`] directly
+/// without going through [`local_fleet_grant`], since every real caller here
+/// requires an active plane before there is anything secret to write at all —
+/// and with no plane bound, there is no sibling instance's files to protect
+/// from, either.
+fn instance_key() -> String {
+    match crate::control_socket::active() {
+        Some(plane) => format!(
+            "{:x}",
+            Sha256::digest(plane.socket.as_os_str().as_encoded_bytes())
+        ),
+        None => "no-plane".to_string(),
+    }
+}
+
+/// Where this account's MCP config files live:
+/// `<medulla_home>/mcp/<instance_key>`.
 fn mcp_state_dir() -> PathBuf {
-    crate::home::medulla_home(&process_env()).join("mcp")
+    crate::home::medulla_home(&process_env())
+        .join("mcp")
+        .join(instance_key())
+}
+
+/// Whether `session` is safe to use as this file's sole filename component.
+///
+/// Every session key this crate mints itself is a UUID-derived string (see
+/// `worker::pty::launch::attach_mcp` in the `medulla-tui` crate), but
+/// [`attach_cli`], [`ServerSpec::write_config_file`], and [`revoke_session`]
+/// are public API a caller outside this crate could hand an arbitrary string.
+/// `PathBuf::join` treats an argument containing `/` as more than one path
+/// component and an *absolute* argument as a full replacement of the base
+/// path it is joined onto — so an unchecked session could write the secret
+/// outside [`mcp_state_dir`] entirely, or make [`revoke_session`] delete a
+/// file that has nothing to do with it.
+fn is_safe_session_component(session: &str) -> bool {
+    !session.is_empty()
+        && session != "."
+        && session != ".."
+        && !session.contains('/')
+        && !session.contains('\\')
+        && !session.contains('\0')
 }
 
 /// Where a session's [`ServerSpec::write_config_file`] output would be, if it
-/// wrote one.
+/// wrote one — `None` when `session` fails [`is_safe_session_component`],
+/// which both the write and the revoke below refuse to touch a filesystem
+/// path for.
 ///
 /// Deterministic from the session key alone: [`revoke_session`] needs to find
 /// and remove the same file without any caller having to hand the path back.
-fn config_file_path(session: &str) -> PathBuf {
-    mcp_state_dir().join(format!("{session}.json"))
+fn config_file_path(session: &str) -> Option<PathBuf> {
+    is_safe_session_component(session).then(|| mcp_state_dir().join(format!("{session}.json")))
 }
 
 /// Remove every config file a *previous* run of this account's control plane
@@ -355,7 +431,13 @@ pub fn revoke_session(session: &str) {
     if let Some(plane) = crate::control_socket::active() {
         plane.grants.revoke(session);
     }
-    let _ = std::fs::remove_file(config_file_path(session));
+    // `None` for a session that failed `is_safe_session_component`: it never
+    // reached a file (`write_config_file` refuses the same key), so there is
+    // nothing here to remove — and, more to the point, nothing to guess a
+    // path for that would not risk removing something unrelated.
+    if let Some(path) = config_file_path(session) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// The server to offer a session, or `None` when no family would be served.

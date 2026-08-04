@@ -49,13 +49,13 @@ mod tests;
 /// Twelve columns still shows a marker and enough of a name to recognise it.
 pub(in crate::ui::app) const MIN_NODE_WIDTH: usize = 12;
 
-/// The most a wire runs on past a node before its column's turn, when the pane
-/// has room to spare.
+/// The fewest columns a band is given, whenever the pane is wide enough to
+/// hold them.
 ///
-/// Columns spread to fill the pane, but only so far: two short names either
-/// side of half a pane of connector read as unrelated, however well aligned
-/// they are.
-pub(in crate::ui::app) const MAX_GUTTER_SPAN: usize = GUTTER_SPAN * 2;
+/// A band of one column is a list, not a graph: every edge in it becomes a
+/// fold. So a long label is clipped rather than allowed to widen its column
+/// until only one fits.
+pub(in crate::ui::app) const MIN_COLUMNS: usize = 2;
 
 /// The widest a node's label is drawn, however much room there is.
 ///

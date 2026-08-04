@@ -14,8 +14,8 @@
 use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
 use super::super::render::workflows::{
-    BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_GUTTER_SPAN, MAX_NODE_WIDTH,
-    MIN_NODE_WIDTH, NODE_HEIGHT,
+    BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_NODE_WIDTH, MIN_COLUMNS, MIN_NODE_WIDTH,
+    NODE_HEIGHT,
 };
 use unicode_width::UnicodeWidthStr;
 use super::super::types::App;
@@ -193,7 +193,15 @@ impl App {
     /// than would fit uses one column per layer rather than spreading thin.
     fn column_metrics(&self) -> (usize, usize) {
         let canvas = self.canvas_width();
-        let width = self.content_width();
+        // However long the labels are, a column may not grow so wide that the
+        // band holds fewer than [`MIN_COLUMNS`] of them: a clipped name still
+        // says which step it is, whereas a band of one column says nothing
+        // about the shape of the graph at all.
+        let share = (canvas / MIN_COLUMNS).saturating_sub(GUTTER_SPAN);
+        let width = self
+            .content_width()
+            .min(share.max(MIN_NODE_WIDTH))
+            .clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH);
         let capacity = (canvas / (width + GUTTER_SPAN)).max(1);
         let per_band = capacity.min(self.wf.layout.layers.max(1));
         (per_band, width)
@@ -225,13 +233,15 @@ impl App {
 
     /// The left edge of a column, relative to the canvas.
     ///
-    /// The multiply-then-divide spreads the remainder of an uneven split across
-    /// the whole band instead of piling it up after the last column, which is
-    /// what keeps a full band's right edge flush with the pane.
+    /// Columns sit at a fixed stride — a label's width plus the gutter its wire
+    /// and port name need — rather than being spread to fill the pane. Spreading
+    /// them puts the leftover width into the connectors, and a pane of
+    /// twenty-cell wires between short names reads as emptiness rather than as
+    /// structure. Whatever is left over stays at the right margin, and the way
+    /// to fill it is to fit another column in.
     fn column_x(&self, column: usize) -> usize {
-        let (per_band, width) = self.column_metrics();
-        let spread = self.canvas_width() / per_band;
-        column * spread.min(width + MAX_GUTTER_SPAN)
+        let (_, width) = self.column_metrics();
+        column * (width + GUTTER_SPAN)
     }
 
     /// How many rows of canvas the graph panel has.

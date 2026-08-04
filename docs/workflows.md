@@ -187,6 +187,107 @@ capability stand-ins, with nothing dispatched.
 Every verb prints JSON and reads bulk input from stdin, so the command is usable
 by a person and by an agent without either being a special case.
 
+## Triggering one from your own harness
+
+Everything above assumes you are in Medulla. The other case is an operator
+sitting in their *own* Claude Code or Codex session who wants to say "babysit
+this PR" and have the saved `babysit` workflow start.
+
+Transport was never the problem: `medulla mcp` serves `workflow_run` to any MCP
+client. What that session lacks is knowing the workflow exists, what it takes,
+and that a tool call is how to start it. `medulla skills` writes that knowledge
+into the harness's own skill directory, one file per workflow:
+
+```sh
+medulla skills install                       # every enabled workflow
+medulla skills install babysit --with-mcp    # one, and attach the server
+medulla skills install --dry-run             # what would change, writing nothing
+medulla skills list                          # what is installed, and where
+medulla skills sync --prune                  # match the store again
+medulla skills uninstall babysit
+```
+
+| flag | meaning |
+| --- | --- |
+| `--harness claude,codex,generic\|all` | which layouts to write (default: the ones already set up under the root) |
+| `--scope user\|project` | `$HOME`, or this checkout (default: `user`) |
+| `--dir <path>` | an explicit root, overriding `--scope` |
+| `--with-mcp` | also register `medulla mcp` with each harness |
+| `--with-commands` | also write the `/medulla-<id>` slash command |
+| `--tools run\|full` | the tool surface a skill-triggered session gets (default: `run`) |
+| `--prune` | on `sync`, delete skills for workflows that are gone or disabled |
+| `--dry-run`, `--json` | report without writing; machine-readable output |
+
+Claude gets `.claude/skills/medulla-<id>/SKILL.md`, Codex gets
+`.codex/skills/…`, and any other harness gets `.medulla/skills/…` to point at
+by hand. Generated files carry a `medulla:managed` marker line, and nothing
+without that marker is ever overwritten or deleted — a collision is reported and
+skipped, which means that workflow is *not* installed. Re-running is a no-op.
+Disabled workflows get no skill: a workflow that may not run should not be
+advertised as runnable.
+
+### Attaching the server
+
+`--with-mcp` registers `medulla mcp` alongside the skills, because a skill whose
+tool is missing just produces a session confidently reaching for something that
+is not there. Registration is a config merge, not a subprocess: `.mcp.json` for
+Claude at project scope, `~/.codex/config.toml` for Codex, both preserving every
+other server and key. Claude at user scope and the generic target have no file
+we can safely write, so the command prints the exact `claude mcp add` line for
+you to run instead of reporting a success Claude would never read.
+
+### What the model then does
+
+The skill's frontmatter description is the workflow's own description plus an
+explicit "use when" clause, which is what a paraphrased request matches against.
+The body is the call, built from the workflow's declared inputs:
+
+```json
+mcp__medulla__workflow_run
+{ "id": "babysit", "inputs": { "pr": "<pr>", "repo": "tinyhumansai/medulla" } }
+```
+
+with a table of every input — type, whether it is required, its default — and an
+instruction to ask for a missing required input rather than invent one. Inputs
+that have defaults appear filled in; the rest are type-shaped placeholders, not
+plausible-looking guesses. The body also says what to do when the tool is
+absent, which is a normal state for a skill file that outlives an MCP
+configuration: do not claim the run started, fall back to
+`medulla workflow run <id> --inputs '…'`, or attach the server.
+
+### Run-only tools, by default
+
+`--with-mcp` writes `MEDULLA_WORKFLOW_TOOLS=run` into the registration. That is
+a third tool mode beside `full` and `propose`, and
+it serves exactly six verbs — `workflow_list`, `workflow_get`,
+`workflow_dry_run`, `workflow_run`, `workflow_runs`, `workflow_run_get`.
+Authoring, deletion, defaults, the journal, and the proposal verbs are withheld
+from `tools/list` *and* refused by `tools/call`, with a refusal that says where
+those things happen instead.
+
+It is the default because a skill installed into your everyday harness hands
+*every* turn in that harness whatever surface the server exposes. A turn that
+came to trigger `nightly-sweep` has no business being able to rewrite or delete
+it, and an unrelated turn three hours later has less. Unlike `propose`, which
+denies a list of verbs, `run` allows a list: a verb added to the family later
+stays withheld until someone decides a trigger-only session needs it. `--tools
+full` opts back in for a session you actually want authoring from.
+
+### The blocking call
+
+`workflow_run` returns only when the run finishes. For a short workflow that is
+fine and the generated body says to expect minutes. For a `babysit`-class
+workflow it is an hour-long tool call, and most MCP clients will time out or the
+operator will interrupt — at which point the run is still going but its outcome
+is no longer observable from the harness.
+
+That is a real limitation, not a rough edge. The fix is a `workflow_start` verb
+returning `{ runId }` as soon as the run is admitted, with the skill body
+becoming start → report the id → poll `workflow_run_get`. **It is not built
+yet.** Until it is, prefer skills for workflows that finish inside a tool call,
+and start the long ones from Medulla or `medulla workflow run`, where nothing is
+waiting on a response.
+
 ## In the TUI
 
 Workflows is a top-level tab: a sidebar, a canvas, and a copilot.

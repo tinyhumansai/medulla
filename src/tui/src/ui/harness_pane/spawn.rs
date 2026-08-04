@@ -112,12 +112,9 @@ impl LocalHarnesses {
         // attribution depended on which door the session came through.
         let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
         env.extend(attribution_env);
-        let (launch_args, dropped) =
+        let (launch_args, _dropped) =
             medulla::harness_hooks::launch_args(choice.provider, self.attribution, &self.hooks);
         extra_args.extend(launch_args);
-        for hook in dropped {
-            tracing::warn!(event = ?hook.event, reason = %hook.reason, "dropping unsupported harness hook");
-        }
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
         // OpenRouter-bound sessions are re-pointed at Medulla's loopback
         // attribution proxy and the real key is scrubbed from `env`. A hand-opened

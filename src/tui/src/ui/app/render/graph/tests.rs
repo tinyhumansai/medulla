@@ -51,12 +51,29 @@ fn mock_graph_fans_in_and_out_of_one_hub() {
 fn every_node_is_reachable_from_the_hub_or_feeds_it() {
     let graph = mock::mock_graph();
     for (i, node) in graph.nodes.iter().enumerate() {
-        assert!(
-            graph.edges.iter().any(|e| e.from == i || e.to == i),
-            "{} is connected to something",
-            node.label
-        );
+        let (from, to) = if node.kind == NodeKind::Source {
+            (i, 0)
+        } else {
+            (0, i)
+        };
+        assert!(directed_path_exists(&graph, from, to), "{} is reachable", node.label);
     }
+}
+
+/// Whether following edge direction can reach `to` from `from`.
+fn directed_path_exists(graph: &Graph, from: usize, to: usize) -> bool {
+    let mut pending = vec![from];
+    let mut seen = vec![false; graph.nodes.len()];
+    while let Some(node) = pending.pop() {
+        if node == to {
+            return true;
+        }
+        if std::mem::replace(&mut seen[node], true) {
+            continue;
+        }
+        pending.extend(graph.edges.iter().filter(|edge| edge.from == node).map(|edge| edge.to));
+    }
+    false
 }
 
 #[test]

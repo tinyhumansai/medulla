@@ -151,9 +151,11 @@ pub fn register(opts: &RegistrationOptions) -> io::Result<Vec<RegistrationOutcom
     for target in &opts.targets {
         outcomes.push(match target {
             // Nothing to register in the managed root, whatever the harness: a
-            // session Medulla spawned is handed the MCP server at session/new
-            // with a grant minted for it, so a config file there would be a
-            // second, weaker copy of something already true. Reported rather
+            // session Medulla spawned is handed the MCP server directly, with a
+            // grant minted for it — over ACP at `session/new`, and on the
+            // child's own argv when it is started as a CLI on a pty (see
+            // `crate::mcp::attach`). A config file there would be a second,
+            // weaker copy of something already true. Reported rather
             // than skipped silently, so `--with-mcp` never looks like it did
             // something it did not.
             _ if opts.scope == SkillScope::Managed => {

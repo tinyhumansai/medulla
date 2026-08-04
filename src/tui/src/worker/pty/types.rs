@@ -149,6 +149,12 @@ pub struct LaunchSpec {
     /// exists so the rail can say "unmanaged" instead of the less useful
     /// "orchestrator-spawned, currently yours".
     pub user_spawned: bool,
+    /// The key this session's MCP fleet grant was minted under, when one was.
+    ///
+    /// Carried so the grant can be handed back when the harness exits: a
+    /// capability that outlives the session it was minted for is a token
+    /// nothing revokes and a leaked subprocess could still redeem.
+    pub mcp_grant_session: Option<String>,
 }
 
 /// The operator-facing projection of one session, for the list pane.

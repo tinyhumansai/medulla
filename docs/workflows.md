@@ -263,9 +263,18 @@ advertised as runnable.
 ### Skills for the harnesses Medulla spawns
 
 The tools already arrive on their own: a session Medulla starts is handed the
-MCP server at `session/new` with a grant minted for it, so nothing needs
-installing for an `agent` step to *call* `workflow_run`. What it lacks is the
-knowledge — that `babysit` exists, and what it takes.
+MCP server with a grant minted for it, so nothing needs installing for an
+`agent` step to *call* `workflow_run`. What it lacks is the knowledge — that
+`babysit` exists, and what it takes.
+
+Both doors carry it, by different means. Over ACP the offer rides on
+`session/new`'s `mcpServers`. A harness started as a CLI on a pseudo-terminal —
+the Workers pane's own sessions, and the ones a task frame opens on this device
+— has no such request, so the registration goes on the child's argv
+(`--mcp-config`, which *merges* with the servers the harness already knows) and
+the grant into its environment, where `/proc` keeps it readable only by you.
+Claude Code is the only CLI attached this way today; Codex configures its
+servers through `~/.codex/config.toml`, which is what `--with-mcp` writes.
 
 `--scope managed` fills that in without touching the operator's own
 directories:

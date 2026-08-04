@@ -123,6 +123,7 @@ fn flooding(label: &str) -> LaunchSpec {
         // `claim_idle` skips entirely.
         control: HarnessControl::Orchestrator,
         user_spawned: false,
+        mcp_grant_session: None,
     }
 }
 

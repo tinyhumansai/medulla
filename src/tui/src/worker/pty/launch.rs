@@ -10,7 +10,48 @@
 //! A tty is not optional: Codex refuses to start with `stdin is not a terminal`,
 //! and both harnesses fall back to dumb line mode without one.
 
+use std::collections::HashMap;
+
 use medulla::protocol::HarnessProvider;
+
+/// Hand a harness about to be launched here Medulla's own tools.
+///
+/// The PTY door has no `session/new` to carry an offer in, so the registration
+/// goes on the child's argv and the grant into its environment — both of which
+/// this appends to the spawn the caller is assembling. Returns the key the
+/// session's fleet grant was minted under, for [`LaunchSpec::mcp_grant_session`]
+/// to carry to the reap that gives it back.
+///
+/// Called at both doors — the executor's dispatched session and the operator's
+/// hand-opened one — because a harness Medulla started is a harness Medulla
+/// serves, whichever door it came through. Without it an operator sitting in a
+/// Medulla-spawned Claude Code had skills telling the model to call
+/// `workflow_run` and no such tool in the session.
+///
+/// [`LaunchSpec::mcp_grant_session`]: super::types::LaunchSpec::mcp_grant_session
+#[cfg(feature = "workflows")]
+pub fn attach_mcp(
+    provider: HarnessProvider,
+    env: &mut HashMap<String, String>,
+    extra_args: &mut Vec<String>,
+) -> Option<String> {
+    // Unique per launch: the key *is* the grant's identity, so two sessions
+    // sharing one would share a capability and revoking either would revoke
+    // both.
+    let session = format!("pty-{}", uuid::Uuid::new_v4());
+    medulla::mcp::attach_cli(provider, &session, env, extra_args)
+}
+
+/// Without the engine compiled in there is no tool server to attach.
+#[cfg(not(feature = "workflows"))]
+pub fn attach_mcp(
+    provider: HarnessProvider,
+    env: &mut HashMap<String, String>,
+    extra_args: &mut Vec<String>,
+) -> Option<String> {
+    let _ = (provider, env, extra_args);
+    None
+}
 
 /// The argv for an interactive (screen-painting) run of `provider`.
 ///

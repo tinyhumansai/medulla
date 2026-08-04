@@ -165,6 +165,7 @@ fn user_session(sessions: &PtyManager) -> String {
             session_id: None,
             control: HarnessControl::User,
             user_spawned: true,
+            mcp_grant_session: None,
         })
         .expect("open")
 }

@@ -50,7 +50,12 @@ impl LocalHarnesses {
 
         let provider = choice.provider;
         let bin = medulla::protocol::env::provider_bin(provider, &self.env);
-        let (env, extra_args) = self.spawn_env(choice)?;
+        let (mut env, mut extra_args) = self.spawn_env(choice)?;
+        // The operator's own session gets Medulla's tools too. This is the door
+        // a person is actually sitting in, so it is the one where a missing
+        // `workflow_run` is noticed — and, until now, the one that never had it.
+        let mcp_grant_session =
+            crate::worker::pty::launch::attach_mcp(provider, &mut env, &mut extra_args);
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
         self.sessions.open(LaunchSpec {
@@ -69,6 +74,7 @@ impl LocalHarnesses {
             session_id: None,
             control: HarnessControl::User,
             user_spawned: true,
+            mcp_grant_session,
         })
     }
 

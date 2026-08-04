@@ -129,8 +129,7 @@ fn session_grants_read_depth_from_the_task_environment() {
         "2".to_string(),
     )]);
 
-    let grant =
-        super::super::execution::session_grant("nested", &env, Some("propose:demo"), true, 3, 5);
+    let grant = crate::mcp::attach::session_grant("nested", &env, Some("propose:demo"), true, 3, 5);
 
     assert_eq!(grant.depth, 2);
     assert_eq!(grant.max_depth, 3);
@@ -141,8 +140,7 @@ fn session_grants_read_depth_from_the_task_environment() {
 #[cfg(feature = "workflows")]
 #[test]
 fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
-    let grant =
-        super::super::execution::session_grant("fleet-only", &HashMap::new(), None, false, 2, 4);
+    let grant = crate::mcp::attach::session_grant("fleet-only", &HashMap::new(), None, false, 2, 4);
 
     assert!(!grant.families.workflows);
     assert!(grant.families.fleet);

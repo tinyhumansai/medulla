@@ -102,6 +102,7 @@ impl PtyManager {
                 launch_checkout_identity,
                 started_at: now,
                 user_spawned: spec.user_spawned,
+                mcp_grant_session: spec.mcp_grant_session,
             },
             spec.label,
             session_id,

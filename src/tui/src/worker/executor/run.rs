@@ -372,7 +372,12 @@ impl PtySessionExecutor {
         // live harness mid-conversation. Router/model drift across turns of the
         // same conversation is the same trade the headless executor's own resume
         // path accepts.
-        let (env, extra_args) = self.spawn_env(options)?;
+        let (mut env, mut extra_args) = self.spawn_env(options)?;
+        // Medulla's own tools, on the same terms an ACP-dispatched session gets
+        // them. A task frame that asked for a workflow to be run needs the verb
+        // to run it with.
+        let mcp_grant_session =
+            super::super::pty::launch::attach_mcp(options.provider, &mut env, &mut extra_args);
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
             bin: medulla::protocol::env::provider_bin(options.provider, &self.env),
@@ -388,6 +393,7 @@ impl PtySessionExecutor {
             // next frame landing in a composer they are typing in.
             control: HarnessControl::Orchestrator,
             user_spawned: false,
+            mcp_grant_session,
         }))
     }
 

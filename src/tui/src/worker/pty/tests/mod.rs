@@ -59,6 +59,7 @@ fn sh(script: &str) -> LaunchSpec {
         model: None,
         control: HarnessControl::Orchestrator,
         user_spawned: false,
+        mcp_grant_session: None,
     }
 }
 

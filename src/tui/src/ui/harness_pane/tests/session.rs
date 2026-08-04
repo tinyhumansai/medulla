@@ -42,6 +42,7 @@ fn sh(script: &str) -> LaunchSpec {
         model: None,
         control: HarnessControl::Orchestrator,
         user_spawned: false,
+        mcp_grant_session: None,
     }
 }
 
@@ -254,6 +255,66 @@ fn a_codex_harness_is_attributed_by_hook_without_extra_argv() {
 
     assert!(env.contains_key("MEDULLA_ATTRIBUTION"), "{env:?}");
     assert!(extra_args.is_empty(), "{extra_args:?}");
+}
+
+/// The door an operator actually sits in. It spawns a CLI on a pty, where there
+/// is no `session/new` to carry an offer of Medulla's tools — so the
+/// registration has to reach the child on its argv, and for a long while it did
+/// not reach it at all: the harness came up with the workflow skills installed
+/// and no `workflow_run` to call.
+///
+/// Asserted against the *real spawn*, not the argv builder, because everything
+/// between the two is exactly what used to drop it.
+#[cfg(feature = "workflows")]
+#[test]
+fn an_operator_started_claude_is_handed_medullas_own_tools() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let argv = dir.path().join("argv");
+    let bin = dir.path().join("fake-claude");
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nsleep 30\n",
+            argv.display()
+        ),
+    )
+    .expect("the stand-in harness is writable");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in harness is executable");
+    }
+
+    let sessions = PtyManager::new();
+    let mut harnesses = harnesses(sessions.clone());
+    harnesses.workspace = dir.path().to_string_lossy().into_owned();
+    harnesses.env.insert(
+        "TINYVERSE_CLAUDE_BIN".to_string(),
+        bin.to_string_lossy().into_owned(),
+    );
+
+    let id = harnesses
+        .open_unmanaged(&HarnessChoice::native(HarnessProvider::Claude), "", false)
+        .expect("the stand-in harness starts");
+    wait_for("the child to record its argv", || argv.exists());
+    let recorded = std::fs::read_to_string(&argv).expect("the argv was recorded");
+    sessions.close(&id);
+
+    let mut lines = recorded.lines();
+    let Some(document) = lines
+        .find(|line| *line == "--mcp-config")
+        .and_then(|_| lines.next())
+    else {
+        panic!("claude must be registered through --mcp-config: {recorded}");
+    };
+    let document: serde_json::Value =
+        serde_json::from_str(document).expect("the registration is a JSON document");
+    assert_eq!(document["mcpServers"]["medulla"]["args"][0], "mcp");
+    assert!(
+        !recorded.contains(medulla::control_socket::MCP_GRANT_ENV),
+        "no bearer token may appear on an argv other users can read: {recorded}"
+    );
 }
 
 /// Spin until `check` passes or the deadline expires.

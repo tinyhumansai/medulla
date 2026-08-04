@@ -156,6 +156,10 @@ pub(crate) struct SessionMeta {
     /// what lets the rail say "unmanaged", and what marks a session whose
     /// synthetic `you:` label is still up for adoption.
     pub(crate) user_spawned: bool,
+    /// The key this session's MCP fleet grant was minted under, when one was.
+    ///
+    /// Read once, when the child is reaped, to give the capability back.
+    pub(crate) mcp_grant_session: Option<String>,
 }
 
 /// One live PTY-backed harness session, and everything the manager knows about

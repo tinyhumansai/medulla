@@ -142,6 +142,7 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
             session_id: None,
             control: HarnessControl::User,
             user_spawned: true,
+            mcp_grant_session: None,
         })
         .expect("open");
     let painted = sessions.clone();

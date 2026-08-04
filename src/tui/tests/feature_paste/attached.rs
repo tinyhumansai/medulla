@@ -44,6 +44,7 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
             session_id: None,
             control: HarnessControl::User,
             user_spawned: true,
+            mcp_grant_session: None,
         })
         .expect("the shell opens on a pty")
 }

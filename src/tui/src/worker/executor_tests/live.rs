@@ -223,6 +223,7 @@ async fn experiment_codex_dialog_dismissal() {
             model: None,
             control: HarnessControl::Orchestrator,
             user_spawned: false,
+            mcp_grant_session: None,
         })
         .expect("open");
 
@@ -305,6 +306,7 @@ async fn experiment_codex_startup_dialog_dismissal() {
             model: None,
             control: HarnessControl::Orchestrator,
             user_spawned: false,
+            mcp_grant_session: None,
         })
         .expect("open");
 
@@ -378,6 +380,7 @@ async fn diagnose_codex_paste_rendering() {
             model: None,
             control: HarnessControl::Orchestrator,
             user_spawned: false,
+            mcp_grant_session: None,
         })
         .expect("open codex session");
 

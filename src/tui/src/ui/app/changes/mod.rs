@@ -23,11 +23,28 @@ use std::path::Path;
 use medulla::ui::git_review::CommentAnchor;
 pub(crate) use types::GitChangesState;
 
-use super::types::{App, PromptKind};
+use super::types::{App, Cmd, PromptKind, TABS};
 use crate::ui::composer::{Draft, TextPrompt};
 use baseline::select_harness_baseline;
 
 impl App {
+    /// Open the Changes tab for the harness currently shown in the Agents pane.
+    ///
+    /// The draw path records the exact session resolved from the selected rail
+    /// row. Keeping that id before changing tabs lets [`refresh_changes`] pick
+    /// the matching launch snapshot instead of falling back to another, newer
+    /// harness in a different checkout.
+    pub(super) fn open_selected_harness_changes(&mut self) -> Option<Cmd> {
+        let session = self.harness_pane_session.clone()?;
+        self.selected_harness_session = Some(session);
+        self.tab_index = TABS
+            .iter()
+            .position(|tab| *tab == "Changes")
+            .expect("Changes is a top-level tab");
+        self.selected = 0;
+        self.tab_enter_cmd()
+    }
+
     /// Reload commits, changed paths, and the selected patch from Git.
     pub(super) fn refresh_changes(&mut self) {
         let preferred_id = self

@@ -234,6 +234,41 @@ manage that path again. Re-running is a no-op.
 Disabled workflows get no skill: a workflow that may not run should not be
 advertised as runnable.
 
+### Skills for the harnesses Medulla spawns
+
+The tools already arrive on their own: a session Medulla starts is handed the
+MCP server at `session/new` with a grant minted for it, so nothing needs
+installing for an `agent` step to *call* `workflow_run`. What it lacks is the
+knowledge — that `babysit` exists, and what it takes.
+
+`--scope managed` fills that in without touching the operator's own
+directories:
+
+```sh
+medulla skills install --scope managed --harness claude
+```
+
+The root is `<medulla home>/harness/`, laid out like a project root
+(`.claude/skills/…`), and Medulla adds `--add-dir <that root>` when it spawns
+Claude Code. Claude loads `.claude/skills/` from an added directory — a
+documented exception to `--add-dir` being a file-access grant, and the reason
+this works at all; the `permissions.additionalDirectories` *setting* grants
+access without loading skills. The flag is added only once the root actually
+holds skills, so an install nobody ran changes no argv.
+
+Two things this deliberately does not do. It does not relocate the harness's
+config directory: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move credentials and
+settings along with the skills, and a session started under a fresh one is not
+logged in. And it does not register an MCP server into the managed root —
+`--with-mcp` there reports `already-attached`, because Medulla attaches the
+server itself, per session, with a grant no config file can express.
+
+Codex has no additional-directory flag, so `--scope managed` writes its files
+but nothing points a spawned Codex session at them yet. The ACP transport is
+the same story for both: Medulla drives `claude-agent-acp` over stdio and does
+not control the underlying CLI's argv, so this applies to the direct spawn path
+only.
+
 ### Attaching the server
 
 `--with-mcp` registers `medulla mcp` alongside the skills, because a skill whose

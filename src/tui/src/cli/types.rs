@@ -94,7 +94,8 @@ pub struct SkillsArgs {
     /// operator named none, and the runner should pick the harnesses whose
     /// directories already exist.
     pub targets: Option<Vec<medulla::workflows::skills::SkillTarget>>,
-    /// `--scope user|project`: whether the root is `$HOME` or the project.
+    /// `--scope user|project|managed`: whether the root is `$HOME`, the project,
+    /// or Medulla's own root that harnesses it spawns are pointed at.
     pub scope: medulla::workflows::skills::SkillScope,
     /// `--dir <path>`: an explicit root, overriding whatever `--scope` would
     /// have resolved to. Relative paths are resolved against the cwd by the

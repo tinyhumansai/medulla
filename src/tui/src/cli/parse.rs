@@ -402,7 +402,7 @@ pub fn parse_skills_args(args: &[String]) -> Result<SkillsArgs, String> {
             "--scope" => {
                 let value = it
                     .next()
-                    .ok_or_else(|| "--scope expects user or project".to_string())?;
+                    .ok_or_else(|| "--scope expects user, project, or managed".to_string())?;
                 out.scope = SkillScope::parse(value)?;
             }
             "--dir" => {
@@ -582,7 +582,7 @@ Workflow flags:\n  \
 Workflow documents and graph ops are read from stdin; every verb prints JSON.\n\n\
 Skills flags:\n  \
 --harness <a,b>         claude, codex, generic, or all (default: those already set up)\n  \
---scope <user|project>  Install into $HOME or into this checkout (default: user)\n  \
+--scope <user|project|managed>\n                          Install into $HOME, into this checkout, or into Medulla's\n                          own root that spawned harnesses are pointed at (default: user)\n  \
 --dir <path>            Explicit root, overriding --scope\n  \
 --with-mcp              Also register `medulla mcp` with each harness\n  \
 --with-commands         Also write the slash-command variant\n  \

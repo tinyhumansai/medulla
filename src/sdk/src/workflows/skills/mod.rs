@@ -38,7 +38,9 @@ mod tests;
 pub use install::{install, installed, sync, uninstall};
 pub use registration::{register, RegistrationOptions, RegistrationOutcome};
 pub use render::{render, render_command, slug_for};
-pub use targets::{command_path, default_targets, scope_root, skill_path};
+pub use targets::{
+    command_path, default_targets, managed_root, scope_root, skill_path, spawn_args,
+};
 pub use types::{
     FileAction, FileOutcome, InstallOptions, InstallReport, InstalledSkill, RenderedSkill,
     SkillScope, SkillTarget,

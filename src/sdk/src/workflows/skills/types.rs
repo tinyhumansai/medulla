@@ -67,7 +67,7 @@ impl std::fmt::Display for SkillTarget {
     }
 }
 
-/// Whether generated files land in the operator's home or in one project.
+/// Which root generated files land in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillScope {
@@ -75,6 +75,14 @@ pub enum SkillScope {
     User,
     /// The project directory — the skill travels with the checkout.
     Project,
+    /// Medulla's own root under the Medulla home, which Medulla points the
+    /// harnesses it spawns at.
+    ///
+    /// The operator's own sessions do not read it; sessions Medulla starts do,
+    /// because Medulla adds the flag. That is the point: generated files stay
+    /// out of a directory the operator curates by hand, and a workflow's agent
+    /// steps still get the skills.
+    Managed,
 }
 
 impl SkillScope {
@@ -83,6 +91,7 @@ impl SkillScope {
         match self {
             SkillScope::User => "user",
             SkillScope::Project => "project",
+            SkillScope::Managed => "managed",
         }
     }
 
@@ -95,8 +104,9 @@ impl SkillScope {
         match value.trim().to_ascii_lowercase().as_str() {
             "user" => Ok(SkillScope::User),
             "project" => Ok(SkillScope::Project),
+            "managed" => Ok(SkillScope::Managed),
             other => Err(format!(
-                "unknown scope `{other}` (expected user or project)"
+                "unknown scope `{other}` (expected user, project, or managed)"
             )),
         }
     }

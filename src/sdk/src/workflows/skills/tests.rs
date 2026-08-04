@@ -206,6 +206,74 @@ fn scope_root_reads_home_for_user_and_cwd_for_project() {
 }
 
 #[test]
+fn the_managed_scope_resolves_under_the_medulla_home_not_the_operators() {
+    let home = TempDir::new().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_HOME".to_string(),
+        home.path().display().to_string(),
+    );
+    env.insert("HOME".to_string(), "/home/op".to_string());
+
+    let root = scope_root(SkillScope::Managed, &env, Path::new("/work/repo"));
+    assert_eq!(root, managed_root(&env));
+    assert!(
+        root.starts_with(home.path()),
+        "the managed root belongs to Medulla, not the operator: {}",
+        root.display()
+    );
+    // Laid out like a project root, which is what makes --add-dir find it.
+    assert_eq!(
+        skill_path(SkillTarget::Claude, &root, "medulla-babysit"),
+        root.join(".claude")
+            .join("skills")
+            .join("medulla-babysit")
+            .join("SKILL.md")
+    );
+}
+
+#[test]
+fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
+    let home = TempDir::new().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_HOME".to_string(),
+        home.path().display().to_string(),
+    );
+    let provider = crate::protocol::HarnessProvider::Claude;
+
+    // Nothing installed yet: the argv is untouched. Granting a session access to
+    // a directory that holds nothing buys nothing and shows up in the operator's
+    // transcript as an unexplained extra directory.
+    assert!(spawn_args(provider, &env).is_empty());
+
+    let root = managed_root(&env);
+    let summary = summary("babysit", "Watch a PR.", Vec::new());
+    install(
+        &[summary],
+        &InstallOptions {
+            targets: vec![SkillTarget::Claude],
+            scope: SkillScope::Managed,
+            root: root.clone(),
+            with_commands: false,
+            dry_run: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        spawn_args(provider, &env),
+        vec!["--add-dir".to_string(), root.display().to_string()],
+        "Claude loads .claude/skills from an --add-dir directory; that flag is the \
+         only spelling that does it"
+    );
+
+    // Codex has no equivalent flag, so it gets nothing rather than a flag its
+    // CLI would reject.
+    assert!(spawn_args(crate::protocol::HarnessProvider::Codex, &env).is_empty());
+}
+
+#[test]
 fn default_targets_are_the_harnesses_already_present() {
     let home = TempDir::new().unwrap();
     assert!(default_targets(home.path()).is_empty());

@@ -19,6 +19,7 @@ use super::{SkillScope, SkillTarget};
 pub fn scope_root(scope: SkillScope, env: &HashMap<String, String>, cwd: &Path) -> PathBuf {
     match scope {
         SkillScope::Project => cwd.to_path_buf(),
+        SkillScope::Managed => managed_root(env),
         SkillScope::User => env
             .get("HOME")
             .map(|home| home.trim())
@@ -26,6 +27,26 @@ pub fn scope_root(scope: SkillScope, env: &HashMap<String, String>, cwd: &Path) 
             .map(PathBuf::from)
             .unwrap_or_else(|| cwd.to_path_buf()),
     }
+}
+
+/// The directory name, under the Medulla home, holding harness-facing files.
+const MANAGED_DIR: &str = "harness";
+
+/// Medulla's own skills root: a directory Medulla owns outright, laid out the
+/// way a *project* root is (`<root>/.claude/skills/…`).
+///
+/// This exists because the alternative ways to give a spawned harness a skill
+/// are both wrong. Writing into the operator's `~/.claude` mixes generated
+/// files into a directory they curate by hand, and relocating the harness's
+/// whole config directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) takes their
+/// credentials and settings with it — a session started that way is not logged
+/// in. A separate root that the harness is *pointed at* leaves both alone.
+///
+/// Under the Medulla home rather than the workspace so one install serves every
+/// workspace on the machine, and so the directory is not an untracked artifact
+/// in someone's repository.
+pub fn managed_root(env: &HashMap<String, String>) -> PathBuf {
+    crate::home::medulla_home(env).join(MANAGED_DIR)
 }
 
 /// The harness's own dotted directory under `root` (`.claude`, `.codex`,
@@ -78,4 +99,34 @@ pub fn default_targets(root: &Path) -> Vec<SkillTarget> {
         .into_iter()
         .filter(|target| base_dir(*target, root).is_dir())
         .collect()
+}
+
+/// The argv Medulla adds so a harness it spawns can see the managed skills.
+///
+/// Claude Code loads `.claude/skills/` from any directory passed with
+/// `--add-dir`. That is a documented exception to `--add-dir` being a
+/// file-access grant rather than configuration discovery — the
+/// `permissions.additionalDirectories` *setting* grants access without loading
+/// skills, so the flag is the only spelling that works.
+///
+/// Empty unless the managed root actually holds skills for that harness:
+/// pointing a session at a directory that does not exist is a permission grant
+/// bought for nothing, and it would show up in the operator's transcript as an
+/// unexplained extra directory.
+///
+/// Other providers get nothing yet. Codex reads skills from fixed locations
+/// with no additional-directory flag of its own, so the equivalent has to be a
+/// different mechanism, not this one.
+pub fn spawn_args(
+    provider: crate::protocol::HarnessProvider,
+    env: &HashMap<String, String>,
+) -> Vec<String> {
+    if provider != crate::protocol::HarnessProvider::Claude {
+        return Vec::new();
+    }
+    let root = managed_root(env);
+    if !skills_dir(SkillTarget::Claude, &root).is_dir() {
+        return Vec::new();
+    }
+    vec!["--add-dir".to_string(), root.display().to_string()]
 }

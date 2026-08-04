@@ -187,6 +187,17 @@ async fn run_provider_attempt(
         }
         extra_args.extend(injection.args);
     }
+    // Point the harness at Medulla's own skills root, when one has been
+    // installed. This is what makes a workflow a harness *can* trigger visible
+    // to it: the MCP tools arrive automatically, but nothing tells a session
+    // that `babysit` exists or what it takes. Empty when no managed skill has
+    // been installed for this provider, so the argv is unchanged for anyone who
+    // has not run `medulla skills install --scope managed`.
+    #[cfg(feature = "workflows")]
+    extra_args.extend(crate::workflows::skills::spawn_args(
+        spec.provider,
+        &spec.env,
+    ));
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,

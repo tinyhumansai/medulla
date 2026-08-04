@@ -150,9 +150,20 @@ pub fn register(opts: &RegistrationOptions) -> io::Result<Vec<RegistrationOutcom
     let mut outcomes = Vec::with_capacity(opts.targets.len());
     for target in &opts.targets {
         outcomes.push(match target {
+            // Nothing to register in the managed root, whatever the harness: a
+            // session Medulla spawned is handed the MCP server at session/new
+            // with a grant minted for it, so a config file there would be a
+            // second, weaker copy of something already true. Reported rather
+            // than skipped silently, so `--with-mcp` never looks like it did
+            // something it did not.
+            _ if opts.scope == SkillScope::Managed => {
+                already_attached(*target, opts.tools_mode.as_str())
+            }
             SkillTarget::Claude => match opts.scope {
                 SkillScope::Project => register_claude_project(opts)?,
-                SkillScope::User => manual(SkillTarget::Claude, claude_user_command(opts)),
+                SkillScope::Managed | SkillScope::User => {
+                    manual(SkillTarget::Claude, claude_user_command(opts))
+                }
             },
             SkillTarget::Codex => register_codex(opts)?,
             SkillTarget::Generic => manual(SkillTarget::Generic, generic_command(opts)),
@@ -229,6 +240,21 @@ fn manual(target: SkillTarget, command: String) -> RegistrationOutcome {
         path: None,
         action: "manual".to_string(),
         manual_command: Some(command),
+    }
+}
+
+/// The outcome for the managed root: the server is already attached, by
+/// Medulla, to every session it starts — with the per-session grant that
+/// decides the tool families, which no config file can express.
+fn already_attached(target: SkillTarget, tools_mode: &str) -> RegistrationOutcome {
+    RegistrationOutcome {
+        target,
+        path: None,
+        action: "already-attached".to_string(),
+        manual_command: Some(format!(
+            "sessions Medulla spawns are served the MCP tools directly (mode `{tools_mode}` is \
+             decided per session), so the managed root needs no registration"
+        )),
     }
 }
 

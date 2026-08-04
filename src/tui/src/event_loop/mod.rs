@@ -264,9 +264,12 @@ pub(crate) async fn run(
                 }
             }
             _ = tick.tick() => {
-                if app.snapshot.running {
-                    app.frame = app.frame.wrapping_add(1);
-                }
+                // Advanced every tick rather than only while a cycle is
+                // running: it is the whole UI's animation clock now, and the
+                // workflow canvas's wires flow whether or not this process
+                // happens to be mid-cycle. The spinner it also drives is only
+                // drawn while running, so it is unaffected.
+                app.frame = app.frame.wrapping_add(1);
             }
         }
     }

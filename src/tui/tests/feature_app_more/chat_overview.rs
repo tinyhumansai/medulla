@@ -29,7 +29,7 @@ fn overview_header_shows_the_backend_host_without_scheme() {
 #[test]
 fn overview_has_no_model_routing_panel() {
     // Routing is server-managed and was never actionable here; the panel is gone
-    // and Live activity takes the space it used to occupy.
+    // and the workflow graph takes the space it used to occupy.
     let rt = Arc::new(MockRuntime::empty());
     let mut app = App::new(rt, LoadedConfig::defaults("medulla.tui.json".into()));
     app.tab_index = 0;
@@ -37,8 +37,12 @@ fn overview_has_no_model_routing_panel() {
     assert!(!out.contains("Model routing"), "panel is gone: {out}");
     assert!(!out.contains("summarizer"), "routing rows are gone: {out}");
     assert!(
-        out.contains("Live activity"),
-        "the feed still renders: {out}"
+        out.contains("Workflow"),
+        "the graph panel takes the space: {out}"
+    );
+    assert!(
+        !out.contains("Live activity"),
+        "the event feed is gone, the Trace tab already shows it: {out}"
     );
 }
 

@@ -43,13 +43,19 @@ mod rail_tests;
 #[cfg(test)]
 mod tests;
 
-/// The narrowest a node's label may be squeezed to before the canvas folds
-/// rather than fitting another column in.
+/// The narrowest a node's label is ever drawn.
 ///
-/// Twelve columns still shows a marker and enough of a name to recognise it;
-/// below that the labels stop distinguishing anything and the graph is better
-/// off wrapping.
+/// Only reached on a pane too narrow to give one column its preferred width.
+/// Twelve columns still shows a marker and enough of a name to recognise it.
 pub(in crate::ui::app) const MIN_NODE_WIDTH: usize = 12;
+
+/// The width a column is worth having before another one is fitted in.
+///
+/// How many columns a band holds is decided at this width, and they are then
+/// widened into whatever is left over. Deciding at [`MIN_NODE_WIDTH`] instead
+/// would pack in every column the pane could physically hold and clip every
+/// name to fit — more steps on screen, none of them readable.
+pub(in crate::ui::app) const PREFERRED_NODE_WIDTH: usize = 18;
 
 /// The widest a node's label is drawn, however much room there is.
 ///

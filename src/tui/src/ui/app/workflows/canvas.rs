@@ -15,6 +15,7 @@ use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
 use super::super::render::workflows::{
     BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_NODE_WIDTH, MIN_NODE_WIDTH, NODE_HEIGHT,
+    PREFERRED_NODE_WIDTH,
 };
 use super::super::types::App;
 
@@ -184,13 +185,14 @@ impl App {
     /// How many layers fit across the canvas before it folds, and how wide each
     /// one's label may be.
     ///
-    /// Columns are sized to the pane rather than fixed: as many as will fit at
-    /// the minimum readable width, then every one widened into whatever is left
-    /// over, up to [`MAX_NODE_WIDTH`]. A graph with fewer layers than would fit
-    /// uses one column per layer rather than spreading itself thin.
+    /// Columns are sized to the pane rather than fixed: as many as fit at the
+    /// preferred width, then every one widened into whatever is left over, up
+    /// to [`MAX_NODE_WIDTH`], so a full band's columns tile the pane instead of
+    /// leaving a ragged margin. A graph with fewer layers than would fit uses
+    /// one column per layer rather than spreading itself thin.
     fn column_metrics(&self) -> (usize, usize) {
         let canvas = self.canvas_width();
-        let capacity = (canvas / (MIN_NODE_WIDTH + GUTTER_SPAN)).max(1);
+        let capacity = (canvas / (PREFERRED_NODE_WIDTH + GUTTER_SPAN)).max(1);
         let per_band = capacity.min(self.wf.layout.layers.max(1));
         let width = (canvas / per_band)
             .saturating_sub(GUTTER_SPAN)

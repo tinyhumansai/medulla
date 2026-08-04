@@ -21,7 +21,9 @@ use crate::protocol::HarnessProvider;
 use super::input::Observation;
 use super::registry::SessionRegistry;
 use super::routing::{route_transport, Transport};
-use super::types::{SessionClass, SessionKey, SessionPhase, SessionRecord, TurnRequest};
+use super::types::{
+    SessionClass, SessionKey, SessionOrigin, SessionPhase, SessionRecord, TurnRequest,
+};
 
 mod turns;
 pub mod types;
@@ -140,6 +142,11 @@ impl SessionManager {
             record: SessionRecord {
                 id: id.clone(),
                 key,
+                // Set here and never written again: whichever door the request
+                // came through is the session's provenance for the rest of its
+                // life. Control moves later; this does not.
+                origin: request.origin,
+                name: request.name,
                 class,
                 driver: request.driver,
                 phase: SessionPhase::Idle,
@@ -275,6 +282,13 @@ impl SessionManager {
                     record: SessionRecord {
                         id,
                         key: observation.key.clone(),
+                        // Observed, not dispatched: a wrapper somewhere is
+                        // running this for a person, so it is not the
+                        // orchestrator's session even though this daemon never
+                        // saw it start. It has no name because nobody named it
+                        // *here*.
+                        origin: SessionOrigin::User,
+                        name: None,
                         // An observed session is by definition long-lived: the
                         // wrapper keeps it across turns.
                         class: SessionClass::Unbound,

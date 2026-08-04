@@ -101,9 +101,13 @@ impl PtyManager {
                 launch_commit,
                 launch_checkout_identity,
                 started_at: now,
-                user_spawned: spec.user_spawned,
+                // Whichever door this launch came through is this session's
+                // provenance from here on. The executor's task path stamps
+                // `Orchestrator`; the operator's picker stamps `User`.
+                origin: spec.origin,
             },
             spec.label,
+            spec.name,
             session_id,
             spec.control,
             vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, SCROLLBACK),

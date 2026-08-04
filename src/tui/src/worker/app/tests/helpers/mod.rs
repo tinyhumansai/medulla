@@ -58,7 +58,8 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         session_id: None,
         model: None,
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: crate::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
     }
 }
 

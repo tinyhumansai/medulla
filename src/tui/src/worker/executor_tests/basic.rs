@@ -203,3 +203,43 @@ fn only_transcript_writing_harnesses_can_run_watchable_tasks() {
         None
     );
 }
+
+#[tokio::test]
+async fn a_session_opened_to_serve_a_task_is_orchestrator_originated() {
+    // The dispatch door. §4.1: a task that names no session creates one, and
+    // that session belongs to the orchestrator for the rest of its life —
+    // including after an operator takes it over, which is why the row keeps
+    // reporting `origin: orchestrator` while `control` moves.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let rollout = dir.path().join("rollout-origin.jsonl");
+    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "done");
+
+    let (executor, env) = harness(dir.path(), &cwd);
+    let sessions = executor.sessions_for_test();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        executor
+            .clone()
+            .run_for_test(options(&env, "peer-alice", &script, &cwd)),
+    )
+    .await
+    .expect("must settle")
+    .expect("must succeed");
+
+    let rows = sessions.rows();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].origin.is_orchestrator(),
+        "a dispatched session is the orchestrator's"
+    );
+    assert_eq!(rows[0].name, None, "a dispatch never names a session");
+
+    let id = rows[0].id.clone();
+    sessions.set_control(&id, super::super::pty::HarnessControl::User);
+    assert!(
+        sessions.row(&id).unwrap().origin.is_orchestrator(),
+        "taking it over is a control change, not a change of provenance"
+    );
+    sessions.shutdown();
+}

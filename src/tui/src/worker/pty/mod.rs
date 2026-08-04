@@ -52,4 +52,4 @@ pub use cell_text::CellText;
 pub use handle::SessionHandle;
 pub use inject::inject_prompt;
 pub use manager::{PtyManager, ScreenCell, ScreenSnapshot};
-pub use types::{HarnessControl, LaunchSpec, PtyState, SessionRow};
+pub use types::{HarnessControl, LaunchSpec, PtyState, SessionOrigin, SessionRow};

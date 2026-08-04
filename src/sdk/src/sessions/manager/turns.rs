@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::daemon::providers::{Abort, RunTaskOptions};
 
 use super::super::interactive::{InteractiveSession, InteractiveSpec, StreamEvent};
+use super::super::registry::SessionIdentity;
 use super::super::routing::{route_transport, Transport};
 use super::super::types::{SessionClass, SessionPhase, TurnOrigin, TurnOutcome, TurnRequest};
 use super::{push_line, SessionManager, TranscriptRole};
@@ -135,6 +136,20 @@ impl SessionManager {
                             session_id.clone(),
                             workspace_context.lock().unwrap().clone(),
                         );
+                        // The binding outlives the record — it is what a later
+                        // turn resumes — so the session's identity is copied
+                        // onto it the moment there is a binding to hold it.
+                        // Skipping this would let a resumed conversation come
+                        // back as an unnamed orchestrator session.
+                        if let Some(record) = self.record(&id) {
+                            self.inner.registry.record_identity(
+                                &request.key,
+                                SessionIdentity {
+                                    origin: record.origin,
+                                    name: record.name,
+                                },
+                            );
+                        }
                     }
                 }
                 // A resumed process may report authoritative workspace movement
@@ -171,6 +186,12 @@ impl SessionManager {
                 driver: request.origin.driver(),
                 workspace: None,
                 model: request.model.clone(),
+                // Auto-creation (§4.1): a session made to serve a task frame is
+                // the orchestrator's; one made for a prompt a person typed is
+                // theirs. The turn's own provenance is the only thing that can
+                // answer this, and it is the same answer for every later turn.
+                origin: request.origin.session_origin(),
+                name: None,
             })
         })
     }

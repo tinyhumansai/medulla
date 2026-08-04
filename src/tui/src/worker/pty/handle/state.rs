@@ -100,6 +100,17 @@ impl SessionHandle {
         }
     }
 
+    /// Give this session the display name a person chose for it.
+    ///
+    /// Naming is not ownership and not provenance: renaming a session neither
+    /// takes it (that is [`set_control`](Self::set_control)) nor changes who
+    /// started it (that is fixed at birth). A blank name clears it back to
+    /// unnamed rather than storing an empty label the rail would render as a
+    /// gap.
+    pub(in super::super) fn set_name(&self, name: Option<String>) {
+        lock(&self.cold).name = name.filter(|name| !name.trim().is_empty());
+    }
+
     /// Record why a queued write never reached the child.
     ///
     /// The write half is drained by a thread (see the manager's `spawn_writer`),
@@ -131,7 +142,8 @@ impl SessionHandle {
             last_error: cold.last_error.clone(),
             busy: self.is_busy(),
             control: self.control(),
-            user_spawned: self.meta.user_spawned,
+            origin: self.meta.origin,
+            name: cold.name.clone(),
             attention: lock(&self.attention).cue.clone(),
         }
     }

@@ -43,7 +43,8 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: medulla_tui::worker::pty::SessionOrigin::User,
+            name: None,
         })
         .expect("the shell opens on a pty")
 }

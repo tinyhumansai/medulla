@@ -9,7 +9,7 @@
 use crate::protocol::HarnessProvider;
 
 use super::manager::{OpenSession, SessionManager};
-use super::types::{SessionClass, SessionDriver};
+use super::types::{SessionClass, SessionDriver, SessionOrigin};
 
 impl SessionOp {
     /// Parse a free-text "open session" line into a [`SessionOp::Open`].
@@ -53,6 +53,11 @@ impl SessionManager {
                     driver: SessionDriver::Task,
                     workspace: None,
                     model: None,
+                    // A [`SessionOp`] is an operator action by definition — the
+                    // orchestrator dispatches, it does not press keys — so the
+                    // session it opens is the person's.
+                    origin: SessionOrigin::User,
+                    name: None,
                 });
                 Ok(match class {
                     SessionClass::Unbound => {

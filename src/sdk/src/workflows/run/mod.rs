@@ -313,6 +313,60 @@ fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {
     }
 }
 
+/// Lowers any `loop` node's `max_iterations` to this host's ceiling.
+///
+/// A loop's cap is the author's decision, but here a pass through the body can
+/// be a whole harness session, so a graph asking for a thousand of them is
+/// asking for something the operator never agreed to.
+///
+/// **Clamped, never refused** — the same contract as `max_parallel_agents`. A
+/// workflow that asks for more still runs; it just stops sooner. Refusing would
+/// make a graph authored against a more generous host unrunnable here, and the
+/// author usually cannot change this host's configuration.
+///
+/// Applied to the execution graph only. The stored document keeps the number
+/// the author wrote, so raising the ceiling later restores the intent without
+/// anyone having to re-edit the workflow.
+///
+/// Called on every resolved graph, not just the root:
+/// [`StoreWorkflowResolver`](crate::workflows::StoreWorkflowResolver) applies
+/// this to a `sub_workflow`'s child graph too, with the same ceiling, so a
+/// nested loop cannot outrun the host limit just because it is one
+/// `sub_workflow` hop away from the run that declared it.
+pub(crate) fn clamp_loop_iterations(
+    mut graph: tinyflows::model::WorkflowGraph,
+    ceiling: u64,
+) -> tinyflows::model::WorkflowGraph {
+    for node in &mut graph.nodes {
+        if node.kind != tinyflows::model::NodeKind::Loop {
+            continue;
+        }
+        // An absent cap falls through to the engine's own default
+        // (`tinyflows::nodes::control_flow::loop_node::DEFAULT_MAX_ITERATIONS`),
+        // which can itself exceed a low host ceiling — so it is treated as
+        // that declared value here rather than left for the engine to apply
+        // unclamped.
+        let declared = node
+            .config
+            .get("max_iterations")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(tinyflows::nodes::control_flow::loop_node::DEFAULT_MAX_ITERATIONS);
+        if declared <= ceiling {
+            continue;
+        }
+        tracing::info!(
+            node = %node.id,
+            declared,
+            ceiling,
+            "clamping loop max_iterations to the host ceiling"
+        );
+        if let Some(config) = node.config.as_object_mut() {
+            config.insert("max_iterations".to_string(), ceiling.into());
+        }
+    }
+    graph
+}
+
 /// The settings one run of `workflow` uses.
 ///
 /// The host's settings with the workflow's own `defaults` block layered over
@@ -330,50 +384,6 @@ fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {
 /// Returns [`WorkflowError::Invalid`] when the block names something that cannot
 /// be a harness. A stored workflow is checked on the way in, so this only fires
 /// for a record built in memory.
-/// Lowers any `loop` node's `max_iterations` to this host's ceiling.
-///
-/// A loop's cap is the author's decision, but here a pass through the body can
-/// be a whole harness session, so a graph asking for a thousand of them is
-/// asking for something the operator never agreed to.
-///
-/// **Clamped, never refused** — the same contract as `max_parallel_agents`. A
-/// workflow that asks for more still runs; it just stops sooner. Refusing would
-/// make a graph authored against a more generous host unrunnable here, and the
-/// author usually cannot change this host's configuration.
-///
-/// Applied to the execution graph only. The stored document keeps the number
-/// the author wrote, so raising the ceiling later restores the intent without
-/// anyone having to re-edit the workflow.
-fn clamp_loop_iterations(
-    mut graph: tinyflows::model::WorkflowGraph,
-    ceiling: u64,
-) -> tinyflows::model::WorkflowGraph {
-    for node in &mut graph.nodes {
-        if node.kind != tinyflows::model::NodeKind::Loop {
-            continue;
-        }
-        // An absent cap means the engine's own default, which is already at or
-        // under any sane ceiling — leave it alone rather than writing a number
-        // the author did not choose.
-        let Some(declared) = node.config.get("max_iterations").and_then(|v| v.as_u64()) else {
-            continue;
-        };
-        if declared <= ceiling {
-            continue;
-        }
-        tracing::info!(
-            node = %node.id,
-            declared,
-            ceiling,
-            "clamping loop max_iterations to the host ceiling"
-        );
-        if let Some(config) = node.config.as_object_mut() {
-            config.insert("max_iterations".to_string(), ceiling.into());
-        }
-    }
-    graph
-}
-
 fn settings_for(
     host: &Arc<CapabilitySettings>,
     workflow: &crate::workflows::WorkflowRecord,

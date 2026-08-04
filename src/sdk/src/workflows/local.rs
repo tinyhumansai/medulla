@@ -196,12 +196,13 @@ pub async fn run_here(
     .map_err(crate::workflows::WorkflowError::Engine)?;
 
     let (sink, _fold) = folding_sink();
+    let max_loop_iterations = settings.max_loop_iterations;
     let context = RunContext {
         store: store.clone(),
         settings: Arc::new(settings),
         services: HostServices {
             dispatch: host.dispatch(),
-            resolver: Arc::new(StoreWorkflowResolver::new(store)),
+            resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
             http_credentials: std::collections::HashMap::new(),
         },
         sink,

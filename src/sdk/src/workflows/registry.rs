@@ -39,12 +39,27 @@ use crate::workflows::WorkflowDefaults;
 /// A [`WorkflowResolver`] over any [`WorkflowStore`].
 pub struct StoreWorkflowResolver {
     store: Arc<dyn WorkflowStore>,
+    /// The host's `loop` iteration ceiling, applied to every resolved child
+    /// graph. See [`clamp_loop_iterations`](crate::workflows::run::clamp_loop_iterations)
+    /// for why: the root graph is clamped once in `run_workflow_inner` before
+    /// it is compiled, but a `sub_workflow` node's child graph is compiled by
+    /// the engine itself, straight from what this resolver returns — the only
+    /// place left to apply the same ceiling to it.
+    max_loop_iterations: u64,
 }
 
 impl StoreWorkflowResolver {
-    /// Resolve sub-workflows out of `store`.
-    pub fn new(store: Arc<dyn WorkflowStore>) -> Self {
-        Self { store }
+    /// Resolve sub-workflows out of `store`, clamping every resolved graph's
+    /// `loop` nodes to `max_loop_iterations`.
+    ///
+    /// Pass [`u64::MAX`] from a simulation caller (dry run, proposal
+    /// verification) that never dispatches a real harness session: those
+    /// paths cost nothing per iteration, so there is nothing to bound.
+    pub fn new(store: Arc<dyn WorkflowStore>, max_loop_iterations: u64) -> Self {
+        Self {
+            store,
+            max_loop_iterations,
+        }
     }
 }
 
@@ -77,7 +92,11 @@ impl WorkflowResolver for StoreWorkflowResolver {
                         failures.join("; ")
                     )));
                 }
-                Ok(record.graph)
+                let graph = crate::workflows::run::clamp_loop_iterations(
+                    record.graph,
+                    self.max_loop_iterations,
+                );
+                Ok(graph)
             }
             Ok(None) => Err(EngineError::Capability(format!(
                 "sub_workflow: no saved workflow found for workflow_id '{workflow_id}'"

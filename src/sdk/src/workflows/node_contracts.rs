@@ -180,9 +180,12 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              than `workflows.runTimeoutSecs` (600 by default) is cut off there regardless of \
              how many iterations remain. Check `workflow_host` for the current value."
                 .to_string(),
-            "Two shapes are refused rather than silently running once: a `merge` node on the \
-             cycle, and a loop node that is itself a fan-in. For the second, join the incoming \
-             arms with a `merge` placed *before* the loop node, outside the cycle."
+            "Three shapes are refused rather than silently running once or never: a fan-in \
+             `merge` node on the cycle (a single-input `merge` is a passthrough and is fine), \
+             a loop node that is itself a fan-in, and a `body` that does not route back to the \
+             loop head. For the fan-in cases, join the incoming arms with a `merge` placed \
+             *before* the loop node, outside the cycle; for the last, wire `body` to the first \
+             node of the loop body and wire that body's last node back to this loop."
                 .to_string(),
         ],
         _ => Vec::new(),

@@ -117,7 +117,10 @@ impl Harness {
             settings: self.settings.clone(),
             services: HostServices {
                 dispatch,
-                resolver: Arc::new(StoreWorkflowResolver::new(self.store.clone())),
+                resolver: Arc::new(StoreWorkflowResolver::new(
+                    self.store.clone(),
+                    self.settings.max_loop_iterations,
+                )),
                 http_credentials: HashMap::new(),
             },
             sink: null_sink(),
@@ -396,7 +399,7 @@ async fn a_dry_run_exercises_the_graph_without_dispatching_anything() {
 
     let result = dry_run(
         harness.store.clone(),
-        Arc::new(StoreWorkflowResolver::new(harness.store.clone())),
+        Arc::new(StoreWorkflowResolver::new(harness.store.clone(), u64::MAX)),
         "diamond",
         json!({}),
         Default::default(),
@@ -542,5 +545,57 @@ async fn a_loop_asking_past_the_host_ceiling_is_clamped_rather_than_refused() {
         declared,
         Some(50),
         "the clamp must not rewrite the document"
+    );
+}
+
+/// A loop that omits `max_iterations` falls through to the engine's own
+/// default (25) — not to "no limit". A host ceiling below that default must
+/// still bind it, or a graph that names no cap at all can outrun a ceiling an
+/// operator lowered specifically to bound cost.
+#[tokio::test]
+async fn a_loop_with_no_declared_cap_is_still_clamped_to_the_host_ceiling() {
+    let mut harness = Harness::new();
+    let mut settings = CapabilitySettings::clone(&harness.settings);
+    settings.max_loop_iterations = 2;
+    harness.settings = Arc::new(settings);
+
+    let document = json!({
+        "name": "Uncapped loop",
+        "nodes": [
+            { "id": "start", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "l", "kind": "loop", "name": "Until done",
+              "config": { "on_exceeded": "continue" } },
+            { "id": "work", "kind": "agent", "name": "Work",
+              "config": { "prompt": "Do one pass of the work." } },
+            { "id": "out", "kind": "transform", "name": "Report",
+              "config": { "set": { "passes": "=.nodes.l.iteration" } } }
+        ],
+        "edges": [
+            { "from_node": "start", "to_node": "l" },
+            { "from_node": "l", "from_port": "body", "to_node": "work" },
+            { "from_node": "work", "to_node": "l" },
+            { "from_node": "l", "from_port": "done", "to_node": "out" }
+        ]
+    })
+    .to_string();
+    harness.install(&document, "uncapped");
+    let dispatch = Arc::new(StubDispatch::default());
+
+    let record = run_workflow(
+        harness.context(dispatch.clone()),
+        "uncapped",
+        "run-loop-uncapped",
+        json!({}),
+        Default::default(),
+    )
+    .await
+    .expect("a clamped loop still runs");
+
+    assert_eq!(record.status, RunStatus::Succeeded);
+    assert_eq!(
+        dispatch.seen.lock().unwrap().len(),
+        2,
+        "an implicit engine default (25) must still be clamped to the host ceiling"
     );
 }

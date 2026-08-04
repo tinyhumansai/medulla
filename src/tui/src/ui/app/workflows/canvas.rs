@@ -69,36 +69,62 @@ impl App {
 
     /// Scroll the canvas so the selected node is inside the viewport.
     ///
-    /// The viewport is measured in layers and lanes rather than cells, so this
-    /// does not need to know how wide a node box is drawn — only that the
-    /// renderer starts at [`canvas_layer`](super::super::types::WorkflowsState)
-    /// and shows [`visible_layers`](Self::visible_layers) of them.
+    /// Only vertically: the graph folds to the pane's width, so a node is never
+    /// off to the side — a later layer is further *down*, on the next band.
     fn scroll_canvas_to_cursor(&mut self) {
         let Some(node) = self.wf.layout.node(self.wf.node_index) else {
             return;
         };
         let (layer, lane) = (node.layer, node.lane);
-        let (layers, lanes) = (self.visible_layers(), self.visible_lanes());
-        if layer < self.wf.canvas_layer {
-            self.wf.canvas_layer = layer;
-        } else if layer >= self.wf.canvas_layer + layers {
-            self.wf.canvas_layer = layer + 1 - layers;
+        let (_, row) = self.graph_cell(layer, lane);
+        let rows = self.visible_rows();
+        if row < self.wf.canvas_row {
+            self.wf.canvas_row = row;
+        } else if row + NODE_HEIGHT > self.wf.canvas_row + rows {
+            self.wf.canvas_row = row + NODE_HEIGHT - rows;
         }
-        if lane < self.wf.canvas_lane {
-            self.wf.canvas_lane = lane;
-        } else if lane >= self.wf.canvas_lane + lanes {
-            self.wf.canvas_lane = lane + 1 - lanes;
-        }
+    }
+
+    /// Where a node sits on the unscrolled canvas, in cells.
+    ///
+    /// This is the fold: layers run left to right until one would leave the
+    /// pane, then the graph continues on a band below, the way a paragraph
+    /// wraps. Shared with the renderer so navigation and drawing can never
+    /// disagree about where a node is.
+    pub(in crate::ui::app) fn graph_cell(&self, layer: usize, lane: usize) -> (usize, usize) {
+        let per_band = self.layers_per_band();
+        let (band, column) = (layer / per_band, layer % per_band);
+        (
+            column * LAYER_STRIDE,
+            band * self.band_stride() + lane * LANE_STRIDE,
+        )
+    }
+
+    /// The band a layer folds onto.
+    pub(in crate::ui::app) fn band_of(&self, layer: usize) -> usize {
+        layer / self.layers_per_band()
+    }
+
+    /// How many layers fit across the canvas before it folds.
+    pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
+        self.visible_layers()
+    }
+
+    /// Rows from one band's top edge to the next: every lane the graph has,
+    /// plus a blank row for the wires that fold back to the left to run in.
+    pub(in crate::ui::app) fn band_stride(&self) -> usize {
+        self.wf.layout.lanes.max(1) * LANE_STRIDE + BAND_GAP
     }
 
     /// How many layers the canvas can show at the current terminal width.
     ///
-    /// A node box plus the gutter between columns is a known number of cells, so
+    /// A node plus the gutter between columns is a known number of cells, so
     /// this is arithmetic rather than a measurement — which means the key
-    /// handler can scroll without waiting for a frame to have been drawn. The
-    /// sidebar is measured exactly the way the layout measures it; everything
-    /// left of the panel's own borders is canvas, because the content pane now
-    /// holds one view rather than sharing the row with a copilot column.
+    /// handler can fold and scroll without waiting for a frame to have been
+    /// drawn. The sidebar is measured exactly the way the layout measures it;
+    /// everything left of the panel's own borders is canvas, because the content
+    /// pane now holds one view rather than sharing the row with a copilot
+    /// column.
     pub(in crate::ui::app) fn visible_layers(&self) -> usize {
         const BORDERS: usize = 2;
         let rail = self.workflow_sidebar_width(self.area.width);
@@ -108,11 +134,23 @@ impl App {
         (canvas / super::super::render::workflows::LAYER_STRIDE).max(1)
     }
 
-    /// How many lanes the canvas can show at the current terminal height.
-    pub(in crate::ui::app) fn visible_lanes(&self) -> usize {
+    /// How many rows of canvas the graph panel has.
+    pub(in crate::ui::app) fn visible_rows(&self) -> usize {
         if self.wf.graph_rows > 0 {
-            return (self.wf.graph_rows / super::super::render::workflows::LANE_STRIDE).max(1);
+            return self.wf.graph_rows.max(1);
         }
+        // Header, tab bar, hint row, footer, and the panel's own borders. No
+        // measured graph exists before the first frame, so this fallback keeps
+        // pre-render navigation safe. Every later move uses the exact inner
+        // graph rectangle recorded by the renderer.
+        const CHROME: usize = 9;
+        (self.area.height as usize).saturating_sub(CHROME).max(1)
+    }
+
+    /// How many lanes of one band the canvas can show at once.
+    pub(in crate::ui::app) fn visible_lanes(&self) -> usize {
+        (self.visible_rows() / super::super::render::workflows::LANE_STRIDE).max(1)
+    }
         // Header, tab bar, hint row, footer, and the panel's own borders. No
         // measured graph exists before the first frame, so this fallback keeps
         // pre-render navigation safe. Every later move uses the exact inner

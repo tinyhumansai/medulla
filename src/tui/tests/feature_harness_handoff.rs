@@ -141,7 +141,8 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: medulla_tui::worker::pty::SessionOrigin::User,
+            name: None,
             mcp_grant_session: None,
         })
         .expect("open");

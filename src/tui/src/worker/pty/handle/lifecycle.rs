@@ -24,6 +24,7 @@ impl SessionHandle {
     pub(in super::super) fn new(
         meta: SessionMeta,
         label: String,
+        name: Option<String>,
         session_id: Option<String>,
         control: HarnessControl,
         screen: vt100::Parser,
@@ -39,7 +40,11 @@ impl SessionHandle {
         // Not so for an operator-spawned session: nothing is about to run in it,
         // it is sitting at a prompt waiting to be typed in. Leaving it claimed
         // would make the rail read "busy" for a harness that is plainly idle.
-        let busy = !meta.user_spawned;
+        //
+        // Origin, not control, answers this: what matters is whether a turn was
+        // dispatched into this session at birth, and only the path that created
+        // it knows that.
+        let busy = !meta.origin.is_user();
         SessionHandle {
             meta,
             state: AtomicU8::new(STATE_RUNNING),
@@ -52,6 +57,7 @@ impl SessionHandle {
             cold: Mutex::new(ColdFields {
                 label,
                 session_id,
+                name,
                 thread_name: None,
                 last_error: None,
             }),

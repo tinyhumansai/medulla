@@ -34,7 +34,7 @@ use medulla::session_history::SessionAgentKind;
 use medulla::sessions::{SessionClass, TurnStream};
 use medulla::wrapper::tail::SessionTailer;
 
-use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
+use super::super::pty::{HarnessControl, LaunchSpec, PtyManager, SessionOrigin};
 use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
@@ -403,7 +403,12 @@ impl PtySessionExecutor {
             // operator can still take it over later; that is what stops the
             // next frame landing in a composer they are typing in.
             control: HarnessControl::Orchestrator,
-            user_spawned: false,
+            // …and that later takeover does *not* touch this: the session was
+            // auto-created by a dispatch (§4.1), which is true for the rest of
+            // its life however many times control changes hands. Unnamed on
+            // purpose — the UI labels it from the task it was created for.
+            origin: SessionOrigin::Orchestrator,
+            name: None,
             mcp_grant_session,
         }))
     }

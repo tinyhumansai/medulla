@@ -9,7 +9,7 @@
 //!
 //! [`claim_idle`]: crate::worker::pty::PtyManager::claim_idle
 
-use crate::worker::pty::{HarnessControl, LaunchSpec};
+use crate::worker::pty::{HarnessControl, LaunchSpec, SessionOrigin};
 
 use super::{HarnessChoice, LocalHarnesses};
 
@@ -42,6 +42,27 @@ impl LocalHarnesses {
         choice: &HarnessChoice,
         cwd: &str,
         skip_permissions: bool,
+    ) -> Result<String, String> {
+        self.open_unmanaged_named(choice, cwd, skip_permissions, None)
+    }
+
+    /// [`open_unmanaged`](Self::open_unmanaged), with the display name the
+    /// person spinning the session up gave it.
+    ///
+    /// The seam for the picker's name prompt: a session a person starts is
+    /// [`SessionOrigin::User`]-originated and is the only kind that carries a
+    /// name, because a dispatched one is labelled from its task instead. `None`
+    /// leaves it unnamed, which is what the picker passes until it asks.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_unmanaged`](Self::open_unmanaged).
+    pub fn open_unmanaged_named(
+        &self,
+        choice: &HarnessChoice,
+        cwd: &str,
+        skip_permissions: bool,
+        name: Option<String>,
     ) -> Result<String, String> {
         let cwd = self.resolve_workspace(cwd);
         if !std::path::Path::new(&cwd).is_dir() {
@@ -78,7 +99,12 @@ impl LocalHarnesses {
             model,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            // A person asked for this one, so it is theirs by origin as well as
+            // by control — and it stays user-originated even after they hand it
+            // to the orchestrator, which is the case the two fields exist to
+            // tell apart.
+            origin: SessionOrigin::User,
+            name,
             mcp_grant_session,
         })
     }

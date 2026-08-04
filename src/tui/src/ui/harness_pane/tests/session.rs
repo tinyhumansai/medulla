@@ -41,7 +41,8 @@ fn sh(script: &str) -> LaunchSpec {
         session_id: None,
         model: None,
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: crate::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
         mcp_grant_session: None,
     }
 }
@@ -51,7 +52,7 @@ fn sh(script: &str) -> LaunchSpec {
 /// Task resolution needs a live host and is covered by the daemon's own screen
 /// e2e; everything here is about what the pane does *once* a session is named,
 /// so the runtime is inert on purpose.
-fn harnesses(sessions: PtyManager) -> LocalHarnesses {
+pub(super) fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],

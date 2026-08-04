@@ -8,4 +8,4 @@ mod behavior;
 mod types;
 
 pub use behavior::DEFAULT_MAX_BINDINGS;
-pub use types::{SessionRegistry, TurnPlan, WorkspaceContext};
+pub use types::{SessionIdentity, SessionRegistry, TurnPlan, WorkspaceContext};

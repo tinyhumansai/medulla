@@ -164,7 +164,8 @@ fn user_session(sessions: &PtyManager) -> String {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: medulla_tui::worker::pty::SessionOrigin::User,
+            name: None,
             mcp_grant_session: None,
         })
         .expect("open")
@@ -199,7 +200,7 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
     wait_for("the harness to open", || sessions.rows().len() == 1);
 
     let row = sessions.rows().remove(0);
-    assert!(row.user_spawned);
+    assert!(row.origin.is_user());
     assert_eq!(row.control, HarnessControl::User);
     assert!(!row.busy, "nothing is running in it yet");
     assert!(

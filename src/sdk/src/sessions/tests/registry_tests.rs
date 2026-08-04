@@ -3,8 +3,8 @@
 
 use crate::protocol::HarnessProvider;
 
-use super::super::registry::SessionRegistry;
-use super::super::types::{SessionClass, SessionKey};
+use super::super::registry::{SessionIdentity, SessionRegistry};
+use super::super::types::{SessionClass, SessionKey, SessionOrigin};
 
 // --------------------------------------------------------------- registry ---
 
@@ -160,4 +160,82 @@ async fn only_unbound_turns_take_the_conversation_chain() {
     // concurrency budget into a single file.
     let bounded = registry.acquire_turn(&alice, SessionClass::Bounded).await;
     assert!(bounded.is_none());
+}
+
+// ---------------------------------------------------------------- identity ---
+
+#[test]
+fn an_unrecorded_conversation_plans_as_an_unnamed_orchestrator_session() {
+    // The auto-creation default (§4.1): a turn nobody opened by hand is serving
+    // a dispatch, and only a person supplies a name.
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+
+    let plan = registry.plan(&alice, SessionClass::Unbound);
+    assert_eq!(plan.identity, SessionIdentity::orchestrator());
+    assert!(plan.identity.origin.is_orchestrator());
+    assert_eq!(plan.identity.name, None);
+    assert_eq!(registry.identity(&alice), None, "nothing is bound yet");
+}
+
+#[test]
+fn a_recorded_identity_round_trips_through_the_plan() {
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+    registry.record(&alice, "sess-1");
+
+    assert!(registry.record_identity(&alice, SessionIdentity::user(Some("debug login".into()))));
+    assert_eq!(
+        registry.identity(&alice),
+        Some(SessionIdentity::user(Some("debug login".into())))
+    );
+
+    let plan = registry.plan(&alice, SessionClass::Unbound);
+    assert_eq!(plan.identity.origin, SessionOrigin::User);
+    assert_eq!(plan.identity.name.as_deref(), Some("debug login"));
+}
+
+#[test]
+fn identity_survives_the_binding_being_rewritten() {
+    // A conversation that rebinds — a new harness session id for the same
+    // person's session — must not silently lose the name they gave it.
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+    registry.record(&alice, "sess-1");
+    registry.record_identity(&alice, SessionIdentity::user(Some("debug login".into())));
+
+    registry.record(&alice, "sess-2");
+    assert_eq!(registry.bound(&alice).as_deref(), Some("sess-2"));
+    assert_eq!(
+        registry.identity(&alice),
+        Some(SessionIdentity::user(Some("debug login".into()))),
+        "rebinding is not a rename"
+    );
+}
+
+#[test]
+fn identity_cannot_be_recorded_before_there_is_a_binding() {
+    // Mirrors `record_workspace_context`: the binding is the session here, so
+    // there is nothing to attach an identity to until one exists.
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+
+    assert!(!registry.record_identity(&alice, SessionIdentity::user(Some("nope".into()))));
+    assert_eq!(registry.identity(&alice), None);
+    assert!(registry.is_empty(), "a rejected identity binds nothing");
+}
+
+#[test]
+fn identity_is_per_conversation_like_every_other_binding_field() {
+    let registry = SessionRegistry::default();
+    let alice = key("alice", HarnessProvider::Claude);
+    let bob = key("bob", HarnessProvider::Claude);
+    registry.record(&alice, "sess-1");
+    registry.record(&bob, "sess-2");
+    registry.record_identity(&alice, SessionIdentity::user(Some("mine".into())));
+
+    assert_eq!(
+        registry.identity(&bob),
+        Some(SessionIdentity::orchestrator())
+    );
 }

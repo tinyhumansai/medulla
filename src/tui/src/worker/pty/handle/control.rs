@@ -54,7 +54,7 @@ impl SessionHandle {
     /// [`adopt_label`](Self::adopt_label).
     pub(in super::super) fn serves_label(&self, label: &str) -> bool {
         let cold = lock(&self.cold);
-        cold.label == label || (self.meta.user_spawned && cold.label.starts_with("you:"))
+        cold.label == label || (self.meta.origin.is_user() && cold.label.starts_with("you:"))
     }
 
     /// Adopt `label` if this is a handed-back operator session still carrying
@@ -66,7 +66,7 @@ impl SessionHandle {
     /// adoption must not turn one harness into a cross-conversation pool.
     pub(in super::super) fn adopt_label(&self, label: &str) {
         let mut cold = lock(&self.cold);
-        if self.meta.user_spawned && cold.label.starts_with("you:") {
+        if self.meta.origin.is_user() && cold.label.starts_with("you:") {
             cold.label = label.to_string();
         }
     }

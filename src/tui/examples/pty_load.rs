@@ -122,7 +122,8 @@ fn flooding(label: &str) -> LaunchSpec {
         // measures the dispatch path, and an operator-held session is one
         // `claim_idle` skips entirely.
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
         mcp_grant_session: None,
     }
 }

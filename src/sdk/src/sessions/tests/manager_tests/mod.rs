@@ -9,9 +9,10 @@ use crate::protocol::HarnessProvider;
 
 use super::super::input::{Folded, Observation};
 use super::super::manager::{OpenSession, SessionConfig, SessionManager, TranscriptRole};
+use super::super::registry::SessionIdentity;
 use super::super::routing::Transport;
 use super::super::types::{
-    SessionClass, SessionDriver, SessionKey, SessionPhase, TurnOrigin, TurnRequest,
+    SessionClass, SessionDriver, SessionKey, SessionOrigin, SessionPhase, TurnOrigin, TurnRequest,
 };
 use super::input_tests::prompt_envelope;
 

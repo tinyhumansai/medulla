@@ -169,7 +169,8 @@ fn sample_selected() -> SessionRow {
         last_error: None,
         busy: false,
         control: HarnessControl::User,
-        user_spawned: true,
+        origin: crate::worker::pty::SessionOrigin::User,
+        name: None,
         attention: None,
     }
 }

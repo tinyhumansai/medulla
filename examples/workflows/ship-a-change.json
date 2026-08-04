@@ -1,0 +1,106 @@
+{
+  "name": "Ship a change",
+  "description": "Do a piece of work in a repository, open a pull request for it, then hand that pull request to the `pr-babysitter` workflow and let it drive the PR to green.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "What to change in the repository."
+    },
+    {
+      "name": "cwd",
+      "type": "string",
+      "default": ".",
+      "description": "Checkout to work in, relative to the workspace."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "default": "",
+      "description": "owner/name the pull request belongs to. Empty means the checkout's own remote."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "start",
+      "config": { "trigger_kind": "manual", "max_node_visits": 40 }
+    },
+    {
+      "id": "implement",
+      "kind": "agent",
+      "name": "Do the work and open a PR",
+      "config": {
+        "prompt": "=\"Work in this repository on the following task:\\n\\n\" + .inputs.task + \"\\n\\nCreate a branch, implement it, run the repository's own build, lint and test commands until they pass, and commit. Push the branch and open a pull request against the upstream default branch with `gh pr create` — ready for review, not a draft. Do not merge it. Finish by printing the pull request URL on its own line.\""
+      }
+    },
+    {
+      "id": "locate",
+      "kind": "tool_call",
+      "name": "Find the pull request",
+      "config": {
+        "slug": "medulla:shell",
+        "args": {
+          "language": "shell",
+          "cwd": "=inputs.cwd",
+          "env": { "REPO": "=inputs.repo" },
+          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# No argument: `gh pr view` resolves the PR for the branch that is checked\n# out, which is the one the agent just pushed.\nnumber=$(gh pr view $repo_arg --json number -q .number 2>/dev/null || true)\nurl=$(gh pr view $repo_arg --json url -q .url 2>/dev/null || true)\n\n# A string, not a number: the babysitter declares `pr` as a string input and\n# the child validates what arrives against its own declaration.\nprintf '{\"pr\":\"%s\",\"url\":\"%s\",\"found\":%s}\\n' \"$number\" \"$url\" \"$([ -n \"$number\" ] && echo true || echo false)\"\n"
+        }
+      }
+    },
+    {
+      "id": "opened",
+      "kind": "condition",
+      "name": "Did a PR get opened?",
+      "config": { "field": "=.item.json.output.found" }
+    },
+    {
+      "id": "babysit",
+      "kind": "sub_workflow",
+      "name": "Babysit it until green",
+      "config": {
+        "workflow_id": "pr-babysitter",
+        "inputs": {
+          "pr": "=.nodes.locate.item.json.output.pr",
+          "repo": "=inputs.repo",
+          "cwd": "=inputs.cwd"
+        }
+      }
+    },
+    {
+      "id": "report",
+      "kind": "transform",
+      "name": "Report",
+      "config": {
+        "set": {
+          "url": "=.nodes.locate.item.json.output.url",
+          "pr": "=.nodes.locate.item.json.output.pr",
+          "babysat": "=.item.json"
+        }
+      }
+    },
+    {
+      "id": "no_pr",
+      "kind": "transform",
+      "name": "No pull request",
+      "config": {
+        "set": {
+          "url": null,
+          "pr": null,
+          "babysat": null,
+          "note": "=\"the agent did not leave an open pull request on the checked-out branch: \" + (.nodes.implement.item.text // \"no output\")"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from_node": "start", "to_node": "implement" },
+    { "from_node": "implement", "to_node": "locate" },
+    { "from_node": "locate", "to_node": "opened" },
+    { "from_node": "opened", "from_port": "true", "to_node": "babysit" },
+    { "from_node": "babysit", "to_node": "report" },
+    { "from_node": "opened", "from_port": "false", "to_node": "no_pr" }
+  ]
+}

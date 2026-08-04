@@ -1,0 +1,158 @@
+{
+  "name": "Babysit a pull request",
+  "description": "Watch one pull request until it is green and clean: poll CI and review feedback, hand each round of failures to a harness that fixes them at the root and pushes, and stop when nothing actionable is left or the round cap is hit.",
+  "inputs": [
+    {
+      "name": "pr",
+      "type": "string",
+      "required": true,
+      "description": "Pull request number or URL to babysit."
+    },
+    {
+      "name": "repo",
+      "type": "string",
+      "default": "",
+      "description": "owner/name to target. Empty means the checkout's own remote."
+    },
+    {
+      "name": "cwd",
+      "type": "string",
+      "default": ".",
+      "description": "Checkout to run gh and the fixing harness in, relative to the workspace."
+    },
+    {
+      "name": "feedback_command",
+      "type": "string",
+      "default": "",
+      "description": "Optional command run through `zsh -lc`, so the operator's own login PATH and shell functions are available. It must print JSON carrying `unresolvedThreads` and `changesRequested` counts, and it can read $PR and $REPO from the environment — e.g. `pr-comments \"$PR\" --json -R \"$REPO\"`. Empty falls back to `gh pr view`, which sees review verdicts but not thread resolution state."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "start",
+      "config": { "trigger_kind": "manual", "max_node_visits": 60 }
+    },
+    {
+      "id": "watch",
+      "kind": "loop",
+      "name": "Until green and clean",
+      "config": {
+        "max_iterations": 8,
+        "on_exceeded": "continue",
+        "condition": "=(try .item.settled catch false) != true"
+      }
+    },
+    {
+      "id": "inspect",
+      "kind": "tool_call",
+      "name": "Read CI and review feedback",
+      "config": {
+        "slug": "medulla:shell",
+        "args": {
+          "language": "shell",
+          "cwd": "=inputs.cwd",
+          "env": {
+            "PR": "=inputs.pr",
+            "REPO": "=inputs.repo",
+            "FEEDBACK_COMMAND": "=inputs.feedback_command"
+          },
+          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# `gh pr checks` exits non-zero when checks are failing or pending, which is\n# exactly the case this node exists to report — so its status is ignored and\n# only its output is read.\nchecks=$(gh pr checks \"$PR\" $repo_arg --json name,state,link 2>/dev/null || true)\n[ -n \"$checks\" ] || checks='[]'\n\npr=$(gh pr view \"$PR\" $repo_arg --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName 2>/dev/null || true)\n[ -n \"$pr\" ] || pr='{}'\n\nif [ -n \"${FEEDBACK_COMMAND:-}\" ]; then\n  # A login zsh, so the operator's own PATH, functions and helper scripts\n  # (`pr-comments` and friends) are on hand rather than just the daemon's.\n  feedback=$(zsh -lc \"$FEEDBACK_COMMAND\" 2>/dev/null || true)\nelse\n  feedback=$(gh pr view \"$PR\" $repo_arg --json reviewDecision,reviews,comments -q '{unresolvedThreads: 0, changesRequested: (if .reviewDecision == \"CHANGES_REQUESTED\" then 1 else 0 end), detail: .}' 2>/dev/null || true)\nfi\n[ -n \"$feedback\" ] || feedback='{}'\n\nprintf '{\"checks\":%s,\"pr\":%s,\"feedback\":%s}\\n' \"$checks\" \"$pr\" \"$feedback\"\n"
+        }
+      }
+    },
+    {
+      "id": "assess",
+      "kind": "transform",
+      "name": "What is left to do",
+      "config": {
+        "set": {
+          "failing": "=[.item.json.output.checks[]? | select(.state == \"FAIL\" or .state == \"FAILURE\" or .state == \"ERROR\" or .state == \"CANCELLED\" or .state == \"TIMED_OUT\")]",
+          "pending": "=[.item.json.output.checks[]? | select(.state == \"PENDING\" or .state == \"QUEUED\" or .state == \"IN_PROGRESS\")] | length",
+          "blocking_feedback": "=((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0))",
+          "feedback": "=.item.json.output.feedback",
+          "pr": "=.item.json.output.pr",
+          "actionable": "=([.item.json.output.checks[]? | select(.state == \"FAIL\" or .state == \"FAILURE\" or .state == \"ERROR\" or .state == \"CANCELLED\" or .state == \"TIMED_OUT\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0"
+        }
+      }
+    },
+    {
+      "id": "decide",
+      "kind": "condition",
+      "name": "Anything to fix?",
+      "config": { "field": "=.item.actionable" }
+    },
+    {
+      "id": "fix",
+      "kind": "agent",
+      "name": "Fix and push",
+      "config": {
+        "prompt": "=\"Pull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
+      }
+    },
+    {
+      "id": "again",
+      "kind": "transform",
+      "name": "Round again",
+      "config": {
+        "set": {
+          "settled": false,
+          "did": "fixed"
+        }
+      }
+    },
+    {
+      "id": "wait",
+      "kind": "tool_call",
+      "name": "Let CI catch up",
+      "config": {
+        "slug": "medulla:shell",
+        "args": {
+          "language": "shell",
+          "cwd": "=inputs.cwd",
+          "env": { "PENDING": "=.nodes.assess.item.pending | tostring" },
+          "script": "set -u\n# Nothing is actionable. If checks are still running, sleeping before the\n# next poll is the whole point of the round; if none are, this settles.\nif [ \"${PENDING:-0}\" != \"0\" ]; then sleep 60; fi\nprintf '{\"settled\":%s}\\n' \"$([ \"${PENDING:-0}\" = \"0\" ] && echo true || echo false)\"\n"
+        }
+      }
+    },
+    {
+      "id": "settle",
+      "kind": "transform",
+      "name": "Settled?",
+      "config": {
+        "set": {
+          "settled": "=.item.json.output.settled",
+          "did": "waited"
+        }
+      }
+    },
+    {
+      "id": "report",
+      "kind": "transform",
+      "name": "Report",
+      "config": {
+        "set": {
+          "pr": "=.nodes.assess.item.pr",
+          "rounds": "=.nodes.watch.iteration",
+          "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0)",
+          "failing": "=.nodes.assess.item.failing",
+          "blocking_feedback": "=.nodes.assess.item.blocking_feedback"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from_node": "start", "to_node": "watch" },
+    { "from_node": "watch", "from_port": "body", "to_node": "inspect" },
+    { "from_node": "inspect", "to_node": "assess" },
+    { "from_node": "assess", "to_node": "decide" },
+    { "from_node": "decide", "from_port": "true", "to_node": "fix" },
+    { "from_node": "fix", "to_node": "again" },
+    { "from_node": "again", "to_node": "watch" },
+    { "from_node": "decide", "from_port": "false", "to_node": "wait" },
+    { "from_node": "wait", "to_node": "settle" },
+    { "from_node": "settle", "to_node": "watch" },
+    { "from_node": "watch", "from_port": "done", "to_node": "report" }
+  ]
+}

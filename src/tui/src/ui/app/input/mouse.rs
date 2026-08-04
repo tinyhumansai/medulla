@@ -7,7 +7,9 @@
 
 use crossterm::event::{MouseButton, MouseEventKind};
 
-use super::super::types::{App, Cmd, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES};
+use super::super::types::{
+    App, Cmd, PointerGrab, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, TOKENMAXXING_SUBPAGES,
+};
 
 /// Rows one wheel notch moves, matching the transcript's own step so the two
 /// panes feel like one surface. Only used for a harness we scroll ourselves —
@@ -46,6 +48,13 @@ impl App {
         if self.kill_armed.take().is_some() {
             self.set_status("Harness kill cancelled");
         }
+        // Ahead of every other rule, including the modal one below: a button
+        // that went down in a harness has to come back up in it. The grab is
+        // the whole gesture, so it outranks whatever the pointer has since
+        // moved over and whatever the press itself put on screen.
+        if self.deliver_pointer_grab(&m) {
+            return None;
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // The harness picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.
@@ -71,29 +80,30 @@ impl App {
                         self.hit_harness.as_ref().is_some_and(|(rect, id)| {
                             id == &session && rect.contains((m.column, m.row).into())
                         });
-                    if !inside_attached_pane {
-                        // The rail and the threads strip are navigation chrome,
-                        // not a destination away from the harness: clicking a
-                        // lane should move the cursor, not raise the hand-back
-                        // question over the pane the operator is still in.
-                        let inside_rail = self
-                            .hit_agents
-                            .as_ref()
-                            .is_some_and(|(rect, _)| rect.contains((m.column, m.row).into()));
-                        let inside_threads = self
-                            .hit_threads
-                            .as_ref()
-                            .is_some_and(|(rect, _)| rect.contains((m.column, m.row).into()));
-                        if !inside_rail && !inside_threads {
-                            // A click that navigates away releases the same keyboard
-                            // focus as Ctrl-]. Settle the configured hand-back policy
-                            // before changing the selected tab or rail row; otherwise
-                            // an Ask prompt would refer to a pane already hidden.
-                            if !self.begin_harness_release(&session) {
-                                return None;
-                            }
-                            self.release_harness();
+                    // Only the attached harness's own rail row is not a
+                    // destination away from it: clicking the row you are
+                    // already typing in should move nothing and ask nothing.
+                    // Every other row is a departure, and used not to be
+                    // treated as one — the rail was waved through wholesale, so
+                    // a click on the lane next door skipped the hand-back
+                    // policy here and was then released silently by the next
+                    // draw, which notices the cursor has left the attached
+                    // session. Worse, a click on *another harness's* row opened
+                    // the handover question about that harness while detaching
+                    // this one, so answering it handed back a session the
+                    // operator had never typed in and left the one they had
+                    // held forever.
+                    let on_own_rail_row =
+                        self.rail_session_at(m.column, m.row).as_deref() == Some(session.as_str());
+                    if !inside_attached_pane && !on_own_rail_row {
+                        // A click that navigates away releases the same keyboard
+                        // focus as Ctrl-]. Settle the configured hand-back policy
+                        // before changing the selected tab or rail row; otherwise
+                        // an Ask prompt would refer to a pane already hidden.
+                        if !self.begin_harness_release(&session) {
+                            return None;
                         }
+                        self.release_harness();
                     }
                 }
                 self.drag_anchor = Some((m.column, m.row));
@@ -111,6 +121,67 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    /// The harness session named by the rail row under `(x, y)`, if any.
+    ///
+    /// Resolved through the same drawn-line-to-row map [`handle_click`] uses,
+    /// so a click on the second line of a wrapped harness row answers with that
+    /// harness rather than with whatever follows it.
+    fn rail_session_at(&self, x: u16, y: u16) -> Option<String> {
+        let (rect, owners) = self.hit_agents.as_ref()?;
+        if !rect.contains((x, y).into()) {
+            return None;
+        }
+        let index = *owners.get((y - rect.y) as usize)?;
+        self.rail_rows()
+            .get(index)?
+            .session_id()
+            .map(str::to_string)
+    }
+
+    /// Deliver a drag or release to the harness that took the matching press.
+    ///
+    /// Returns `true` when the event belonged to a grab and was consumed. Only
+    /// the grabbed button's own motion is claimed: a second button pressed
+    /// meanwhile, or the wheel, still routes normally.
+    ///
+    /// The coordinates are clamped into the pane rather than dropped when the
+    /// pointer has left it. That is what a terminal reports for a drag off the
+    /// edge of a window, and it is the only encoding that keeps the child's idea
+    /// of where the pointer is inside the screen it believes it owns — a release
+    /// at a negative offset would wrap to the far side of the pane instead.
+    fn deliver_pointer_grab(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        let Some(grab) = self.harness_pointer_grab.clone() else {
+            return false;
+        };
+        let Some((button, motion)) = pointer_report(m.kind) else {
+            return false;
+        };
+        use crate::ui::harness_pane::mouse::Motion;
+        // A press never belongs to a grab: it starts one. Leaving it to the
+        // ordinary path also means a press elsewhere while a button is held
+        // behaves exactly as it does with no harness involved.
+        if button != grab.button || motion == Motion::Press {
+            return false;
+        }
+        if motion == Motion::Release {
+            self.harness_pointer_grab = None;
+        }
+        let Some(harnesses) = self.harnesses.clone() else {
+            return true;
+        };
+        let rect = grab.rect;
+        let col = m
+            .column
+            .clamp(rect.x, rect.right().saturating_sub(1))
+            .saturating_sub(rect.x);
+        let row = m
+            .row
+            .clamp(rect.y, rect.bottom().saturating_sub(1))
+            .saturating_sub(rect.y);
+        harnesses.mouse_button(&grab.session, col, row, button, motion);
+        true
     }
 
     /// Hand a pointer event to the attached harness, if it is the harness's.
@@ -156,6 +227,25 @@ impl App {
         // origin, and reporting our absolute position would put the event
         // somewhere else entirely on it.
         harnesses.mouse_button(&session, m.column - rect.x, m.row - rect.y, button, motion);
+        // The press opens the grab that owns the rest of the gesture. Recorded
+        // even for a child in press-only mode, whose release
+        // [`mouse_button`](crate::ui::harness_pane::LocalHarnesses::mouse_button)
+        // will drop: the grab is about *routing*, and a release routed to the
+        // harness and then dropped by its protocol is right, while the same
+        // release re-routed to our own drag-selection is not.
+        match motion {
+            crate::ui::harness_pane::mouse::Motion::Press => {
+                self.harness_pointer_grab = Some(PointerGrab {
+                    session,
+                    button,
+                    rect,
+                });
+            }
+            crate::ui::harness_pane::mouse::Motion::Release => {
+                self.harness_pointer_grab = None;
+            }
+            crate::ui::harness_pane::mouse::Motion::Drag => {}
+        }
         true
     }
 
@@ -348,6 +438,15 @@ impl App {
                                 return None;
                             }
                             if let Some(session) = row.session_id() {
+                                // Clicking the row of the harness the keyboard
+                                // is already in is not a handover request. It
+                                // used to raise "you still have this harness"
+                                // over the pane the operator was mid-sentence
+                                // in, whose only useful answer was Esc.
+                                if self.harness_focus.is_attached_to(session) {
+                                    self.harness_pane_session = Some(session.to_string());
+                                    return None;
+                                }
                                 // Point the prompt at the row that was clicked,
                                 // not at whatever the last render left behind.
                                 // `harness_pane_session` is written during the

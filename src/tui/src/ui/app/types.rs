@@ -598,6 +598,32 @@ pub(super) struct WorkspaceChoice {
     pub(super) source: &'static str,
 }
 
+/// A pointer gesture a harness owns until the button comes back up.
+///
+/// Terminals grab the pointer on press: every drag and the release belong to
+/// whoever took the press, regardless of where the pointer has moved to since.
+/// The embedded pane has to do the same, because the alternatives are both
+/// visible failures — a release that lands outside the pane, or one swallowed
+/// by the hand-back question the click itself opened, leaves the child holding
+/// a button nobody is pressing. Claude Code and Codex then read every later
+/// motion as a drag and anchor their popups to a press the operator has long
+/// since let go of.
+#[derive(Clone)]
+pub(super) struct PointerGrab {
+    /// The session that received the press.
+    pub(super) session: String,
+    /// The button that went down, so a second button's events are not stolen.
+    pub(super) button: crate::ui::harness_pane::mouse::Button,
+    /// Where that session's pane was when the press landed.
+    ///
+    /// Carried rather than re-read from `hit_harness` because the grab has to
+    /// outlive the pane: the click that opened a modal, detached the harness,
+    /// or scrolled the rail can move or remove the rect before the release
+    /// arrives, and the release still has to be encoded against the geometry
+    /// the child believes it has.
+    pub(super) rect: Rect,
+}
+
 /// The "you still hold this harness" confirmation shown on release.
 ///
 /// Modelled on an unsaved-changes prompt, and for the same reason: an operator
@@ -1050,6 +1076,14 @@ pub struct App {
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
     pub(super) harness_pane_session: Option<String>,
+    // The harness that took the press of the button currently held down, if any.
+    // A terminal grabs the pointer for the whole gesture: whoever received the
+    // press receives the drags and the release too, wherever the pointer has
+    // wandered to since. Without the grab a release outside the pane — or one
+    // swallowed by a modal the click itself opened — never reaches the child,
+    // which goes on believing the button is still down and misplaces everything
+    // it draws in response to the pointer afterwards.
+    pub(super) harness_pointer_grab: Option<PointerGrab>,
     // The harness selected on the Agents rail, retained while another tab is
     // visible. Unlike `harness_pane_session`, this is navigation state rather
     // than a keyboard-routing capability: Changes uses it to keep following

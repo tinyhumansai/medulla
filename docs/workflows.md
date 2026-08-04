@@ -30,7 +30,9 @@ Everything produced by running or editing those sources is kept separately
 under `<medulla home>/state/workflows/`: run records, checkpoints, persistent
 step state, evolution notes and proposals, undo revisions, and coordination
 locks. The run history is scoped by workspace, so its concrete path is
-`state/workflows/scopes/<workspace-id>/runs/`.
+`state/workflows/scopes/<workspace-id>/runs/`. Revision history and locks are
+scoped by a stable digest of the authored catalog's full path under
+`state/workflows/definitions/`, so distinct catalogs cannot mix their history.
 
 This makes `<medulla home>/workflows/` safe to sync on its own: it contains only
 the current authored `*.json` source files. Syncing it does not copy runs,

@@ -372,12 +372,20 @@ fn absolute_path(path: &Path) -> PathBuf {
 /// this `<medulla home>/state/workflows`. Deriving it from the destination—not
 /// a run scope—keeps locks and undo history coherent across workspaces and
 /// across callers of every public constructor.
-fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    dirs.last()
-        .and_then(|write_dir| write_dir.parent())
-        .unwrap_or_else(|| Path::new("."))
+pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
+    let write_dir = dirs
+        .last()
+        .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
+    let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
+    let scope = format!(
+        "{:x}",
+        Sha256::digest(write_dir.as_os_str().as_encoded_bytes())
+    );
+    parent
         .join("state")
         .join("workflows")
+        .join("definitions")
+        .join(scope)
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

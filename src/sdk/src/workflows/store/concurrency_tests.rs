@@ -13,7 +13,7 @@ use std::sync::{Arc, Barrier};
 use fs2::FileExt;
 use serde_json::json;
 
-use super::file::FileWorkflowStore;
+use super::file::{definition_state_dir, FileWorkflowStore};
 use super::WorkflowStore;
 use crate::workflows::types::WorkflowRecord;
 
@@ -156,7 +156,7 @@ fn separate_store_instances_use_the_same_definition_lock() {
     let second = store_in(root.path());
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = root.path().join("state/workflows/locks/.race.lock");
+    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -201,7 +201,7 @@ fn workspace_scoped_stores_share_the_global_definition_lock() {
     );
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = root.path().join("state/workflows/locks/.race.lock");
+    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -237,7 +237,7 @@ fn explicit_stores_derive_locks_from_the_shared_definition_destination() {
     let second = FileWorkflowStore::new(definitions, root.path().join("b/runs"));
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = root.path().join("state/workflows/locks/.race.lock");
+    let lock_path = definition_state_dir(&[root.path().join("workflows")]).join("locks/.race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -262,6 +262,31 @@ fn explicit_stores_derive_locks_from_the_shared_definition_destination() {
         .expect("save completes after unlock")
         .expect("save succeeds");
     writer.join().expect("writer thread");
+}
+
+#[test]
+fn sibling_definition_catalogs_do_not_share_revision_history() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let first = FileWorkflowStore::new(
+        vec![root.path().join("catalog-a")],
+        root.path().join("runs-a"),
+    );
+    let second = FileWorkflowStore::new(
+        vec![root.path().join("catalog-b")],
+        root.path().join("runs-b"),
+    );
+    first.save(&document("same", "a0")).expect("seed first");
+    first.save(&document("same", "a1")).expect("edit first");
+    second.save(&document("same", "b0")).expect("seed second");
+
+    assert_eq!(
+        first.list_revisions("same").expect("first history").len(),
+        1
+    );
+    assert!(second
+        .list_revisions("same")
+        .expect("second history")
+        .is_empty());
 }
 
 #[test]

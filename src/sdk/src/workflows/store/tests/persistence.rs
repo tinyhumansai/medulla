@@ -38,11 +38,10 @@ fn authored_directory_contains_only_workflow_sources_after_edits() {
         .map(|entry| entry.expect("entry").file_name())
         .collect();
     assert_eq!(source_entries, vec![std::ffi::OsString::from("clean.json")]);
-    assert!(root.path().join("state/workflows/revisions/clean").is_dir());
-    assert!(root
-        .path()
-        .join("state/workflows/locks/.clean.lock")
-        .is_file());
+    let definition_state =
+        super::super::file::definition_state_dir(&[root.path().join("workflows")]);
+    assert!(definition_state.join("revisions/clean").is_dir());
+    assert!(definition_state.join("locks/.clean.lock").is_file());
 }
 
 #[test]

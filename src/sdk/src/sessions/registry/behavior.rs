@@ -19,7 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::types::{Inner, SessionBinding, SessionRegistry, TurnPlan, WorkspaceContext};
+use super::types::{
+    Inner, SessionBinding, SessionIdentity, SessionRegistry, TurnPlan, WorkspaceContext,
+};
 use crate::sessions::routing::can_resume;
 use crate::sessions::types::{SessionClass, SessionKey};
 
@@ -35,6 +37,7 @@ impl TurnPlan {
             class,
             resume_session_id: None,
             workspace_context: WorkspaceContext::default(),
+            identity: SessionIdentity::default(),
             bind: false,
         }
     }
@@ -99,12 +102,14 @@ impl SessionRegistry {
                 class,
                 resume_session_id: Some(binding.session_id),
                 workspace_context: binding.workspace_context,
+                identity: binding.identity,
                 bind: false,
             },
             None => TurnPlan {
                 class,
                 resume_session_id: None,
                 workspace_context: WorkspaceContext::default(),
+                identity: SessionIdentity::default(),
                 bind: true,
             },
         }
@@ -126,14 +131,57 @@ impl SessionRegistry {
         if session_id.trim().is_empty() {
             return;
         }
-        self.inner.lock().unwrap().record(
-            key.map_key(),
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        // Identity outlives the harness session id it is recorded beside: a
+        // conversation that rebinds — a reset, or a codex rollout announcing a
+        // new id — is the same session to the person who named it. Rebuilding
+        // the binding from scratch would silently rename their session back to
+        // nothing, so the existing identity is carried across.
+        let identity = inner
+            .get(&map_key)
+            .map(|binding| binding.identity.clone())
+            .unwrap_or_default();
+        inner.record(
+            map_key,
             SessionBinding {
                 session_id,
                 workspace_context,
+                identity,
             },
             self.max_bindings,
         );
+    }
+
+    /// Record who a bound session belongs to and what it is called.
+    ///
+    /// A no-op when nothing is bound yet, exactly like
+    /// [`record_workspace_context`](Self::record_workspace_context): the binding
+    /// *is* the session here, and there is nothing to attach an identity to
+    /// before one exists. Returns whether it landed.
+    pub fn record_identity(&self, key: &SessionKey, identity: SessionIdentity) -> bool {
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .bindings
+            .iter_mut()
+            .find_map(|(k, binding)| (k == &map_key).then_some(binding))
+        {
+            Some(binding) => {
+                binding.identity = identity;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The identity attached to `key`'s binding, if it has one.
+    pub fn identity(&self, key: &SessionKey) -> Option<SessionIdentity> {
+        self.inner
+            .lock()
+            .unwrap()
+            .get(&key.map_key())
+            .map(|binding| binding.identity.clone())
     }
 
     /// Replace the workspace state attached to an existing binding.

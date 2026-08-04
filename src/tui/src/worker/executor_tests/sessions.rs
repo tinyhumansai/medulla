@@ -383,7 +383,8 @@ async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: crate::worker::pty::SessionOrigin::User,
+            name: None,
         })
         .expect("the operator's harness must start");
     let before = sessions.rows().len();
@@ -443,7 +444,8 @@ async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: crate::worker::pty::SessionOrigin::User,
+            name: None,
         })
         .expect("the operator's harness must start");
 

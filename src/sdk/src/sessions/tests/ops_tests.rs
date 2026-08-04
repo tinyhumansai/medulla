@@ -444,6 +444,8 @@ fn record(class: SessionClass, phase: SessionPhase, last_at: i64) -> SessionReco
     SessionRecord {
         id: "s_1".to_string(),
         key: SessionKey::new("alice", HarnessProvider::Claude),
+        origin: crate::sessions::SessionOrigin::Orchestrator,
+        name: None,
         class,
         driver: SessionDriver::Task,
         phase,

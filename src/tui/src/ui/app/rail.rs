@@ -163,7 +163,7 @@ impl App {
             .rows()
             .into_iter()
             .filter(|row| {
-                row.user_spawned || row.control == crate::worker::pty::HarnessControl::User
+                row.origin.is_user() || row.control == crate::worker::pty::HarnessControl::User
             })
             .collect();
         rows.sort_by_key(|row| row.started_at);

@@ -58,7 +58,8 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         session_id: None,
         model: None,
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
     }
 }
 

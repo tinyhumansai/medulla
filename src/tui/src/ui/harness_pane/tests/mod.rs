@@ -18,6 +18,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[cfg(unix)]
 mod session;
 
+// Same constraint as [`session`]: it opens real sessions to check what each
+// creation door stamps on them.
+#[cfg(unix)]
+mod origin;
+
 mod buttons;
 
 use super::keys::{encode, is_focus_chord};

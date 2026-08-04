@@ -99,6 +99,24 @@ impl PtyManager {
         true
     }
 
+    /// Name `id` for display, returning whether the session existed.
+    ///
+    /// The counterpart of [`set_control`](Self::set_control) for the *other*
+    /// axis, and deliberately not the same thing: naming a session says nothing
+    /// about who may drive it, and it never touches
+    /// [`origin`](super::super::types::SessionOrigin) — a dispatched session an
+    /// operator names is still one the orchestrator started.
+    ///
+    /// Passing `None` (or blank) clears the name; the session then falls back to
+    /// whatever the UI derives for it.
+    pub fn set_name(&self, id: &str, name: Option<String>) -> bool {
+        let Some(session) = self.handle(id) else {
+            return false;
+        };
+        session.set_name(name);
+        true
+    }
+
     /// Mark a session free without implying that a turn was submitted.
     ///
     /// Used for failed injection and claim rollback, where no completion chime

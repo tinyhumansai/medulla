@@ -13,7 +13,8 @@ use medulla::protocol::HarnessProvider;
 fn user_sh(script: &str) -> LaunchSpec {
     LaunchSpec {
         control: HarnessControl::User,
-        user_spawned: true,
+        origin: crate::worker::pty::SessionOrigin::User,
+        name: None,
         ..sh(script)
     }
 }
@@ -122,7 +123,7 @@ fn an_operator_spawned_session_opens_idle() {
     let id = manager.open(user_sh("sleep 30")).unwrap();
     let row = manager.row(&id).unwrap();
     assert!(!row.busy, "an operator-spawned session opens idle");
-    assert!(row.user_spawned);
+    assert!(row.origin.is_user());
     assert_eq!(row.control, HarnessControl::User);
     manager.close(&id);
 }
@@ -264,5 +265,107 @@ fn operator_hold_matches_the_same_directory_written_two_ways() {
         );
     }
 
+    manager.close(&id);
+}
+
+// ------------------------------------------------------------ provenance ---
+
+#[test]
+fn taking_a_dispatched_session_and_handing_it_back_never_changes_its_origin() {
+    // The distinction this whole field exists for. Control is a question about
+    // *now* and moves with every takeover; origin is a fact about how the
+    // session was born and moves never. A rail that read them as one thing would
+    // lose a dispatched session out of its agent's group the moment an operator
+    // pressed ctrl-g on it.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    let row = manager.row(&id).unwrap();
+    assert!(row.origin.is_orchestrator());
+    assert_eq!(row.control, HarnessControl::Orchestrator);
+
+    assert!(manager.set_control(&id, HarnessControl::User));
+    let taken = manager.row(&id).unwrap();
+    assert_eq!(taken.control, HarnessControl::User, "the operator holds it");
+    assert!(
+        taken.origin.is_orchestrator(),
+        "holding a session is not having started it"
+    );
+
+    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    assert!(
+        manager.row(&id).unwrap().origin.is_orchestrator(),
+        "handing it back changes control, and only control"
+    );
+
+    manager.close(&id);
+}
+
+#[test]
+fn handing_an_operator_started_session_to_the_orchestrator_keeps_it_user_originated() {
+    // The mirror case, and the one that makes the two axes visibly independent:
+    // the session becomes dispatchable — a control fact — while still being one
+    // a person started.
+    let manager = PtyManager::new();
+    let id = manager.open(user_sh("sleep 30")).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+
+    assert!(manager.set_control(&id, HarnessControl::Orchestrator));
+    let row = manager.row(&id).unwrap();
+    assert!(row.origin.is_user(), "origin is fixed at birth");
+    assert_eq!(row.control, HarnessControl::Orchestrator);
+    assert!(
+        manager
+            .claim_idle("test", HarnessProvider::Codex)
+            .is_some_and(|claimed| claimed.id == id),
+        "a handed-over session is dispatchable however it was started"
+    );
+
+    manager.close(&id);
+}
+
+#[test]
+fn a_session_name_round_trips_and_a_blank_one_clears_it() {
+    // The name is the operator's label for a session they spun up; it is display
+    // identity only, and it never touches provenance or control.
+    let manager = PtyManager::new();
+    let id = manager
+        .open(LaunchSpec {
+            name: Some("debug login".to_string()),
+            ..user_sh("sleep 30")
+        })
+        .unwrap();
+    assert_eq!(
+        manager.row(&id).unwrap().name.as_deref(),
+        Some("debug login")
+    );
+
+    assert!(manager.set_name(&id, Some("chasing the 500".to_string())));
+    let renamed = manager.row(&id).unwrap();
+    assert_eq!(renamed.name.as_deref(), Some("chasing the 500"));
+    assert!(renamed.origin.is_user(), "renaming is not re-parenting");
+    assert_eq!(renamed.control, HarnessControl::User);
+
+    // Blank is not a name: storing it would render as a gap in the rail.
+    assert!(manager.set_name(&id, Some("   ".to_string())));
+    assert_eq!(manager.row(&id).unwrap().name, None);
+    assert!(manager.set_name(&id, Some("back".to_string())));
+    assert!(manager.set_name(&id, None));
+    assert_eq!(manager.row(&id).unwrap().name, None);
+
+    assert!(!manager.set_name("w_nope", Some("ghost".to_string())));
+
+    manager.close(&id);
+}
+
+#[test]
+fn a_dispatched_session_is_born_unnamed() {
+    // Nothing to name it: the UI labels an orchestrator-originated session from
+    // the task it was created for, which is why this stays `None` rather than
+    // getting a synthetic string here.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    assert_eq!(manager.row(&id).unwrap().name, None);
     manager.close(&id);
 }

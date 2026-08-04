@@ -240,20 +240,41 @@ fn process_env() -> HashMap<String, String> {
 /// from, either.
 fn instance_key() -> String {
     match crate::control_socket::active() {
-        Some(plane) => format!(
-            "{:x}",
-            Sha256::digest(plane.socket.as_os_str().as_encoded_bytes())
-        ),
+        Some(plane) => socket_key(&plane.socket),
         None => "no-plane".to_string(),
     }
+}
+
+/// [`instance_key`] for a socket named directly, for the one caller that has
+/// bound a plane but not yet published it — see [`sweep_stale_config_files`].
+fn socket_key(socket: &Path) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(socket.as_os_str().as_encoded_bytes())
+    )
 }
 
 /// Where this account's MCP config files live:
 /// `<medulla_home>/mcp/<instance_key>`.
 fn mcp_state_dir() -> PathBuf {
+    state_dir_for(&instance_key())
+}
+
+/// Where the `--mcp-config` files of the instance bound to `socket` live.
+///
+/// Public because the directory is part of this module's observable contract,
+/// not an implementation detail: [`sweep_stale_config_files`] empties it, and a
+/// caller that wants to assert on — or clean up after — what a bind did needs
+/// to be able to name it without re-deriving the hash.
+pub fn config_dir_for_socket(socket: &Path) -> PathBuf {
+    state_dir_for(&socket_key(socket))
+}
+
+/// [`mcp_state_dir`] for an already-computed key.
+fn state_dir_for(key: &str) -> PathBuf {
     crate::home::medulla_home(&process_env())
         .join("mcp")
-        .join(instance_key())
+        .join(key)
 }
 
 /// Whether `session` is safe to use as this file's sole filename component.
@@ -294,16 +315,29 @@ fn config_file_path(session: &str) -> Option<PathBuf> {
 /// only runs when a session is reaped in the same process that minted its
 /// grant — a process that exits without reaching that point (killed, or
 /// crashed) leaves its file on disk with nothing left to remove it. This is
-/// the mitigation for that gap, called once, right after a fresh control plane
-/// binds (see `control_plane::start` in the `medulla-tui` crate): every grant
+/// Takes the bound `socket` rather than reading
+/// [`crate::control_socket::active`], because the one correct moment to call
+/// it is precisely when that is still `None`: the directory these files live
+/// in is keyed off the socket (see `instance_key`), so a sweep that resolved
+/// the key from an unpublished plane would clear `no-plane` — some other
+/// caller's directory — and leave this instance's own leftovers untouched.
+///
+/// This is the mitigation for that gap, called once at startup — after the
+/// control plane binds but strictly *before* it is published to
+/// [`crate::control_socket::active`] (see `control_plane::start` in the
+/// `medulla-tui` crate). The ordering matters: once a plane is visible, a task
+/// arriving on another thread can launch a session and write its config file
+/// immediately, and a sweep running after that point would delete a file
+/// belonging to a live session. Sweeping first means every file this run
+/// writes comes after the last deletion this run performs. Every grant
 /// a prior process minted lived only in that process's in-memory
 /// [`crate::control_socket::GrantRegistry`], which died with the process, so a
 /// leftover file's token can never be redeemed again no matter how long it
 /// sits on disk — sweeping it is hygiene, not a race against something still
 /// live. Best effort throughout: a directory that does not exist yet, or one
 /// entry this account cannot remove, is not worth failing startup over.
-pub fn sweep_stale_config_files() {
-    let Ok(entries) = std::fs::read_dir(mcp_state_dir()) else {
+pub fn sweep_stale_config_files(socket: &Path) {
+    let Ok(entries) = std::fs::read_dir(state_dir_for(&socket_key(socket))) else {
         return;
     };
     for entry in entries.flatten() {

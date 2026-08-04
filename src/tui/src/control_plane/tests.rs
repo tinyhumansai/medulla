@@ -102,6 +102,50 @@ async fn a_hub_that_did_not_start_gets_no_control_plane() {
     assert!(!root.path().join("control.sock").exists());
 }
 
+/// A bind sweeps the config files a *previous* run left behind, and does it
+/// before the plane is published.
+///
+/// The ordering itself is not directly observable from a test — `install`
+/// writes a process-wide `OnceLock`, so there is no seam to interleave a
+/// launch against — so what is pinned here is the observable half: after a
+/// successful bind, a leftover file is gone. The unobservable half is held by
+/// construction, with the sweep call sited above `install` in `start` and the
+/// reason written there; a future edit that moves it below would leave this
+/// test passing, which is exactly why the comment at the call site says what
+/// the ordering is for.
+#[cfg(unix)]
+#[tokio::test]
+async fn binding_sweeps_a_previous_runs_leftover_config_file() {
+    let root = tempfile::tempdir().unwrap();
+    let _home = ScratchHome::install(root.path());
+    let logs = medulla_tui::log::LogBuffer::new();
+
+    // Named through the SDK rather than rebuilt here: the directory is keyed
+    // by a hash of the socket path, and a test that re-derived it would pass
+    // against the wrong directory the moment that keying changed.
+    let stale = medulla::mcp::config_dir_for_socket(&root.path().join("control.sock"))
+        .join("pty-from-a-dead-run.json");
+    std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    std::fs::write(&stale, "{}").unwrap();
+
+    let server = start(
+        &env(&[]),
+        &config(root.path(), true),
+        true,
+        HubSlot::default(),
+        Some("this-device".into()),
+        &logs,
+    )
+    .await
+    .expect("the socket should bind");
+
+    assert!(
+        !stale.exists(),
+        "a file whose grant died with its process must not outlive the next bind"
+    );
+    drop(server);
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn binding_serves_and_cleans_up_after_itself() {

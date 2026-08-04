@@ -14,7 +14,7 @@
 //! `feature_mcp_attach_override.rs`.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use medulla::control_socket::{ActiveControlPlane, GrantRegistry};
 use medulla::mcp::attach_cli;
@@ -70,7 +70,10 @@ fn sweeping_this_instance_never_touches_a_sibling_sockets_directory() {
     let sibling_file = sibling_dir.join("instance-b-live-session.json");
     std::fs::write(&sibling_file, "{}").expect("the sibling's file is writable");
 
-    medulla::mcp::sweep_stale_config_files();
+    // Named explicitly rather than read from the installed plane: for real
+    // this runs before the plane is published, which is the whole reason the
+    // sweep takes a socket at all.
+    medulla::mcp::sweep_stale_config_files(Path::new("/run/medulla-instance-a.sock"));
 
     assert!(
         !own_file.exists(),

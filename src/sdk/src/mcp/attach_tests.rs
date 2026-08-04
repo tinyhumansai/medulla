@@ -351,36 +351,14 @@ fn revoke_session_removes_the_config_file_it_named() {
     );
 }
 
-/// The mitigation for the one gap `revoke_session` cannot close on its own: a
-/// process that exits without reaping its sessions leaves their files behind.
-/// [`sweep_stale_config_files`] is what a *fresh* process run for the same
-/// account calls to clear them, since none of those tokens can be redeemed
-/// against this process's brand-new, empty grant registry anyway.
-#[test]
-fn sweep_stale_config_files_removes_every_leftover_json_file() {
-    let _home = ScratchHome::install();
-    let spec = server_spec(
-        None,
-        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
-        false,
-    )
-    .expect("a fleet grant is served here");
-    let orphan_a = spec
-        .write_config_file("sweep-test-orphan-a")
-        .expect("the config file is writable");
-    let orphan_b = spec
-        .write_config_file("sweep-test-orphan-b")
-        .expect("the config file is writable");
-    assert!(orphan_a.exists() && orphan_b.exists());
-
-    sweep_stale_config_files();
-
-    assert!(
-        !orphan_a.exists() && !orphan_b.exists(),
-        "a fresh process must clear every file a previous run left behind, \
-         since none of their tokens can be redeemed against its new registry"
-    );
-}
+// `sweep_stale_config_files` is deliberately not unit-tested here. It is keyed
+// off the socket the caller passes, while `write_config_file` keys off the
+// *installed* plane — the two agree in production, where the sweep is handed
+// the socket that plane is about to be published with, and cannot agree in a
+// unit test, which must never install a plane (see this module's docs).
+// `src/sdk/tests/feature_mcp_sweep_scope.rs` covers it with a real plane
+// installed, and asserts the stronger property besides: a sibling instance's
+// files survive this instance's sweep.
 
 /// `write_config_file` is public API, and the internal caller's session keys
 /// are UUID-derived, but nothing stops an external one from handing it a `/`

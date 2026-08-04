@@ -94,6 +94,7 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     });
     app.harness_picker = Some(HarnessPicker {
         choices: Vec::new(),

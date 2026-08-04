@@ -89,6 +89,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     }
 }
 

@@ -16,8 +16,8 @@ use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 use super::super::render::workflows::{
     BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_NODE_WIDTH, MIN_LABEL_WIDTH, NODE_HEIGHT,
 };
-use unicode_width::UnicodeWidthStr;
 use super::super::types::App;
+use unicode_width::UnicodeWidthStr;
 
 impl App {
     /// Re-read the selected workflow's graph and lay it out.

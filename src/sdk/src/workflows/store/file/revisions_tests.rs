@@ -78,7 +78,8 @@ fn history_is_capped_and_the_oldest_go_first() {
     let root = tempfile::tempdir().expect("tempdir");
 
     for n in 0..MAX_REVISIONS + 5 {
-        capture(root.path(), &record("greet", &format!("v{n}"))).expect("capture");
+        let captured = capture(root.path(), &record("greet", &format!("v{n}"))).expect("capture");
+        commit_capture(&captured).expect("commit capture");
     }
 
     let listed = list(root.path(), "greet").expect("list");

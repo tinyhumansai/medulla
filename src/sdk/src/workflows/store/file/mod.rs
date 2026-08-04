@@ -44,7 +44,7 @@ use crate::workflows::types::{
 };
 
 use document::{read_workflow, to_document};
-use paths::{is_json, write_atomic};
+use paths::{is_json, stage_atomic, write_atomic};
 // Re-exported within the crate rather than merely imported: the identifier
 // guard is the one piece of this module worth asserting on from outside it.
 pub(crate) use paths::safe_component;
@@ -344,8 +344,13 @@ impl FileWorkflowStore {
             let path = self.definition_path(&record.id)?;
             validate_graph(&record.id, &record.graph)?;
             let document = to_document(record)?;
-            revisions::capture(&self.revisions_dir, &current)?;
-            write_atomic(&path, &document)?;
+            let staged = stage_atomic(&path, &document)?;
+            let revision = revisions::capture(&self.revisions_dir, &current)?;
+            if let Err(error) = staged.commit() {
+                revisions::rollback_capture(&revision);
+                return Err(error);
+            }
+            revisions::commit_capture(&revision)?;
             Ok(true)
         })
     }
@@ -422,7 +427,14 @@ impl WorkflowStore for FileWorkflowStore {
             // here rather than at each call site is what makes every authoring
             // surface undoable without any of them having to opt in.
             if let Some(superseded) = self.superseded_by(&path, &record.id)? {
-                revisions::capture(&self.revisions_dir, &superseded)?;
+                let staged = stage_atomic(&path, &document)?;
+                let revision = revisions::capture(&self.revisions_dir, &superseded)?;
+                if let Err(error) = staged.commit() {
+                    revisions::rollback_capture(&revision);
+                    return Err(error);
+                }
+                revisions::commit_capture(&revision)?;
+                return Ok(());
             }
             write_atomic(&path, &document)
         })
@@ -475,8 +487,12 @@ impl WorkflowStore for FileWorkflowStore {
             // Snapshot before removing. A delete is the one edit that leaves
             // nothing to diff against afterwards, so without this it is the one
             // edit that cannot be undone.
-            revisions::capture(&self.revisions_dir, &existing)?;
-            std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
+            let revision = revisions::capture(&self.revisions_dir, &existing)?;
+            if let Err(source) = std::fs::remove_file(&path) {
+                revisions::rollback_capture(&revision);
+                return Err(WorkflowError::Io { path, source });
+            }
+            revisions::commit_capture(&revision)
         })
     }
 

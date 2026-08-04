@@ -21,6 +21,7 @@ use ratatui::style::Color;
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
@@ -195,12 +196,12 @@ impl App {
             // state, so the box, the border and the kind subtitle the box used
             // to hold are all saying something already said elsewhere.
             //
-            // The whole slot is written as one padded string so the cells behind
-            // the label are locked: a wire routed through this lane tunnels
-            // behind the name rather than striking it out.
+            // Written at its own length rather than padded out to the column:
+            // the wires attach to the text, so padding would only push every
+            // connector a few cells away from the name it belongs to.
             let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or("");
-            let label = format!("{} {}{}", node.glyph, node.name, mark);
-            canvas.text(x, y, &pad(&label, node_width), style.bold());
+            let label = label_of(node, mark, node_width);
+            canvas.text(x, y, &label, style.bold());
         }
     }
 
@@ -292,7 +293,7 @@ impl App {
                 let tail = if in_reversed {
                     tx.saturating_sub(1)
                 } else {
-                    tx + node_width
+                    tx + to_width
                 };
                 vec![
                     (exit, from_row),
@@ -308,7 +309,7 @@ impl App {
             } else if in_reversed {
                 (tx.saturating_sub(1), '▶')
             } else {
-                (tx + node_width, '◀')
+                (tx + to_width, '◀')
             };
             canvas.arrow(head_x, to_row, head, style);
 
@@ -344,6 +345,23 @@ impl App {
                 }
             }
         }
+    }
+
+    /// How many columns a node's label actually occupies on screen.
+    ///
+    /// The wires attach here, so this has to agree exactly with what
+    /// [`paint_nodes`](Self::paint_nodes) drew — hence both going through
+    /// [`label_of`].
+    fn label_width(
+        &self,
+        node: &PlacedNode,
+        _layout: &GraphLayout,
+        overlay: Option<&RunOverlay>,
+    ) -> usize {
+        let mark = overlay
+            .map(|overlay| overlay.node(&node.id).state.glyph())
+            .unwrap_or("");
+        label_of(node, mark, self.node_width()).width()
     }
 
     /// Where this edge's flow highlight sits on `route` this frame, if it is
@@ -402,6 +420,15 @@ impl App {
         let sway = (self.frame as f64 * DRIFT_RATE + phase).sin();
         usize::from(sway > 0.5)
     }
+}
+
+/// A node's drawn label: its marker, its name, and the run's state glyph.
+///
+/// Clipped to the column width, never padded — the caller draws it at its own
+/// length and the wires meet it there.
+fn label_of(node: &PlacedNode, mark: &str, width: usize) -> String {
+    let label = format!("{} {}", node.glyph, node.name);
+    format!("{}{mark}", crate::ui::util::clip(&label, width))
 }
 
 /// Clip or pad `text` to exactly `width` display columns.

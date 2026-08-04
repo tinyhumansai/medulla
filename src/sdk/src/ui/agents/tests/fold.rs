@@ -222,16 +222,26 @@ fn a_fully_revealed_lane_keeps_an_overflow_row_to_collapse_with() {
 
 #[test]
 fn a_lane_within_one_page_has_no_overflow_row() {
-    let lanes = lanes_with_tasks(6);
-    assert_eq!(paged_counts(&lanes, 10, 0), (6, None));
-    // Nothing is hidden and nothing was expanded, so there is nothing to offer.
-    let rows = agent_row_model_paged(&lanes, 10, |_| 0);
-    assert!(matches!(
-        rows.iter()
-            .rev()
-            .find(|r| matches!(r, AgentRow::Sub { .. })),
-        Some(AgentRow::Sub { last: true, .. })
-    ));
+    // Six tasks is comfortably inside a page; ten sits exactly on the boundary,
+    // where `shown > page` decides whether a lane that happens to fill its page
+    // exactly is offered a pointless `show less`. A `>=` there would regress it.
+    for tasks in [6, 10] {
+        let lanes = lanes_with_tasks(tasks);
+        assert_eq!(
+            paged_counts(&lanes, 10, 0),
+            (tasks, None),
+            "a lane of {tasks} within one page must not overflow"
+        );
+        let rows = agent_row_model_paged(&lanes, 10, |_| 0);
+        assert!(!rows.iter().any(|r| matches!(r, AgentRow::More { .. })));
+        // Nothing follows, so the last sublane closes the lane itself.
+        assert!(matches!(
+            rows.iter()
+                .rev()
+                .find(|r| matches!(r, AgentRow::Sub { .. })),
+            Some(AgentRow::Sub { last: true, .. })
+        ));
+    }
 }
 
 #[test]

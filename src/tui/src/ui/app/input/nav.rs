@@ -56,7 +56,15 @@ impl App {
         if hidden > 0 {
             *self.subtask_pages.entry(key.clone()).or_insert(0) += 1;
             let revealed = self.revealed_subtasks(&key).min(total);
-            self.set_status(format!("Showing {revealed} of {total} tasks · ↵ for more"));
+            // What the row will say once it is redrawn — the page that reveals
+            // the last task turns it into the collapse control, and a status
+            // still offering "more" would contradict the row under the cursor.
+            let next = if revealed < total {
+                "↵ for more"
+            } else {
+                "↵ collapses"
+            };
+            self.set_status(format!("Showing {revealed} of {total} tasks · {next}"));
         } else {
             self.subtask_pages.remove(&key);
             self.set_status(format!(

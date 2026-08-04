@@ -353,8 +353,15 @@ impl App {
                             }
                             // So is a lane's `+N more`: the click that lands on
                             // it is the request to see what it is counting.
+                            //
+                            // Returns the retarget rather than nothing, for the
+                            // same reason the harness branch below does: the
+                            // overflow row watches no task, so a click arriving
+                            // from one has to stop that stream. The keyboard
+                            // path is already covered — the arrow that reaches
+                            // this row retargets on the way.
                             if self.page_subtasks() {
-                                return None;
+                                return self.retarget_watch();
                             }
                             if let Some(session) = row.session_id() {
                                 // Point the prompt at the row that was clicked,

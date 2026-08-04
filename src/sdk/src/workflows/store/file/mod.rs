@@ -373,9 +373,11 @@ fn absolute_path(path: &Path) -> PathBuf {
 /// destination—not a run scope—keeps locks and undo history coherent across
 /// workspaces without mixing unrelated catalogs.
 pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
-    let write_dir = dirs
+    let raw_write_dir = dirs
         .last()
         .map_or_else(|| PathBuf::from("."), |dir| absolute_path(dir));
+    let write_dir = std::fs::canonicalize(&raw_write_dir)
+        .unwrap_or_else(|_| lexically_normalize(&raw_write_dir));
     let parent = write_dir.parent().unwrap_or_else(|| Path::new("."));
     let scope = format!(
         "{:x}",
@@ -386,6 +388,26 @@ pub(super) fn definition_state_dir(dirs: &[PathBuf]) -> PathBuf {
         .join("workflows")
         .join("definitions")
         .join(scope)
+}
+
+/// Remove `.` and resolvable `..` components without requiring the path to
+/// exist, preserving the root or platform prefix of an absolute path.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
 }
 
 /// A stable process-local key for every store instance over `proposals_dir`.

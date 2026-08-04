@@ -58,6 +58,11 @@ impl SessionHandle {
         )
     }
 
+    /// Whether the child is currently painting on the alternate screen.
+    pub(in super::super) fn alternate_screen(&self) -> bool {
+        lock(&self.screen).screen().alternate_screen()
+    }
+
     /// Feed bytes from the pty into the emulator.
     pub(in super::super) fn process(&self, bytes: &[u8]) {
         let thread_name = {

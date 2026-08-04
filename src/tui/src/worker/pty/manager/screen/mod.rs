@@ -8,6 +8,11 @@
 use super::PtyManager;
 
 impl PtyManager {
+    /// Whether `id` is currently using its terminal's alternate screen.
+    pub fn alternate_screen(&self, id: &str) -> Option<bool> {
+        Some(self.handle(id)?.alternate_screen())
+    }
+
     /// Whether the child has turned bracketed-paste mode on (DECSET 2004).
     ///
     /// We are this child's terminal, so this is not a preference to guess at: a

@@ -413,6 +413,35 @@ fn a_child_that_asks_for_the_mouse_has_wheel_notches_forwarded_to_it() {
 }
 
 #[test]
+fn an_alternate_screen_without_mouse_reporting_gets_arrow_scroll_events() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Codex uses the terminal's alternate-scroll behaviour instead of mouse
+    // reporting: while the alternate screen is active, a terminal translates
+    // each wheel notch into cursor-key input for the child.
+    let id = sessions
+        .open(sh("printf '\\033[?1049h'; sleep 0.3; cat -v; sleep 30"))
+        .unwrap();
+
+    wait_for("the child to enter its alternate screen", || {
+        sessions
+            .alternate_screen(&id)
+            .is_some_and(std::convert::identity)
+    });
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    wait_for("the child to receive translated wheel input", || {
+        text(&harnesses, &id).contains("^[[A^[[A^[[A")
+    });
+    harnesses.scroll(&id, 3, 4, false, 2);
+    wait_for("the child to receive downward wheel input", || {
+        text(&harnesses, &id).contains("^[[B^[[B")
+    });
+    sessions.close(&id);
+}
+
+#[test]
 fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());

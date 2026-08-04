@@ -245,10 +245,12 @@ impl App {
         if !self.band_reversed(band) {
             return before;
         }
-        // Right to left: the first layer of the band is its rightmost column,
-        // and its right edge is the band's right edge.
+        // Right to left: the first layer of the band is its rightmost column.
+        // The same margin the left edge keeps is kept on the right, because a
+        // reversed band's wires arrive on that side and their arrowheads need a
+        // cell to land on.
         self.canvas_width()
-            .saturating_sub(before + members.get(index).copied().unwrap_or(0))
+            .saturating_sub(FOLD_MARGIN + before + members.get(index).copied().unwrap_or(0))
     }
 
     /// How many rows of canvas the graph panel has.

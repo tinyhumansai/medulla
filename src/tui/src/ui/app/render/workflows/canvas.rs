@@ -446,7 +446,7 @@ impl App {
 /// Clipped to the column width, never padded — the caller draws it at its own
 /// length and the wires meet it there.
 fn label_of(node: &PlacedNode, mark: &str, width: usize) -> String {
-    let label = format!("{} {}", node.glyph, node.name);
+    let label = super::super::super::workflows::canvas::node_label(node);
     format!("{}{mark}", crate::ui::util::clip(&label, width))
 }
 

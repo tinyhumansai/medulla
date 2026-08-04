@@ -19,6 +19,11 @@ use super::super::render::workflows::{
 use super::super::types::App;
 use unicode_width::UnicodeWidthStr;
 
+/// The stable glyph-and-name portion of a workflow node label.
+pub(in crate::ui::app) fn node_label(node: &PlacedNode) -> String {
+    format!("{} {}", node.glyph, node.name)
+}
+
 impl App {
     /// Re-read the selected workflow's graph and lay it out.
     ///

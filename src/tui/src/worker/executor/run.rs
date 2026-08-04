@@ -432,12 +432,20 @@ impl PtySessionExecutor {
         // as headless ones, so this path carries the same attribution.
         let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
         env.extend(attribution_env);
-        let (launch_args, _dropped) = medulla::harness_hooks::launch_args(
+        // Attribution and the operator's configured hooks share Claude Code's
+        // single `--settings` flag, so both are built together — a watched PTY
+        // session runs the same lifecycle policy a headless one does.
+        let (launch_args, dropped_hooks) = medulla::harness_hooks::launch_args(
             options.provider,
             options.attribution,
             &options.hooks,
         );
         extra_args.extend(launch_args);
+        // Unsupported (harness, event) pairs are dropped here without a line of
+        // their own: this crate renders a full-screen TUI, so stderr would corrupt
+        // the pane, and the coverage a hook actually got belongs on screen rather
+        // than in a log nobody reads mid-session.
+        let _ = dropped_hooks;
         // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
         // proxy, and the real key is scrubbed from `env` here, before any of it
         // reaches the child. A no-op for every other endpoint.

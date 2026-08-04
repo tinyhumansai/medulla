@@ -21,6 +21,7 @@ use medulla_tui::worker::pty::PtyManager;
 fn picker_app() -> App {
     let mut app = demo_agents_app();
     app.set_local_harnesses(LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions: PtyManager::new(),
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),
@@ -30,7 +31,6 @@ fn picker_app() -> App {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     });
     app
 }

@@ -78,6 +78,7 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         Box::pin(async {}) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
     });
     LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -89,7 +90,6 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     }
 }
 

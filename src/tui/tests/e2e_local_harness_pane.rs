@@ -172,6 +172,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         "printf 'HARNESS-IS-PAINTING\\n'; sleep 30",
     );
     let harnesses = LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -181,7 +182,6 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     // Before dispatch there is nothing to show — the pane must not invent a
@@ -222,6 +222,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         "read line; printf 'typed:%s\\n' \"$line\"; sleep 30",
     );
     let harnesses = LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -231,7 +232,6 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     dispatch(&runtime, task_id);
@@ -260,6 +260,7 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
     let sessions = PtyManager::new();
     let runtime = runtime_over(sessions.clone(), "sleep 30");
     let harnesses = LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -269,7 +270,6 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     };
 
     dispatch(&runtime, "mine#0");

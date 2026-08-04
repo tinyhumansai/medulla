@@ -456,7 +456,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
         &custom_harnesses,
-        crate::local_host::HarnessLaunchPolicy {
+        &crate::local_host::LaunchPolicy {
             attribution: loaded.config.attribution.commit,
             hooks: loaded.config.hooks.clone(),
         },
@@ -558,7 +558,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 loaded.config.budget.clone(),
                 Some(hub_logs.sink()),
                 &custom_harnesses,
-                crate::local_host::HarnessLaunchPolicy {
+                &crate::local_host::LaunchPolicy {
                     attribution: loaded.config.attribution.commit,
                     hooks: loaded.config.hooks.clone(),
                 },

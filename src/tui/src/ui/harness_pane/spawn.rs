@@ -112,9 +112,14 @@ impl LocalHarnesses {
         // attribution depended on which door the session came through.
         let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
         env.extend(attribution_env);
-        let (launch_args, _dropped) =
+        let (launch_args, dropped_hooks) =
             medulla::harness_hooks::launch_args(choice.provider, self.attribution, &self.hooks);
         extra_args.extend(launch_args);
+        // Unsupported (harness, event) pairs are dropped here without a line of
+        // their own: this crate renders a full-screen TUI, so stderr would corrupt
+        // the pane, and the coverage a hook actually got belongs on screen rather
+        // than in a log nobody reads mid-session.
+        let _ = dropped_hooks;
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
         // OpenRouter-bound sessions are re-pointed at Medulla's loopback
         // attribution proxy and the real key is scrubbed from `env`. A hand-opened

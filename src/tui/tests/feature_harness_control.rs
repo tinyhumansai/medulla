@@ -76,6 +76,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_harnesses(LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -87,7 +88,6 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
-        hooks: medulla::harness_hooks::HooksConfig::default(),
     });
     app
 }

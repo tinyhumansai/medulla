@@ -4,7 +4,7 @@ use crate::ui::agents::TaskState;
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
-use medulla::runtime::{WorkerInfo, WorkerOp};
+use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
@@ -12,15 +12,6 @@ use super::super::types::{
 };
 
 impl App {
-    /// The worker under the Workers-list cursor, if the fleet is non-empty.
-    pub(in crate::ui::app) fn selected_host(&self) -> Option<WorkerInfo> {
-        let ws = self.runtime.workers();
-        if ws.is_empty() {
-            return None;
-        }
-        ws.get(self.host_index.min(ws.len() - 1)).cloned()
-    }
-
     /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
     ///
     /// Indexes the rail's rows, which is what `agent_index` counts — the lane
@@ -185,7 +176,11 @@ impl App {
             }
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
-                patch.insert("label".into(), serde_json::Value::String(text));
+                patch.insert("label".into(), serde_json::Value::String(text.clone()));
+                // The roster label is this run's; the declaration's name is the
+                // one that comes back after a restart, so an agent this machine
+                // declared is renamed in both places or the edit half-survives.
+                self.persist_agent_name(&id, &text);
                 self.set_status("Updating label…");
                 Some(Cmd::WorkerOp(WorkerOp::Update { id, patch }))
             }

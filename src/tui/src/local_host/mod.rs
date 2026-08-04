@@ -69,78 +69,25 @@ pub(crate) fn host_address(config: &HostSection) -> String {
 /// than from a started host — and it is needed in exactly the case where none
 /// started, to recognise remembered local roster entries and drop them.
 pub(crate) fn all_host_addresses(primary: &HostSection, extras: &[HostSection]) -> Vec<String> {
-    std::iter::once(host_address(primary))
-        .chain(
-            extras
-                .iter()
-                .enumerate()
-                .map(|(index, extra)| extra_host_address(extra, index)),
-        )
+    medulla::config::local_hosts(primary, extras)
+        .into_iter()
+        .map(|host| host.id)
         .collect()
 }
 
-/// The bus address for an extra host, derived from its name when it declared
-/// none of its own.
-///
-/// Two hosts cannot share an address — the second `bind` fails — so an operator
-/// who adds `[[hosts]]` without thinking about addressing would otherwise get
-/// one working host and one startup error. Deriving from the name means the
-/// field is optional in the common case and explicit when it matters.
+/// The bus address for an extra host — see
+/// [`local_host_address`](medulla::config::local_host_address), which the Hosts
+/// tab reads too so the list and the binder cannot disagree about which address
+/// a section will bind.
 fn extra_host_address(config: &HostSection, fallback_index: usize) -> String {
-    // The section default counts as unchosen, not as a choice. `[[hosts]]`
-    // shares `HostSection`, so an entry that names no address inherits the
-    // primary's — and two hosts on one address means the second never binds.
-    // An operator who *typed* the primary's address has made the same mistake,
-    // so both are treated the same way.
-    let chosen = config.address.trim();
-    let chosen = if chosen == HostSection::default().address {
-        ""
-    } else {
-        chosen
-    };
-    match chosen {
-        "" => {
-            let slug = slug_of(&config.name);
-            if slug.is_empty() {
-                format!("local-host-{}", fallback_index + 1)
-            } else {
-                format!("local-{slug}")
-            }
-        }
-        value => value.to_string(),
-    }
+    medulla::config::local_host_address(config, fallback_index)
 }
 
-/// A lowercase, hyphenated form of `name`, safe to use as a bus address.
-fn slug_of(name: &str) -> String {
-    let mut out = String::new();
-    let mut hyphen = false;
-    for ch in name.trim().chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            hyphen = false;
-        } else if !out.is_empty() && !hyphen {
-            out.push('-');
-            hyphen = true;
-        }
-    }
-    out.trim_end_matches('-').to_string()
-}
-
-/// What to call a host that named itself nothing.
-///
-/// The primary is "this device" — it is the machine the operator is looking at.
-/// An extra is named for the directory it works in, because that is the only
-/// thing distinguishing it from the primary.
+/// What to call a host that named itself nothing — see
+/// [`local_host_name`](medulla::config::local_host_name). Shared with the Hosts
+/// tab, which names the same hosts before any of them has started.
 pub(crate) fn display_name(config: &HostSection, workspace: &str, primary: bool) -> String {
-    match config.name.trim() {
-        "" if primary => "this device".to_string(),
-        "" => std::path::Path::new(workspace)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| workspace.to_string()),
-        value => value.to_string(),
-    }
+    medulla::config::local_host_name(config, workspace, primary)
 }
 
 /// Translate the `[host]` section into the SDK's start-up options.

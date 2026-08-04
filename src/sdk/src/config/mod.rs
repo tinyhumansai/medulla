@@ -14,6 +14,7 @@ mod appearance;
 mod core_socket;
 mod custom_harnesses;
 mod load;
+mod local_hosts;
 mod persist;
 mod types;
 mod urls;
@@ -26,6 +27,8 @@ mod core_socket_tests;
 mod custom_harnesses_tests;
 #[cfg(test)]
 mod load_tests;
+#[cfg(test)]
+mod local_hosts_tests;
 #[cfg(test)]
 mod persist_tests;
 #[cfg(test)]
@@ -44,6 +47,7 @@ pub use custom_harnesses::{
     OPENROUTER_ANTHROPIC_URL, OPENROUTER_API_KEY_ENV, OPENROUTER_OPENAI_URL,
 };
 pub use load::{default_link_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
+pub use local_hosts::{local_host_address, local_host_name, local_hosts, LocalHostRef};
 pub use persist::{
     clear_setting, persist_agent_declarations, persist_custom_harnesses, persist_host_workspaces,
     persist_hub_workers, persist_link_peers, persist_local_hosts, persist_root_setting,

@@ -501,7 +501,7 @@ fn brightened(color: Color) -> Color {
         Color::Magenta => Color::LightMagenta,
         Color::Cyan => Color::LightCyan,
         Color::Gray => Color::White,
-        other => other,
+        _ => Color::White,
     }
 }
 

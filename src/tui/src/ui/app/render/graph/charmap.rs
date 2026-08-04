@@ -105,6 +105,7 @@ impl CharMap {
         colors: (Rgb, Rgb),
     ) {
         let path = elbow_path(from, to, bias);
+        let turn_cells = [path[1], path[2]].map(|point| self.cell_of(point));
         let total = path_length(&path).max(f64::EPSILON);
         let mut travelled = 0.0;
         for pair in path.windows(2) {
@@ -120,9 +121,13 @@ impl CharMap {
             let steps = (span * 2.0).ceil().max(1.0);
             for i in 0..=(steps as usize) {
                 let along = i as f64 / steps;
+                let point = (a.0 + (b.0 - a.0) * along, a.1 + (b.1 - a.1) * along);
+                if turn_cells.contains(&self.cell_of(point)) {
+                    continue;
+                }
                 let color = mix(colors.0, colors.1, (travelled + span * along) / total);
                 self.put(
-                    (a.0 + (b.0 - a.0) * along, a.1 + (b.1 - a.1) * along),
+                    point,
                     Mark {
                         glyph: if (b.0 - a.0).abs() > f64::EPSILON {
                             '─'
@@ -143,10 +148,7 @@ impl CharMap {
             (path[2], corner_glyph(path[1], path[2], path[3])),
         ] {
             if let Some(glyph) = glyph {
-                // Written without merging: the two runs meeting here have
-                // already put a `─` and a `│` in this cell, and merging would
-                // turn every single corner in the graph into a `┼`.
-                self.write(
+                self.put(
                     corner,
                     Mark {
                         glyph,
@@ -154,7 +156,6 @@ impl CharMap {
                         layer: Layer::Edge,
                         bold: false,
                     },
-                    false,
                 );
             }
         }
@@ -284,12 +285,11 @@ pub(crate) fn point_along(path: &[(f64, f64); 4], t: f64) -> (f64, f64) {
     for pair in path.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let span = distance(a, b);
-        if target <= span || span <= f64::EPSILON {
-            let along = if span > f64::EPSILON {
-                target / span
-            } else {
-                0.0
-            };
+        if span <= f64::EPSILON {
+            continue;
+        }
+        if target <= span {
+            let along = target / span;
             return (a.0 + (b.0 - a.0) * along, a.1 + (b.1 - a.1) * along);
         }
         target -= span;

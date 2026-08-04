@@ -192,7 +192,7 @@ impl App {
                 // Plus one for the run-state glyph a run overlay appends, so
                 // overlaying a run cannot change a column's width under the
                 // reader.
-                let label = format!("{} {}", node.glyph, node.name).width() + 1;
+                let label = node_label(node).width() + 1;
                 *slot = (*slot).max(label.min(MAX_NODE_WIDTH));
             }
         }

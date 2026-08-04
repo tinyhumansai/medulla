@@ -13,7 +13,7 @@ use crate::ui::util::{clip, clip_middle, wrap};
 use super::super::types::App;
 
 impl App {
-    /// Draw the Overview tab: logo, top panels, and live activity.
+    /// Draw the Overview tab: logo, top panels, and the animated workflow graph.
     pub(super) fn draw_overview(&mut self, f: &mut Frame, area: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)

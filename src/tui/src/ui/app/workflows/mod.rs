@@ -16,6 +16,7 @@
 //! - [`copilot`] — the per-workflow conversation and its turns.
 
 mod canvas;
+pub(super) use canvas::node_label;
 mod copilot;
 mod rail;
 

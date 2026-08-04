@@ -22,6 +22,7 @@ mod agents;
 mod changes;
 mod decisions;
 mod feedback;
+pub(super) mod graph;
 mod harness_modals;
 mod overview;
 mod points;

@@ -48,6 +48,13 @@ impl Child for RecordingChild {
     fn process_id(&self) -> Option<u32> {
         None
     }
+
+    // Only required on Windows, where `portable_pty::Child` has no default —
+    // this stand-in names no real process, so there is no handle to report.
+    #[cfg(windows)]
+    fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        None
+    }
 }
 
 /// The property behind the "Revoke grants when PTY setup fails" fix: a

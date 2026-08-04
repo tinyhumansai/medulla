@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde_json::Value;
 
@@ -15,6 +16,49 @@ use super::*;
 /// A spec with no fleet grant, as a host with workflows on and no plane builds.
 fn spec_without_fleet() -> ServerSpec {
     server_spec(None, None, true).expect("workflows on is enough to serve a server")
+}
+
+/// Serializes the tests below that write a real `--mcp-config` file: those
+/// resolve their directory through `mcp_state_dir`/`process_env`, which reads
+/// this *process's* real environment rather than a per-test `HashMap` — unlike
+/// every other `medulla_home`-dependent test in this crate, which injects its
+/// own map and needs no such guard. Two of these tests racing on the same
+/// `MEDULLA_HOME` mutation would each think it owned the value.
+static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Points `MEDULLA_HOME` at a scratch directory for the life of one test, so
+/// `write_config_file`/`revoke_session`/`sweep_stale_config_files` never touch
+/// the real developer or CI account while these tests run. Restores whatever
+/// was there before on drop.
+struct ScratchHome {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+    previous: Option<String>,
+}
+
+impl ScratchHome {
+    fn install() -> Self {
+        let guard = HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().expect("a scratch home");
+        let previous = std::env::var("MEDULLA_HOME").ok();
+        std::env::set_var("MEDULLA_HOME", dir.path());
+        Self {
+            _guard: guard,
+            _dir: dir,
+            previous,
+        }
+    }
+}
+
+impl Drop for ScratchHome {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("MEDULLA_HOME", value),
+            None => std::env::remove_var("MEDULLA_HOME"),
+        }
+    }
 }
 
 #[test]
@@ -195,6 +239,7 @@ fn revoking_without_a_control_plane_is_a_no_op_rather_than_a_panic() {
 /// spawns, not just the one this file configures).
 #[test]
 fn write_config_file_carries_the_secret_the_argv_document_withholds() {
+    let _home = ScratchHome::install();
     let spec = server_spec(
         Some("run"),
         Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
@@ -227,6 +272,7 @@ fn write_config_file_carries_the_secret_the_argv_document_withholds() {
 fn write_config_file_is_created_owner_only() {
     use std::os::unix::fs::PermissionsExt;
 
+    let _home = ScratchHome::install();
     let spec = server_spec(
         None,
         Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
@@ -251,8 +297,34 @@ fn write_config_file_is_created_owner_only() {
     );
 }
 
+/// The property that actually closes the class of attack the module docs
+/// describe: a pre-existing entry at the target path — a symlink included —
+/// must never be followed and written through. `create_new` is what
+/// guarantees this; a plain `create` would happily write the secret to
+/// wherever `elsewhere` points.
+#[cfg(unix)]
+#[test]
+fn write_owner_only_refuses_a_pre_existing_path_rather_than_following_it() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let target = dir.path().join("planted");
+    let elsewhere = dir.path().join("elsewhere");
+    std::os::unix::fs::symlink(&elsewhere, &target).expect("a symlink at the target path");
+
+    let result = write_owner_only(&target, "{ \"secret\": true }");
+
+    assert!(
+        result.is_err(),
+        "an existing entry at the target path must make the write fail, not succeed through it"
+    );
+    assert!(
+        !elsewhere.exists(),
+        "the secret must never land at wherever a pre-planted symlink points"
+    );
+}
+
 #[test]
 fn revoke_session_removes_the_config_file_it_named() {
+    let _home = ScratchHome::install();
     let spec = server_spec(
         None,
         Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
@@ -270,6 +342,37 @@ fn revoke_session_removes_the_config_file_it_named() {
     assert!(
         !path.exists(),
         "revoking a session must remove any file its grant was minted into"
+    );
+}
+
+/// The mitigation for the one gap `revoke_session` cannot close on its own: a
+/// process that exits without reaping its sessions leaves their files behind.
+/// [`sweep_stale_config_files`] is what a *fresh* process run for the same
+/// account calls to clear them, since none of those tokens can be redeemed
+/// against this process's brand-new, empty grant registry anyway.
+#[test]
+fn sweep_stale_config_files_removes_every_leftover_json_file() {
+    let _home = ScratchHome::install();
+    let spec = server_spec(
+        None,
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        false,
+    )
+    .expect("a fleet grant is served here");
+    let orphan_a = spec
+        .write_config_file("sweep-test-orphan-a")
+        .expect("the config file is writable");
+    let orphan_b = spec
+        .write_config_file("sweep-test-orphan-b")
+        .expect("the config file is writable");
+    assert!(orphan_a.exists() && orphan_b.exists());
+
+    sweep_stale_config_files();
+
+    assert!(
+        !orphan_a.exists() && !orphan_b.exists(),
+        "a fresh process must clear every file a previous run left behind, \
+         since none of their tokens can be redeemed against its new registry"
     );
 }
 

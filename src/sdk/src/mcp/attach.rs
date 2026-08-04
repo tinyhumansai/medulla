@@ -39,6 +39,25 @@
 //! server, so the grant reaches the one subprocess it is for and nothing else
 //! the harness starts. [`revoke_session`] removes the file along with the
 //! grant it names.
+//!
+//! # Where the file lives, and what closes it against a symlink
+//!
+//! The file lives under this process's own [`crate::home::medulla_home`], not
+//! a shared directory like `/tmp`: that account directory already holds every
+//! other piece of this account's runtime state, and unlike a world-writable
+//! temp directory nothing else on the machine has a reason to write there.
+//! Naming still leans on `session`'s own randomness (a fresh UUID per PTY
+//! launch — see `worker::pty::launch::attach_mcp` in the `medulla-tui` crate)
+//! rather than on the directory being unshared, because the mode alone is not
+//! what stops a pre-planted entry — including a symlink — from being followed
+//! and written through by a plain `create`. [`write_owner_only`] opens with
+//! `O_CREAT | O_EXCL` (`create_new`) instead, so an existing entry at the
+//! target path makes the open fail rather than get overwritten, and the
+//! caller's already-safe fallback (the non-secret inline document) takes over.
+//! Revoking a session removes the file the same way it revokes the grant, but
+//! a process that exits without reaching that call — killed, or crashed —
+//! leaves its file behind; see [`sweep_stale_config_files`] for why that is
+//! survivable rather than a second leak.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -142,10 +161,32 @@ impl ServerSpec {
             entry.insert("env".to_string(), Value::Object(env));
         }
         let document = json!({ "mcpServers": { self.name: Value::Object(entry) } }).to_string();
+        std::fs::create_dir_all(mcp_state_dir())?;
         let path = config_file_path(session);
         write_owner_only(&path, &document)?;
         Ok(path)
     }
+}
+
+/// The real environment of *this* process — the daemon or TUI itself, not any
+/// task's spawn environment — read only to resolve where this account's own
+/// runtime state lives ([`crate::home::medulla_home`]).
+///
+/// Deliberately not the `env` a caller such as [`attach_cli`] was handed: that
+/// map describes a *task's* spawn, which a caller may scrub or override pieces
+/// of for the child, and [`revoke_session`] — invoked from wherever a harness's
+/// session is finally reaped, often nowhere near any per-task environment —
+/// has no such map to consult even in principle. Both the write and the later
+/// revoke have to agree on the same path for the same session, so both read
+/// the one environment guaranteed to be present, and unchanged, in either
+/// place: this process's own.
+fn process_env() -> HashMap<String, String> {
+    std::env::vars().collect()
+}
+
+/// Where this account's MCP config files live: `<medulla_home>/mcp`.
+fn mcp_state_dir() -> PathBuf {
+    crate::home::medulla_home(&process_env()).join("mcp")
 }
 
 /// Where a session's [`ServerSpec::write_config_file`] output would be, if it
@@ -154,17 +195,48 @@ impl ServerSpec {
 /// Deterministic from the session key alone: [`revoke_session`] needs to find
 /// and remove the same file without any caller having to hand the path back.
 fn config_file_path(session: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("medulla-mcp-{session}.json"))
+    mcp_state_dir().join(format!("{session}.json"))
 }
 
-/// Write `contents` to `path`, created with permissions only its owner can
-/// read.
+/// Remove every config file a *previous* run of this account's control plane
+/// left behind.
 ///
-/// On Unix the mode is set at creation (`O_CREAT` with the mode already
-/// applied), not with a follow-up `chmod`, so there is no window where the
-/// file briefly exists world-readable. Windows has no equivalent bit; the
-/// threat this defends against — `/proc/<pid>/environ` and world-readable
-/// temp files — is a Unix one, as the module docs describe.
+/// [`revoke_session`] is the normal way a file here stops existing, but it
+/// only runs when a session is reaped in the same process that minted its
+/// grant — a process that exits without reaching that point (killed, or
+/// crashed) leaves its file on disk with nothing left to remove it. This is
+/// the mitigation for that gap, called once, right after a fresh control plane
+/// binds (see `control_plane::start` in the `medulla-tui` crate): every grant
+/// a prior process minted lived only in that process's in-memory
+/// [`crate::control_socket::GrantRegistry`], which died with the process, so a
+/// leftover file's token can never be redeemed again no matter how long it
+/// sits on disk — sweeping it is hygiene, not a race against something still
+/// live. Best effort throughout: a directory that does not exist yet, or one
+/// entry this account cannot remove, is not worth failing startup over.
+pub fn sweep_stale_config_files() {
+    let Ok(entries) = std::fs::read_dir(mcp_state_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "json") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Write `contents` to `path`, created — not opened, not truncated — with
+/// permissions only its owner can read.
+///
+/// `create_new` (`O_CREAT | O_EXCL`) is what actually closes the class of
+/// attack the module docs describe, not the mode alone: `session` leans on a
+/// fresh UUID for its randomness, but a pre-planted entry at the exact target
+/// path — including a symlink pointed somewhere the caller does not expect —
+/// would still be followed and written through by a plain `create`. Failing
+/// the open instead means the secret is never written to the wrong place; the
+/// caller's fallback is the non-secret inline document, which needs no file at
+/// all. Windows has no exclusive-creation flag through `std::fs`, but
+/// `OpenOptions::create_new` maps to `CREATE_NEW` there and gets the same
+/// property; only the owner-only *mode* is Unix-specific.
 #[cfg(unix)]
 fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
@@ -172,17 +244,23 @@ fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(path)?;
     file.write_all(contents.as_bytes())
 }
 
-/// Windows fallback: no owner-only creation mode to apply.
+/// Windows fallback: no owner-only mode bit, but the same exclusive-creation
+/// guarantee against a pre-planted path.
 #[cfg(not(unix))]
 fn write_owner_only(path: &Path, contents: &str) -> std::io::Result<()> {
-    std::fs::write(path, contents)
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(contents.as_bytes())
 }
 
 /// Whether workflow authoring is switched on for this host.
@@ -322,10 +400,10 @@ pub fn server_spec(
 
 /// Attach Medulla's tools to a harness about to be started as a **CLI**.
 ///
-/// Mutates the spawn the caller is assembling: secret environment into `env`,
-/// the registration onto `args`. Returns the grant's session key so the caller
-/// can [`revoke_session`] it when the harness exits, or `None` when nothing was
-/// attached.
+/// Mutates the spawn the caller is assembling: the registration onto `args`,
+/// nothing onto `env` — see the `env` note below. Returns the grant's session
+/// key so the caller can [`revoke_session`] it when the harness exits, or
+/// `None` when nothing was attached.
 ///
 /// `session` is the key the grant is minted under and must be unique per
 /// launch — two sessions sharing one key would share one capability, and

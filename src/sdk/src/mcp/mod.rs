@@ -53,7 +53,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use attach::{attach_cli, revoke_session, ServerSpec};
+pub use attach::{attach_cli, revoke_session, sweep_stale_config_files, ServerSpec};
 pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{
     tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,

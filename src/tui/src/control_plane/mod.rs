@@ -77,6 +77,16 @@ pub(crate) async fn start(
                     .mcp
                     .effective_max_in_flight(config.workflows.max_parallel_agents),
             });
+            // A grant this fresh registry never minted can never be redeemed,
+            // so any `--mcp-config` file a *previous* run of this account left
+            // behind — most often one whose process was killed before it could
+            // reap its own sessions — is pure leftover by now. This is the one
+            // point in this process's life where sweeping all of them is safe:
+            // before the first grant of this run is minted, so nothing this
+            // run wrote can be swept by mistake. `mcp` itself only exists with
+            // the `workflows` feature compiled in.
+            #[cfg(feature = "workflows")]
+            medulla::mcp::sweep_stale_config_files();
             logs.push(format!(
                 "control socket: serving spawned harnesses on {}",
                 server.path().display()

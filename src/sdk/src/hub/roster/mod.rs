@@ -124,8 +124,21 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
         "tags": role_tags(&roles),
         "metadata": metadata,
     });
-    if let Some(host_id) = host_id_of(w) {
-        agent["hostId"] = json!(host_id);
+    // `hostId` goes ONLY on an agent with no workspace. The library's contract
+    // (`AgentDescriptor.hostId`) is explicit: it names the host a *local* agent
+    // runs on, "only meaningful when `workspaceId` is absent", and must NEVER be
+    // set on a harness-backed agent, whose host is derived by walking up from
+    // its workspace. Setting it on every agent made the server skip synthesizing
+    // a `workspaceId` from `metadata.workspace` (`a supplied workspaceId or
+    // hostId always wins`), which orphaned every agent from the
+    // agent→workspace→harness→host chain: `host_list` still rendered them, but
+    // placement reported "no agent inside <host> is available (none declared
+    // there)" and no task could be dispatched. The `hosts[]` block carries host
+    // identity for the topology; a workspace-backed agent must not repeat it.
+    if w.workspace_path().is_none() {
+        if let Some(host_id) = host_id_of(w) {
+            agent["hostId"] = json!(host_id);
+        }
     }
     agent
 }

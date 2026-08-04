@@ -66,6 +66,9 @@ portable-pty = "0.9"
 # Terminal emulator: parses a PTY's VT/ANSI stream into a screen grid so a live
 # harness CLI can be rendered inside a ratatui pane.
 vt100 = "0.15"
+# Inspect terminal modes that vt100 parses but does not expose, such as xterm's
+# alternate-scroll mode (DECSET 1007).
+vte = "0.11"
 # Minted session ids: a harness told which id to use writes a transcript we can
 # find by name, instead of one we have to guess by mtime.
 uuid = { version = "1", features = ["v4"] }

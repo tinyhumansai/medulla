@@ -58,13 +58,21 @@ impl SessionHandle {
         )
     }
 
-    /// Whether the child is currently painting on the alternate screen.
-    pub(in super::super) fn alternate_screen(&self) -> bool {
-        lock(&self.screen).screen().alternate_screen()
+    /// Whether the child enabled xterm alternate-scroll mode (DECSET 1007).
+    pub(in super::super) fn alternate_scroll(&self) -> bool {
+        lock(&self.modes).alternate_scroll
     }
 
     /// Feed bytes from the pty into the emulator.
     pub(in super::super) fn process(&self, bytes: &[u8]) {
+        {
+            let mut modes = lock(&self.modes);
+            let mut parser = std::mem::take(&mut modes.parser);
+            for &byte in bytes {
+                parser.advance(&mut *modes, byte);
+            }
+            modes.parser = parser;
+        }
         let thread_name = {
             let mut parser = lock(&self.screen);
             parser.process(bytes);

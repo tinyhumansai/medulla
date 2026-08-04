@@ -98,7 +98,7 @@ impl LocalHarnesses {
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - the harness uses an alternate screen without mouse reporting (Codex),
+    /// - the harness enables alternate scrolling without mouse reporting (Codex),
     ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
     ///   specifies;
     /// - otherwise our emulator's own retained lines move instead. Not as good,
@@ -118,7 +118,7 @@ impl LocalHarnesses {
                 return;
             }
         }
-        if self.sessions.alternate_screen(session_id) == Some(true) {
+        if self.sessions.alternate_scroll(session_id) == Some(true) {
             let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };
             let mut bytes = Vec::with_capacity(arrow.len() * rows);
             for _ in 0..rows {

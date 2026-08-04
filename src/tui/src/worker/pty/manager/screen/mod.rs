@@ -8,9 +8,9 @@
 use super::PtyManager;
 
 impl PtyManager {
-    /// Whether `id` is currently using its terminal's alternate screen.
-    pub fn alternate_screen(&self, id: &str) -> Option<bool> {
-        Some(self.handle(id)?.alternate_screen())
+    /// Whether `id` enabled xterm alternate-scroll mode (DECSET 1007).
+    pub fn alternate_scroll(&self, id: &str) -> Option<bool> {
+        Some(self.handle(id)?.alternate_scroll())
     }
 
     /// Whether the child has turned bracketed-paste mode on (DECSET 2004).

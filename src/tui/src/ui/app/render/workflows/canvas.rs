@@ -49,6 +49,10 @@ const LABEL_WIDTH: usize = LAYER_STRIDE - NODE_WIDTH - GUTTER_GAP - 2;
 /// is that row.
 const ATTACH_ROW: usize = 0;
 
+/// Radians per frame of the nodes' idle sway. About a nine-second cycle at the
+/// app's draw rate — slow enough to read as drift rather than as movement.
+const DRIFT_RATE: f64 = 0.06;
+
 /// How many cells the flow highlight advances per drawn frame.
 ///
 /// Well under one: at the ~11fps the app redraws at, a whole cell per frame is
@@ -375,7 +379,25 @@ impl App {
     /// only the vertical scroll can put a node out of view.
     fn cell_of(&self, node: &PlacedNode) -> Option<(usize, usize)> {
         let (x, row) = self.graph_cell(node.layer, node.lane);
-        Some((x, row.checked_sub(self.wf.canvas_row)?))
+        Some((x + self.drift(node), row.checked_sub(self.wf.canvas_row)?))
+    }
+
+    /// A slow one-cell sway, so the graph breathes instead of sitting still.
+    ///
+    /// One cell is the whole budget: the wires are re-routed from these
+    /// positions every frame, so a node that wandered further would drag its
+    /// wires into its neighbours, and a label that moves while it is being read
+    /// is worse than a static diagram. Each node has its own phase, which is
+    /// what makes it read as drift rather than as the panel juddering.
+    fn drift(&self, node: &PlacedNode) -> usize {
+        // The node under the cursor never moves. It is the one an operator is
+        // looking at, and it is the anchor everything else is judged against.
+        if self.selected_graph_node().map(|selected| &selected.id) == Some(&node.id) {
+            return 0;
+        }
+        let phase = (node.layer * 7 + node.lane * 3) as f64 * 0.9;
+        let sway = (self.frame as f64 * DRIFT_RATE + phase).sin();
+        usize::from(sway > 0.5)
     }
 }
 

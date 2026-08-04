@@ -32,9 +32,12 @@ step state, evolution notes and proposals, undo revisions, and coordination
 locks. The run history is scoped by workspace, so its concrete path is
 `state/workflows/scopes/<workspace-id>/runs/`.
 
-This makes `<medulla home>/workflows/` safe to sync on its own: it contains only
-the current authored `*.json` source files. Syncing it does not copy runs,
-checkpoints, logs, locks, or other machine-local state.
+For new installations, this makes `<medulla home>/workflows/` safe to sync on
+its own: it contains only the current authored `*.json` source files. Homes
+upgraded from an earlier release may retain a legacy `.revisions/` directory or
+`.workflow.lock` file there for compatibility; exclude those legacy artifacts
+when syncing. Newly written runs, revisions, locks, and other machine-local
+state always use `state/workflows/`.
 
 ## Writing one
 

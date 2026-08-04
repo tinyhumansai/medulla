@@ -144,9 +144,12 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("revisions"))
             .unwrap_or_else(|| PathBuf::from("revisions"));
-        let definition_locks_dir = runs_dir
-            .parent()
-            .map(|state| state.join("locks"))
+        // A definition lock coordinates writers to the definition destination,
+        // independent of where either caller chooses to keep its run state.
+        let definition_locks_dir = dirs
+            .last()
+            .and_then(|dir| dir.parent())
+            .map(|parent| parent.join("locks"))
             .unwrap_or_else(|| PathBuf::from("locks"));
         let decision_scope = file_store_scope(&proposals_dir);
         Self {
@@ -186,9 +189,11 @@ impl FileWorkflowStore {
         let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
         let scope = format!("{digest:x}");
         let mut store = Self::with_state(dirs, &state_dir.join("scopes").join(&scope[..16]));
-        // Definitions are global even though runs, proposals, and revisions
-        // are workspace-scoped. Every workspace writing that shared catalog
-        // must therefore contend on the same filesystem locks.
+        // Definitions, their undo history, and their locks are global even
+        // though runs, notes, and proposals are workspace-scoped. Every
+        // workspace editing that shared catalog must observe one linear
+        // history and contend on the same filesystem locks.
+        store.revisions_dir = state_dir.join("revisions");
         store.definition_locks_dir = state_dir.join("locks");
         store
     }

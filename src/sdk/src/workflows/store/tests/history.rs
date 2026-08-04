@@ -51,13 +51,23 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
     record.description = "post-upgrade edit".into();
     store.save(&record).unwrap();
 
-    let descriptions: Vec<_> = store
-        .list_revisions("greet")
-        .unwrap()
-        .into_iter()
+    let history = store.list_revisions("greet").unwrap();
+    let descriptions: Vec<_> = history
+        .iter()
         .map(|revision| revision.record.description)
         .collect();
     assert_eq!(descriptions, ["current at upgrade", "legacy version"]);
+
+    let legacy = history
+        .iter()
+        .find(|revision| revision.record.description == "legacy version")
+        .expect("legacy revision remains addressable");
+    let restored = rollback(&store, "greet", &legacy.id).expect("legacy rollback");
+    assert_eq!(restored.description, "legacy version");
+    assert_eq!(
+        store.get("greet").unwrap().unwrap().description,
+        "legacy version"
+    );
 }
 
 #[test]

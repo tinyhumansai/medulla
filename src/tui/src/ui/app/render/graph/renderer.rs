@@ -55,10 +55,14 @@ impl App {
         let block = self.panel("Workflow");
         let inner = block.inner(area);
         f.render_widget(block, area);
-        if inner.width < 24 || inner.height < 4 {
+        let drawable_width = inner.width as f64 - 1.0 - 2.0 * LABEL_GUTTER;
+        let drawable_height = inner.height.saturating_sub(1) as f64 * UNITS_H as f64
+            - 1.0
+            - 2.0 * EDGE_ROWS * UNITS_H as f64;
+        if drawable_width * SPREAD < 8.0 || drawable_height * SPREAD < 4.0 {
             f.render_widget(
                 Paragraph::new(TLine::from(Span::styled(
-                    "Workflow graph needs a taller window.",
+                    "Workflow graph needs a larger window.",
                     Style::default().add_modifier(Modifier::DIM),
                 ))),
                 inner,
@@ -120,7 +124,7 @@ fn flip(map_height: usize, y: f64) -> f64 {
     map_height as f64 - 1.0 - y
 }
 
-/// Draw every edge as a color-interpolated line, plus the packet travelling it.
+/// Draw every edge as a color-interpolated line, then its travelling packet.
 ///
 /// Each edge carries one moving highlight. It is the cheapest possible signal
 /// that work is flowing rather than merely connected, and it gives the panel
@@ -146,7 +150,18 @@ fn draw_edges(map: &mut CharMap, graph: &Graph, positions: &[(f64, f64)]) {
             bias,
             (scale(from_rgb, EDGE_DIM), scale(to_rgb, EDGE_DIM)),
         );
+    }
 
+    // Packets are a higher layer than edges, so all wires must exist before a
+    // packet is placed. Otherwise a later crossing edge loses connections at
+    // the packet cell.
+    for (i, edge) in graph.edges.iter().enumerate() {
+        let (x0, y0) = positions[edge.from];
+        let (x1, y1) = positions[edge.to];
+        let (from, to) = ((x0, flip(height, y0)), (x1, flip(height, y1)));
+        let edge_rgb = edge.kind.rgb();
+        let to_rgb = mix(edge_rgb, graph.nodes[edge.to].kind.rgb(), 0.35);
+        let bias = 0.5 + RISER_SPREAD * ((i as f64 * 0.618_034).fract() * 2.0 - 1.0);
         // Packets are spaced by an irrational stride so they never form a
         // visible pulse across the whole graph at once. They ride the drawn
         // elbow rather than the straight line between the two nodes, or they

@@ -303,46 +303,6 @@ impl App {
             .max(MIN_LABEL_WIDTH)
     }
 
-    /// How the canvas is divided into columns: how many a band holds, and how
-    /// wide each of them is.
-    ///
-    /// Every column is sized to its own content — the longest label of any node
-    /// that lands in it — rather than every column in the graph taking the
-    /// width of the graph's longest label. One wordy step used to widen every
-    /// column in the fold, and the difference came out as connector: a short
-    /// name followed by twenty cells of `─` before the next step.
-    ///
-    /// Columns keep the same widths on every band, because a folded band holds
-    /// the same column positions as the one above it and nodes that did not
-    /// line up down the fold would undo the point of folding at all.
-    fn column_layout(&self) -> (usize, Vec<usize>) {
-        let canvas = self.canvas_width();
-        let layers = self.wf.layout.layers.max(1);
-        let mut widest = vec![MIN_LABEL_WIDTH; layers];
-        for node in &self.wf.layout.nodes {
-            if let Some(slot) = widest.get_mut(node.layer) {
-                // Plus one for the run-state glyph a run overlay appends, so
-                // overlaying a run cannot change a column's width under the
-                // reader.
-                let label = format!("{} {}", node.glyph, node.name).width() + 1;
-                *slot = (*slot).max(label.min(MAX_NODE_WIDTH));
-            }
-        }
-        // The most columns the narrowest possible label would allow is the
-        // ceiling; the first count at or below it whose own widths fit is the
-        // answer, so a band takes as many columns as its actual labels permit.
-        let ceiling = (canvas / (MIN_LABEL_WIDTH + GUTTER_SPAN)).clamp(1, layers);
-        for per_band in (1..=ceiling).rev() {
-            let widths = fold_columns(&widest, per_band);
-            let total: usize = widths.iter().map(|width| width + GUTTER_SPAN).sum();
-            // The last column needs no gutter of its own — nothing follows it.
-            if total.saturating_sub(GUTTER_SPAN) <= canvas {
-                return (per_band, widths);
-            }
-        }
-        (1, vec![widest[0].min(canvas)])
-    }
-
     /// How many layers fit across the canvas before it folds.
     pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
         self.column_layout().0

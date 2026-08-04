@@ -161,6 +161,7 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     // attached instead of advancing to the workspace step.
     a.harness_pane_session = Some("already-running".to_string());
     a.harness_picker = Some(HarnessPicker {
+        purpose: super::types::PickerPurpose::Spawn,
         choices: vec![HarnessChoice::native(
             medulla::protocol::HarnessProvider::Claude,
         )],
@@ -365,10 +366,9 @@ fn select_first_task(app: &mut App) -> Option<Cmd> {
     app.tab_index = tab("Agents");
     let rows = app.rail_rows();
     let idx = rows.iter().position(|r| {
-        matches!(
-            r,
-            super::rail::RailRow::Agent(crate::ui::agents::AgentRow::Sub { .. })
-        )
+        // A dispatched task is a *session* of its agent now, not a sublane of
+        // its lane: one row type for everything an agent is running.
+        matches!(r, super::rail::RailRow::Session(session) if session.task.is_some())
     })?;
     app.agent_index = idx;
     app.retarget_watch()
@@ -509,12 +509,7 @@ fn selecting_a_lane_rather_than_a_task_watches_nothing() {
     let rows = app.rail_rows();
     let idx = rows
         .iter()
-        .position(|r| {
-            matches!(
-                r,
-                super::rail::RailRow::Agent(crate::ui::agents::AgentRow::Lane { .. })
-            )
-        })
+        .position(|r| matches!(r, super::rail::RailRow::Agent(_)))
         .expect("the fixture has a lane row");
     app.agent_index = idx;
     assert!(app.retarget_watch().is_none());

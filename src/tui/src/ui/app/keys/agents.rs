@@ -51,11 +51,11 @@ impl App {
         self.agents_focus == AgentsFocus::Rail || !self.agents_composer_shown()
     }
 
-    /// Whether the rail cursor sits on the `+ New session` action row.
-    pub(in crate::ui::app) fn on_new_harness_row(&self) -> bool {
+    /// Whether the rail cursor sits on the `+ New agent` action row.
+    pub(in crate::ui::app) fn on_new_agent_row(&self) -> bool {
         let rows = self.rail_rows();
         rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
-            .is_some_and(|row| row.is_new_harness())
+            .is_some_and(|row| row.is_new_agent())
     }
 
     /// Move the keyboard to the rail. Nothing else about the draft changes, so
@@ -106,12 +106,12 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the rows that are themselves an action: the harness starter, and a
+            // the rows that are themselves an action: the agent starter, and a
             // lane's `+N more`, where it pages the hidden sublanes into view. A
             // visible harness consumes it earlier and takes the keyboard instead.
             KeyCode::Enter => {
-                if self.on_new_harness_row() {
-                    self.open_harness_picker();
+                if self.on_new_agent_row() {
+                    self.open_new_agent_picker();
                 } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }

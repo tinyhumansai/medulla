@@ -423,6 +423,18 @@ impl App {
             return None;
         }
         if tab == "Agents" {
+            // §A7: clicking an entry of the orchestrator's "sessions started"
+            // block opens that session — the rail selection follows, which is
+            // what makes the pane show its conversation. Checked before the rail
+            // because the block lives in the pane beside it.
+            if let Some((rect, tasks)) = self.hit_started_sessions.clone() {
+                if rect.contains((x, y).into()) {
+                    if let Some(task_id) = tasks.get((y - rect.y) as usize) {
+                        self.focus_session_for_task(task_id);
+                        return self.retarget_watch();
+                    }
+                }
+            }
             // The rail stacks two hit boxes — threads above lanes — so both are
             // tried; an `else if` here would leave the strip unclickable.
             if let Some((rect, window_start)) = self.hit_threads {
@@ -460,8 +472,8 @@ impl App {
                             // requiring a second keystroke to confirm what was
                             // already aimed at is the friction it exists to
                             // remove.
-                            if row.is_new_harness() {
-                                self.open_harness_picker();
+                            if row.is_new_agent() {
+                                self.open_new_agent_picker();
                                 return None;
                             }
                             // So is a lane's `+N more`: the click that lands on

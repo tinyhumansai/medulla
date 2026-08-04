@@ -49,13 +49,13 @@ mod tests;
 /// Twelve columns still shows a marker and enough of a name to recognise it.
 pub(in crate::ui::app) const MIN_NODE_WIDTH: usize = 12;
 
-/// The width a column is worth having before another one is fitted in.
+/// The most a wire runs on past a node before its column's turn, when the pane
+/// has room to spare.
 ///
-/// How many columns a band holds is decided at this width, and they are then
-/// widened into whatever is left over. Deciding at [`MIN_NODE_WIDTH`] instead
-/// would pack in every column the pane could physically hold and clip every
-/// name to fit — more steps on screen, none of them readable.
-pub(in crate::ui::app) const PREFERRED_NODE_WIDTH: usize = 18;
+/// Columns spread to fill the pane, but only so far: two short names either
+/// side of half a pane of connector read as unrelated, however well aligned
+/// they are.
+pub(in crate::ui::app) const MAX_GUTTER_SPAN: usize = GUTTER_SPAN * 2;
 
 /// The widest a node's label is drawn, however much room there is.
 ///

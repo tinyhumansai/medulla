@@ -14,9 +14,10 @@
 use medulla::ui::workflows::{GraphLayout, Move, PlacedNode};
 
 use super::super::render::workflows::{
-    BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_NODE_WIDTH, MIN_NODE_WIDTH, NODE_HEIGHT,
-    PREFERRED_NODE_WIDTH,
+    BAND_GAP, FOLD_MARGIN, GUTTER_SPAN, LANE_STRIDE, MAX_GUTTER_SPAN, MAX_NODE_WIDTH,
+    MIN_NODE_WIDTH, NODE_HEIGHT,
 };
+use unicode_width::UnicodeWidthStr;
 use super::super::types::App;
 
 impl App {
@@ -185,19 +186,31 @@ impl App {
     /// How many layers fit across the canvas before it folds, and how wide each
     /// one's label may be.
     ///
-    /// Columns are sized to the pane rather than fixed: as many as fit at the
-    /// preferred width, then every one widened into whatever is left over, up
-    /// to [`MAX_NODE_WIDTH`], so a full band's columns tile the pane instead of
-    /// leaving a ragged margin. A graph with fewer layers than would fit uses
-    /// one column per layer rather than spreading itself thin.
+    /// Columns are sized to what the graph actually holds, not to a fixed
+    /// width: a column is as wide as this graph's longest label, so a workflow
+    /// of short names packs more steps across the pane instead of padding every
+    /// one of them out to a width nothing in it uses. A graph with fewer layers
+    /// than would fit uses one column per layer rather than spreading thin.
     fn column_metrics(&self) -> (usize, usize) {
         let canvas = self.canvas_width();
-        let capacity = (canvas / (PREFERRED_NODE_WIDTH + GUTTER_SPAN)).max(1);
+        let width = self.content_width();
+        let capacity = (canvas / (width + GUTTER_SPAN)).max(1);
         let per_band = capacity.min(self.wf.layout.layers.max(1));
-        let width = (canvas / per_band)
-            .saturating_sub(GUTTER_SPAN)
-            .clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH);
         (per_band, width)
+    }
+
+    /// The width of the longest label in this graph, within the readable range.
+    fn content_width(&self) -> usize {
+        self.wf
+            .layout
+            .nodes
+            .iter()
+            // Plus one for the run-state glyph a run overlay appends, so
+            // overlaying a run cannot change the column width under the reader.
+            .map(|node| format!("{} {}", node.glyph, node.name).width() + 1)
+            .max()
+            .unwrap_or(MIN_NODE_WIDTH)
+            .clamp(MIN_NODE_WIDTH, MAX_NODE_WIDTH)
     }
 
     /// How many layers fit across the canvas before it folds.
@@ -217,13 +230,8 @@ impl App {
     /// what keeps a full band's right edge flush with the pane.
     fn column_x(&self, column: usize) -> usize {
         let (per_band, width) = self.column_metrics();
-        if width >= MAX_NODE_WIDTH {
-            // Columns that hit the cap keep their own stride: the pane has more
-            // room than the labels can use, and spreading them to fill it would
-            // put half a pane of blank between two short names.
-            return column * (width + GUTTER_SPAN);
-        }
-        column * self.canvas_width() / per_band
+        let spread = self.canvas_width() / per_band;
+        column * spread.min(width + MAX_GUTTER_SPAN)
     }
 
     /// How many rows of canvas the graph panel has.

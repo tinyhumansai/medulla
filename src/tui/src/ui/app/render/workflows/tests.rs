@@ -621,3 +621,67 @@ fn the_graph_is_still_the_same_drawing_while_the_highlight_moves() {
 
     assert_eq!(first, second);
 }
+
+#[test]
+fn a_reversed_band_draws_its_wires_leftward() {
+    let mut long = diamond("long");
+    long.graph = serde_json::from_value(json!({
+        "nodes": (0..12).map(|index| json!({
+            "id": format!("n{index}"),
+            "kind": if index == 0 { "trigger" } else { "transform" },
+            "name": format!("Step {index}"),
+            "config": {},
+        })).collect::<Vec<_>>(),
+        "edges": (0..11).map(|index| json!({
+            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("graph parses");
+    let (_home, mut app) = app_with(&[long], &[]);
+
+    let screen = render(&mut app);
+
+    assert!(screen.contains('▶'), "the first band points right");
+    assert!(
+        screen.contains('◀'),
+        "the band under it runs the other way: {screen}"
+    );
+}
+
+#[test]
+fn the_nodes_sway_but_the_selected_one_holds_still() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+    let selected = app
+        .selected_graph_node()
+        .expect("a node is selected")
+        .name
+        .clone();
+
+    // A whole sway cycle, sampled often enough to catch the sway at both ends.
+    let frames: Vec<String> = (0..64)
+        .map(|step| {
+            app.frame = step * 4;
+            render(&mut app)
+        })
+        .collect();
+    let column_of = |screen: &str, label: &str| {
+        screen
+            .lines()
+            .find_map(|line| line.find(label))
+            .expect("the label is on screen")
+    };
+
+    let moved = frames
+        .iter()
+        .any(|screen| column_of(screen, "◆ Check") != column_of(&frames[0], "◆ Check"));
+    assert!(moved, "an unselected node sways");
+
+    let anchor = column_of(&frames[0], &selected);
+    for screen in &frames {
+        assert_eq!(
+            column_of(screen, &selected),
+            anchor,
+            "the selected node is the anchor and never moves"
+        );
+    }
+}

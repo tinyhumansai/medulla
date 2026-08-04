@@ -220,7 +220,7 @@ fn an_unmanaged_harness_gets_its_own_rail_row() {
     let _ = user_session(&sessions);
 
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("your harnesses"), "{out}");
+    assert!(out.contains("your sessions"), "{out}");
     assert!(out.contains("unmanaged"), "{out}");
 
     sessions.shutdown();

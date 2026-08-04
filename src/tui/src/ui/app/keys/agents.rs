@@ -51,7 +51,7 @@ impl App {
         self.agents_focus == AgentsFocus::Rail || !self.agents_composer_shown()
     }
 
-    /// Whether the rail cursor sits on the `+ New harness` action row.
+    /// Whether the rail cursor sits on the `+ New session` action row.
     pub(in crate::ui::app) fn on_new_harness_row(&self) -> bool {
         let rows = self.rail_rows();
         rows.get(self.agent_index.min(rows.len().saturating_sub(1)))

@@ -44,19 +44,19 @@ fn from_config_falls_back_per_field() {
 }
 
 #[test]
-fn default_primary_is_medulla_red() {
-    assert_eq!(Theme::default().primary, MEDULLA_RED);
+fn default_primary_is_red() {
+    assert_eq!(Theme::default().primary, Color::Red);
     assert_eq!(Theme::default().selection_fg, Color::White);
 }
 
 #[test]
 fn cycle_role_walks_palette_and_wraps() {
     let mut t = Theme::default();
-    assert_eq!(t.role(0), MEDULLA_RED);
+    assert_eq!(t.role(0), Color::Red);
     t.cycle_role(0, true);
-    assert_eq!(t.role(0), Color::Cyan); // PALETTE[0]
+    assert_eq!(t.role(0), Color::Cyan); // PALETTE[1]
     t.cycle_role(0, false);
-    assert_eq!(t.role(0), MEDULLA_RED);
+    assert_eq!(t.role(0), Color::Red);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn persist_theme_preserves_unrelated_sections() {
     );
     assert_eq!(reparsed["medulla"]["maxPasses"].as_integer(), Some(8));
     assert_eq!(reparsed["stateDir"].as_str(), Some("/tmp/state"));
-    assert_eq!(reparsed["theme"]["primary"].as_str(), Some("#a50025"));
+    assert_eq!(reparsed["theme"]["primary"].as_str(), Some("red"));
     assert_eq!(reparsed["theme"]["attention"].as_str(), Some("yellow"));
     assert_eq!(reparsed["theme"]["attentionBlink"].as_bool(), Some(true));
 }

@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::super::super::rail::{RailRow, NEW_HARNESS_LABEL};
+use super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
@@ -296,7 +296,7 @@ impl App {
             RailRow::Agent(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
             RailRow::NewHarness => self.new_harness_line(active),
             RailRow::HarnessSeparator => TLine::from(Span::styled(
-                "── your harnesses ──",
+                "── your sessions ──",
                 Style::default().add_modifier(Modifier::DIM),
             )),
             // Only reached through `rail_row_lines`, which draws a harness over
@@ -309,7 +309,7 @@ impl App {
         }
     }
 
-    /// Format the `+ New harness` action row.
+    /// Format the `+ New session` action row.
     ///
     /// Drawn as a button rather than as another list entry — bold and coloured,
     /// with its chord beside it — because it is the one row on the rail that
@@ -323,7 +323,7 @@ impl App {
                 .add_modifier(Modifier::BOLD)
         };
         TLine::from(vec![
-            Span::styled(format!(" {NEW_HARNESS_LABEL} "), style),
+            Span::styled(format!(" {NEW_SESSION_LABEL} "), style),
             Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
         ])
     }

@@ -289,10 +289,14 @@ pub struct WorkflowsState {
     pub(super) layout: medulla::ui::workflows::GraphLayout,
     /// Selected node in the canvas, in the layout's reading order.
     pub(super) node_index: usize,
-    /// Horizontal scroll of the canvas, in layers.
-    pub(super) canvas_layer: usize,
-    /// Vertical scroll of the canvas, in lanes.
-    pub(super) canvas_lane: usize,
+    /// Vertical scroll of the canvas, in rows.
+    ///
+    /// The only scroll the canvas has: the graph folds onto a new band whenever
+    /// a layer would run past the right edge, so it is never wider than the
+    /// pane and there is nothing to scroll horizontally. Counted in rows rather
+    /// than lanes because a fold puts a band boundary between two lanes, and a
+    /// scroll measured in lanes cannot address the gap.
+    pub(super) canvas_row: usize,
     /// Rows inside the graph panel during its most recent render.
     ///
     /// Navigation uses this measured viewport rather than the full terminal

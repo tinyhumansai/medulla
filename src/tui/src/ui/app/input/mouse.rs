@@ -316,8 +316,13 @@ impl App {
             // because the block lives in the pane beside it.
             if let Some((rect, tasks)) = self.hit_started_sessions.clone() {
                 if rect.contains((x, y).into()) {
-                    if let Some(task_id) = tasks.get((y - rect.y) as usize) {
-                        self.focus_session_for_task(task_id);
+                    // Only the rows that *are* entries answer; a click on the
+                    // conversation between them falls through to the rail's own
+                    // hit test, exactly as a click above the block used to.
+                    if let Some(task_id) = tasks.get((y - rect.y) as usize).and_then(Option::as_ref)
+                    {
+                        let task_id = task_id.clone();
+                        self.focus_session_for_task(&task_id);
                         return self.retarget_watch();
                     }
                 }
@@ -361,6 +366,12 @@ impl App {
                             // remove.
                             if row.is_new_agent() {
                                 self.open_new_agent_picker();
+                                return None;
+                            }
+                            // Same rule for the per-agent action: a click on
+                            // `+ new session` opens the flow it names.
+                            if let Some(agent_id) = row.new_session_agent().map(str::to_string) {
+                                self.open_new_session(&agent_id);
                                 return None;
                             }
                             // So is a lane's `+N more`: the click that lands on

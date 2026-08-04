@@ -30,6 +30,7 @@ fn picker_app() -> App {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     });
     app
 }

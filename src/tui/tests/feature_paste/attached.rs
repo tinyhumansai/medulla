@@ -62,6 +62,7 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
     });
 
     for _ in 0..64 {

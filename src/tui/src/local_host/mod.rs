@@ -171,6 +171,7 @@ pub(crate) fn options_from_config(
 /// advertised or executable on this device. Its base CLI is added to an
 /// explicit provider allowlist because declaring a custom harness is itself an
 /// explicit request to run that CLI.
+#[cfg(test)]
 pub(crate) fn options_from_config_with_custom(
     config: &HostSection,
     env: &HashMap<String, String>,

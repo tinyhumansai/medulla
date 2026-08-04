@@ -102,6 +102,7 @@ pub(super) async fn connect_harness(
     let HarnessWiring {
         roster,
         catalog,
+        local_hosts,
         runner,
         subscription_strategy,
         log,
@@ -110,6 +111,7 @@ pub(super) async fn connect_harness(
     } = wiring;
     let connect_roster = roster.clone();
     let connect_catalog = catalog.clone();
+    let connect_local_hosts = local_hosts.clone();
     let cap_catalog = catalog.clone();
     let connect_relay = runner.relay();
     let connect_log = log.clone();
@@ -149,6 +151,7 @@ pub(super) async fn connect_harness(
         .on(Event::Connect, move |_payload, socket| {
             let roster = connect_roster.clone();
             let catalog = connect_catalog.clone();
+            let local_hosts = connect_local_hosts.clone();
             let relay = connect_relay.clone();
             let connect_log = connect_log.clone();
             let workflows = connect_workflows.clone();
@@ -190,8 +193,15 @@ pub(super) async fn connect_harness(
                         format!(" — withholding {} from agent_list", withheld.len())
                     }
                 ));
-                let payload =
-                    { register_payload(&roster.lock().expect("roster lock"), &online, &catalog) };
+                // Both locks are taken and released inside this block, before
+                // the emit await: the hosts block and the agent list must
+                // describe one instant, and neither std guard may be held
+                // across a suspension point.
+                let payload = {
+                    let workers = roster.lock().expect("roster lock");
+                    let local_hosts = local_hosts.lock().expect("local hosts lock");
+                    register_payload(&workers, &online, &catalog, &local_hosts)
+                };
                 let _ = socket.emit("medulla:register_agents", payload).await;
                 // Beside the roster, not instead of it: the backend keys a
                 // workflow advert to the socket that sent it and drops the whole

@@ -181,6 +181,7 @@ impl HarnessDispatch for ConcurrencyProbe {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         })
     }
 }

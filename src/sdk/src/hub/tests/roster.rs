@@ -190,7 +190,7 @@ fn subscription_routing_excludes_not_ready_and_fails_open_without_numbers() {
 
 #[test]
 fn register_payload_advertises_id_address_and_harness() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0]["id"], "w1");
@@ -206,7 +206,7 @@ fn register_payload_advertises_id_address_and_harness() {
 fn register_payload_advertises_a_known_workspace() {
     let mut w = worker("this-device", "this-device");
     w.workspace = Some(crate::runtime::WorkspaceRef::checkout("/srv/repos/medulla"));
-    let payload = register_payload(&[w], &no_presence(), &[]);
+    let payload = register_payload(&[w], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["metadata"]["workspace"], "/srv/repos/medulla");
 }
@@ -216,13 +216,13 @@ fn register_payload_advertises_a_known_workspace() {
 /// win that fallback and place the agent nowhere.
 #[test]
 fn register_payload_omits_an_unknown_or_blank_workspace() {
-    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 
     let mut blank = worker("w2", "ADDR2");
     blank.workspace = Some(crate::runtime::WorkspaceRef::checkout("   "));
-    let payload = register_payload(&[blank], &no_presence(), &[]);
+    let payload = register_payload(&[blank], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert!(agents[0]["metadata"].get("workspace").is_none());
 }
@@ -268,7 +268,7 @@ fn an_advertised_worker_is_online_so_it_can_be_auto_assigned() {
     // availability is exactly "online". Advertising a blank one excluded this
     // hub's workers from every fan-out, and rendered as an empty column in
     // agent_list — which reads as a broken row, not an idle worker.
-    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["availability"], "online");
 }
@@ -450,7 +450,12 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // `agent_list` renders `id (name)`. When those differ and both read as
     // names, the model picks one and may pick the unroutable one — which is the
     // original bug. Unlabelled, they must coincide.
-    let payload = register_payload(&[worker("claude-worker", "3Hob1Fxu")], &no_presence(), &[]);
+    let payload = register_payload(
+        &[worker("claude-worker", "3Hob1Fxu")],
+        &no_presence(),
+        &[],
+        &[],
+    );
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "claude-worker");
     assert_eq!(
@@ -461,7 +466,7 @@ fn an_unlabelled_worker_advertises_one_token_not_two() {
     // A labelled one keeps its human name; the id stays a visible slug of it.
     let mut labelled = worker("sanil-laptop", "3Hob1Fxu");
     labelled.label = Some("Sanil Laptop".to_string());
-    let payload = register_payload(&[labelled], &no_presence(), &[]);
+    let payload = register_payload(&[labelled], &no_presence(), &[], &[]);
     let agents = payload.get("agents").unwrap().as_array().unwrap();
     assert_eq!(agents[0]["id"], "sanil-laptop");
     assert_eq!(agents[0]["name"], "Sanil Laptop");
@@ -477,6 +482,7 @@ fn a_worker_the_relay_reports_down_is_withheld_entirely() {
         &[worker("live", "GRVlive"), worker("dead", "GRVdead")],
         &online,
         &[],
+        &[],
     );
     let agents = payload["agents"].as_array().expect("an agent list");
 
@@ -490,7 +496,7 @@ fn a_worker_the_relay_reports_down_is_withheld_entirely() {
 #[test]
 fn a_worker_the_relay_reports_up_is_advertised() {
     let online = std::collections::HashMap::from([("GRVaddr".to_string(), true)]);
-    let payload = register_payload(&[worker("w1", "GRVaddr")], &online, &[]);
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &online, &[], &[]);
     assert_eq!(payload["agents"].as_array().expect("agents").len(), 1);
     assert_eq!(payload["agents"][0]["availability"], "online");
 }
@@ -502,6 +508,7 @@ fn no_answer_from_the_relay_advertises_everything() {
     let payload = register_payload(
         &[worker("w1", "GRVone"), worker("w2", "GRVtwo")],
         &no_presence(),
+        &[],
         &[],
     );
     assert_eq!(payload["agents"].as_array().expect("agents").len(), 2);
@@ -537,7 +544,7 @@ fn a_toggled_role_reaches_the_orchestrator_as_description_tags_and_id() {
     let mut w = worker("claude-worker-2", "GRVaddr");
     w.roles = vec!["code-reviewer".to_string()];
 
-    let payload = register_payload(&[w], &no_presence(), &catalog);
+    let payload = register_payload(&[w], &no_presence(), &catalog, &[]);
     let agent = &payload["agents"][0];
 
     assert!(
@@ -568,6 +575,7 @@ fn a_worker_with_no_roles_is_advertised_exactly_as_before() {
         &[worker("w1", "GRVaddr")],
         &no_presence(),
         &crate::agents::default_templates(),
+        &[],
     );
     let agent = &payload["agents"][0];
     assert_eq!(agent["description"], "claude daemon");
@@ -582,7 +590,12 @@ fn a_role_the_catalog_does_not_have_is_dropped_rather_than_advertised() {
     // backs.
     let mut w = worker("w1", "GRVaddr");
     w.roles = vec!["deleted-role".to_string()];
-    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    let payload = register_payload(
+        &[w],
+        &no_presence(),
+        &crate::agents::default_templates(),
+        &[],
+    );
     assert_eq!(payload["agents"][0]["description"], "claude daemon");
     // Including from `metadata.roles`, which is the join key: an id with no
     // template behind it hands a downstream lookup a key that resolves to
@@ -598,7 +611,12 @@ fn a_role_the_catalog_does_not_have_is_dropped_rather_than_advertised() {
 fn metadata_roles_carries_only_the_ids_the_catalog_resolves() {
     let mut w = worker("w1", "GRVaddr");
     w.roles = vec!["code-reviewer".to_string(), "deleted-role".to_string()];
-    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    let payload = register_payload(
+        &[w],
+        &no_presence(),
+        &crate::agents::default_templates(),
+        &[],
+    );
     assert_eq!(
         payload["agents"][0]["metadata"]["roles"],
         serde_json::json!(["code-reviewer"])
@@ -630,14 +648,22 @@ fn a_declared_agents_roles_and_placement_survive_into_the_advert() {
     assert_eq!(w.workspace_path(), Some("/srv/api"));
     assert_eq!(w.max_sessions, 1);
 
-    let payload = register_payload(&[w], &no_presence(), &crate::agents::default_templates());
+    let payload = register_payload(
+        &[w],
+        &no_presence(),
+        &crate::agents::default_templates(),
+        &[],
+    );
     let agent = &payload["agents"][0];
     assert_eq!(agent["metadata"]["roles"][0], "code-reviewer");
+    // Placement still rides `metadata.workspace` as a path — the `{path, type}`
+    // object is deferred, and the backend reads both anyway.
     assert_eq!(agent["metadata"]["workspace"], "/srv/api");
-    // The advert keeps the shape it had: placement rides `metadata.workspace` as
-    // a path, and neither `hostId` nor `maxSessions` is emitted yet.
+    // The declared host and capacity now reach the wire. `hostId` sits on the
+    // agent, not inside its metadata: that is where the backend reads it.
+    assert_eq!(agent["hostId"], "this-device");
     assert!(agent["metadata"].get("hostId").is_none());
-    assert!(agent["metadata"].get("maxSessions").is_none());
+    assert_eq!(agent["metadata"]["maxSessions"], 1);
 }
 
 /// A remembered roster row and an env-seeded one state no capacity at all.
@@ -691,4 +717,236 @@ fn a_task_is_grouped_under_the_agent_it_named_not_the_first_at_that_address() {
         "alpha"
     );
     assert_eq!(super::super::roster::lane_id(&[], "nobody", None), "");
+}
+
+// ------------------------------------------------------- the topology block ---
+
+/// One declared local host, as `local_hosts` resolves one.
+fn declared(id: &str, name: &str) -> crate::config::LocalHostRef {
+    crate::config::LocalHostRef {
+        id: id.to_string(),
+        name: name.to_string(),
+        workspace: String::new(),
+        primary: false,
+    }
+}
+
+/// A worker placed on `host_id`, reached at that host's address.
+fn placed(id: &str, host_id: &str) -> HubWorker {
+    HubWorker {
+        host_id: host_id.to_string(),
+        address: host_id.to_string(),
+        ..worker(id, host_id)
+    }
+}
+
+/// The whole point of the block: five machines behind one hub socket must read
+/// as five hosts, not as one synthesized `host:${socketId}`.
+#[test]
+fn the_advert_names_every_host_its_agents_run_on() {
+    let workers = [
+        placed("this-device", "this-device"),
+        placed("this-device-codex", "this-device"),
+        placed("api", "local-backend"),
+    ];
+    let declared_hosts = [
+        declared("this-device", "this device"),
+        declared("local-backend", "backend"),
+    ];
+
+    let payload = register_payload(&workers, &no_presence(), &[], &declared_hosts);
+    let hosts = payload["hosts"].as_array().expect("a hosts block");
+
+    assert_eq!(
+        hosts.len(),
+        2,
+        "one entry per host, not per agent: {hosts:?}"
+    );
+    assert_eq!(hosts[0]["hostId"], "this-device");
+    assert_eq!(hosts[0]["name"], "this device");
+    assert_eq!(hosts[0]["kind"], "local");
+    assert_eq!(hosts[0]["address"], "this-device");
+    assert_eq!(hosts[1]["hostId"], "local-backend");
+    assert_eq!(hosts[1]["name"], "backend");
+    assert_eq!(hosts[1]["kind"], "local");
+
+    // And every agent says which of them it runs on, which is what makes the
+    // backend prefer these ids over its own synthesis.
+    let agents = payload["agents"].as_array().expect("agents");
+    assert_eq!(agents[0]["hostId"], "this-device");
+    assert_eq!(agents[1]["hostId"], "this-device");
+    assert_eq!(agents[2]["hostId"], "local-backend");
+}
+
+/// `kind` is decided by the declaration and nothing else — a host this machine
+/// declares is local, and any other host an agent names is one this hub merely
+/// fronts. Nothing is probed to establish it.
+#[test]
+fn a_host_this_machine_did_not_declare_is_advertised_as_remote() {
+    let workers = [
+        placed("mine", "this-device"),
+        placed("theirs", "mac-studio"),
+    ];
+    let payload = register_payload(
+        &workers,
+        &no_presence(),
+        &[],
+        &[declared("this-device", "this device")],
+    );
+    let hosts = payload["hosts"].as_array().expect("a hosts block");
+
+    assert_eq!(hosts[0]["kind"], "local");
+    assert_eq!(hosts[1]["hostId"], "mac-studio");
+    assert_eq!(hosts[1]["kind"], "remote");
+    assert!(
+        hosts[1].get("name").is_none(),
+        "a host learned from a placement has an id and nothing to call it"
+    );
+    assert_eq!(hosts[1]["address"], "mac-studio");
+}
+
+/// The peer an operator added by address: this hub has no idea which machine it
+/// is. Synthesizing a host for it would invent a fact, so the key is omitted and
+/// the backend's own `host:${socketId}` fallback still applies to exactly those.
+#[test]
+fn an_unplaced_worker_carries_no_host_and_creates_none() {
+    let payload = register_payload(&[worker("peer", "GRVaddr")], &no_presence(), &[], &[]);
+
+    assert!(
+        payload.get("hosts").is_none(),
+        "an empty block is a key that says nothing: {payload}"
+    );
+    assert!(payload["agents"][0].get("hostId").is_none());
+}
+
+/// The two halves of one payload must agree: a host whose agents were all
+/// withheld by the liveness filter is withheld too, so no entry ever describes a
+/// host with nothing on it.
+#[test]
+fn a_host_whose_agents_are_all_offline_is_withheld_with_them() {
+    let workers = [placed("live", "this-device"), placed("dead", "mac-studio")];
+    let online = std::collections::HashMap::from([("mac-studio".to_string(), false)]);
+    let payload = register_payload(
+        &workers,
+        &online,
+        &[],
+        &[declared("this-device", "this device")],
+    );
+
+    let hosts = payload["hosts"].as_array().expect("a hosts block");
+    assert_eq!(hosts.len(), 1, "{hosts:?}");
+    assert_eq!(hosts[0]["hostId"], "this-device");
+    assert_eq!(payload["agents"].as_array().expect("agents").len(), 1);
+}
+
+/// Never synthesised. The hub holds per-*worker* capability probes, not
+/// host-level facts, and aggregating those into a resource claim would be
+/// inventing a number for a model whose whole doctrine is "declared, never
+/// probed".
+#[test]
+fn a_host_advertises_no_resources_it_did_not_measure() {
+    let payload = register_payload(
+        &[placed("mine", "this-device")],
+        &no_presence(),
+        &[],
+        &[declared("this-device", "this device")],
+    );
+
+    assert!(payload["hosts"][0].get("resources").is_none());
+}
+
+/// The per-agent concurrency contract. Deterministic placement reads it to
+/// decide whether an agent has headroom; without it the library's demotion never
+/// engages.
+#[test]
+fn an_agent_advertises_the_sessions_it_may_run_at_once() {
+    let payload = register_payload(&[worker("w1", "GRVaddr")], &no_presence(), &[], &[]);
+    assert_eq!(
+        payload["agents"][0]["metadata"]["maxSessions"], 1,
+        "the serial checkout default"
+    );
+
+    let mut parallel = worker("w2", "ADDR2");
+    parallel.max_sessions = 4;
+    let payload = register_payload(&[parallel], &no_presence(), &[], &[]);
+    assert_eq!(payload["agents"][0]["metadata"]["maxSessions"], 4);
+
+    // Zero is withheld rather than sent: a capacity of nothing reads as
+    // saturated, which is the opposite of what every other omission here means.
+    let mut unstated = worker("w3", "ADDR3");
+    unstated.max_sessions = 0;
+    let payload = register_payload(&[unstated], &no_presence(), &[], &[]);
+    assert!(payload["agents"][0]["metadata"]
+        .get("maxSessions")
+        .is_none());
+}
+
+/// A worker nobody placed still advertises cleanly — no workspace key, no host
+/// key, and everything the backend already read left where it was.
+#[test]
+fn an_agent_with_no_declared_workspace_still_serializes() {
+    let payload = register_payload(&[worker("peer", "GRVaddr")], &no_presence(), &[], &[]);
+    let agent = &payload["agents"][0];
+
+    assert!(agent["metadata"].get("workspace").is_none());
+    assert!(agent.get("hostId").is_none());
+    assert_eq!(agent["id"], "peer");
+    assert_eq!(agent["availability"], "online");
+    assert_eq!(agent["metadata"]["address"], "GRVaddr");
+    assert_eq!(agent["metadata"]["harness"], "claude");
+}
+
+/// The keys the backend's per-agent control ingestion and the manager ledger's
+/// control folds read. A regression here is silent — the advert still parses,
+/// the folds just stop seeing a hold — so the whole metadata object is pinned
+/// rather than spot-checked.
+#[test]
+fn the_control_and_handoff_keys_keep_exactly_the_shape_the_backend_folds() {
+    let mut held = placed("this-device", "this-device");
+    held.workspace = Some(crate::runtime::WorkspaceRef::checkout("/repos/acme"));
+    held.control = super::super::HandoffControl::Operator;
+    held.control_reason = Some("  pairing on the migration  ".to_string());
+    held.control_since = Some(1_753_420_600_000);
+
+    let payload = register_payload(
+        &[held],
+        &no_presence(),
+        &[],
+        &[declared("this-device", "this device")],
+    );
+
+    assert_eq!(
+        payload["agents"][0]["metadata"],
+        serde_json::json!({
+            "address": "this-device",
+            "harness": "claude",
+            "maxSessions": 1,
+            "workspace": "/repos/acme",
+            "control": "operator",
+            "controlReason": "pairing on the migration",
+            "controlSince": 1_753_420_600_000i64,
+        }),
+        "control/controlReason/controlSince must not move, gain a wrapper, or change spelling"
+    );
+
+    // And the handoff brief, which only rides while the orchestrator holds it.
+    let mut handed_back = worker("w1", "GRVaddr");
+    handed_back.handoff = Some(super::super::HarnessHandoff {
+        id: "w_3-1".to_string(),
+        at: 1_753_420_600_000,
+        session_id: "w_3".to_string(),
+        harness_session_id: None,
+        provider: "claude".to_string(),
+        workspace_path: "/repos/acme".to_string(),
+        branch: None,
+        project: None,
+        note: None,
+        transcript: "…pnpm test".to_string(),
+        transcript_truncated: false,
+    });
+    let payload = register_payload(&[handed_back], &no_presence(), &[], &[]);
+    let handoff = &payload["agents"][0]["metadata"]["handoff"];
+    assert_eq!(handoff["id"], "w_3-1");
+    assert_eq!(handoff["sessionId"], "w_3");
+    assert_eq!(handoff["workspacePath"], "/repos/acme");
 }

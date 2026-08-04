@@ -291,14 +291,8 @@ pub struct DaemonRuntime {
 
 /// Optional payloads a task frame can carry beyond its text.
 ///
-/// Grouped into one value rather than threaded as parameters because the list
-/// grows with the protocol: token usage was the first, the child harness's work
-/// snapshot the second, and every addition would otherwise widen four call
-/// signatures.
-#[derive(Debug, Clone, Default)]
-pub(super) struct FrameAttachments {
-    /// Token counts the child harness reported, on reply frames.
-    pub(super) usage: Option<crate::protocol::TokenUsage>,
-    /// What the child harness is working on as of this frame.
-    pub(super) work: Option<crate::harness_work::WorkSnapshot>,
-}
+/// The protocol's own type rather than a daemon-local copy of it: the list grows
+/// with the protocol (token usage was the first, the child harness's work
+/// snapshot the second, the serving session the third), and a parallel struct
+/// here would only be a second place to forget an addition.
+pub(super) use crate::protocol::FrameAttachments;

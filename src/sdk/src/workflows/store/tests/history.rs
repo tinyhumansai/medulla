@@ -35,6 +35,32 @@ fn saving_over_a_workflow_snapshots_the_version_it_replaced() {
 }
 
 #[test]
+fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    record.description = "legacy version".into();
+    store.save(&record).unwrap();
+    record.description = "current at upgrade".into();
+    store.save(&record).unwrap();
+
+    let legacy_dir = root.path().join("workflows/.revisions/greet");
+    std::fs::create_dir_all(legacy_dir.parent().unwrap()).unwrap();
+    std::fs::rename(root.path().join("revisions/greet"), &legacy_dir).unwrap();
+
+    record.description = "post-upgrade edit".into();
+    store.save(&record).unwrap();
+
+    let descriptions: Vec<_> = store
+        .list_revisions("greet")
+        .unwrap()
+        .into_iter()
+        .map(|revision| revision.record.description)
+        .collect();
+    assert_eq!(descriptions, ["current at upgrade", "legacy version"]);
+}
+
+#[test]
 fn undo_restores_the_previous_version_and_is_itself_undoable() {
     let root = tempfile::tempdir().unwrap();
     let store = store_in(root.path());
@@ -120,8 +146,8 @@ fn history_does_not_show_up_in_the_workflow_listing() {
     record.description = "again".into();
     store.save(&record).unwrap();
 
-    // Snapshots sit in a subdirectory of the definition directory; a load that
-    // wandered into it would show every past version as a workflow of its own.
+    // Snapshots sit outside the definition directory, so a load must never
+    // mistake a past version for a current workflow.
     assert_eq!(store.list().unwrap().len(), 1);
     assert!(store.load().errors.is_empty());
 }

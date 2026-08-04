@@ -65,6 +65,7 @@ impl App {
             contexts: Vec::new(),
             context_index: 0,
             agent_index: 0,
+            subtask_pages: std::collections::HashMap::new(),
             watching: None,
             kill_armed: None,
             agents_focus: super::types::AgentsFocus::default(),

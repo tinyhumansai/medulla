@@ -111,10 +111,23 @@ impl App {
                 "── functions ──",
                 Style::default().add_modifier(Modifier::DIM),
             )),
-            AgentRow::More { hidden, .. } => TLine::from(Span::styled(
-                format!("   └ +{hidden} more"),
-                Style::default().add_modifier(Modifier::DIM),
-            )),
+            // The overflow row is a control, so it highlights under the cursor
+            // like any other selectable row. Unselected it stays dim: it is a
+            // counter among real rows, and drawing it at full weight made a
+            // lane's tail read as another task.
+            AgentRow::More { hidden, .. } => {
+                let label = if *hidden > 0 {
+                    format!("   └ +{hidden} more")
+                } else {
+                    "   └ show less".to_string()
+                };
+                let style = if active {
+                    self.theme.selection()
+                } else {
+                    Style::default().add_modifier(Modifier::DIM)
+                };
+                TLine::from(Span::styled(label, style))
+            }
             AgentRow::Sub { task, last, .. } => {
                 let branch = if *last { "└" } else { "├" };
                 let needs_input = self.task_attention(&task.task_id, waiting_sessions);

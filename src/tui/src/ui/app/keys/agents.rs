@@ -99,12 +99,13 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the action row, where it is the action. A visible harness consumes
-            // it earlier and takes the keyboard instead.
+            // the rows that are themselves an action: the harness starter, and a
+            // lane's `+N more`, where it pages the hidden sublanes into view. A
+            // visible harness consumes it earlier and takes the keyboard instead.
             KeyCode::Enter => {
                 if self.on_new_harness_row() {
                     self.open_harness_picker();
-                } else {
+                } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }
                 AgentsKey::Handled(None)

@@ -326,8 +326,7 @@ impl App {
                     // click on the second line of a wrapped harness row selects
                     // that harness rather than whatever follows it. The map
                     // covers the unselectable rows too — the `── functions ──`
-                    // separator and the `+N more` counter — because
-                    // `agent_index` indexes all of them.
+                    // separator — because `agent_index` indexes all of them.
                     let rel = (y - rect.y) as usize;
                     let rows = self.rail_rows();
                     if let Some(row) = owners.get(rel).and_then(|idx| rows.get(*idx)) {
@@ -345,6 +344,11 @@ impl App {
                             // remove.
                             if row.is_new_harness() {
                                 self.open_harness_picker();
+                                return None;
+                            }
+                            // So is a lane's `+N more`: the click that lands on
+                            // it is the request to see what it is counting.
+                            if self.page_subtasks() {
                                 return None;
                             }
                             if let Some(session) = row.session_id() {

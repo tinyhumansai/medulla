@@ -820,6 +820,15 @@ pub struct App {
     pub(super) contexts: Vec<ContextItem>,
     pub(super) context_index: usize,
     pub(super) agent_index: usize,
+    /// Extra pages of sublanes revealed under an agent lane, keyed by lane key.
+    ///
+    /// Keyed by [`AgentLane::key`](crate::ui::agents::AgentLane::key) rather than
+    /// by the lane's rail position, because lanes are re-folded from events every
+    /// tick and a lane that appears or ends shifts every index below it — an
+    /// expansion tied to a position would silently jump to a different agent.
+    /// Absent means the lane shows its first page, which is the default every
+    /// lane starts at.
+    pub(super) subtask_pages: std::collections::HashMap<String, usize>,
     /// The `(worker address, task id)` whose screen is currently subscribed.
     ///
     /// Held so a selection change can stop the old stream as well as start the

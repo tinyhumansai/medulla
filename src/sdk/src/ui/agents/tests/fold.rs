@@ -159,6 +159,106 @@ fn agent_lane_stacks_tasks_with_row_model() {
     assert!(!rows.iter().any(|r| matches!(r, AgentRow::Separator)));
 }
 
+/// Lanes for one rostered agent carrying `tasks` started tasks.
+fn lanes_with_tasks(tasks: usize) -> Vec<AgentLane> {
+    let roster = vec![AgentDescriptor {
+        id: "dev".into(),
+        name: "Dev".into(),
+        description: String::new(),
+        availability: "online".into(),
+        workspace_id: None,
+        host_id: None,
+        template_id: None,
+        tags: vec![],
+        metadata: serde_json::Map::new(),
+    }];
+    let events = (0..tasks)
+        .map(|i| {
+            env(
+                i as u64,
+                TuiEvent::TaskStart {
+                    task_id: format!("t{i}"),
+                    instruction: "x".into(),
+                    depth: 2,
+                    agent_id: Some("dev".into()),
+                    contract: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    derive_agent_lanes(&events, "TINYPLACE", &roster)
+}
+
+/// The sublane count and the overflow row's hidden count, for one expansion.
+fn paged_counts(lanes: &[AgentLane], page: usize, extra: usize) -> (usize, Option<usize>) {
+    let rows = agent_row_model_paged(lanes, page, |_| extra);
+    let subs = rows
+        .iter()
+        .filter(|r| matches!(r, AgentRow::Sub { .. }))
+        .count();
+    let hidden = rows.iter().find_map(|r| match r {
+        AgentRow::More { hidden, .. } => Some(*hidden),
+        _ => None,
+    });
+    (subs, hidden)
+}
+
+#[test]
+fn each_extra_page_reveals_another_page_of_sublanes() {
+    let lanes = lanes_with_tasks(25);
+    assert_eq!(paged_counts(&lanes, 10, 0), (10, Some(15)));
+    assert_eq!(paged_counts(&lanes, 10, 1), (20, Some(5)));
+}
+
+#[test]
+fn a_fully_revealed_lane_keeps_an_overflow_row_to_collapse_with() {
+    let lanes = lanes_with_tasks(25);
+    // Every task is on screen, but the row stays on — it is the way back to one
+    // page, and `hidden: 0` is what the renderer reads as "show less".
+    assert_eq!(paged_counts(&lanes, 10, 2), (25, Some(0)));
+    // Expanding past the end reveals no more than the lane holds.
+    assert_eq!(paged_counts(&lanes, 10, 9), (25, Some(0)));
+}
+
+#[test]
+fn a_lane_within_one_page_has_no_overflow_row() {
+    let lanes = lanes_with_tasks(6);
+    assert_eq!(paged_counts(&lanes, 10, 0), (6, None));
+    // Nothing is hidden and nothing was expanded, so there is nothing to offer.
+    let rows = agent_row_model_paged(&lanes, 10, |_| 0);
+    assert!(matches!(
+        rows.iter()
+            .rev()
+            .find(|r| matches!(r, AgentRow::Sub { .. })),
+        Some(AgentRow::Sub { last: true, .. })
+    ));
+}
+
+#[test]
+fn the_overflow_row_closes_the_lane_rather_than_the_last_sublane() {
+    let lanes = lanes_with_tasks(25);
+    // Whether it counts hidden rows or offers to collapse, the overflow row is
+    // the lane's last line — so no sublane above it may also draw the closing
+    // branch, or the lane ends on two `└`.
+    for extra in [0, 1, 2] {
+        let rows = agent_row_model_paged(&lanes, 10, |_| extra);
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r, AgentRow::Sub { last: true, .. })),
+            "a sublane closed the lane under the overflow row at extra={extra}"
+        );
+    }
+}
+
+#[test]
+fn the_fixed_cap_model_matches_a_single_unexpanded_page() {
+    let lanes = lanes_with_tasks(25);
+    let fixed = agent_row_model(&lanes, 10);
+    let paged = agent_row_model_paged(&lanes, 10, |_| 0);
+    assert_eq!(fixed.len(), paged.len());
+}
+
 #[test]
 fn session_lanes_group_under_machine() {
     let events = vec![env(
@@ -335,7 +435,8 @@ fn agent_row_helpers_lane_index_and_selectable() {
         .lane_index(),
         Some(2)
     );
-    assert!(!AgentRow::More {
+    // The overflow row pages its lane open, so the cursor must reach it.
+    assert!(AgentRow::More {
         lane_index: 2,
         hidden: 4
     }

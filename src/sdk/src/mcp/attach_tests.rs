@@ -54,7 +54,8 @@ fn the_grant_never_reaches_the_non_secret_environment() {
         spec.secret_env
             .iter()
             .any(|(key, value)| key == crate::control_socket::MCP_GRANT_ENV && value == "s3cret"),
-        "the token has to reach the server somehow — by inherited environment"
+        "the token has to reach the server somehow — via write_config_file's \
+         owner-only file, not the argv document"
     );
     assert!(spec
         .secret_env
@@ -186,4 +187,109 @@ fn attaching_a_cli_passes_the_operators_tool_mode_through() {
 #[test]
 fn revoking_without_a_control_plane_is_a_no_op_rather_than_a_panic() {
     revoke_session("a session this process never granted");
+}
+
+/// The file [`ServerSpec::write_config_file`] writes is the one safe place for
+/// the bearer grant: not on argv (world-readable via `/proc/<pid>/cmdline`),
+/// and not the harness's own environment (inherited by every subprocess it
+/// spawns, not just the one this file configures).
+#[test]
+fn write_config_file_carries_the_secret_the_argv_document_withholds() {
+    let spec = server_spec(
+        Some("run"),
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        true,
+    )
+    .expect("a server is served here");
+    let session = "attach-test-carries-secret";
+
+    let path = spec
+        .write_config_file(session)
+        .expect("the config file is writable");
+    let contents = std::fs::read_to_string(&path).expect("the file was written");
+    std::fs::remove_file(&path).ok();
+
+    let document: Value = serde_json::from_str(&contents).expect("a JSON document");
+    let env = &document["mcpServers"]["medulla"]["env"];
+    assert_eq!(env[crate::control_socket::MCP_GRANT_ENV], "s3cret");
+    assert_eq!(
+        env[crate::control_socket::MCP_SOCKET_ENV],
+        "/run/medulla.sock"
+    );
+    // The tool mode travels the same way non-secret env always has.
+    assert_eq!(env[super::super::TOOL_MODE_ENV], "run");
+}
+
+/// Only this session's own user may read the file its grant went into — the
+/// same property `/proc/<pid>/environ` has and `/proc/<pid>/cmdline` does not.
+#[cfg(unix)]
+#[test]
+fn write_config_file_is_created_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let spec = server_spec(
+        None,
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        false,
+    )
+    .expect("a fleet grant is served here");
+    let session = "attach-test-owner-only";
+
+    let path = spec
+        .write_config_file(session)
+        .expect("the config file is writable");
+    let mode = std::fs::metadata(&path)
+        .expect("the file exists")
+        .permissions()
+        .mode()
+        & 0o777;
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(
+        mode, 0o600,
+        "the grant's file must not be group- or world-readable"
+    );
+}
+
+#[test]
+fn revoke_session_removes_the_config_file_it_named() {
+    let spec = server_spec(
+        None,
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        false,
+    )
+    .expect("a fleet grant is served here");
+    let session = "attach-test-revoke-removes-file";
+    let path = spec
+        .write_config_file(session)
+        .expect("the config file is writable");
+    assert!(path.exists());
+
+    revoke_session(session);
+
+    assert!(
+        !path.exists(),
+        "revoking a session must remove any file its grant was minted into"
+    );
+}
+
+/// The end-to-end property `an_operator_started_claude_is_handed_medullas_own_tools`
+/// (`src/tui/src/ui/harness_pane/tests/session.rs`) cannot exercise on its own,
+/// because that test never installs a control plane: with a real grant,
+/// `attach_cli` must register through a file rather than the inline document,
+/// and must never touch the process environment it was handed.
+#[test]
+fn attach_cli_never_writes_the_process_environment() {
+    let mut env = HashMap::new();
+    let mut args = Vec::new();
+    attach_cli(
+        crate::protocol::HarnessProvider::Claude,
+        "attach-test-no-env-write",
+        &mut env,
+        &mut args,
+    );
+    assert!(
+        env.is_empty(),
+        "attach_cli must never write the harness's own environment: {env:?}"
+    );
 }

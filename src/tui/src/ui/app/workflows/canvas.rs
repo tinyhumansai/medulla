@@ -199,5 +199,4 @@ impl App {
         const CHROME: usize = 9;
         (self.area.height as usize).saturating_sub(CHROME).max(1)
     }
-
 }

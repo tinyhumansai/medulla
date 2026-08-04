@@ -69,9 +69,7 @@ impl App {
             // short. Past half the pane the canvas scrolls instead of growing —
             // the inspector is not worth starving for a graph nobody asked to
             // see all of at once.
-            let graph_height = (self.folded_rows() as u16 + 2)
-                .max(5)
-                .min(area.height / 2);
+            let graph_height = (self.folded_rows() as u16 + 2).max(5).min(area.height / 2);
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(graph_height), Constraint::Min(8)])
@@ -242,7 +240,10 @@ impl App {
             let folds = self.band_of(to.layer) != self.band_of(from.layer);
 
             let (exit, gutter) = if out_reversed {
-                (fx.saturating_sub(1 + NODE_GAP), fx.saturating_sub(GUTTER_GAP))
+                (
+                    fx.saturating_sub(1 + NODE_GAP),
+                    fx.saturating_sub(GUTTER_GAP),
+                )
             } else {
                 (fx + NODE_WIDTH + NODE_GAP, fx + NODE_WIDTH + GUTTER_GAP)
             };

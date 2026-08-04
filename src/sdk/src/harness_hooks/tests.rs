@@ -35,12 +35,12 @@ fn event_wire_names_round_trip() {
 }
 
 #[test]
-fn notification_is_the_only_claude_codex_divergence() {
+fn codex_omits_notification_and_session_end() {
     for event in HookEvent::ALL {
         assert!(event.supported_by(HarnessProvider::Claude), "{event:?}");
         assert_eq!(
             event.supported_by(HarnessProvider::Codex),
-            event != HookEvent::Notification,
+            !matches!(event, HookEvent::Notification | HookEvent::SessionEnd),
             "{event:?}",
         );
         assert!(!event.supported_by(HarnessProvider::Opencode), "{event:?}");

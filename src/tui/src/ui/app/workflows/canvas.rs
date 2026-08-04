@@ -92,16 +92,25 @@ impl App {
 
     /// Where a node sits on the unscrolled canvas, in cells.
     ///
-    /// This is the fold: layers run left to right until one would leave the
-    /// pane, then the graph continues on a band below, the way a paragraph
-    /// wraps. Shared with the renderer so navigation and drawing can never
-    /// disagree about where a node is.
+    /// This is the fold: layers run across the pane until one would leave it,
+    /// then the graph continues on a band below. Alternate bands run *backwards*
+    /// — boustrophedon, the way an ox ploughs a field — so a chain that wraps
+    /// picks up directly under where it left off instead of throwing a wire all
+    /// the way back across the pane to start again at the left margin.
+    ///
+    /// Shared with the renderer so navigation and drawing can never disagree
+    /// about where a node is.
     pub(in crate::ui::app) fn graph_cell(&self, layer: usize, lane: usize) -> (usize, usize) {
         let per_band = self.layers_per_band();
         let (band, column) = (layer / per_band, layer % per_band);
+        let column = if self.band_reversed(band) {
+            per_band - 1 - column
+        } else {
+            column
+        };
         (
             FOLD_MARGIN + column * LAYER_STRIDE,
-            band * self.band_stride() + lane * LANE_STRIDE,
+            self.band_top(band) + lane * LANE_STRIDE,
         )
     }
 
@@ -110,15 +119,53 @@ impl App {
         layer / self.layers_per_band()
     }
 
+    /// Whether a band runs right to left.
+    pub(in crate::ui::app) fn band_reversed(&self, band: usize) -> bool {
+        band % 2 == 1
+    }
+
+    /// Whether the layer at `layer` sits on a band that runs right to left.
+    pub(in crate::ui::app) fn layer_reversed(&self, layer: usize) -> bool {
+        self.band_reversed(self.band_of(layer))
+    }
+
     /// How many layers fit across the canvas before it folds.
     pub(in crate::ui::app) fn layers_per_band(&self) -> usize {
         self.visible_layers()
     }
 
-    /// Rows from one band's top edge to the next: every lane the graph has,
-    /// plus a blank row for the wires that fold back to the left to run in.
-    pub(in crate::ui::app) fn band_stride(&self) -> usize {
-        self.wf.layout.lanes.max(1) * LANE_STRIDE + BAND_GAP
+    /// The row each band starts on.
+    ///
+    /// Bands are only as tall as the lanes they actually use, rather than as
+    /// tall as the widest band in the graph: one branch three lanes deep should
+    /// not put two blank rows under every other band in the fold.
+    pub(in crate::ui::app) fn band_top(&self, band: usize) -> usize {
+        self.band_heights().into_iter().take(band).sum()
+    }
+
+    /// The height of every band, in rows, in order.
+    pub(in crate::ui::app) fn band_heights(&self) -> Vec<usize> {
+        let per_band = self.layers_per_band();
+        let bands = self.wf.layout.layers.max(1).div_ceil(per_band);
+        let mut lanes = vec![1usize; bands];
+        for node in &self.wf.layout.nodes {
+            if let Some(slot) = lanes.get_mut(node.layer / per_band) {
+                *slot = (*slot).max(node.lane + 1);
+            }
+        }
+        lanes
+            .into_iter()
+            .map(|lanes| lanes * LANE_STRIDE + BAND_GAP)
+            .collect()
+    }
+
+    /// How many rows the whole folded graph occupies.
+    pub(in crate::ui::app) fn folded_rows(&self) -> usize {
+        // The last band needs no trailing gap, so one is taken back off.
+        self.band_heights()
+            .into_iter()
+            .sum::<usize>()
+            .saturating_sub(BAND_GAP)
     }
 
     /// How many layers the canvas can show at the current terminal width.

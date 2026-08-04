@@ -288,13 +288,38 @@ fn state_dir_for(key: &str) -> PathBuf {
 /// path it is joined onto — so an unchecked session could write the secret
 /// outside [`mcp_state_dir`] entirely, or make [`revoke_session`] delete a
 /// file that has nothing to do with it.
+///
+/// Asked of the platform rather than spelled out as a list of forbidden
+/// characters, because that list was wrong: a denylist of `/`, `\\` and NUL
+/// accepts `C:temp`, which on Windows is a *drive-relative* path, so
+/// `join`ing it replaces the state directory exactly the way an absolute path
+/// would. `Path::components` is the only thing that knows every such syntax
+/// on the platform actually running, so the test is structural — the string
+/// must decompose into exactly one component, and that component must be the
+/// whole string back again. `.` and `..` fail it for free, being `CurDir` and
+/// `ParentDir` rather than `Normal`.
+///
+/// A colon and a backslash are rejected outright on top of that, and for one
+/// reason: both are ordinary filename characters on Unix, so `components`
+/// there answers "one component" for `C:temp` and `back\\slash` — correctly,
+/// on Unix — while on Windows the first is drive-relative and the second is a
+/// separator. Accepting a key on one platform that escapes on another is a
+/// trap for whoever reads this next, so the structural test is kept for what
+/// only the platform can answer and these two are refused everywhere. Every
+/// key this crate mints is UUID-derived and contains neither.
 fn is_safe_session_component(session: &str) -> bool {
-    !session.is_empty()
-        && session != "."
-        && session != ".."
-        && !session.contains('/')
-        && !session.contains('\\')
-        && !session.contains('\0')
+    if session.is_empty()
+        || session.contains('\0')
+        || session.contains(':')
+        || session.contains('\\')
+    {
+        return false;
+    }
+    let mut components = Path::new(session).components();
+    let Some(std::path::Component::Normal(only)) = components.next() else {
+        return false;
+    };
+    only == std::ffi::OsStr::new(session) && components.next().is_none()
 }
 
 /// Where a session's [`ServerSpec::write_config_file`] output would be, if it

@@ -379,8 +379,16 @@ fn write_config_file_refuses_a_session_that_is_not_a_plain_filename() {
         "nested/path",
         "/etc/cron.d/evil",
         "..",
+        ".",
         "",
         "back\\slash",
+        // Drive-relative on Windows: no separator at all, but `join` treats it
+        // as replacing the base, so a denylist of separators let it through.
+        "C:temp",
+        "C:/absolute",
+        // A bare drive, and the UNC-ish shape, for the same reason.
+        "C:",
+        "\\\\server\\share",
     ] {
         let result = spec.write_config_file(unsafe_session);
         assert!(

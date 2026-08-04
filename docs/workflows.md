@@ -39,6 +39,12 @@ upgraded from an earlier release may retain a legacy `.revisions/` directory or
 when syncing. Newly written runs, revisions, locks, and other machine-local
 state always use `state/workflows/`.
 
+Homes first used by a release before this split may still contain a legacy
+`.revisions/` directory and hidden `.*.lock` files. They remain readable for
+compatibility but are never written again; exclude those two legacy patterns
+when syncing an existing home, or remove them while Medulla is stopped once
+their undo history is no longer needed.
+
 ## Writing one
 
 The smallest useful workflow is a trigger and a step:

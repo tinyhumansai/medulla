@@ -46,7 +46,11 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
 
     let legacy_dir = root.path().join("workflows/.revisions/greet");
     std::fs::create_dir_all(legacy_dir.parent().unwrap()).unwrap();
-    std::fs::rename(root.path().join("revisions/greet"), &legacy_dir).unwrap();
+    std::fs::rename(
+        root.path().join("state/workflows/revisions/greet"),
+        &legacy_dir,
+    )
+    .unwrap();
 
     record.description = "post-upgrade edit".into();
     store.save(&record).unwrap();
@@ -68,6 +72,31 @@ fn legacy_and_new_revisions_are_listed_together_after_an_edit() {
         store.get("greet").unwrap().unwrap().description,
         "legacy version"
     );
+}
+
+#[test]
+fn workspace_scoped_stores_share_definition_revision_history() {
+    let root = tempfile::tempdir().unwrap();
+    let definitions = vec![root.path().join("workflows")];
+    let state = root.path().join("state/workflows");
+    let first = FileWorkflowStore::with_workspace_state(
+        definitions.clone(),
+        &state,
+        &root.path().join("workspace-a"),
+    );
+    let second = FileWorkflowStore::with_workspace_state(
+        definitions,
+        &state,
+        &root.path().join("workspace-b"),
+    );
+    let mut record = parse_workflow(&valid_document("greet"), "greet").unwrap();
+    first.save(&record).unwrap();
+    record.description = "edited from workspace a".into();
+    first.save(&record).unwrap();
+
+    let history = second.list_revisions("greet").unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].record.description, "says hello");
 }
 
 #[test]

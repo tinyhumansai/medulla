@@ -251,40 +251,6 @@ impl App {
             .saturating_sub(before + members.get(index).copied().unwrap_or(0))
     }
 
-    /// The row each band starts on.
-    ///
-    /// Bands are only as tall as the lanes they actually use, rather than as
-    /// tall as the widest band in the graph: one branch three lanes deep should
-    /// not put two blank rows under every other band in the fold.
-    pub(in crate::ui::app) fn band_top(&self, band: usize) -> usize {
-        self.band_heights().into_iter().take(band).sum()
-    }
-
-    /// The height of every band, in rows, in order.
-    pub(in crate::ui::app) fn band_heights(&self) -> Vec<usize> {
-        let per_band = self.layers_per_band();
-        let bands = self.wf.layout.layers.max(1).div_ceil(per_band);
-        let mut lanes = vec![1usize; bands];
-        for node in &self.wf.layout.nodes {
-            if let Some(slot) = lanes.get_mut(node.layer / per_band) {
-                *slot = (*slot).max(node.lane + 1);
-            }
-        }
-        lanes
-            .into_iter()
-            .map(|lanes| lanes * LANE_STRIDE + BAND_GAP)
-            .collect()
-    }
-
-    /// How many rows the whole folded graph occupies.
-    pub(in crate::ui::app) fn folded_rows(&self) -> usize {
-        // The last band needs no trailing gap, so one is taken back off.
-        self.band_heights()
-            .into_iter()
-            .sum::<usize>()
-            .saturating_sub(BAND_GAP)
-    }
-
     /// How wide the canvas is, in cells, inside the panel's borders and the
     /// margin the folded wires turn in.
     ///

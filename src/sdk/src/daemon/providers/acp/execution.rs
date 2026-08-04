@@ -383,14 +383,13 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 
 /// Construct the ACP server command for a supported harness.
 fn agent_for(options: &RunTaskOptions) -> AcpAgent {
-    let hook_args = crate::harness_hooks::hook_injection(options.provider, &options.hooks).args;
     let config = match options.provider {
-        HarnessProvider::Claude => AcpAgentConfig::new("npx")
-            .args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
-            .args(hook_args),
-        HarnessProvider::Codex => AcpAgentConfig::new("npx")
-            .args(["-y", "@agentclientprotocol/codex-acp@latest"])
-            .args(hook_args),
+        HarnessProvider::Claude => {
+            AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
+        }
+        HarnessProvider::Codex => {
+            AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/codex-acp@latest"])
+        }
         HarnessProvider::Opencode => AcpAgentConfig::new(crate::protocol::env::provider_bin(
             HarnessProvider::Opencode,
             &options.env,

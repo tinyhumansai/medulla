@@ -164,13 +164,19 @@ fn every_target_has_its_documented_layout() {
         skill_path(SkillTarget::Claude, root, "medulla-x"),
         Path::new("/root/.claude/skills/medulla-x/SKILL.md")
     );
+    // Codex reads `.agents/skills`, anchored to the real home rather than to
+    // CODEX_HOME. Its own `.codex/skills` is scanned too, but upstream calls
+    // that one deprecated, and an operator with CODEX_HOME set would never see
+    // a file we wrote there.
     assert_eq!(
         skill_path(SkillTarget::Codex, root, "medulla-x"),
-        Path::new("/root/.codex/skills/medulla-x/SKILL.md")
+        Path::new("/root/.agents/skills/medulla-x/SKILL.md")
     );
+    // The generic target shares that location: the Agent Skills convention is
+    // the one thing unverified harnesses have in common.
     assert_eq!(
         skill_path(SkillTarget::Generic, root, "medulla-x"),
-        Path::new("/root/.medulla/skills/medulla-x/SKILL.md")
+        Path::new("/root/.agents/skills/medulla-x/SKILL.md")
     );
 
     assert_eq!(
@@ -222,10 +228,20 @@ fn the_managed_scope_resolves_under_the_medulla_home_not_the_operators() {
         "the managed root belongs to Medulla, not the operator: {}",
         root.display()
     );
-    // Laid out like a project root, which is what makes --add-dir find it.
+
+    // Each harness gets its own directory, so the path handed to one harness
+    // never exposes another's files. Laid out inside like a project root, which
+    // is what makes --add-dir find it.
+    let claude = managed_dir(SkillTarget::Claude, &env);
+    assert_eq!(claude, root.join("claude-skills"));
     assert_eq!(
-        skill_path(SkillTarget::Claude, &root, "medulla-babysit"),
-        root.join(".claude")
+        managed_dir(SkillTarget::Codex, &env),
+        root.join("codex-skills")
+    );
+    assert_eq!(
+        skill_path(SkillTarget::Claude, &claude, "medulla-babysit"),
+        claude
+            .join(".claude")
             .join("skills")
             .join("medulla-babysit")
             .join("SKILL.md")
@@ -261,9 +277,13 @@ fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
     )
     .unwrap();
 
+    // The install lands in the harness's own directory, and that directory —
+    // not the shared root — is what the session is given.
+    let claude = managed_dir(SkillTarget::Claude, &env);
+    assert!(skill_path(SkillTarget::Claude, &claude, "medulla-babysit").is_file());
     assert_eq!(
         spawn_args(provider, &env),
-        vec!["--add-dir".to_string(), root.display().to_string()],
+        vec!["--add-dir".to_string(), claude.display().to_string()],
         "Claude loads .claude/skills from an --add-dir directory; that flag is the \
          only spelling that does it"
     );
@@ -279,11 +299,93 @@ fn default_targets_are_the_harnesses_already_present() {
     assert!(default_targets(home.path()).is_empty());
 
     fs::create_dir_all(home.path().join(".claude")).unwrap();
-    fs::create_dir_all(home.path().join(".medulla")).unwrap();
+    fs::create_dir_all(home.path().join(".agents")).unwrap();
     assert_eq!(
         default_targets(home.path()),
         vec![SkillTarget::Claude, SkillTarget::Generic]
     );
+
+    // Codex is detected by its config directory, which is where its config,
+    // prompts, and credentials still live — its *skills* are the only thing
+    // that moved to `.agents`.
+    fs::create_dir_all(home.path().join(".codex")).unwrap();
+    assert_eq!(
+        default_targets(home.path()),
+        vec![
+            SkillTarget::Claude,
+            SkillTarget::Codex,
+            SkillTarget::Generic
+        ]
+    );
+}
+
+#[test]
+fn codex_and_generic_share_one_directory_and_are_visited_once() {
+    // Both resolve to `.agents/skills`. Naming both must not write the file
+    // twice, report it twice, or list it under two harness names.
+    let home = TempDir::new().unwrap();
+    let options = opts(
+        home.path(),
+        vec![
+            SkillTarget::Codex,
+            SkillTarget::Generic,
+            SkillTarget::Claude,
+        ],
+    );
+    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+
+    let report = install(&workflows, &options).unwrap();
+    assert_eq!(report.count(FileAction::Created), 2, "{report:?}");
+    assert!(!report.has_collisions(), "{report:?}");
+    assert_eq!(installed(&options).unwrap().len(), 2);
+
+    // The first target named keeps the shared directory.
+    let shared = installed(&options)
+        .unwrap()
+        .into_iter()
+        .find(|skill| skill.path.starts_with(home.path().join(".agents")))
+        .expect("the shared .agents skill is installed");
+    assert_eq!(shared.target, SkillTarget::Codex);
+}
+
+#[test]
+fn an_install_retires_the_skill_an_older_release_left_in_codexs_own_root() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Codex]);
+    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+
+    // What a previous version of this command wrote: a *managed* file under
+    // `.codex/skills`. Codex still scans that root, so leaving it there would
+    // make `$medulla-babysit` resolve to two skills and silently stop working.
+    let legacy = home
+        .path()
+        .join(".codex")
+        .join("skills")
+        .join("medulla-babysit")
+        .join("SKILL.md");
+    fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    let rendered = render(&workflows[0]);
+    fs::write(&legacy, &rendered.body).unwrap();
+
+    // A hand-written neighbour in the same root must survive.
+    let theirs = home
+        .path()
+        .join(".codex")
+        .join("skills")
+        .join("mine")
+        .join("SKILL.md");
+    fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+    fs::write(&theirs, "mine, not yours").unwrap();
+
+    let report = install(&workflows, &options).unwrap();
+    assert_eq!(report.count(FileAction::Removed), 1, "{report:?}");
+    assert!(!legacy.exists(), "the legacy managed copy is retired");
+    assert!(skill_path(SkillTarget::Codex, home.path(), &rendered.slug).exists());
+    assert_eq!(fs::read_to_string(&theirs).unwrap(), "mine, not yours");
+
+    // Nothing left to retire on the next run.
+    let second = install(&workflows, &options).unwrap();
+    assert_eq!(second.count(FileAction::Removed), 0, "{second:?}");
 }
 
 #[test]

@@ -15,12 +15,23 @@ use crate::workflows::WorkflowSummary;
 /// The tool a generated skill instructs the model to call.
 const RUN_TOOL: &str = "mcp__medulla__workflow_run";
 
+/// The longest slug either verified harness accepts as a skill name.
+///
+/// Codex rejects a name over 64 characters outright (`InvalidField`), and the
+/// name it validates is the directory basename when the frontmatter omits one.
+/// Truncating here rather than letting the harness refuse keeps the failure
+/// visible in the path the operator can see, instead of in a startup warning
+/// they will not read.
+const MAX_SLUG_CHARS: usize = 64;
+
 /// The slug a workflow's skill is installed under.
 ///
 /// Prefixed with `medulla-` so a directory listing of `~/.claude/skills` says
 /// where these came from, and sanitised to the `[a-z0-9-]` alphabet that both
-/// verified harnesses accept as a skill name. An id that sanitises to nothing
-/// (all punctuation) still yields a usable, if opaque, `medulla-workflow`.
+/// verified harnesses accept as a skill name — Codex additionally tokenises
+/// `$name` mentions over `[A-Za-z0-9_\-:]`, so a slug carrying a dot or a space
+/// could never be mentioned at all. An id that sanitises to nothing (all
+/// punctuation) still yields a usable, if opaque, `medulla-workflow`.
 pub fn slug_for(workflow_id: &str) -> String {
     let mut slug = String::with_capacity(workflow_id.len() + 8);
     let mut pending_dash = false;
@@ -38,7 +49,16 @@ pub fn slug_for(workflow_id: &str) -> String {
     if slug.is_empty() {
         slug.push_str("workflow");
     }
-    format!("medulla-{slug}")
+    let mut slug = format!("medulla-{slug}");
+    if slug.len() > MAX_SLUG_CHARS {
+        // ASCII by construction, so a byte truncation is a char truncation. A
+        // trailing dash would read as an accident.
+        slug.truncate(MAX_SLUG_CHARS);
+        while slug.ends_with('-') {
+            slug.pop();
+        }
+    }
+    slug
 }
 
 /// Renders the `SKILL.md` for one workflow.

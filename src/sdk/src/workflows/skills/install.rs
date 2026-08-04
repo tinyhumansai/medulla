@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use crate::workflows::WorkflowSummary;
 
 use super::render::{parse_marker, render, render_command};
-use super::targets::{command_path, commands_dir, skill_path, skills_dir};
+use super::targets::{
+    command_path, commands_dir, dedupe_by_skills_dir, legacy_codex_skills_dir, skill_path,
+    skills_dir, target_root,
+};
 use super::{FileAction, FileOutcome, InstallOptions, InstallReport, InstalledSkill, SkillTarget};
 
 /// Installs the given workflows into every configured target.
@@ -37,10 +40,11 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
     // dry run would report two `Created`s where the real run writes one file
     // and collides on the second, and the two must agree.
     let mut claimed: HashMap<PathBuf, String> = HashMap::new();
-    for target in &opts.targets {
+    for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
+        let root = target_root(*target, opts.scope, &opts.root);
         for summary in workflows.iter().filter(|summary| summary.enabled) {
             let skill = render(summary);
-            let path = skill_path(*target, &opts.root, &skill.slug);
+            let path = skill_path(*target, &root, &skill.slug);
             report.files.push(write_managed(
                 &path,
                 &skill.body,
@@ -50,8 +54,21 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
                 &mut claimed,
             )?);
 
+            // Codex reads its deprecated `.codex/skills` root as well as the
+            // `.agents/skills` one we now write, and a skill discovered under
+            // two names is worse than one discovered under none: Codex drops a
+            // `$slug` mention it cannot resolve to exactly one skill, silently.
+            // So an install also retires what an earlier version of this
+            // command left behind. Marker-gated like every other removal, so a
+            // file the operator wrote there themselves stays.
+            if *target == SkillTarget::Codex {
+                if let Some(outcome) = retire_legacy_codex(&root, &skill.slug, &summary.id, opts)? {
+                    report.files.push(outcome);
+                }
+            }
+
             if opts.with_commands {
-                if let Some(path) = command_path(*target, &opts.root, &skill.slug) {
+                if let Some(path) = command_path(*target, &root, &skill.slug) {
                     let body = render_command(&skill, summary);
                     report.files.push(write_managed(
                         &path,
@@ -96,8 +113,8 @@ pub fn sync(
         .map(|summary| summary.id.as_str())
         .collect();
 
-    for target in &opts.targets {
-        for managed in scan_managed(*target, &opts.root)? {
+    for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
+        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
             if keep.contains(managed.workflow_id.as_str()) {
                 continue;
             }
@@ -119,8 +136,8 @@ pub fn sync(
 pub fn uninstall(ids: &[String], opts: &InstallOptions) -> io::Result<InstallReport> {
     let wanted: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
     let mut report = InstallReport::default();
-    for target in &opts.targets {
-        for managed in scan_managed(*target, &opts.root)? {
+    for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
+        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
             if !wanted.contains(managed.workflow_id.as_str()) {
                 continue;
             }
@@ -141,8 +158,8 @@ pub fn uninstall(ids: &[String], opts: &InstallOptions) -> io::Result<InstallRep
 /// simply contributes nothing.
 pub fn installed(opts: &InstallOptions) -> io::Result<Vec<InstalledSkill>> {
     let mut found = Vec::new();
-    for target in &opts.targets {
-        for managed in scan_managed(*target, &opts.root)? {
+    for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
+        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
             if !managed.is_skill {
                 continue;
             }
@@ -156,6 +173,45 @@ pub fn installed(opts: &InstallOptions) -> io::Result<Vec<InstalledSkill>> {
         }
     }
     Ok(found)
+}
+
+/// Removes a skill an earlier release wrote to Codex's deprecated
+/// `.codex/skills` root, so the same workflow is not discovered twice.
+///
+/// Marker-gated, and gated on the marker naming *this* workflow: a file the
+/// operator wrote there themselves, or one belonging to another workflow, is
+/// left exactly as it is. Returns `None` when there is nothing of ours to
+/// retire, which is the normal case on every install after the first.
+///
+/// Why it matters: Codex still scans both roots, dedupes by canonical path
+/// rather than by name, and then silently drops a `$slug` mention that resolves
+/// to more than one skill. The duplicate would not error — it would quietly
+/// stop the mention working.
+fn retire_legacy_codex(
+    root: &Path,
+    slug: &str,
+    workflow_id: &str,
+    opts: &InstallOptions,
+) -> io::Result<Option<FileOutcome>> {
+    let path = legacy_codex_skills_dir(root).join(slug).join("SKILL.md");
+    let Some((marked_id, rev)) = read_marker(&path)? else {
+        return Ok(None);
+    };
+    if marked_id != workflow_id {
+        return Ok(None);
+    }
+    remove_managed(
+        &ManagedFile {
+            path,
+            slug: slug.to_string(),
+            workflow_id: marked_id,
+            rev,
+            target: SkillTarget::Codex,
+            is_skill: true,
+        },
+        opts,
+    )
+    .map(Some)
 }
 
 /// A generated file discovered on disk, with what its marker claims.

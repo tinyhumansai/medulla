@@ -101,12 +101,36 @@ trace on disk.
 | target | skill | slash command |
 | --- | --- | --- |
 | `claude` | `<root>/.claude/skills/<slug>/SKILL.md` | `<root>/.claude/commands/<slug>.md` |
-| `codex` | `<root>/.codex/skills/<slug>/SKILL.md` | `<root>/.codex/prompts/<slug>.md` |
-| `generic` | `<root>/.medulla/skills/<slug>/SKILL.md` | none |
+| `codex` | `<root>/.agents/skills/<slug>/SKILL.md` | `<root>/.codex/prompts/<slug>.md` |
+| `generic` | `<root>/.agents/skills/<slug>/SKILL.md` | none |
+
+Codex reads `.agents/skills`, not `.codex/skills`, and the distinction is not
+cosmetic. Codex does still scan `$CODEX_HOME/skills`, but its own source calls
+that root deprecated (since `rust-v0.95.0`), and — the part that actually bites
+— that root follows `CODEX_HOME` while `.agents/skills` follows the real home
+directory. An operator with `CODEX_HOME` pointed at a profile directory would
+never have seen a skill written to `~/.codex/skills`.
+
+`generic` shares the same directory on purpose: `.agents/skills` is the
+cross-tool [Agent Skills](https://agentskills.io) convention, which is the one
+thing harnesses we have not verified individually have in common. A file under
+`.medulla/skills`, where this used to write, was read by nothing. Because the
+two targets resolve to one directory, `dedupe_by_skills_dir` visits it once —
+otherwise naming both would write the file twice and list it under two harness
+names.
+
+An install also *retires* a managed skill an earlier release left in
+`.codex/skills`. Codex scans both roots and dedupes by canonical path rather
+than by name, so the same skill under two paths resolves to two entries — and
+Codex silently drops a `$slug` mention that resolves to more than one. The
+removal is marker-gated and id-gated like every other one here: a file the
+operator wrote there stays.
 
 `<slug>` is `medulla-<sanitised id>`: prefixed so a listing of `~/.claude/skills`
 says where these files came from, sanitised to the `[a-z0-9-]` alphabet both
-verified harnesses accept.
+verified harnesses accept, and capped at 64 characters because Codex rejects a
+longer name outright. Codex also tokenises `$name` mentions over
+`[A-Za-z0-9_\-:]`, so a slug carrying a dot or a space could never be mentioned.
 
 `<root>` is `$HOME` for user scope and the project directory for project scope,
 resolved by the caller and handed in already absolute — the filesystem code

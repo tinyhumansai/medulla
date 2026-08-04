@@ -223,9 +223,16 @@ one", and the removal is not recoverable from the output.
 | `--prune` | on `sync`, delete skills for workflows that are gone or disabled |
 | `--dry-run`, `--json` | report without writing; machine-readable output |
 
-Claude gets `.claude/skills/medulla-<id>/SKILL.md`, Codex gets
-`.codex/skills/…`, and any other harness gets `.medulla/skills/…` to point at
-by hand. Generated files carry a `medulla:managed` marker line, and nothing
+Claude gets `.claude/skills/medulla-<id>/SKILL.md`. Codex and every other
+harness get `.agents/skills/…`, the cross-tool
+[Agent Skills](https://agentskills.io) location: Codex still scans its own
+`$CODEX_HOME/skills`, but upstream calls that root deprecated, and it follows
+`CODEX_HOME` rather than the real home — so a skill written there is invisible
+to anyone running a Codex profile. An install retires a managed skill an
+earlier release left in `.codex/skills`, because Codex scans both and silently
+drops a `$name` mention that resolves to two skills.
+
+Generated files carry a `medulla:managed` marker line, and nothing
 without that marker is ever overwritten or deleted — a collision is reported and
 skipped, which means that workflow is *not* installed, and the command exits
 non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
@@ -248,9 +255,11 @@ directories:
 medulla skills install --scope managed --harness claude
 ```
 
-The root is `<medulla home>/harness/`, laid out like a project root
-(`.claude/skills/…`), and Medulla adds `--add-dir <that root>` when it spawns
-Claude Code. Claude loads `.claude/skills/` from an added directory — a
+The root is `<medulla home>/claude-skills/`, laid out like a project root
+(`.claude/skills/…`), and Medulla adds `--add-dir <that directory>` when it
+spawns Claude Code. Each harness gets its own `<harness>-skills` directory, so
+the path handed to one never exposes another's files, and the Medulla home is
+already per-account. Claude loads `.claude/skills/` from an added directory — a
 documented exception to `--add-dir` being a file-access grant, and the reason
 this works at all; the `permissions.additionalDirectories` *setting* grants
 access without loading skills. The flag is added only once the root actually

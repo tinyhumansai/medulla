@@ -79,7 +79,8 @@ fn expected_paths(home: &Path, slug: &str) -> Vec<PathBuf> {
     vec![
         home.join(".claude/skills").join(slug).join("SKILL.md"),
         home.join(".claude/commands").join(format!("{slug}.md")),
-        home.join(".codex/skills").join(slug).join("SKILL.md"),
+        // Codex reads `.agents/skills`, not its own config directory.
+        home.join(".agents/skills").join(slug).join("SKILL.md"),
         home.join(".codex/prompts").join(format!("{slug}.md")),
     ]
 }
@@ -170,7 +171,7 @@ fn authoring_a_workflow_and_installing_its_skill_writes_a_harness_readable_file(
     // that made one target's body drift would be a bug, not a feature.
     assert_eq!(
         skill,
-        fs::read_to_string(home.path().join(".codex/skills/medulla-babysit/SKILL.md")).unwrap()
+        fs::read_to_string(home.path().join(".agents/skills/medulla-babysit/SKILL.md")).unwrap()
     );
 
     // A workflow with no inputs says so rather than rendering an empty table.

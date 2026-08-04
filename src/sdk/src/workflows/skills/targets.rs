@@ -29,11 +29,8 @@ pub fn scope_root(scope: SkillScope, env: &HashMap<String, String>, cwd: &Path) 
     }
 }
 
-/// The directory name, under the Medulla home, holding harness-facing files.
-const MANAGED_DIR: &str = "harness";
-
-/// Medulla's own skills root: a directory Medulla owns outright, laid out the
-/// way a *project* root is (`<root>/.claude/skills/…`).
+/// Medulla's own root for managed skills: the Medulla home, under which each
+/// harness gets its own `<harness>-skills` directory.
 ///
 /// This exists because the alternative ways to give a spawned harness a skill
 /// are both wrong. Writing into the operator's `~/.claude` mixes generated
@@ -44,25 +41,110 @@ const MANAGED_DIR: &str = "harness";
 ///
 /// Under the Medulla home rather than the workspace so one install serves every
 /// workspace on the machine, and so the directory is not an untracked artifact
-/// in someone's repository.
+/// in someone's repository. The home is already per-account
+/// (`<root>/<user id>`), so two accounts on one machine do not share skills.
 pub fn managed_root(env: &HashMap<String, String>) -> PathBuf {
-    crate::home::medulla_home(env).join(MANAGED_DIR)
+    crate::home::medulla_home(env)
+}
+
+/// One harness's managed directory: `<medulla home>/<harness>-skills`.
+///
+/// Per harness rather than one shared directory because the thing Medulla hands
+/// the harness is a *directory path* — `--add-dir` for Claude — and that grant
+/// should not also expose another harness's files. The name says which harness
+/// it is for, since it appears verbatim in the operator's session transcript.
+///
+/// Laid out inside like a project root, so Claude finds
+/// `<medulla home>/claude-skills/.claude/skills/<slug>/SKILL.md`.
+pub fn managed_dir(target: SkillTarget, env: &HashMap<String, String>) -> PathBuf {
+    managed_root(env).join(format!("{}-skills", target.as_str()))
+}
+
+/// The root one target actually writes under, given the scope.
+///
+/// Every scope but `Managed` shares a single root: `$HOME`, the checkout, or an
+/// explicit `--dir`. `Managed` splits per harness, so this is the one place
+/// that difference lives — callers pass the scope's root and get the target's.
+pub(crate) fn target_root(target: SkillTarget, scope: SkillScope, root: &Path) -> PathBuf {
+    match scope {
+        SkillScope::Managed => root.join(format!("{}-skills", target.as_str())),
+        SkillScope::User | SkillScope::Project => root.to_path_buf(),
+    }
 }
 
 /// The harness's own dotted directory under `root` (`.claude`, `.codex`,
 /// `.medulla`). Its existence is what [`default_targets`] reads as "this
 /// operator uses this harness".
+///
+/// Note this is *not* where Codex skills go — see [`skills_dir`]. Codex still
+/// keeps its config, prompts, and credentials in `.codex`, so that is still the
+/// right signal for "this operator uses Codex".
 pub(crate) fn base_dir(target: SkillTarget, root: &Path) -> PathBuf {
     match target {
         SkillTarget::Claude => root.join(".claude"),
         SkillTarget::Codex => root.join(".codex"),
-        SkillTarget::Generic => root.join(".medulla"),
+        // `.agents`, not `.medulla`: the generic target exists for harnesses we
+        // have not verified individually, and the thing they have in common is
+        // the Agent Skills convention. A file under `.medulla/skills` was read
+        // by nothing unless the operator wired it up by hand.
+        SkillTarget::Generic => root.join(".agents"),
     }
 }
 
+/// The legacy Codex skills directory, read but deprecated upstream.
+///
+/// Codex still scans `$CODEX_HOME/skills` at user scope, and its own source
+/// calls it "Deprecated ... kept for backward compatibility" (since
+/// `rust-v0.95.0`). We wrote here once; [`super::install`] removes what it finds
+/// so the same skill is not discovered twice — a duplicate name makes every
+/// `$slug` mention a silent no-op, because Codex drops a mention it cannot
+/// resolve to exactly one skill.
+pub(crate) fn legacy_codex_skills_dir(root: &Path) -> PathBuf {
+    base_dir(SkillTarget::Codex, root).join("skills")
+}
+
 /// The directory holding one skill directory per installed workflow.
+///
+/// Codex reads `.agents/skills`, not `.codex/skills`: the `.agents` convention
+/// is the cross-tool [Agent Skills](https://agentskills.io) location, it is the
+/// one upstream calls current, and — the part that actually bites — it is
+/// anchored to the real home directory rather than to `CODEX_HOME`. An operator
+/// with `CODEX_HOME` set to a profile directory would never have seen a skill
+/// we wrote to `~/.codex/skills`.
 pub(crate) fn skills_dir(target: SkillTarget, root: &Path) -> PathBuf {
-    base_dir(target, root).join("skills")
+    match target {
+        SkillTarget::Codex => root.join(".agents").join("skills"),
+        _ => base_dir(target, root).join("skills"),
+    }
+}
+
+/// The targets that write somewhere no earlier target in the list already
+/// writes.
+///
+/// Codex and Generic both resolve to `.agents/skills` — deliberately, it is one
+/// shared convention — so naming both would otherwise walk the same directory
+/// twice: two report lines for one file on install, and the same file listed
+/// under two harness names by `list`. The first target named keeps the
+/// directory, so an explicit `--harness codex,generic` reports it as Codex.
+///
+/// Scope-aware because `Managed` gives each harness its own directory, where
+/// the two no longer overlap and both should be visited.
+pub(crate) fn dedupe_by_skills_dir(
+    targets: &[SkillTarget],
+    scope: SkillScope,
+    root: &Path,
+) -> Vec<SkillTarget> {
+    let mut seen: Vec<PathBuf> = Vec::with_capacity(targets.len());
+    let mut kept = Vec::with_capacity(targets.len());
+    for target in targets {
+        let dir = skills_dir(*target, &target_root(*target, scope, root));
+        if seen.contains(&dir) {
+            continue;
+        }
+        seen.push(dir);
+        kept.push(*target);
+    }
+    kept
 }
 
 /// The directory holding slash commands, for targets that have them.
@@ -124,9 +206,9 @@ pub fn spawn_args(
     if provider != crate::protocol::HarnessProvider::Claude {
         return Vec::new();
     }
-    let root = managed_root(env);
-    if !skills_dir(SkillTarget::Claude, &root).is_dir() {
+    let dir = managed_dir(SkillTarget::Claude, env);
+    if !skills_dir(SkillTarget::Claude, &dir).is_dir() {
         return Vec::new();
     }
-    vec!["--add-dir".to_string(), root.display().to_string()]
+    vec!["--add-dir".to_string(), dir.display().to_string()]
 }

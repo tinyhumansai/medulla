@@ -67,8 +67,18 @@ fn the_config_section_maps_onto_start_up_options() {
         ..HostSection::default()
     };
 
-    let options = options_from_config(&config, &HashMap::new(), None, None, None, true)
-        .expect("every name in this config is valid");
+    let options = options_from_config(
+        &config,
+        &HashMap::new(),
+        None,
+        None,
+        None,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
+    )
+    .expect("every name in this config is valid");
 
     assert_eq!(options.providers, Some(vec![HarnessProvider::Codex]));
     assert_eq!(options.default_provider, Some(HarnessProvider::Codex));
@@ -86,7 +96,10 @@ fn an_empty_provider_list_means_detect_rather_than_serve_nothing() {
         None,
         None,
         None,
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .expect("the default section is valid");
     assert_eq!(options.providers, None);
@@ -113,7 +126,10 @@ fn a_custom_harness_is_attached_only_to_its_fleet_host() {
         None,
         None,
         &[local.clone(), remote],
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .expect("valid host options");
 
@@ -140,7 +156,10 @@ fn custom_harness_matching_uses_the_effective_host_address() {
         None,
         None,
         std::slice::from_ref(&local),
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .expect("valid host options");
 
@@ -158,7 +177,10 @@ fn a_zero_concurrency_config_still_runs_one_task_at_a_time() {
         None,
         None,
         None,
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .expect("a zero concurrency is clamped, not rejected");
     assert_eq!(options.concurrency, 1);
@@ -179,7 +201,10 @@ fn an_unknown_harness_name_is_rejected_rather_than_silently_widening_the_host() 
         None,
         None,
         None,
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .err()
     .expect("an unknown harness name is an error");
@@ -204,7 +229,10 @@ fn an_unknown_default_harness_is_rejected_rather_than_falling_back() {
         None,
         None,
         None,
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .err()
     .expect("an unknown default harness is an error");
@@ -223,7 +251,7 @@ fn the_attribution_opt_out_reaches_embedded_host_options() {
         None,
         None,
         None,
-        false,
+        &super::super::LaunchPolicy::default(),
     )
     .expect("the default section is valid");
     assert!(
@@ -237,7 +265,10 @@ fn the_attribution_opt_out_reaches_embedded_host_options() {
         None,
         None,
         None,
-        true,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
     )
     .expect("the default section is valid");
     assert!(on.attribution, "the default stays on");

@@ -60,6 +60,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_harnesses(LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),

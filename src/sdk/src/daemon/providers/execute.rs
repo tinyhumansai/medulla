@@ -63,6 +63,22 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     // that is not OpenRouter.
     crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
     if super::acp::uses_acp(&options) {
+        // ACP dispatch cannot carry Medulla hooks. Every other path injects them
+        // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*
+        // (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`)
+        // which spawns the harness itself, so there is no argv to add to. Claude
+        // Code's env-based settings paths were checked as an alternative and do
+        // not deliver hooks either. Say so rather than let the operator believe a
+        // configured hook is running.
+        let configured = options.hooks.for_provider(options.provider).len();
+        if configured > 0 {
+            tracing::warn!(
+                provider = options.provider.as_str(),
+                hooks = configured,
+                "medulla hooks are not installed for ACP dispatch: the harness CLI is \
+                 launched by the ACP server, not by Medulla",
+            );
+        }
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;

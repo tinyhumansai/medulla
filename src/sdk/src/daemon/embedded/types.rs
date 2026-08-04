@@ -65,6 +65,9 @@ pub struct EmbeddedDaemonOptions {
     /// Medulla — the resolved `attribution.commit` config value (on by default;
     /// see [`crate::config::AttributionConfig`]).
     pub attribution: bool,
+    /// Lifecycle hooks installed into every harness this host launches — the
+    /// resolved `[[hooks]]` config section (see [`crate::harness_hooks`]).
+    pub hooks: crate::harness_hooks::HooksConfig,
     /// Named OpenRouter presets exposed by this host.
     pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets.
@@ -90,6 +93,7 @@ impl Default for EmbeddedDaemonOptions {
             env: HashMap::new(),
             router: None,
             attribution: true,
+            hooks: crate::harness_hooks::HooksConfig::default(),
             custom_harnesses: Vec::new(),
             budget: None,
             log: None,

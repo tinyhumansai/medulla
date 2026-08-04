@@ -456,7 +456,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
         &custom_harnesses,
-        loaded.config.attribution.commit,
+        &crate::local_host::LaunchPolicy {
+            attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
+        },
     )
     .map(|options| {
         crate::local_host::start_all(
@@ -535,6 +538,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             custom_harnesses,
             router: loaded.config.router.clone(),
             attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
         }
     });
     // Shared with the hub's roster filter and appended to by the spawner, so a
@@ -554,7 +558,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 loaded.config.budget.clone(),
                 Some(hub_logs.sink()),
                 &custom_harnesses,
-                loaded.config.attribution.commit,
+                &crate::local_host::LaunchPolicy {
+                    attribution: loaded.config.attribution.commit,
+                    hooks: loaded.config.hooks.clone(),
+                },
             )
             .ok()
             .map(|options| {

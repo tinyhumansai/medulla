@@ -261,3 +261,34 @@ fn hook_spec_deserializes_from_the_config_spelling() {
     assert_eq!(parsed.hooks[1].matcher, "*");
     assert!(parsed.hooks[1].harnesses.is_empty());
 }
+
+#[test]
+fn every_spawn_seam_uses_the_merged_launch_builder() {
+    // Each of these seams launches a harness CLI, and each one previously called
+    // `attribution_args` directly — which is exactly how a configured hook came
+    // to be silently ignored on the interactive paths. Pin them: a new seam that
+    // reaches for `attribution_args` instead of `launch_args` fails here.
+    let seams = [
+        "src/sdk/src/wrapper/run/mod.rs",
+        "src/sdk/src/daemon/providers/execute.rs",
+        "src/tui/src/worker/executor/run.rs",
+        "src/tui/src/ui/harness_pane/spawn.rs",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("workspace root");
+    for seam in seams {
+        let source = std::fs::read_to_string(root.join(seam))
+            .unwrap_or_else(|error| panic!("{seam}: {error}"));
+        assert!(
+            source.contains("harness_hooks::launch_args"),
+            "{seam} must build its argv with harness_hooks::launch_args",
+        );
+        assert!(
+            !source.contains("attribution::attribution_args"),
+            "{seam} still calls attribution_args directly, so configured hooks \
+             would not reach the harness it launches",
+        );
+    }
+}

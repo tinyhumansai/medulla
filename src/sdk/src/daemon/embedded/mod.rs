@@ -119,7 +119,6 @@ impl EmbeddedDaemon {
         let stats = Arc::new(Mutex::new(EmbeddedDaemonStats::default()));
 
         let config = DaemonConfig {
-            hooks: crate::harness_hooks::HooksConfig::default(),
             providers: providers.clone(),
             default_provider,
             workspace: workspace.clone(),
@@ -136,6 +135,7 @@ impl EmbeddedDaemon {
             skip_permissions: options.skip_permissions,
             router: options.router.clone(),
             attribution: options.attribution,
+            hooks: options.hooks.clone(),
             custom_harnesses: options.custom_harnesses.clone(),
             budget: options.budget.clone(),
         };

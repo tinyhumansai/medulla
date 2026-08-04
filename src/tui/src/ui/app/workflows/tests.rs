@@ -199,7 +199,7 @@ fn a_move_with_nowhere_to_go_leaves_the_cursor_where_it_was() {
 }
 
 #[test]
-fn the_canvas_scrolls_to_keep_the_cursor_on_screen() {
+fn a_chain_too_wide_for_the_pane_folds_onto_the_next_band() {
     // A long chain, so the last node is well past one screen of layers.
     let mut chain = diamond("long");
     chain.graph = serde_json::from_value(json!({
@@ -222,13 +222,27 @@ fn the_canvas_scrolls_to_keep_the_cursor_on_screen() {
 
     assert_eq!(app.selected_graph_node().unwrap().id, "n11");
     let node = app.selected_graph_node().unwrap().clone();
+    let per_band = app.layers_per_band();
     assert!(
-        node.layer >= app.wf.canvas_layer
-            && node.layer < app.wf.canvas_layer + app.visible_layers(),
-        "layer {} is outside the viewport at {}",
-        node.layer,
-        app.wf.canvas_layer
+        node.layer >= per_band,
+        "the chain has to be long enough to fold at all: {} layers over {per_band}",
+        node.layer
     );
+
+    // Folded, not scrolled off the side: the last node's column is its layer
+    // modulo the band width, and it sits further down instead.
+    let (x, row) = app.graph_cell(node.layer, node.lane);
+    let (first_x, first_row) = app.graph_cell(0, 0);
+    assert_eq!(x, app.graph_cell(node.layer % per_band, node.lane).0);
+    assert!(
+        x < app.area.width as usize,
+        "column {x} is inside the pane, so nothing scrolls horizontally"
+    );
+    assert!(
+        row > first_row,
+        "the fold puts a later layer below the first band: {row} vs {first_row}"
+    );
+    assert!(first_x > 0, "a margin is kept for folded wires to turn in");
 }
 
 #[test]

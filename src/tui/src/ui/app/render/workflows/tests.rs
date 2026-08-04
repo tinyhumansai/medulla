@@ -168,24 +168,22 @@ fn canvas_navigation_uses_the_split_graph_panes_measured_height() {
     let (_home, mut app) = app_with(&[fanout("parallel")], &[]);
 
     render_sized(&mut app, 140, 34);
-    let measured_lanes = app.visible_lanes();
-    assert_eq!(
-        measured_lanes,
-        (app.wf.graph_rows / super::LANE_STRIDE).max(1)
-    );
+    let measured_rows = app.visible_rows();
+    assert_eq!(measured_rows, app.wf.graph_rows.max(1));
 
     app.move_graph_cursor(Move::Forward);
     for _ in 0..7 {
         app.move_graph_cursor(Move::LaneDown);
     }
-    let selected_lane = app.selected_graph_node().expect("selected node").lane;
+    let node = app.selected_graph_node().expect("selected node").clone();
+    let (_, row) = app.graph_cell(node.layer, node.lane);
     assert!(
-        selected_lane < app.wf.canvas_lane + measured_lanes,
-        "lane {selected_lane} must remain inside {}..{}",
-        app.wf.canvas_lane,
-        app.wf.canvas_lane + measured_lanes
+        row >= app.wf.canvas_row && row < app.wf.canvas_row + measured_rows,
+        "row {row} must remain inside {}..{}",
+        app.wf.canvas_row,
+        app.wf.canvas_row + measured_rows
     );
-    assert!(app.wf.canvas_lane > 0, "the reduced pane must scroll");
+    assert!(app.wf.canvas_row > 0, "the reduced pane must scroll");
 }
 
 #[test]

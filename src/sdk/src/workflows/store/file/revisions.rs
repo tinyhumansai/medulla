@@ -11,10 +11,10 @@
 //! the copilot, the `medulla workflow` subcommand, and the MCP tools all become
 //! undoable without any of them knowing revisions exist.
 //!
-//! Snapshots live in a dot-directory beside the definitions rather than in the
-//! state directory, so a workflow and its history move together when an operator
-//! copies a project. They are capped at [`MAX_REVISIONS`] per workflow: history
-//! is for taking back a mistake that was just made, not an archive.
+//! Snapshots live in the workflow state directory. They are host history rather
+//! than authored source, so syncing the definitions never pulls along undo
+//! state. They are capped at [`MAX_REVISIONS`] per workflow: history is for
+//! taking back a mistake that was just made, not an archive.
 
 use std::path::{Path, PathBuf};
 
@@ -30,13 +30,6 @@ use super::paths::{is_json, safe_component, write_atomic};
 /// undoing an edit they just watched happen — they want the version control the
 /// project is already in.
 pub const MAX_REVISIONS: usize = 20;
-
-/// The directory holding every workflow's history, beside the definitions.
-///
-/// Dot-prefixed so [`super::FileWorkflowStore::load`] — which reads `*.json`
-/// entries of the definition directories, not their subdirectories — cannot
-/// mistake a snapshot for a definition.
-const REVISIONS_DIR: &str = ".revisions";
 
 /// Tie-breaker for snapshots taken inside the same millisecond.
 ///
@@ -59,10 +52,8 @@ struct StoredRevision {
 }
 
 /// Where one workflow's snapshots live.
-fn dir_for(write_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowError> {
-    Ok(write_dir
-        .join(REVISIONS_DIR)
-        .join(safe_component(workflow_id)?))
+fn dir_for(revisions_dir: &Path, workflow_id: &str) -> Result<PathBuf, WorkflowError> {
+    Ok(revisions_dir.join(safe_component(workflow_id)?))
 }
 
 /// Snapshot `record` as a superseded version, then prune to [`MAX_REVISIONS`].

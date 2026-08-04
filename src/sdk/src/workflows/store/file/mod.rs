@@ -96,6 +96,13 @@ pub struct FileWorkflowStore {
     journal_dir: PathBuf,
     /// Where proposed graph changes are written, awaiting an operator.
     proposals_dir: PathBuf,
+    /// Where superseded workflow definitions are kept for undo.
+    revisions_dir: PathBuf,
+    /// Where cross-process definition locks live.
+    ///
+    /// Locks are runtime coordination, so they must not appear among authored
+    /// files an operator may sync between machines.
+    definition_locks_dir: PathBuf,
     /// Stable identity for in-process decisions and evolution claims.
     ///
     /// Derived from the persistent proposal directory rather than this
@@ -133,12 +140,22 @@ impl FileWorkflowStore {
             .parent()
             .map(|state| state.join("proposals"))
             .unwrap_or_else(|| PathBuf::from("proposals"));
+        let revisions_dir = runs_dir
+            .parent()
+            .map(|state| state.join("revisions"))
+            .unwrap_or_else(|| PathBuf::from("revisions"));
+        let definition_locks_dir = runs_dir
+            .parent()
+            .map(|state| state.join("locks"))
+            .unwrap_or_else(|| PathBuf::from("locks"));
         let decision_scope = file_store_scope(&proposals_dir);
         Self {
             dirs,
             runs_dir,
             journal_dir,
             proposals_dir,
+            revisions_dir,
+            definition_locks_dir,
             decision_scope,
             write_lock: Arc::new(Mutex::new(())),
         }
@@ -154,6 +171,8 @@ impl FileWorkflowStore {
             dirs,
             runs_dir: state_dir.join("runs"),
             journal_dir: state_dir.join("journal"),
+            revisions_dir: state_dir.join("revisions"),
+            definition_locks_dir: state_dir.join("locks"),
             decision_scope: file_store_scope(&proposals_dir),
             proposals_dir,
             write_lock: Arc::new(Mutex::new(())),
@@ -275,12 +294,14 @@ impl FileWorkflowStore {
         workflow_id: &str,
         operation: impl FnOnce() -> Result<T, WorkflowError>,
     ) -> Result<T, WorkflowError> {
-        std::fs::create_dir_all(self.write_dir()).map_err(|source| WorkflowError::Io {
-            path: self.write_dir().to_path_buf(),
-            source,
+        std::fs::create_dir_all(&self.definition_locks_dir).map_err(|source| {
+            WorkflowError::Io {
+                path: self.definition_locks_dir.clone(),
+                source,
+            }
         })?;
         let lock_path = self
-            .write_dir()
+            .definition_locks_dir
             .join(format!(".{}.lock", safe_component(workflow_id)?));
         let file_lock = std::fs::OpenOptions::new()
             .create(true)
@@ -327,7 +348,7 @@ impl FileWorkflowStore {
             let path = self.definition_path(&record.id)?;
             validate_graph(&record.id, &record.graph)?;
             let document = to_document(record)?;
-            revisions::capture(self.write_dir(), &current)?;
+            revisions::capture(&self.revisions_dir, &current)?;
             write_atomic(&path, &document)?;
             Ok(true)
         })
@@ -391,7 +412,7 @@ impl WorkflowStore for FileWorkflowStore {
             // here rather than at each call site is what makes every authoring
             // surface undoable without any of them having to opt in.
             if let Some(superseded) = self.superseded_by(&path, &record.id)? {
-                revisions::capture(self.write_dir(), &superseded)?;
+                revisions::capture(&self.revisions_dir, &superseded)?;
             }
             write_atomic(&path, &document)
         })
@@ -444,7 +465,7 @@ impl WorkflowStore for FileWorkflowStore {
             // Snapshot before removing. A delete is the one edit that leaves
             // nothing to diff against afterwards, so without this it is the one
             // edit that cannot be undone.
-            revisions::capture(self.write_dir(), &existing)?;
+            revisions::capture(&self.revisions_dir, &existing)?;
             std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })
         })
     }
@@ -495,7 +516,14 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn list_revisions(&self, workflow_id: &str) -> Result<Vec<WorkflowRevision>, WorkflowError> {
-        revisions::list(self.write_dir(), workflow_id)
+        let revisions = revisions::list(&self.revisions_dir, workflow_id)?;
+        if revisions.is_empty() {
+            // Releases before the source/state split kept undo snapshots in a
+            // hidden directory beside definitions. Keep that history readable
+            // without writing any new runtime data there.
+            return revisions::list(&self.write_dir().join(".revisions"), workflow_id);
+        }
+        Ok(revisions)
     }
 
     fn revision(
@@ -503,7 +531,14 @@ impl WorkflowStore for FileWorkflowStore {
         workflow_id: &str,
         revision_id: &str,
     ) -> Result<Option<WorkflowRevision>, WorkflowError> {
-        revisions::read(self.write_dir(), workflow_id, revision_id)
+        match revisions::read(&self.revisions_dir, workflow_id, revision_id)? {
+            some @ Some(_) => Ok(some),
+            None => revisions::read(
+                &self.write_dir().join(".revisions"),
+                workflow_id,
+                revision_id,
+            ),
+        }
     }
 
     fn list_notes(&self, workflow_id: &str) -> Result<Vec<WorkflowNote>, WorkflowError> {

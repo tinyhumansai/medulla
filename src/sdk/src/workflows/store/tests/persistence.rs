@@ -24,6 +24,25 @@ fn saving_then_loading_round_trips_the_host_fields_and_the_graph() {
 }
 
 #[test]
+fn authored_directory_contains_only_workflow_sources_after_edits() {
+    let root = tempfile::tempdir().unwrap();
+    let store = store_in(root.path());
+    let mut record = parse_workflow(&valid_document("clean"), "clean").unwrap();
+
+    store.save(&record).expect("initial save");
+    record.description = "second version".into();
+    store.save(&record).expect("edit");
+
+    let source_entries: Vec<_> = std::fs::read_dir(root.path().join("workflows"))
+        .expect("source directory")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    assert_eq!(source_entries, vec![std::ffi::OsString::from("clean.json")]);
+    assert!(root.path().join("revisions/clean").is_dir());
+    assert!(root.path().join("locks/.clean.lock").is_file());
+}
+
+#[test]
 fn saving_round_trips_the_defaults_block() {
     let root = tempfile::tempdir().unwrap();
     let store = store_in(root.path());

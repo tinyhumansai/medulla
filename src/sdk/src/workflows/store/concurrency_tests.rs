@@ -134,7 +134,7 @@ fn separate_store_instances_use_the_same_definition_lock() {
     let second = store_in(root.path());
     first.save(&document("race", "v0")).expect("seed save");
 
-    let lock_path = root.path().join("workflows").join(".race.lock");
+    let lock_path = root.path().join("locks").join(".race.lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

@@ -450,6 +450,61 @@ fn label_of(node: &PlacedNode, mark: &str, width: usize) -> String {
     format!("{}{mark}", crate::ui::util::clip(&label, width))
 }
 
+/// Paint a polyline as axis-aligned runs, returning the cells it covers in
+/// flow order.
+///
+/// Every segment must be horizontal or vertical; a diagonal is a bug in the
+/// caller's routing, and is dropped rather than approximated.
+fn paint_route(
+    canvas: &mut Canvas,
+    points: &[(usize, usize)],
+    style: CellStyle,
+) -> Vec<(usize, usize)> {
+    let mut route: Vec<(usize, usize)> = Vec::new();
+    for pair in points.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if y0 == y1 {
+            canvas.horizontal(x0, x1, y0, style);
+            let step: Box<dyn Iterator<Item = usize>> = if x0 <= x1 {
+                Box::new(x0..=x1)
+            } else {
+                Box::new((x1..=x0).rev())
+            };
+            route.extend(step.map(|x| (x, y0)));
+        } else if x0 == x1 {
+            canvas.vertical(x0, y0, y1, style);
+            let step: Box<dyn Iterator<Item = usize>> = if y0 <= y1 {
+                Box::new(y0..=y1)
+            } else {
+                Box::new((y1..=y0).rev())
+            };
+            route.extend(step.map(|y| (x0, y)));
+        }
+    }
+    route
+}
+
+/// The light variant of a colour, for the flow highlight.
+///
+/// The wire is drawn dim in its own colour, so the highlight has to be more than
+/// the same colour undimmed to be visible at a glance — but it also has to stay
+/// recognisably that wire's colour, or it reads as a separate thing crawling
+/// over the graph. The light variant is both. Colours with no lighter twin fall
+/// back to white, which is still clearly a highlight.
+fn brightened(color: Color) -> Color {
+    match color {
+        Color::Black | Color::DarkGray => Color::Gray,
+        Color::Red => Color::LightRed,
+        Color::Green => Color::LightGreen,
+        Color::Yellow => Color::LightYellow,
+        Color::Blue => Color::LightBlue,
+        Color::Magenta => Color::LightMagenta,
+        Color::Cyan => Color::LightCyan,
+        Color::Gray => Color::White,
+        other => other,
+    }
+}
+
 /// Map a colour name from the SDK's vocabulary to a ratatui colour.
 fn color_named(name: &str) -> Color {
     super::super::color(name)

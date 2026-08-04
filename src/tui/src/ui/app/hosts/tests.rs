@@ -1,0 +1,317 @@
+//! Unit tests for the Hosts page's tree, its cursor, and its edits.
+
+use std::sync::Arc;
+
+use medulla::config::LoadedConfig;
+use medulla::runtime::mock::MockRuntime;
+use medulla::runtime::{AgentDeclaration, WorkerInfo};
+use medulla::ui::hosts::HostKind;
+
+use super::super::types::{App, Cmd};
+
+/// A roster entry at `address`, with no capability probe.
+fn worker(id: &str, address: &str) -> WorkerInfo {
+    WorkerInfo {
+        id: id.into(),
+        address: address.into(),
+        handle: None,
+        label: None,
+        harness: Some("claude".into()),
+        workspace: Some("/w/checkout".into()),
+        peer_id: None,
+        cpu_cores: None,
+        memory_total_bytes: None,
+        memory_available_bytes: None,
+        ip_address: None,
+        selected: false,
+        roles: Vec::new(),
+        budgets: Vec::new(),
+        readiness: Vec::new(),
+    }
+}
+
+/// An app over `workers` and `declarations`, writing to a real config file so
+/// the persistence path is exercised rather than stubbed.
+fn app_with(
+    workers: Vec<WorkerInfo>,
+    declarations: Vec<AgentDeclaration>,
+) -> (App, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(&path, "{}").unwrap();
+    let runtime = MockRuntime::empty();
+    runtime.set_workers(workers);
+    let mut loaded = LoadedConfig::defaults(path.to_string_lossy().into_owned());
+    loaded.config.fleet.agent_declarations = declarations;
+    let mut app = App::new(Arc::new(runtime), loaded);
+    app.set_config_path(path);
+    (app, dir)
+}
+
+/// Move the cursor to the row `steps` below the top of the list.
+fn cursor_to(app: &mut App, steps: usize) {
+    app.focus_routing_subpage("Hosts");
+    for _ in 0..steps {
+        let _ = app.on_event(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
+    }
+}
+
+#[test]
+fn the_local_host_leads_the_tree_with_its_agents_under_it() {
+    let (app, _dir) = app_with(
+        vec![
+            worker("medulla-claude", "this-device"),
+            worker("peer", "7Kx"),
+        ],
+        vec![AgentDeclaration::new(
+            "medulla-claude",
+            "this-device",
+            "claude",
+            "/w/medulla",
+        )],
+    );
+
+    let tree = app.host_tree();
+    assert_eq!(tree.len(), 2, "the local host and one remote: {tree:?}");
+    assert_eq!(tree[0].id, "this-device");
+    assert_eq!(tree[0].kind, HostKind::Local);
+    assert_eq!(tree[0].agents.len(), 1);
+    assert_eq!(tree[1].id, "7Kx");
+    assert_eq!(tree[1].kind, HostKind::Remote);
+    // Four rows: two headers, two agents.
+    assert_eq!(app.hosts_row_count(), 4);
+}
+
+#[test]
+fn the_cursor_walks_hosts_and_the_agents_under_them() {
+    let (mut app, _dir) = app_with(vec![worker("peer", "7Kx")], Vec::new());
+    cursor_to(&mut app, 0);
+
+    // Row 0 is the local host header, and it is where a new agent may go.
+    assert!(app.hosts_cursor_on_host());
+    assert!(app.selected_host_is_local());
+    assert!(app.selected_host_agent().is_none());
+
+    // Row 1 is the remote host, row 2 the agent the roster knows on it.
+    cursor_to(&mut app, 1);
+    assert!(app.hosts_cursor_on_host());
+    assert!(!app.selected_host_is_local());
+    cursor_to(&mut app, 1);
+    assert_eq!(
+        app.selected_host_agent().map(|agent| agent.agent_id),
+        Some("peer".to_string())
+    );
+}
+
+#[test]
+fn a_role_toggle_is_written_to_the_declaration_and_survives_a_reload() {
+    let declaration =
+        AgentDeclaration::new("medulla-claude", "this-device", "claude", "/w/medulla");
+    let (mut app, dir) = app_with(
+        vec![worker("medulla-claude", "this-device")],
+        vec![declaration],
+    );
+    cursor_to(&mut app, 1); // the local host's only agent
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    let cmd = app.toggle_selected_agent_role(&role);
+
+    // The live roster moves too, so the orchestrator starts routing the role
+    // here without waiting for a restart.
+    match cmd {
+        Some(Cmd::WorkerOp(medulla::runtime::WorkerOp::SetRoles { id, roles })) => {
+            assert_eq!(id, "medulla-claude");
+            assert_eq!(roles, vec![role.clone()]);
+        }
+        other => panic!("expected a SetRoles op, got {other:?}"),
+    }
+    // And — the point of the whole exercise — the file has it.
+    let written = medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json"));
+    assert_eq!(written.len(), 1);
+    assert_eq!(written[0].roles, vec![role.clone()]);
+    assert_eq!(written[0].harness, "claude");
+
+    // Toggling back sends an empty list and clears it on disk, so the checkbox
+    // is not one-way.
+    let cmd = app.toggle_selected_agent_role(&role);
+    match cmd {
+        Some(Cmd::WorkerOp(medulla::runtime::WorkerOp::SetRoles { roles, .. })) => {
+            assert!(roles.is_empty(), "removal sends an empty list: {roles:?}")
+        }
+        other => panic!("expected a SetRoles op, got {other:?}"),
+    }
+    let written = medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json"));
+    assert!(written[0].roles.is_empty());
+}
+
+#[test]
+fn giving_a_seeded_agent_a_role_declares_it() {
+    // The migration case: the roster has an agent nobody wrote down. A role must
+    // still persist, which means the toggle declares it from what the roster
+    // reports rather than refusing.
+    let (mut app, dir) = app_with(vec![worker("this-device", "this-device")], Vec::new());
+    cursor_to(&mut app, 1);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(app.toggle_selected_agent_role(&role).is_some());
+
+    let written = medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json"));
+    assert_eq!(written.len(), 1, "the seed became a declaration");
+    assert_eq!(written[0].agent_id, "this-device");
+    assert_eq!(written[0].host_id, "this-device");
+    assert_eq!(written[0].harness, "claude");
+    assert_eq!(written[0].workspace.path, "/w/checkout");
+    assert_eq!(written[0].roles, vec![role]);
+    // The in-memory config agrees with the file, so the row redraws assigned.
+    assert_eq!(app.loaded.config.fleet.agent_declarations.len(), 1);
+}
+
+#[test]
+fn a_remote_agent_is_read_only() {
+    let (mut app, dir) = app_with(vec![worker("peer", "7Kx")], Vec::new());
+    cursor_to(&mut app, 2); // local header, remote header, remote agent
+
+    let agent = app.selected_host_agent().expect("a remote agent row");
+    assert!(!agent.editable);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(
+        app.toggle_selected_agent_role(&role).is_none(),
+        "a remote agent's roles are that machine's to assign"
+    );
+    assert!(
+        app.status().contains("declared on"),
+        "and the refusal says why: {}",
+        app.status()
+    );
+    let written = medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json"));
+    assert!(written.is_empty(), "nothing is declared for a remote host");
+}
+
+#[test]
+fn a_failed_write_changes_nothing_at_all() {
+    // A UI showing a role the file does not have is worse than one that refused:
+    // the operator would believe the assignment survived the restart it will not.
+    let (mut app, dir) = app_with(
+        vec![worker("medulla-claude", "this-device")],
+        vec![AgentDeclaration::new(
+            "medulla-claude",
+            "this-device",
+            "claude",
+            "/w/medulla",
+        )],
+    );
+    // A directory cannot be written as a config file.
+    app.set_config_path(dir.path().to_path_buf());
+    cursor_to(&mut app, 1);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(app.toggle_selected_agent_role(&role).is_none());
+    assert!(
+        app.status().starts_with("Roles were not saved"),
+        "status: {}",
+        app.status()
+    );
+    assert!(
+        app.loaded.config.fleet.agent_declarations[0]
+            .roles
+            .is_empty(),
+        "the in-memory list must not drift from the file"
+    );
+}
+
+#[test]
+fn an_agent_with_no_harness_cannot_be_declared_by_a_role_toggle() {
+    // Declaring an agent with no harness would advertise a placement that cannot
+    // run, so the toggle says so instead of inventing one.
+    let mut bare = worker("mystery", "this-device");
+    bare.harness = None;
+    let (mut app, dir) = app_with(vec![bare], Vec::new());
+    cursor_to(&mut app, 1);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(app.toggle_selected_agent_role(&role).is_none());
+    assert!(app.status().contains("no harness"), "{}", app.status());
+    assert!(
+        medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json")).is_empty()
+    );
+}
+
+#[test]
+fn undeclaring_an_agent_removes_it_from_the_file_only() {
+    let (mut app, dir) = app_with(
+        Vec::new(),
+        vec![AgentDeclaration::new(
+            "api-codex",
+            "this-device",
+            "codex",
+            "/w/api",
+        )],
+    );
+    cursor_to(&mut app, 1);
+
+    assert!(app.undeclare_selected_agent());
+    assert!(
+        medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json")).is_empty()
+    );
+    assert!(app.loaded.config.fleet.agent_declarations.is_empty());
+    // An agent the roster owns but this machine never declared is not ours to
+    // undeclare — that path removes the roster entry instead.
+    let (mut remote, _dir) = app_with(vec![worker("peer", "7Kx")], Vec::new());
+    cursor_to(&mut remote, 2);
+    assert!(!remote.undeclare_selected_agent());
+}
+
+#[test]
+fn a_host_this_device_does_not_serve_drops_out_unless_it_still_holds_something() {
+    let (mut app, _dir) = app_with(Vec::new(), Vec::new());
+    assert_eq!(app.host_tree().len(), 1, "hosting is on by default");
+
+    app.loaded.config.host.enabled = false;
+    assert!(
+        app.host_tree().is_empty(),
+        "nothing declared, nothing running, not hosting"
+    );
+
+    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
+        "api-codex",
+        "this-device",
+        "codex",
+        "/w/api",
+    )];
+    assert_eq!(
+        app.host_tree().len(),
+        1,
+        "declared agents keep their host listed"
+    );
+}

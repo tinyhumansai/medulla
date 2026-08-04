@@ -14,6 +14,7 @@ pub mod events;
 pub mod fleet;
 pub mod git_review;
 pub mod harness;
+pub mod hosts;
 pub mod meters;
 #[cfg(test)]
 mod meters_tests;

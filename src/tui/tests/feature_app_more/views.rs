@@ -76,20 +76,23 @@ fn workers_add_prompt_empty_is_cancelled() {
 }
 
 #[test]
-fn hosts_select_and_remove_no_op_when_empty() {
+fn hosts_select_and_remove_no_op_when_the_roster_is_empty() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
-    // No workers → select/remove produce no command.
+    // No workers → select/remove have no roster entry to act on.
     assert!(app.on_event(key(KeyCode::Enter)).is_none());
     assert!(app.on_event(key(KeyCode::Char('d'))).is_none());
-    // Up/Down clamp harmlessly at 0.
+    // The tree is still one row — this device — so the cursor clamps at 0.
     let _ = app.on_event(key(KeyCode::Down));
     let _ = app.on_event(key(KeyCode::Up));
     assert_eq!(app.host_index(), 0);
-    // The empty-state hint renders.
+    assert_eq!(app.hosts_row_count(), 1);
+    // And the local host says it has declared nothing rather than reading as a
+    // machine that is not there.
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("No hosts registered"));
+    assert!(out.contains("this device"), "{out}");
+    assert!(out.contains("no agents"), "{out}");
 }
 
 // --- Context navigation & mouse ---------------------------------------------

@@ -180,6 +180,17 @@ fn crossing_edges_merge_into_a_junction() {
 }
 
 #[test]
+fn an_elbow_merges_with_a_wire_already_at_its_turn() {
+    let area = Rect::new(0, 0, 9, 5);
+    let mut map = CharMap::for_area(area);
+    map.elbow((4.0, 0.0), (4.0, 8.0), 0.5, (WHITE, WHITE));
+    map.elbow((0.0, 4.0), (8.0, 8.0), 0.5, (WHITE, WHITE));
+    let mut buf = Buffer::empty(area);
+    (&map).render(area, &mut buf);
+    assert_eq!(buf[(4, 2)].symbol(), "┤");
+}
+
+#[test]
 fn a_node_wins_the_cell_it_shares_with_an_edge() {
     let area = Rect::new(0, 0, 6, 2);
     let mut map = CharMap::for_area(area);
@@ -230,6 +241,15 @@ fn a_packet_rides_the_elbow_it_was_drawn_for() {
     );
     assert_eq!(point_along(&path, 0.0), (0.0, 0.0));
     assert_eq!(point_along(&path, 1.0), (10.0, 10.0));
+}
+
+#[test]
+fn packets_traverse_routes_with_zero_length_segments() {
+    let horizontal = elbow_path((0.0, 0.0), (10.0, 0.0), 0.5);
+    assert_eq!(point_along(&horizontal, 0.75), (7.5, 0.0));
+
+    let vertical = elbow_path((4.0, 0.0), (4.0, 10.0), 0.5);
+    assert_eq!(point_along(&vertical, 0.75), (4.0, 7.5));
 }
 
 #[test]

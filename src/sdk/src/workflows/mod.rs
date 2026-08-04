@@ -31,6 +31,7 @@ pub mod node_contracts;
 pub mod ops;
 mod registry;
 pub mod run;
+pub mod skills;
 pub mod store;
 mod types;
 

@@ -1,0 +1,423 @@
+//! Turning a [`WorkflowSummary`] into harness-readable skill text.
+//!
+//! Rendering is deliberately target-independent: one body serves every harness,
+//! and [`super::targets`] decides only where it lands. The generated text has
+//! one job — make a model that has never seen this workflow call
+//! `mcp__medulla__workflow_run` with the right argument shape, and behave
+//! sensibly when the tool is not attached.
+
+use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
+use tinyflows::model::{InputType, WorkflowInput};
+
+use crate::workflows::WorkflowSummary;
+
+/// The tool a generated skill instructs the model to call.
+const RUN_TOOL: &str = "mcp__medulla__workflow_run";
+
+/// The slug a workflow's skill is installed under.
+///
+/// Prefixed with `medulla-` so a directory listing of `~/.claude/skills` says
+/// where these came from, and sanitised to the `[a-z0-9-]` alphabet that both
+/// verified harnesses accept as a skill name. An id that sanitises to nothing
+/// (all punctuation) still yields a usable, if opaque, `medulla-workflow`.
+pub fn slug_for(workflow_id: &str) -> String {
+    let mut slug = String::with_capacity(workflow_id.len() + 8);
+    let mut pending_dash = false;
+    for ch in workflow_id.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_dash && !slug.is_empty() {
+                slug.push('-');
+            }
+            pending_dash = false;
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            pending_dash = true;
+        }
+    }
+    if slug.is_empty() {
+        slug.push_str("workflow");
+    }
+    format!("medulla-{slug}")
+}
+
+/// Renders the `SKILL.md` for one workflow.
+///
+/// The returned [`RenderedSkill::body`] is the complete file: managed marker
+/// first line, then frontmatter, then the instructions. `rev` fingerprints
+/// everything below the marker, so it changes if and only if the generated
+/// content does — which is what makes an install idempotent across releases
+/// that do not touch the template.
+pub fn render(summary: &WorkflowSummary) -> super::RenderedSkill {
+    let slug = slug_for(&summary.id);
+    let description = description_for(summary);
+    let content = skill_content(summary, &slug, &description);
+    let (body, rev) = seal(&summary.id, &content);
+    super::RenderedSkill {
+        workflow_id: summary.id.clone(),
+        slug,
+        description,
+        body,
+        rev,
+    }
+}
+
+/// Renders the slash-command variant of an already-rendered skill.
+///
+/// The command exists for the operator who would rather type `/medulla-babysit
+/// 123` than describe the work; the model-facing instructions are the same call
+/// with the typed text handed over as `$ARGUMENTS`. Returns the complete file,
+/// marker included, so it follows the same managed-file discipline.
+pub fn render_command(skill: &super::RenderedSkill, summary: &WorkflowSummary) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!(
+        "description: {}\n",
+        yaml_scalar(&skill.description)
+    ));
+    out.push_str(&format!(
+        "argument-hint: {}\n",
+        yaml_scalar(&argument_hint(&summary.inputs))
+    ));
+    out.push_str("---\n\n");
+    out.push_str(&format!(
+        "Run the `{id}` Medulla workflow for the operator.\n\n",
+        id = summary.id
+    ));
+    out.push_str(&format!(
+        "Call `{RUN_TOOL}` with:\n\n```json\n{example}\n```\n\n",
+        example = call_example(summary)
+    ));
+    out.push_str(
+        "The operator typed: $ARGUMENTS\n\n\
+         Map that text onto the inputs above. Ask for any required input it does not \
+         supply rather than guessing — a missing or misnamed input is rejected and \
+         nothing runs.\n\n",
+    );
+    out.push_str(&inputs_section(&summary.inputs));
+    out.push('\n');
+    out.push_str(&format!(
+        "The call blocks until the run finishes, which can take minutes. When it \
+         returns, report the run's status and, if it failed, the id and error of the \
+         failing step.\n\n{}",
+        fallback_section(summary)
+    ));
+    seal(&summary.id, &out).0
+}
+
+/// Wraps rendered content in its managed marker and returns `(file, rev)`.
+///
+/// The marker is what every write path checks before touching a file, so it is
+/// produced in exactly one place. The id is percent-encoded, because the store
+/// accepts any id that is a single path component — spaces, newlines, quotes
+/// and non-ASCII included — and the marker is a whitespace-separated,
+/// single-line field list. An id written raw would either come back as a
+/// different id or split the marker across lines, and both make Medulla
+/// disown a file it wrote itself.
+fn seal(workflow_id: &str, content: &str) -> (String, String) {
+    let rev = format!("{:x}", Sha256::digest(content.as_bytes()));
+    let id = encode_marker_id(workflow_id);
+    let file = format!("<!-- medulla:managed workflow={id} rev={rev} -->\n{content}");
+    (file, rev)
+}
+
+/// The characters a marker id keeps as itself.
+///
+/// Deliberately narrow — alphanumerics and the three punctuation marks a
+/// workflow id normally uses. Everything else, including `%` itself, becomes an
+/// escape, so encoding is injective and decoding needs no lookahead rules.
+fn is_marker_literal(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+}
+
+/// Percent-encodes a workflow id for the marker line.
+///
+/// Operates on UTF-8 bytes, so a non-ASCII id round-trips exactly rather than
+/// being transliterated.
+fn encode_marker_id(workflow_id: &str) -> String {
+    let mut out = String::with_capacity(workflow_id.len());
+    for byte in workflow_id.as_bytes() {
+        if is_marker_literal(*byte) {
+            out.push(*byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Decodes a marker id, or `None` when the field is not something
+/// [`encode_marker_id`] could have produced.
+///
+/// Malformed input is rejected rather than guessed at: a half-written escape or
+/// a stray literal byte means the line is not a marker we wrote, and treating
+/// it as one would let a foreign file be adopted — or overwritten.
+fn decode_marker_id(field: &str) -> Option<String> {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' => {
+                let hex = field.get(index + 1..index + 3)?;
+                if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                out.push(u8::from_str_radix(hex, 16).ok()?);
+                index += 3;
+            }
+            byte if is_marker_literal(byte) => {
+                out.push(byte);
+                index += 1;
+            }
+            _ => return None,
+        }
+    }
+    let decoded = String::from_utf8(out).ok()?;
+    if decoded.is_empty() {
+        return None;
+    }
+    Some(decoded)
+}
+
+/// Reads the marker off a file's first line.
+///
+/// Returns the `(workflow id, rev)` it names, or `None` when the file is not
+/// ours — which the install path treats as "leave it alone", never as "assume
+/// it is stale". A marker whose fields are duplicated, unparseable, or missing
+/// counts as not ours for the same reason: the only safe reading of a line we
+/// cannot fully account for is that someone else wrote it.
+pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
+    let first = file.lines().next()?.trim();
+    let rest = first.strip_prefix("<!-- medulla:managed ")?;
+    let rest = rest.strip_suffix("-->")?.trim();
+    let mut workflow = None;
+    let mut rev = None;
+    for field in rest.split_whitespace() {
+        // Unknown keys are tolerated so a marker written by a later release
+        // still identifies its workflow; a field that is not `key=value` at all
+        // is not.
+        let (key, value) = field.split_once('=')?;
+        match key {
+            "workflow" if workflow.is_some() => return None,
+            "workflow" => workflow = Some(decode_marker_id(value)?),
+            "rev" if rev.is_some() => return None,
+            "rev" => {
+                if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                rev = Some(value.to_string());
+            }
+            _ => {}
+        }
+    }
+    Some((workflow?, rev?))
+}
+
+/// The frontmatter description: the workflow's own words plus an explicit
+/// trigger clause.
+///
+/// The clause is not decoration. A description that only restates the workflow
+/// name gives the model nothing to match a paraphrased request against, and the
+/// whole feature turns on that match. It is also why the result is never empty:
+/// a workflow whose author wrote no description still gets a usable trigger.
+fn description_for(summary: &WorkflowSummary) -> String {
+    let own = summary.description.trim();
+    let trigger = format!(
+        "Use when the operator asks to run the Medulla \"{id}\" workflow, or describes the work it does.",
+        id = summary.id
+    );
+    if own.is_empty() {
+        trigger
+    } else {
+        let own = if own.ends_with('.') || own.ends_with('!') || own.ends_with('?') {
+            own.to_string()
+        } else {
+            format!("{own}.")
+        };
+        format!("{own} {trigger}")
+    }
+}
+
+/// The whole skill body below the marker.
+fn skill_content(summary: &WorkflowSummary, slug: &str, description: &str) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("name: {slug}\n"));
+    out.push_str(&format!("description: {}\n", yaml_scalar(description)));
+    out.push_str("---\n\n");
+
+    out.push_str(&format!(
+        "# Run the `{id}` Medulla workflow\n\n",
+        id = summary.id
+    ));
+    if !summary.description.trim().is_empty() {
+        out.push_str(&format!("{}\n\n", summary.description.trim()));
+    }
+    out.push_str(&format!(
+        "Start it with the Medulla MCP server — one tool call, no shell:\n\n```json\n{example}\n```\n\n",
+        example = call_example(summary)
+    ));
+
+    out.push_str(&inputs_section(&summary.inputs));
+    out.push('\n');
+
+    out.push_str(
+        "## While it runs\n\n\
+         This call **blocks until the run finishes**, and a workflow can take minutes. \
+         That is expected: wait for the response rather than calling again, and tell the \
+         operator the run is under way if they ask.\n\n\
+         ## Reading the result\n\n\
+         The call returns the whole run record. Read `status` first — `succeeded`, \
+         `failed`, or `cancelled` — then `steps`, which lists each node with its own \
+         status and output. On failure, report the id of the first failing step and its \
+         error verbatim rather than summarising it away; that string is what the \
+         operator needs to fix the workflow.\n\n",
+    );
+    out.push_str(&fallback_section(summary));
+    out
+}
+
+/// The inputs table, or the sentence that replaces it when there are none.
+fn inputs_section(inputs: &[WorkflowInput]) -> String {
+    if inputs.is_empty() {
+        return "## Inputs\n\nThis workflow takes no inputs. Pass `\"inputs\": {}`.\n".to_string();
+    }
+    let mut out = String::from("## Inputs\n\n| name | type | required | meaning | default |\n| --- | --- | --- | --- | --- |\n");
+    for input in inputs {
+        let meaning = input
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .unwrap_or("—");
+        let default = match &input.default {
+            Some(value) => format!("`{value}`"),
+            None => "—".to_string(),
+        };
+        out.push_str(&format!(
+            "| `{name}` | {ty} | {required} | {meaning} | {default} |\n",
+            name = input.name,
+            ty = input.ty.as_str(),
+            required = if input.required { "yes" } else { "no" },
+            meaning = escape_cell(meaning),
+        ));
+    }
+    out.push_str(
+        "\nCollect every required input from the operator before calling; do not invent \
+         one. A missing or misnamed input is rejected and nothing runs.\n",
+    );
+    out
+}
+
+/// The paragraph that keeps a skill useful when the server is not attached.
+///
+/// Skills are copied into user-scope directories that outlive any particular
+/// MCP configuration, so the tool being absent is a normal state, not a bug —
+/// and a model that dead-ends there is worse than no skill at all.
+fn fallback_section(summary: &WorkflowSummary) -> String {
+    format!(
+        "## If the tool is not available\n\n\
+         `{RUN_TOOL}` missing means the Medulla MCP server is not attached to this \
+         session. Do not claim the run started. Either run it from the shell:\n\n\
+         ```sh\nmedulla workflow run {id} --inputs '{inputs}'\n```\n\n\
+         or attach the server once with `medulla skills install --with-mcp` and try the \
+         tool again.\n",
+        id = shell_quote_arg(&summary.id),
+        inputs = example_inputs(summary),
+    )
+}
+
+/// A concrete, copyable call for this workflow's declared signature.
+fn call_example(summary: &WorkflowSummary) -> String {
+    let call = json!({ "id": summary.id, "inputs": example_input_map(summary) });
+    format!(
+        "{RUN_TOOL}\n{}",
+        serde_json::to_string_pretty(&call).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
+/// Just the inputs object, compact, for the shell fallback.
+fn example_inputs(summary: &WorkflowSummary) -> String {
+    serde_json::to_string(&Value::Object(example_input_map(summary)))
+        .unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Placeholder values for every declared input.
+///
+/// An input with a default shows its default (so the example is runnable as
+/// written); everything else shows a type-shaped placeholder the model is meant
+/// to replace, not a plausible-looking invented value.
+fn example_input_map(summary: &WorkflowSummary) -> Map<String, Value> {
+    let mut map = Map::new();
+    for input in &summary.inputs {
+        let value = match (&input.default, input.ty) {
+            (Some(default), _) => default.clone(),
+            (None, InputType::String) => Value::String(format!("<{}>", input.name)),
+            (None, InputType::Number) => json!(0),
+            (None, InputType::Boolean) => json!(false),
+            (None, InputType::Json) => json!({}),
+        };
+        map.insert(input.name.clone(), value);
+    }
+    map
+}
+
+/// The `argument-hint` line: required inputs in angle brackets, optional in
+/// square ones, matching what both harnesses show beside a slash command.
+fn argument_hint(inputs: &[WorkflowInput]) -> String {
+    if inputs.is_empty() {
+        return "(no inputs)".to_string();
+    }
+    inputs
+        .iter()
+        .map(|input| {
+            if input.required {
+                format!("<{}>", input.name)
+            } else {
+                format!("[{}]", input.name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A double-quoted YAML scalar, safe for any one-line description.
+///
+/// Frontmatter is parsed before the harness ever sees the body, so a colon in a
+/// workflow description must not be able to break the document.
+fn yaml_scalar(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' | '\r' => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Keeps a description with a pipe in it inside its markdown table cell.
+fn escape_cell(text: &str) -> String {
+    text.replace('|', "\\|").replace('\n', " ")
+}
+
+/// Renders a workflow id as a single shell word.
+///
+/// Ids are normally plain, but the fallback line is a command an operator will
+/// paste, so an id with a space in it must not silently become two arguments.
+fn shell_quote_arg(id: &str) -> String {
+    if id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && !id.is_empty()
+    {
+        id.to_string()
+    } else {
+        format!("'{}'", id.replace('\'', "'\\''"))
+    }
+}

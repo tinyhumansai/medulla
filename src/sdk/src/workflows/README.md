@@ -7,6 +7,7 @@ Authored, durable, multi-step work: workflow definitions and their runs.
 - [`copilot/`](./copilot/) — The workflow copilot: a harness turn scoped to one graph.
 - [`mcp/`](./mcp/) — A Model Context Protocol server exposing the workflow operations.
 - [`run/`](./run/) — Running a workflow, and resuming one that paused.
+- [`skills/`](./skills/) — Harness-native skills that trigger saved workflows over MCP.
 - [`store/`](./store/) — Where workflows and their run records live.
 - [`authoring_tests.rs`](./authoring_tests.rs) — Tests for patch-based workflow editing.
 - [`authoring.rs`](./authoring.rs) — Editing a workflow as a series of patches.

@@ -449,12 +449,12 @@ fn alternate_screen_without_alternate_scroll_does_not_receive_arrows() {
     let harnesses = harnesses(sessions.clone());
     let id = sessions
         .open(sh(
-            "printf '\\033[?1049h\\033[?1007l'; sleep 0.3; cat -v; sleep 30",
+            "printf '\\033[?1049h\\033[?1007lready'; sleep 0.3; cat -v; sleep 30",
         ))
         .unwrap();
 
     wait_for("the child to enter its alternate screen", || {
-        text(&harnesses, &id).is_empty()
+        text(&harnesses, &id).contains("ready")
     });
     assert_eq!(sessions.alternate_scroll(&id), Some(false));
 

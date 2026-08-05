@@ -19,31 +19,57 @@ use crate::protocol::HarnessProvider;
 /// serialized form is that shared wire spelling.
 ///
 /// Where the two disagree, [`HookEvent::supported_by`] is the record of it.
+///
+/// # Two accepted spellings in config
+///
+/// The `PascalCase` name is canonical and is what gets serialized, because it
+/// is what the harnesses themselves answer to. Config *also* accepts the
+/// `camelCase` spelling of each name, via `serde(alias)`.
+///
+/// That is not indulgence, it is the rest of the file: every other key an
+/// operator writes in `medulla.tui.toml` is camelCase (`baseUrl`,
+/// `fleetTools`, `maxParallelAgents`), so `event = "postToolUse"` is the
+/// spelling the surrounding config teaches. Rejecting it failed the *whole*
+/// config load — one hook typo and Medulla refuses to start, naming a variant
+/// list rather than the one-character fix. Accepting both costs a `serde`
+/// attribute and removes a trap the config's own conventions set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HookEvent {
     /// Before a tool runs. Can deny the call or rewrite its input.
+    #[serde(alias = "preToolUse")]
     PreToolUse,
     /// After a tool returns. Observation and feedback only.
+    #[serde(alias = "postToolUse")]
     PostToolUse,
     /// When the harness would ask the operator to approve something.
+    #[serde(alias = "permissionRequest")]
     PermissionRequest,
     /// A prompt was submitted, before the model sees it.
+    #[serde(alias = "userPromptSubmit")]
     UserPromptSubmit,
     /// The main agent finished its turn.
+    #[serde(alias = "stop")]
     Stop,
     /// A delegated sub-agent started.
+    #[serde(alias = "subagentStart")]
     SubagentStart,
     /// A delegated sub-agent finished.
+    #[serde(alias = "subagentStop")]
     SubagentStop,
     /// Before the transcript is compacted.
+    #[serde(alias = "preCompact")]
     PreCompact,
     /// After the transcript is compacted.
+    #[serde(alias = "postCompact")]
     PostCompact,
     /// A session began.
+    #[serde(alias = "sessionStart")]
     SessionStart,
     /// A session ended.
+    #[serde(alias = "sessionEnd")]
     SessionEnd,
     /// The harness surfaced a notification to the operator.
+    #[serde(alias = "notification")]
     Notification,
 }
 

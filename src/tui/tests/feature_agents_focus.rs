@@ -278,7 +278,11 @@ fn clicking_a_row_selects_it_and_takes_focus() {
     // the fleet and template rows, so every click below the lanes indexed off
     // the end of the shorter list and silently did nothing.
     let mut app = agents_app();
-    let worker_row = rendered_row(&mut app, 120, 40, "dev-1");
+    // Matched on the rail's own spelling of the row. The orchestrator's
+    // "sessions started" block names the same agent in the pane beside it, and
+    // it draws higher up, so a bare `dev-1` would find that line instead and
+    // click whatever the rail happened to have at the same height.
+    let worker_row = rendered_row(&mut app, 120, 40, "[CODEX] dev-1");
     let start = app.agent_index();
 
     click(&mut app, 3, worker_row);

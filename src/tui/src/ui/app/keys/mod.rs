@@ -48,10 +48,10 @@ impl App {
         // owns exactly one keypress: only a deliberate `y` proceeds.
         if let Some((worker, task_id)) = self.kill_armed.take() {
             if k.code == KeyCode::Char('y') && k.modifiers.is_empty() {
-                self.set_status(format!("Killing harness for {task_id}…"));
+                self.set_status(format!("Killing the session for {task_id}…"));
                 return Some(Cmd::KillTask { worker, task_id });
             }
-            self.set_status("Harness kill cancelled");
+            self.set_status("Session kill cancelled");
             return None;
         }
 
@@ -94,11 +94,11 @@ impl App {
         }
 
         // The harness picker owns navigation while open.
-        if self.harness_picker.is_some() {
+        if self.agent_picker.is_some() {
             if ctrl && k.code == KeyCode::Char('c') {
                 self.should_quit = true;
             } else {
-                self.handle_harness_picker_key(k);
+                self.handle_agent_picker_key(k);
             }
             return None;
         }
@@ -149,6 +149,21 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
+                // On the Agents tab, *away from the orchestrator*, this is the
+                // way back to the conversation after clicking through to a
+                // session (§A7): the rail cursor returns to the orchestrator and
+                // the composer takes the keyboard.
+                //
+                // Scoped to "not already there" rather than to the tab, because
+                // the chord's other job — releasing the mouse for native
+                // drag-select — is wanted most while reading that very
+                // transcript. So it returns you first and toggles the mouse once
+                // you have arrived, and `/mouse` reaches the toggle from
+                // anywhere either way.
+                KeyCode::Char('o') if tab == "Agents" && !self.on_orchestrator_lane() => {
+                    self.focus_orchestrator();
+                    return None;
+                }
                 KeyCode::Char('o') => {
                     self.toggle_mouse();
                     return None;
@@ -174,17 +189,24 @@ impl App {
                     self.new_thread();
                     return None;
                 }
-                // Start a harness of your own. `Ctrl-T` for terminal; `Ctrl-N`
-                // is already a new thread, which is the thing it would
-                // otherwise be confused with.
+                // Open a session. `Ctrl-T` for terminal; `Ctrl-N` is already a
+                // new thread, which is the thing it would otherwise be confused
+                // with. On a row that names an agent it opens a session *of that
+                // agent* — its declared harness in its declared workspace, named
+                // by the operator — because that is the whole point of having
+                // declared one. Anywhere else it falls back to the free-form
+                // picker, which declares nothing.
                 KeyCode::Char('t') => {
-                    self.open_harness_picker();
+                    match self.selected_agent_id().filter(|_| tab == "Agents") {
+                        Some(agent_id) => self.open_new_session(&agent_id),
+                        None => self.open_session_picker(),
+                    }
                     return None;
                 }
                 // Grab or give: one chord for both directions, because the rail
                 // row and the pane title both say which way it will go.
                 KeyCode::Char('g') => {
-                    self.toggle_harness_control();
+                    self.toggle_session_control();
                     return None;
                 }
                 // Walk the open threads. The bare arrows belong to the composer,

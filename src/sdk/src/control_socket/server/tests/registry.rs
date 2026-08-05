@@ -138,6 +138,7 @@ async fn admitting_a_replacement_preserves_a_settled_result_with_a_waiter() {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         }));
         tracked.entry.finished_at = Some(crate::clock::now_millis());
         tracked.settled.subscribe()

@@ -140,6 +140,10 @@ pub(super) async fn route_frame(
                         output_tokens: 0,
                     }),
                     harness: frame.harness,
+                    // Carried through rather than re-derived: the worker is the
+                    // only party that knows which session ran the task, and
+                    // this frame is the only place it says so.
+                    session_id: frame.session_id,
                 }));
             }
         }
@@ -150,6 +154,13 @@ pub(super) async fn route_frame(
         }
         TaskFrameKind::Status => {
             if let Some(w) = map.get(&key) {
+                // Control markers first, and read rather than merely forwarded:
+                // a held session is the one kind of silence that is not a dead
+                // worker, so it pauses this dispatch's no-progress window
+                // instead of counting against it (see [`Waiter::held`]).
+                if let Some(held) = control_marker(&frame.text) {
+                    w.held.store(held, std::sync::atomic::Ordering::Release);
+                }
                 if let Some(tx) = &w.status {
                     let _ = tx.send(frame.text);
                 }
@@ -158,6 +169,24 @@ pub(super) async fn route_frame(
         // ack / task / input / capabilities* — activity already recorded.
         _ => {}
     }
+}
+
+/// Whether a `status` frame announces a control change, and which way.
+///
+/// `Some(true)` — an operator has taken the session serving the dispatch;
+/// `Some(false)` — they handed it back and the hand-back turn has started;
+/// `None` — ordinary progress chatter, which says nothing about control.
+///
+/// Matched on the shared prefixes the daemon builds these from, so the two ends
+/// cannot drift apart behind a copied literal.
+fn control_marker(text: &str) -> Option<bool> {
+    if text.starts_with(crate::daemon::SESSION_HELD_STATUS_PREFIX) {
+        return Some(true);
+    }
+    if text.starts_with(crate::daemon::SESSION_RESUMED_STATUS_PREFIX) {
+        return Some(false);
+    }
+    None
 }
 
 /// The correlation key a frame routes under: its `correlationId`, or its

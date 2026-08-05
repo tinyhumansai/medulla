@@ -11,7 +11,7 @@
 //! bounds, and orchestrator-driven abort.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -98,10 +98,18 @@ const LIVENESS_TICK: Duration = Duration::from_millis(100);
 ///
 /// A bridge with no notion of reachability (the in-memory bus, every test fake)
 /// answers `Live` by default, so this behaves exactly like `sleep` for them.
-async fn live_sleep(relay: &dyn Relay, peer: &str, window: Duration) {
+///
+/// `held` is the second gate, and it is the same idea one layer up: the worker
+/// reports (`crate::daemon::SESSION_HELD_STATUS_PREFIX`) that an operator has
+/// taken the session serving this dispatch, and a person reading their own
+/// session is no more "a crashed worker" than an unreachable one is. Held time
+/// therefore does not accrue either, and the window **resumes rather than
+/// resets** when the session is handed back — a worker that dies mid-hold is
+/// still given up on, it just is not given up on *while* a human has it.
+async fn live_sleep(relay: &dyn Relay, peer: &str, window: Duration, held: &AtomicBool) {
     let mut remaining = window;
     while !remaining.is_zero() {
-        if relay.liveness(peer).await == BridgeLiveness::Live {
+        if relay.liveness(peer).await == BridgeLiveness::Live && !held.load(Ordering::Acquire) {
             let step = LIVENESS_TICK.min(remaining);
             tokio::time::sleep(step).await;
             remaining -= step;
@@ -409,6 +417,9 @@ impl TaskRunner {
             );
             let (tx, mut rx) = oneshot::channel();
             let activity = Arc::new(Notify::new());
+            // Held for the whole attempt, not only for as long as the waiter is
+            // registered: the windows below read it, and the pump writes it.
+            let held = Arc::new(AtomicBool::new(false));
             self.waiters.lock().await.insert(
                 cid.clone(),
                 Waiter {
@@ -421,6 +432,7 @@ impl TaskRunner {
                     reply: tx,
                     status: status.clone(),
                     activity: activity.clone(),
+                    held: held.clone(),
                 },
             );
 
@@ -502,7 +514,7 @@ impl TaskRunner {
                             // A frame: the peer is working. Reset the idle clock.
                             _ = activity.notified() => continue,
                             _ = live_sleep(
-                                self.relay.as_ref(), &req.worker_address, self.idle_window,
+                                self.relay.as_ref(), &req.worker_address, self.idle_window, &held,
                             ) => {
                                 self.waiters.lock().await.remove(&cid);
                                 send_abort(
@@ -514,7 +526,7 @@ impl TaskRunner {
                     }
                 }
                 _ = live_sleep(
-                    self.relay.as_ref(), &req.worker_address, self.ack_window,
+                    self.relay.as_ref(), &req.worker_address, self.ack_window, &held,
                 ) => {
                     // Silence while the link was live — so the peer itself is not
                     // answering, not the network. Reset and resend, or give up.

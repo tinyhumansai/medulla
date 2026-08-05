@@ -2,7 +2,7 @@
 //! repo's 500-line ceiling: this module covers key encoding, mouse-wheel
 //! encoding, and focus; [`buttons`] covers click/drag/release encoding and the
 //! per-mode gate on it; [`session`] drives a real child on a real
-//! pseudo-terminal to cover the session-facing half of [`super::LocalHarnesses`].
+//! pseudo-terminal to cover the session-facing half of [`super::LocalSessions`].
 //!
 //! The encoder is where a mistake is invisible until an operator is sitting in
 //! front of a harness that ignores their arrow keys, so every family it emits is

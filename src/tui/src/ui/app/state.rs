@@ -74,7 +74,6 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             command_index: 0,
-            add_host_provider_cache: std::cell::OnceCell::new(),
             host_index: 0,
             host_roles_focus: false,
             host_role_index: 0,
@@ -102,9 +101,6 @@ impl App {
             wf: Default::default(),
             #[cfg(feature = "workflows")]
             workflow_store_override: None,
-            add_host_kind: 0,
-            add_host_harness: 0,
-            add_host_kind_chosen: false,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,
@@ -140,8 +136,9 @@ impl App {
             hit_tabs: Vec::new(),
             hit_tabs_row: 0,
             hit_agents: None,
-            hit_harness: None,
+            hit_session: None,
             hit_threads: None,
+            hit_started_sessions: None,
             hit_context: None,
             hit_workflow_preview: None,
             hit_nav: Default::default(),
@@ -152,17 +149,18 @@ impl App {
             last_events_len: 0,
             link_obs: None,
             host_obs: None,
-            harnesses: None,
+            local_sessions: None,
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
-            harness_pane_session: None,
-            selected_harness_session: None,
-            harness_picker: None,
+            pane_session: None,
+            pane_remote_session: None,
+            rail_session: None,
+            agent_picker: None,
             handback_prompt: None,
-            harness_pointer_grab: None,
+            pointer_grab: None,
             hit_handback: Vec::new(),
             help_scroll: 0,
             handback_policy,
-            harness_took_control: false,
+            took_control_by_attach: false,
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
@@ -336,12 +334,12 @@ impl App {
         self.host_obs.as_ref()
     }
 
-    /// Attach the live harness sessions this device is running.
+    /// Attach the live sessions this device is running.
     ///
     /// Only called when this machine hosts: without a host nothing runs here, so
     /// there is no screen to render and no PTY to type into.
-    pub fn set_local_harnesses(&mut self, harnesses: crate::ui::harness_pane::LocalHarnesses) {
-        self.harnesses = Some(harnesses);
+    pub fn set_local_sessions(&mut self, sessions: crate::ui::harness_pane::LocalSessions) {
+        self.local_sessions = Some(sessions);
     }
 
     /// Read lifecycle reports out of the log the control socket writes into.
@@ -351,22 +349,22 @@ impl App {
         self.hook_log = log;
     }
 
-    /// The live harness sessions this device is running, if it hosts.
-    pub fn local_harnesses(&self) -> Option<&crate::ui::harness_pane::LocalHarnesses> {
-        self.harnesses.as_ref()
+    /// The live sessions this device is running, if it hosts.
+    pub fn local_sessions(&self) -> Option<&crate::ui::harness_pane::LocalSessions> {
+        self.local_sessions.as_ref()
     }
 
-    /// The harness session the last draw resolved for the rail cursor.
+    /// The session the last draw resolved for the rail cursor.
     ///
     /// Inspection seam: it is set during render, so a test that wants to act on
-    /// "the selected harness" has to be able to see when the cursor has reached
+    /// "the selected session" has to be able to see when the cursor has reached
     /// one rather than counting rows it does not control.
-    pub fn harness_pane_session_for_test(&self) -> Option<&str> {
-        self.harness_pane_session.as_deref()
+    pub fn pane_session_for_test(&self) -> Option<&str> {
+        self.pane_session.as_deref()
     }
 
-    /// The harness session currently receiving the operator's keystrokes.
-    pub fn attached_harness(&self) -> Option<&str> {
+    /// The session currently receiving the operator's keystrokes.
+    pub fn attached_session(&self) -> Option<&str> {
         self.harness_focus.attached_to()
     }
 
@@ -377,7 +375,7 @@ impl App {
     /// that wants to click "inside the pane" or "just outside it" has to be
     /// able to read it rather than hardcode a layout it does not control.
     pub fn harness_pane_rect_for_test(&self) -> Option<(Rect, String)> {
-        self.hit_harness.clone()
+        self.hit_session.clone()
     }
 
     /// Re-read the runtime snapshot and merge in the host-link observation.
@@ -412,10 +410,10 @@ impl App {
         self.status = s.into();
     }
 
-    /// Show and arm the harness-kill confirmation as one invariant-preserving
+    /// Show and arm the session-kill confirmation as one invariant-preserving
     /// state transition.
     pub(super) fn arm_kill(&mut self, target: (String, String)) {
-        self.set_status("Kill this harness? y confirm · any other key cancels");
+        self.set_status("Kill this session? y confirm · any other key cancels");
         self.kill_armed = Some(target);
     }
 
@@ -573,20 +571,25 @@ impl App {
     /// rail, which carries the `+ New session` action and the operator's own
     /// harness rows as well as the lanes. Indexing the shorter list with it
     /// reported a lane for rows that name none, and the composer's visibility
-    /// hangs off this answer — so a harness row claimed a text box that was
+    /// hangs off this answer — so a session row claimed a text box that was
     /// never drawn, and every keystroke went into it.
     pub fn on_orchestrator_lane(&self) -> bool {
         let lanes = self.lanes();
         let rows = self.rail_rows();
         match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
-            Some(super::rail::RailRow::Agent(row)) => row
-                .lane_index()
-                .and_then(|index| lanes.get(index))
+            // Only a lane's *own* row is a conversation. `AgentRow` also wraps
+            // the `+N more` overflow control, which carries the lane index of
+            // the lane it pages — matching it here would have read that index
+            // out of a row that is a button, and an overflow row on a rail with
+            // no folded lanes yet would fall through to the `true` below and
+            // hand the orchestrator's composer to it.
+            Some(super::rail::RailRow::Lane(AgentRow::Lane { lane_index })) => lanes
+                .get(*lane_index)
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // An empty lane list means the orchestrator lane is all there is.
                 .unwrap_or(true),
-            // The action row and the operator's own harnesses are not lanes and
-            // have no conversation of their own.
+            // Hosts, agents, sessions, the overflow control and the action row
+            // are not lanes and have no conversation of their own.
             Some(_) => false,
             None => true,
         }
@@ -605,7 +608,7 @@ impl App {
     pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
         let lanes = self.lanes();
         self.rail_rows().iter().position(|row| match row {
-            super::rail::RailRow::Agent(AgentRow::Lane { lane_index }) => lanes
+            super::rail::RailRow::Lane(AgentRow::Lane { lane_index }) => lanes
                 .get(*lane_index)
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // Matches the same fallback `on_orchestrator_lane` makes: with

@@ -410,3 +410,222 @@ async fn an_explicit_null_argument_reads_as_absent() {
 
     assert!(err.to_string().contains("is required"), "{err}");
 }
+
+// Unix-only for the same reason as the cases above: these actually dispatch a
+// shell script, which Windows refuses rather than emulating.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_may_name_its_own_interpreter() {
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo picked", "shell": "sh" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("picked"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn interpreter_arguments_alone_still_change_how_the_host_shell_runs() {
+    // `shell_args` with no `shell` means "the host's shell, with these flags".
+    // Dropping them would run the script plainly and look like the flag did
+    // nothing — the failure this case exists to prevent.
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo traced", "shell_args": ["-x"] }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("traced"));
+    assert!(
+        result["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("echo traced"),
+        "expected an -x trace, got {}",
+        result["stderr"]
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_host_shell_setting_decides_when_a_step_names_none() {
+    let root = tempfile::tempdir().unwrap();
+    let mut settings = CapabilitySettings::rooted_at(root.path());
+    settings.allow_code = true;
+    settings.workspace = root.path().to_string_lossy().to_string();
+    settings.shell = crate::flow_engine::caps::script::Interpreter::validated("sh", &["-x".into()])
+        .expect("valid");
+
+    let result = MedullaToolInvoker::new(Arc::new(settings))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo configured" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(result["output"], json!("configured"));
+    assert!(
+        result["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("echo configured"),
+        "the operator's configured shell must be the one that runs it, got {}",
+        result["stderr"]
+    );
+}
+
+#[tokio::test]
+async fn naming_an_interpreter_for_a_non_shell_language_is_refused() {
+    // Quietly handing a `.py` file to a shell because the host configured one
+    // is the worst kind of surprise, so the contradiction is named instead.
+    let root = tempfile::tempdir().unwrap();
+
+    let err = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "print(1)", "language": "python", "shell": "zsh" }),
+            None,
+        )
+        .await
+        .expect_err("contradictory");
+
+    let message = err.to_string();
+    assert!(message.contains("not \"python\""), "{message}");
+    assert!(message.contains("args.shell"), "{message}");
+}
+
+#[tokio::test]
+async fn malformed_interpreter_arguments_are_refused_rather_than_coerced() {
+    let root = tempfile::tempdir().unwrap();
+    let invoker = MedullaToolInvoker::new(scripting_settings(root.path()));
+
+    let not_an_array = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo hi", "shell_args": "-l" }),
+            None,
+        )
+        .await
+        .expect_err("not an array");
+    assert!(
+        not_an_array.to_string().contains("array of strings"),
+        "{not_an_array}"
+    );
+
+    let not_a_string = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo hi", "shell_args": [3] }),
+            None,
+        )
+        .await
+        .expect_err("not a string");
+    assert!(
+        not_a_string.to_string().contains("must be a string"),
+        "{not_a_string}"
+    );
+}
+
+#[tokio::test]
+async fn a_relative_interpreter_path_is_refused_at_the_tool_surface() {
+    let root = tempfile::tempdir().unwrap();
+
+    let err = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo hi", "shell": "./sh" }),
+            None,
+        )
+        .await
+        .expect_err("relative");
+
+    assert!(err.to_string().contains("relative path"), "{err}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_spells_the_login_shell_the_same_way_the_config_does() {
+    // `"user"` is a sentinel, not a program name — a step that writes it must
+    // reach `$SHELL` rather than trying to spawn a binary called `user`, which
+    // is the inconsistency between the two surfaces this pins.
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo \"${SHELL_KIND:-unset}\"", "shell": "user" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    // Whatever `$SHELL` names on the runner, the script ran under *a* shell
+    // rather than failing to spawn `user`. Reaching output at all is the
+    // assertion; naming the shell would pin the CI runner's login shell.
+    assert!(result["output"].is_string(), "got {}", result["output"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_explicit_bash_spelling_outranks_the_hosts_configured_shell() {
+    // `language: "bash"` was writable long before `workflows.shell` existed, so
+    // an operator enabling a different shell must not silently re-point every
+    // bash-specific step at it. The host here is configured with `sh -x`; a
+    // step that asked for bash must get bash, and so must produce no trace.
+    let root = tempfile::tempdir().unwrap();
+    let mut settings = CapabilitySettings::rooted_at(root.path());
+    settings.allow_code = true;
+    settings.workspace = root.path().to_string_lossy().to_string();
+    settings.shell = crate::flow_engine::caps::script::Interpreter::validated("sh", &["-x".into()])
+        .expect("valid");
+    let invoker = MedullaToolInvoker::new(Arc::new(settings));
+
+    let pinned = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "language": "bash", "script": "echo \"${BASH_VERSION:+bash}\"" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(pinned["output"], json!("bash"));
+    assert_eq!(
+        pinned["stderr"],
+        json!(""),
+        "the host's `sh -x` must not have run this step"
+    );
+
+    // The generic spelling is the one that opts into the host's choice.
+    let generic = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "language": "shell", "script": "echo generic" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert!(
+        generic["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("echo generic"),
+        "language \"shell\" must follow the host, got {}",
+        generic["stderr"]
+    );
+}

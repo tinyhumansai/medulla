@@ -14,25 +14,35 @@ system works on its behalf.
 
 ## Agent
 
-A connected worker that executes **tasks**. Agents live inside a **workspace** on
-a **host**, are surfaced through a **harness**, and are listed in `agent_list`.
-Each agent has a set of **tools**, an MCP server inventory, and a health snapshot
+A **declared** working identity on a **host**: a `harness` type × **workspace**
+directory, written down in `[fleet].agentDeclarations` and carrying an `agentId`,
+an optional name, `roles`, and a workspace `strategy`. Agents are declared, never
+discovered — an agent exists because somebody wrote it down, not because a
+process happens to be running. One host runs as many agents as you declare.
+
+The orchestrator delegates **tasks** to agents and lists them in `agent_list`;
+each agent has a set of **tools**, an MCP server inventory, and a health snapshot
 (consecutive-ok / consecutive-failed). An agent is **idle** when it has no running
-tasks and **busy** otherwise. The orchestrator delegates to agents; a manager
-_manages_ them.
+**sessions** and **busy** otherwise. A manager _manages_ agents.
 
 ## Harness
 
-A runtime environment adapter — the layer that boots, supervises, and
-communicates with a coding assistant CLI. Medulla supports several harness kinds:
+**A type, not a thing.** `harness` is the attribute on an agent that says which
+coding-assistant CLI its sessions run — `claude`, `codex`, `opencode`, or a
+custom preset. It is a value in a dropdown; it is never an entity in the model,
+never a level in the containment chain, and never a noun in the UI (the thing an
+operator interacts with is an **agent** or one of its **sessions**).
 
-| Harness     | Transport                                               |
-| ----------- | ------------------------------------------------------- |
-| Claude Code | ACP (Agent Client Protocol) over stdio, or legacy JSONL |
-| Codex       | ACP over stdio                                          |
-| OpenCode    | ACP over stdio                                          |
+In code it also names the runtime adapter that boots, supervises, and talks to
+that CLI:
 
-A harness surfaces a **status** (idle / running / stopped), a **task board**
+| Harness type | Transport                                               |
+| ------------ | ------------------------------------------------------- |
+| Claude Code  | ACP (Agent Client Protocol) over stdio, or legacy JSONL |
+| Codex        | ACP over stdio                                          |
+| OpenCode     | ACP over stdio                                          |
+
+The adapter surfaces a **status** (idle / running / stopped), a **task board**
 (tracked tasks with status open → active → blocked → done / cancelled), and an
 **event stream** (instruction queued, cycle start/end, task-board changes). The
 public wire shapes live in the `harness_contract` module and are versioned
@@ -40,22 +50,32 @@ independently of any implementation.
 
 ## Host
 
-A machine in the fleet — a physical or virtual environment that runs one or more
-**harnesses**. A host is declared (not probed) and carries resource metadata
-(CPU, memory). It is the top of the containment chain:
+A machine, local or remote — the environment the agents declared on it run in. A
+host is declared (not probed) and carries resource metadata (CPU, memory). It is
+the top of the containment chain:
 
+```text
+Host → Agent → Session
 ```
-Host → Harness → Workspace → Agent
-```
+
+The local host is always present; a remote host is added by tiny.place address
+and contributes the agents declared over there. This tree is what both the Agents
+tab and the Hosts tab render, and its union is what the hub advertises to the
+backend — one projection, rendered twice.
+
+*(The legacy `[fleet]` capacity snapshot still carries an older
+`Host → Harness → Workspace → Agent` chain in its own types. That describes
+declared capacity, not the entity model above.)*
 
 ## Workspace
 
-A filesystem directory exposed by a **harness** on a **host**. A workspace is
-where agents read, write, and run code. Each workspace can carry a `MEDULLA.md`
+A filesystem directory an **agent** works in, declared as part of that agent
+together with its `strategy`: `checkout` (every session of the agent shares the
+directory, so they run serially — the v1 default) or `worktree` (a carved
+per-session copy, so they run in parallel — a follow-up). A workspace is where
+agents read, write, and run code. Each workspace can carry a `MEDULLA.md`
 **profile** — a short frontmatter + prose summary that tells the orchestrator
-what the directory _is_ and how to route work over it. Workspaces are registered
-in the fleet configuration; without a registration entry the orchestrator cannot
-place work there.
+what the directory _is_ and how to route work over it.
 
 ## Hub
 
@@ -75,8 +95,23 @@ tool calls and agent delegation are internal to the cycle.
 
 ## Session
 
-A conversation thread between the user and the orchestrator. Sessions come in
-two orthogonal axes:
+**An agent session** is one running instance of an **agent** — what a **task**
+actually executes in, and the row under an agent on the Agents rail. It carries a
+`sessionId`, its launch anchor and workspace context, and two facts that are
+independent of each other:
+
+- **`origin`** — `orchestrator` (auto-created by a dispatch, labelled from its
+  task) or `user` (opened from the UI and named by the operator). Origin never
+  changes.
+- **`owner`** — who may drive it right now. Ownership moves: `ctrl-g` takes a
+  session from the orchestrator, handing it back returns it, and dispatch skips
+  any session the operator holds.
+
+A task **is** an agent session; the two differ only by origin. Sessions are never
+roster entries — only their control state rides the advert.
+
+The word also names the transport-level conversation the SDK keys by
+`(conversation × provider)`. Those come in two orthogonal axes:
 
 - **Class:** `Bounded` (one turn — a single cycle) or `Unbound` (long-lived,
   spanning multiple cycles).
@@ -131,7 +166,7 @@ orchestrator match tasks to agents by what they can reach, rather than guessing.
 Placing a **manager** at a specific **host** + **workspace**. A deployment is
 the concrete instantiation of the fleet's declared containment chain. The
 orchestrator selects a host and workspace from the fleet registry, spawns the
-manager there, and the manager then picks a harness and begins delegating. Once
+manager there, and the manager then picks an agent and begins delegating. Once
 placed, a deployment is fixed for the cycle — a manager cannot move to a
 different host or workspace.
 
@@ -140,8 +175,8 @@ different host or workspace.
 A saved, multi-step **directed graph** definition, usually acyclic but allowed to
 contain bounded loops (see the `loop` node). Each step is a
 node — triggers, agent dispatches, transforms, code execution, HTTP requests, and
-more. An `agent` node runs as a real **harness** session (Claude Code, Codex, or
-OpenCode). Workflows are authored as JSON files, stored in layered directories
+more. An `agent` node runs as a real **agent session** on the harness type it
+names (Claude Code, Codex, or OpenCode). Workflows are authored as JSON files, stored in layered directories
 (personal + per-repository), run through the vendored `tinyflows` engine, and
 surfaced in the TUI's Workflows tab with a canvas, run overlay, and copilot.
 
@@ -170,16 +205,16 @@ with `medulla init` and registered with `medulla workspace add`.
 
 ## Provider
 
-A coding-assistant CLI that a **harness** wraps. The three supported providers
-are `claude` (Claude Code), `codex` (OpenAI Codex), and `opencode`. A provider is
-selected per-task; the daemon spawns the CLI as a subprocess and communicates
-over ACP or legacy JSONL.
+A coding-assistant CLI — the same axis as an agent's **harness** type, seen from
+the process end. The three supported providers are `claude` (Claude Code),
+`codex` (OpenAI Codex), and `opencode`. The daemon spawns the CLI as a subprocess
+and communicates over ACP or legacy JSONL.
 
 ## Daemon
 
 A long-running background process (`medulla daemon --headless`) that listens for
-inbound **task frames** from the **hub**, spawns **providers** through
-**harnesses**, and streams results back. One daemon = one **workspace**; a fleet
+inbound **task frames** from the **hub**, spawns **providers** through their
+harness adapters, and streams results back. One daemon = one **workspace**; a fleet
 is N daemon processes, not one daemon with N directories.
 
 ## TUI

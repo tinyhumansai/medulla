@@ -18,8 +18,9 @@ use crate::ui::meters;
 use medulla::harness_contract::AgentBudgetMetadata;
 
 use super::super::super::types::App;
-use super::super::{chat_lines, styled_to_tline};
+use super::super::styled_to_tline;
 use super::types::Selection;
+use super::{started, summary};
 
 impl App {
     /// Draw the transcript or declaration for whatever the cursor is on.
@@ -37,7 +38,7 @@ impl App {
         //
         // Resolved in `agents_selection`, not here: it decides the layout as
         // well as the contents, so the split has already been made for it.
-        if let Some(session_id) = selection.harness.clone() {
+        if let Some(session_id) = selection.session.clone() {
             self.draw_local_harness(f, area, &session_id);
             return;
         }
@@ -48,16 +49,35 @@ impl App {
         let lane = selection.lane();
         let pane_width = ((area.width as usize).saturating_sub(4)).max(24);
         let on_orchestrator = selection.on_orchestrator;
+        // Resolved for the laneless rows — a host header, an idle agent, either
+        // action row — which have no transcript and must not be given someone
+        // else's. `selection.lane()` is `None` for exactly those, so this is the
+        // one branch that can answer for them.
+        let panel = (!on_orchestrator && selection.task.is_none() && lane.is_none())
+            .then(|| summary::row_panel(self, selection, pane_width));
+        // The sessions this conversation started, and the task each of its lines
+        // opens. Only the orchestrator's own pane carries them.
+        let mut started_hits: Vec<Option<String>> = Vec::new();
         let content_lines: Vec<StyledLine> = if let Some(t) = &selection.task {
             task_lines(t, pane_width)
         } else if on_orchestrator {
             // The orchestrator lane is the conversation: show what was said, not
             // the model calls that said it. The calls stay in Settings › Trace.
-            chat_lines(&self.snapshot.events, pane_width)
+            // §A7 rides inside it — each turn is followed by the sessions that
+            // turn started.
+            let started = self.started_sessions();
+            let (lines, hits) =
+                started::chat_lines_with_sessions(&self.snapshot.events, pane_width, &started);
+            started_hits = hits;
+            lines
+        } else if let Some(panel) = &panel {
+            panel.lines.clone()
         } else {
             lane_lines(lane, pane_width)
         };
-        let title = if let Some(t) = &selection.task {
+        let title = if let Some(panel) = &panel {
+            panel.title.clone()
+        } else if let Some(t) = &selection.task {
             format!(
                 "{} › {} · {} turns",
                 lane.map(|l| l.label.as_str()).unwrap_or("task"),
@@ -71,8 +91,18 @@ impl App {
                 .get(self.active_thread_idx())
                 .map(|t| t.name.clone())
                 .unwrap_or_else(|| "main".into());
+            // The session count moved into the title with the entries
+            // themselves: they are scattered through the conversation now, so
+            // the pane says how many there are and that they can be opened,
+            // rather than repeating a heading above every group.
+            let sessions = started_hits.iter().flatten().count();
+            let opener = if sessions > 0 {
+                format!(" · {sessions} sessions · click ▸ to open")
+            } else {
+                String::new()
+            };
             format!(
-                "orchestrator · {thread} · {} turns",
+                "orchestrator · {thread} · {} turns{opener}",
                 self.snapshot.messages.len().div_ceil(2)
             )
         } else if let Some(l) = lane {
@@ -84,6 +114,11 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         let mut header: Vec<TLine> = Vec::new();
+        // §A7's entries are inside the conversation now (see [`started`]), so
+        // the hit map is built from the scrolled view below rather than from a
+        // fixed block at the top. Cleared here for the frames that draw no
+        // conversation at all.
+        self.hit_started_sessions = None;
         // What the selected agent is working on, in one line. The Work panel
         // beside this shows the whole picture, but it needs columns a narrow
         // terminal does not have — and the single most useful fact, what the
@@ -247,7 +282,30 @@ impl App {
             self.agent_scroll.min(max_scroll)
         };
         let end = content_lines.len() - eff;
-        let view = &content_lines[end.saturating_sub(capacity)..end];
+        let window = end.saturating_sub(capacity)..end;
+        let view = &content_lines[window.clone()];
+        // The §A7 entries are transcript lines now, so their hit box is the
+        // *visible* slice of the conversation and the task each drawn row opens.
+        // Keyed by task rather than by index for the same reason it always was:
+        // the rail is rebuilt every frame, and a session can end between the
+        // click landing and this resolving.
+        if on_orchestrator && !view.is_empty() {
+            let hits: Vec<Option<String>> = started_hits
+                .get(window)
+                .map(<[Option<String>]>::to_vec)
+                .unwrap_or_default();
+            if hits.iter().any(Option::is_some) {
+                self.hit_started_sessions = Some((
+                    Rect {
+                        y: inner.y.saturating_add(header.len() as u16),
+                        height: (hits.len() as u16)
+                            .min(inner.height.saturating_sub(header.len() as u16)),
+                        ..inner
+                    },
+                    hits,
+                ));
+            }
+        }
         let mut out = header;
         if view.is_empty() {
             out.push(TLine::from(Span::styled(

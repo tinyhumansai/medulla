@@ -15,7 +15,9 @@ harness's lifecycle back to it. Without them a harness on a pty is opaque:
   Claude Code carries both through one `--settings` flag.
 - [`types.rs`](./types.rs) — The canonical event vocabulary, one declared hook,
   the one-line editor form the Hooks page reads and writes, and the injection a
-  translator produces.
+  translator produces. Events deserialize from both their canonical `PascalCase`
+  name and its `camelCase` spelling, since the latter is what every other config
+  key teaches; see [`HookEvent`]'s own docs.
 - [`builtin.rs`](./builtin.rs) — Medulla's own reporting hooks: which events they
   cover, why the deciding events (`PreToolUse`, `PermissionRequest`) are
   deliberately not among them, and how the command reaches the launching binary.
@@ -56,6 +58,13 @@ Claude Code 2.1.221 and Codex 0.146 converged on the same event names, the same
 `matcher` + `hooks[]` grouping, and the same `{"type":"command","command":…}`
 handler, so the shared document is built once and only its *delivery* differs.
 `Notification` is the sole vocabulary divergence (Claude Code only).
+
+## The operator's side
+
+`config.example.toml`'s `[[hooks]]` section is the reference an operator reads,
+and `src/sdk/tests/feature_hooks_config.rs` pins it: the example blocks printed
+there are parsed and asserted to reach the harness argv, so the documentation
+cannot drift from what actually loads.
 
 ## Verification
 

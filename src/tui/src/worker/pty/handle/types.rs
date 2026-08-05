@@ -140,6 +140,13 @@ pub(crate) struct SessionMeta {
     pub(crate) id: String,
     /// Which harness is running.
     pub(crate) provider: HarnessProvider,
+    /// The custom preset it was launched from, when it was one — see
+    /// [`LaunchSpec::preset`](super::super::types::LaunchSpec::preset).
+    ///
+    /// Immutable like the rest of the meta: which preset ran is a fact about
+    /// this session's birth, and it is half of the harness id the rail matches
+    /// a session to its agent by.
+    pub(crate) preset: Option<String>,
     /// The working directory the child runs in.
     pub(crate) cwd: String,
     /// Git branch resolved from the working directory when the session opened.
@@ -216,7 +223,7 @@ pub struct SessionHandle {
     pub(super) busy: AtomicBool,
     /// Whether the operator, rather than the orchestrator, holds this session.
     ///
-    /// [`HarnessControl`](super::super::types::HarnessControl) as one bit, for
+    /// [`SessionControl`](super::super::types::SessionControl) as one bit, for
     /// the same reason `busy` is: `claim_idle` tests it for every session on
     /// every dispatch, and it is the gate that stops a task prompt landing in a
     /// composer a person is typing in.

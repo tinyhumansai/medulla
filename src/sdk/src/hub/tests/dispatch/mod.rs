@@ -498,3 +498,19 @@ async fn a_frame_from_another_peer_cannot_settle_a_dispatch() {
     // The impostor's status must not have reached the progress sink either.
     assert_eq!(rx.recv().await.as_deref(), Some("running python audit.py"));
 }
+
+#[tokio::test]
+async fn a_settled_dispatch_carries_the_session_the_worker_ran_it_in() {
+    // The worker is the only party that knows which session served the task —
+    // it opened it — so the reply frame is the one place the id can enter this
+    // process. This pins the whole path: reply frame → pump → outcome.
+    let worker = FakeWorker::new(Mode::Reply("done".to_string()));
+    let runner = TaskRunner::start(worker, Duration::from_millis(5));
+
+    let outcome = runner.run(req("audit"), None).await.expect("ok");
+
+    assert_eq!(
+        outcome.session_id.as_deref(),
+        Some(harness::FAKE_SESSION_ID)
+    );
+}

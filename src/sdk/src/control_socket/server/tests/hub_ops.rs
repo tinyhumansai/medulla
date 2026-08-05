@@ -37,6 +37,7 @@ fn done(reply: &str) -> Result<TaskOutcome, RunError> {
             output_tokens: 2,
         },
         harness: None,
+        session_id: None,
     })
 }
 

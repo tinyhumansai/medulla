@@ -2,7 +2,8 @@
 //! the [`App::draw`] layout, hints/tabs/status line, the shared [`App::panel`] block
 //! builder, and content dispatch — plus the small styling helpers ([`color`],
 //! [`styled_to_tline`], [`event_color`], [`chat_lines`], [`App::event_line`])
-//! reused by the per-tab submodules. Each tab's body lives in a sibling module.
+//! reused by the per-tab submodules. Each tab's body lives in a sibling module,
+//! and [`frame_state`] owns the per-frame reset every draw opens with.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -22,13 +23,14 @@ mod agents;
 mod changes;
 mod decisions;
 mod feedback;
+mod frame_state;
 pub(super) mod graph;
-mod harness_modals;
 mod overview;
 mod points;
 mod prompt;
 mod routing;
 mod selection;
+mod session_modals;
 mod settings;
 mod status_line;
 mod template_modal;
@@ -288,30 +290,9 @@ impl App {
     /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
-        // The harness pane is resolved during the draw and read by the *next*
-        // key press, so it has to be cleared here rather than left over: a
-        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
-        // tab was showing several frames ago. `draw_agents_pane` fills it back
-        // in when it resolves a session.
-        self.harness_pane_session = None;
-        // Same reasoning as above: a stale rect would route the wheel into a
-        // terminal that is no longer on screen.
-        self.hit_harness = None;
-        self.hit_workflow_preview = None;
-        // Same again for the hand-back question's answers: a click must never
-        // reach a `[Y]` that was on screen two frames ago, least of all when
-        // what it now sits over is the harness the operator went back to.
-        self.hit_handback.clear();
-        // Focus follows the pane, not the other way round. `agents_selection`
-        // (called only while drawing the Agents tab) is what notices the cursor
-        // moving off the attached session; it has nothing to say once the
-        // operator has left the tab entirely. Without this, `harness_focus`
-        // stayed `Attached` after a click elsewhere, and the next keystroke —
-        // meant for whatever tab was now on screen — was typed into a harness
-        // pane the operator could no longer see.
-        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
-            self.release_harness();
-        }
+        // Everything the last frame recorded for the next key press, dropped
+        // before this one records its own — see [`frame_state`].
+        self.reset_frame_state();
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.
@@ -354,7 +335,7 @@ impl App {
             match overlay {
                 Overlay::Decisions => self.draw_decisions(f, rows[2]),
                 Overlay::TemplatePopup => self.draw_template_modal(f, rows[2]),
-                Overlay::HarnessPicker => self.draw_harness_picker(f, rows[2]),
+                Overlay::AgentPicker => self.draw_harness_picker(f, rows[2]),
                 Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
                 Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
                 Overlay::ResumePicker => self.draw_resume(f, rows[3]),
@@ -387,7 +368,7 @@ impl App {
         // and an operator reading Workflows or Settings is exactly the person
         // who does not know a pane has stopped. The count rides on the tab so
         // the signal survives leaving the tab that carries it.
-        let waiting = self.harnesses_waiting();
+        let waiting = self.sessions_waiting();
         // Badges are built *before* the width is measured, because they are part
         // of what has to fit: measuring the bare names and then rendering wider
         // labels overflows the bar on a terminal that was only just wide enough,
@@ -470,7 +451,7 @@ impl App {
             f.render_widget(
                 Paragraph::new(TLine::from(Span::styled(
                     format!(
-                        "Typing into the harness — every key goes to it · {} releases the keyboard",
+                        "Typing into the session — every key goes to it · {} releases the keyboard",
                         crate::ui::harness_pane::FOCUS_CHORD_LABEL
                     ),
                     Style::default().add_modifier(Modifier::BOLD),
@@ -489,7 +470,7 @@ impl App {
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else {
-            "Tab views · Esc/↑↓ rail · ⏎/^] harness · d harness diff · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+            "Tab views · Esc/↑↓ rail · ⏎/^] session · d session diff · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

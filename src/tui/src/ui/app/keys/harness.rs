@@ -22,7 +22,7 @@ use crate::ui::harness_pane::{
     HarnessFocus, FOCUS_CHORD_LABEL,
 };
 use crate::worker::pty::launch::bracket_paste;
-use crate::worker::pty::HarnessControl;
+use crate::worker::pty::SessionControl;
 
 use super::super::types::{AgentsFocus, App};
 
@@ -31,13 +31,14 @@ impl App {
     ///
     /// Safe to call when nothing is attached; that is the common case on the
     /// render path, which calls this whenever the selection moves.
-    pub(crate) fn release_harness(&mut self) {
+    pub(crate) fn release_session(&mut self) {
         // The operator has been looking at and handling this pane. Consume any
         // completion bell observed while it was attached so detaching cannot
         // reveal a stale alert that the hidden rail deliberately suppressed.
-        if let (Some(session), Some(harnesses)) =
-            (self.harness_focus.attached_to(), self.harnesses.as_ref())
-        {
+        if let (Some(session), Some(harnesses)) = (
+            self.harness_focus.attached_to(),
+            self.local_sessions.as_ref(),
+        ) {
             harnesses.sessions.acknowledge(session);
         }
         self.harness_focus = HarnessFocus::Chrome;
@@ -54,13 +55,13 @@ impl App {
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             if is_focus_chord(key) {
                 // Releasing the keyboard is also the moment to settle who holds
-                // the harness. `begin_harness_release` answers `false` when it
+                // the harness. `begin_session_release` answers `false` when it
                 // opened a prompt about that, and the keyboard must stay put
                 // until it is answered — moving it out from under the question
                 // would leave the operator answering about a pane they can no
                 // longer see the state of.
-                if self.begin_harness_release(&session) {
-                    self.release_harness();
+                if self.begin_session_release(&session) {
+                    self.release_session();
                     // The keyboard has to land somewhere it can be seen. The
                     // cursor is on a harness row, which draws no composer, so
                     // the rail is the only half of the tab that can answer a
@@ -68,7 +69,7 @@ impl App {
                     // every key after a release look like a dead terminal.
                     self.focus_agents_rail();
                     self.set_status(format!(
-                        "Released the harness · {FOCUS_CHORD_LABEL} to type again"
+                        "Released the session · {FOCUS_CHORD_LABEL} to type again"
                     ));
                 }
                 return true;
@@ -79,27 +80,27 @@ impl App {
         // *Attaching* is a chrome binding, not a mode, so it yields to whatever
         // overlay is on top of the chrome. The pane behind an open picker is
         // still drawn — and so still resolves a harness session — which is how
-        // Enter in the "start a harness" modal used to attach to the harness
+        // Enter in the "start a session" modal used to attach to the session
         // already selected underneath it instead of launching the chosen one.
         if self.overlay_owns_keys() {
             return false;
         }
         let enter_on_harness = key.code == KeyCode::Enter
             && key.modifiers == KeyModifiers::NONE
-            && self.harness_pane_session.is_some()
+            && self.pane_session.is_some()
             && self.agents_focus == AgentsFocus::Rail;
         // Enter asks first. It is a navigation key, and walking the rail onto a
         // managed harness must not silently take it away from the orchestrator;
         // the chord below is the deliberate spelling and still attaches outright.
         if enter_on_harness {
-            self.open_harness_enter_prompt();
+            self.open_session_enter_prompt();
             // Consumed either way: Enter reaches this branch only when the
             // visible pane resolved to a harness, so it must not submit a
             // hidden composer or return focus to one.
             return true;
         }
         if is_focus_chord(key) {
-            self.attach_to_pane_harness();
+            self.attach_to_pane_session();
             return true;
         }
         false
@@ -115,17 +116,17 @@ impl App {
     /// terminal is what every other terminal on the machine means by "type
     /// here", and requiring a chord to do it made the embedded pane the one
     /// exception.
-    pub(in crate::ui::app) fn attach_to_pane_harness(&mut self) {
-        let Some(session) = self.harness_pane_session.clone() else {
-            self.set_status("No harness on this row — select a running task to type into one");
+    pub(in crate::ui::app) fn attach_to_pane_session(&mut self) {
+        let Some(session) = self.pane_session.clone() else {
+            self.set_status("No session on this row — select a running one to type into");
             return;
         };
         let running = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .is_some_and(|harnesses| harnesses.is_running(&session));
         if !running {
-            self.set_status("That harness has exited — its last screen is all that is left");
+            self.set_status("That session has exited — its last screen is all that is left");
             return;
         }
         // Focusing in *is* taking over. Keyboard ownership without control is
@@ -134,27 +135,34 @@ impl App {
         // in, and a harness serves one turn at a time, so the two prompts come
         // back as one confidently wrong answer rather than as an error.
         let took = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .and_then(|harnesses| harnesses.control(&session))
-            == Some(HarnessControl::Orchestrator);
+            == Some(SessionControl::Orchestrator);
         if took {
-            if let Some(harnesses) = self.harnesses.clone() {
-                harnesses.set_control(&session, HarnessControl::User);
+            if let Some(harnesses) = self.local_sessions.clone() {
+                harnesses.set_control(&session, SessionControl::User);
             }
-            self.harness_took_control = true;
         }
+        // Set from `took` on *every* attachment, not only the ones that took
+        // something. The flag is about the session now being attached, and
+        // nothing else clears it — `release_session` leaves the keyboard without
+        // touching who holds what — so a `true` left by an earlier attachment
+        // survived into the next one. A write failure then read it and handed
+        // back a session the operator had already been holding before they
+        // focused in.
+        self.took_control_by_attach = took;
         // Attaching answers whatever the harness was blinking about: the
         // operator is now looking at the screen that was asking. A named prompt
         // that is still up returns on the next refresh, so nothing is lost by
         // clearing it here — and a rail that keeps blinking at the pane you are
         // already typing in is how an indicator becomes furniture.
-        if let Some(harnesses) = self.harnesses.as_ref() {
+        if let Some(harnesses) = self.local_sessions.as_ref() {
             harnesses.sessions.acknowledge(&session);
         }
         self.harness_focus = HarnessFocus::Attached(session);
         self.set_status(format!(
-            "Typing into the harness · you have control · {FOCUS_CHORD_LABEL} to release"
+            "Typing into the session · you have control · {FOCUS_CHORD_LABEL} to release"
         ));
     }
 
@@ -188,7 +196,7 @@ impl App {
     /// line discipline is raw and reads carriage return as the end of a line.
     pub(in crate::ui::app) fn paste_into_harness(&mut self, session: &str, text: &str) {
         let bracketed = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .and_then(|harnesses| harnesses.sessions.bracketed_paste(session))
             .unwrap_or(false);
@@ -203,8 +211,8 @@ impl App {
     /// Write already-encoded bytes to the attached harness, detaching if the
     /// child has stopped listening.
     fn write_to_harness(&mut self, session: &str, bytes: &[u8]) {
-        let Some(harnesses) = self.harnesses.clone() else {
-            self.release_harness();
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.release_session();
             return;
         };
         if let Err(err) = harnesses.write(session, bytes) {
@@ -212,12 +220,12 @@ impl App {
             // the session back on the way out: a dead harness left under user
             // control is a slot nothing can ever reclaim, and there is nobody
             // left to answer a hand-back prompt about it.
-            if self.harness_took_control {
-                harnesses.set_control(session, HarnessControl::Orchestrator);
-                self.harness_took_control = false;
+            if self.took_control_by_attach {
+                harnesses.set_control(session, SessionControl::Orchestrator);
+                self.took_control_by_attach = false;
             }
-            self.release_harness();
-            self.set_status(format!("Harness stopped listening ({err})"));
+            self.release_session();
+            self.set_status(format!("Session stopped listening ({err})"));
             return;
         }
         // Typing means "I am here now". A pane left scrolled back would keep

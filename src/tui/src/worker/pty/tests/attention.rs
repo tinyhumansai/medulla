@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use super::super::attention::AttentionKind;
-use super::{sh, wait_for, HarnessControl, PtyManager};
+use super::{sh, wait_for, PtyManager, SessionControl};
 
 /// Codex's approval prompt, printed by `/bin/sh` and then held on screen.
 ///
@@ -485,7 +485,7 @@ fn expired_completion_debt_does_not_hide_an_operators_next_bell() {
         .expect("a session");
 
     manager.settle_turn(&id);
-    manager.set_control(&id, HarnessControl::User);
+    manager.set_control(&id, SessionControl::User);
     std::thread::sleep(std::time::Duration::from_millis(400));
     manager
         .write(&id, b"\r")

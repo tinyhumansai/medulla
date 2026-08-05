@@ -139,47 +139,55 @@ fn usage_renders_the_argument_hint_only_when_there_is_one() {
 }
 
 #[test]
-fn harness_takes_an_optional_provider_and_path() {
+fn session_takes_an_optional_harness_and_path() {
     // Bare: the front end opens its picker rather than guessing.
     assert_eq!(
-        parse("/harness"),
-        Some(SlashCommand::NewHarness {
+        parse("/session"),
+        Some(SlashCommand::StartSession {
             provider: None,
             path: None,
         })
     );
     assert_eq!(
-        parse("/harness codex"),
-        Some(SlashCommand::NewHarness {
+        parse("/session codex"),
+        Some(SlashCommand::StartSession {
             provider: Some("codex".to_string()),
             path: None,
         })
     );
     assert_eq!(
-        parse("/harness Claude ~/work/foo"),
-        Some(SlashCommand::NewHarness {
+        parse("/session Claude ~/work/foo"),
+        Some(SlashCommand::StartSession {
             provider: Some("claude".to_string()),
             path: Some("~/work/foo".to_string()),
         }),
-        "the provider is matched case-insensitively, the path is left alone"
+        "the harness type is matched case-insensitively, the path is left alone"
+    );
+    assert_eq!(
+        parse("/harness"),
+        Some(SlashCommand::StartSession {
+            provider: None,
+            path: None,
+        }),
+        "the old spelling still works — a rename must not break muscle memory"
     );
 }
 
 #[test]
-fn an_unknown_harness_provider_is_a_usage_error_not_a_default() {
-    // Silently falling back to the default provider would start the wrong CLI
+fn an_unknown_harness_type_is_a_usage_error_not_a_default() {
+    // Silently falling back to the default would start the wrong CLI
     // in the operator's workspace, and they would not find out until it did
     // something.
     assert_eq!(
         parse("/harness claud"),
         Some(SlashCommand::BadUsage(
-            "Usage: /harness [claude|codex|opencode] [path]"
+            "Usage: /session [claude|codex|opencode] [path]"
         ))
     );
     assert_eq!(
-        parse("/harness ~/work/foo"),
+        parse("/session ~/work/foo"),
         Some(SlashCommand::BadUsage(
-            "Usage: /harness [claude|codex|opencode] [path]"
+            "Usage: /session [claude|codex|opencode] [path]"
         )),
         "a bare path is ambiguous with a provider name, so it is refused"
     );

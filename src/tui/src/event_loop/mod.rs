@@ -52,7 +52,7 @@ pub(crate) async fn run(
         onboarding_path,
         link_obs,
         host,
-        harnesses,
+        local_sessions,
         hook_log,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
@@ -65,8 +65,8 @@ pub(crate) async fn run(
     if let Some(host) = host {
         app.set_host_observation(host);
     }
-    if let Some(harnesses) = harnesses {
-        app.set_local_harnesses(harnesses);
+    if let Some(sessions) = local_sessions {
+        app.set_local_sessions(sessions);
     }
     app.set_hook_log(hook_log);
     if let Some(status) = startup_status {

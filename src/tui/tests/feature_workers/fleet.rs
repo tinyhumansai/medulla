@@ -29,7 +29,7 @@ fn the_hosts_and_harnesses_are_still_reachable_on_routing() {
     // Removing the rail half must not remove the information — only the second
     // copy of it.
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Harnesses");
+    app.focus_routing_subpage("Harness Types");
     let out = render(&mut app, 160, 44);
     assert!(out.contains("workshop"), "the declared host: {out}");
 }
@@ -74,7 +74,7 @@ fn the_demo_flag_stands_a_fleet_in_only_when_nothing_is_declared() {
     // A runtime that declares its own capacity wins: the demo app already has
     // one, so Routing shows the scripted host rather than the stand-in's.
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Harnesses");
+    app.focus_routing_subpage("Harness Types");
     let out = render(&mut app, 160, 44);
     assert!(out.contains("workshop"), "{out}");
     assert!(

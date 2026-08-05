@@ -36,7 +36,7 @@ impl App {
             TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),
             TLine::from("Appearance: j / k pick an option · ←/→ or Enter change it (saved live)"),
             TLine::from(
-                "Status line: j / k pick a harness-row field · ←/→ or Enter cycle it (live preview)",
+                "Status line: j / k pick a session-row field · ←/→ or Enter cycle it (live preview)",
             ),
             TLine::from("Config: j / k pick a setting · ←/→ change · Enter toggle (saved to config.toml)"),
             TLine::from("Feedback: j / k browse · u/d vote · c comment · n feature · b bug · s sort · f filter"),
@@ -45,17 +45,27 @@ impl App {
             TLine::from(" "),
             TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
             TLine::from(" "),
-            TLine::from(Span::styled("Harnesses", bold)),
+            TLine::from(Span::styled("Sessions", bold)),
             TLine::from(format!(
-                "{FOCUS_CHORD_LABEL} type into the selected harness (and take it from the orchestrator)"
+                "{FOCUS_CHORD_LABEL} type into the selected session (and take it from the orchestrator)"
             )),
-            TLine::from("Ctrl-T start a harness of your own · Ctrl-G grab it or give it back"),
+            TLine::from(
+                "Agents rail: Enter on + New agent declares one (harness type × workspace dir)",
+            ),
+            TLine::from(
+                "Ctrl-T opens a session of the selected agent · elsewhere it starts a loose session",
+            ),
+            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
+            TLine::from(
+                "Click a line of the orchestrator's \"sessions started\" block to open that session",
+            ),
+            TLine::from("Ctrl-O returns to the orchestrator (and, once there, releases the mouse)"),
             TLine::from(format!(
-                "From an empty composer Esc focuses the rail · from a harness {FOCUS_CHORD_LABEL} releases to it"
+                "From an empty composer Esc focuses the rail · from a session {FOCUS_CHORD_LABEL} releases to it"
             )),
-            TLine::from("On the rail ↑↓ select a running harness task · K then y kills it"),
+            TLine::from("On the rail ↑↓ select a running session · K then y kills it"),
             TLine::from(Span::styled(
-                "While you hold a harness the orchestrator will not dispatch into it",
+                "While you hold a session the orchestrator will not dispatch into it",
                 dim,
             )),
             TLine::from(" "),

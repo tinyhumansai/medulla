@@ -9,25 +9,25 @@
 //!
 //! [`claim_idle`]: crate::worker::pty::PtyManager::claim_idle
 
-use crate::worker::pty::{HarnessControl, LaunchSpec, SessionOrigin};
+use crate::worker::pty::{LaunchSpec, SessionControl, SessionOrigin};
 
-use super::{HarnessChoice, LocalHarnesses};
+use super::{HarnessChoice, LocalSessions};
 
-impl LocalHarnesses {
+impl LocalSessions {
     /// Who currently holds `session_id`.
-    pub fn control(&self, session_id: &str) -> Option<HarnessControl> {
+    pub fn control(&self, session_id: &str) -> Option<SessionControl> {
         self.sessions.control(session_id)
     }
 
     /// Hand `session_id` to `control`; `false` when no such session exists.
-    pub fn set_control(&self, session_id: &str, control: HarnessControl) -> bool {
+    pub fn set_control(&self, session_id: &str, control: SessionControl) -> bool {
         self.sessions.set_control(session_id, control)
     }
 
     /// Start a harness the operator owns, returning its session id.
     ///
     /// `cwd` is where the child runs; an empty string means the host's
-    /// workspace. The session opens [`HarnessControl::User`]-held, which is the
+    /// workspace. The session opens [`SessionControl::User`]-held, which is the
     /// whole of "unmanaged" — dispatch skips it until it is handed over.
     ///
     /// # Errors
@@ -86,6 +86,11 @@ impl LocalHarnesses {
 
         self.sessions.open(LaunchSpec {
             provider,
+            // The preset is the agent, not the CLI under it: a declaration for a
+            // preset records the preset's id, so a session that recorded only
+            // `claude` could never be matched back to the agent that declared
+            // it and was listed as belonging to none.
+            preset: choice.preset.as_ref().map(|preset| preset.id.clone()),
             bin,
             cwd,
             env,
@@ -98,7 +103,7 @@ impl LocalHarnesses {
             label: format!("you:{}", choice.id()),
             model,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             // A person asked for this one, so it is theirs by origin as well as
             // by control — and it stays user-originated even after they hand it
             // to the orchestrator, which is the case the two fields exist to

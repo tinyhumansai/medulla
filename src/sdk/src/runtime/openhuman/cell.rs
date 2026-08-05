@@ -137,12 +137,16 @@ impl SnapshotCell {
                 // never re-delivered — and `switch_thread`, the one place that
                 // does replay from the start, drops the pending list with the
                 // transcript it belonged to.
+                //
+                // The retirement itself identifies the row by *identity*, not
+                // by `seq`, because the provisional's `seq` is a guess that an
+                // earlier batch's real event can already be sitting on.
                 let Some(index) = echoes.pending.iter().position(|p| &p.body == body) else {
                     continue;
                 };
                 let retired = echoes.pending.remove(index);
-                state.events.retain(|e| e.seq != retired.seq);
-                state.chat_events.retain(|e| e.seq != retired.seq);
+                remove_provisional(&mut state.events, &retired);
+                remove_provisional(&mut state.chat_events, &retired);
             }
             drop(echoes);
             state.events.extend(events.iter().cloned());
@@ -291,6 +295,31 @@ impl SnapshotCell {
 impl Default for SnapshotCell {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Drop the one provisional row a confirmation retires, leaving any other row
+/// that happens to share its `seq`.
+///
+/// [`echo_user`](SnapshotCell::echo_user) files the provisional one past the
+/// highest `seq` on record — a guess at what the backend will assign, not a
+/// reservation. A batch that carries a non-user event at that `seq` and no
+/// matching turn lands the real event alongside the provisional, so removing
+/// everything at the `seq` would take the real event with it. Losing a
+/// `cycle_start` that way is not cosmetic: [`fold::running_after`] reads
+/// liveness off cycle boundaries and the agents view counts turns from them.
+///
+/// So the row is identified by its body as well as its `seq` — only a `User`
+/// row echoing exactly what was retired can be the provisional — and removed
+/// by position.
+///
+/// [`fold::running_after`]: crate::runtime::openhuman::fold::running_after
+fn remove_provisional(rows: &mut Vec<EventEnvelope>, retired: &PendingEcho) {
+    let provisional = rows.iter().position(|e| {
+        e.seq == retired.seq && matches!(&e.event, TuiEvent::User { body } if *body == retired.body)
+    });
+    if let Some(index) = provisional {
+        rows.remove(index);
     }
 }
 

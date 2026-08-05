@@ -346,6 +346,33 @@ fn the_confirmed_copy_retires_the_echo_rather_than_doubling_it() {
 }
 
 #[test]
+fn retiring_an_echo_spares_a_real_event_sharing_its_guessed_seq() {
+    // The provisional `seq` is a guess at what the backend will assign, not a
+    // reservation, and a batch that carries no turn can land a real event on
+    // it. Retiring the echo by `seq` alone takes that event down with it —
+    // and a lost `cycle_start` costs the view both its liveness and its turn
+    // count.
+    let cell = SnapshotCell::new();
+    // On an empty cell the guessed `seq` is 1.
+    cell.echo_user("hello");
+    // Nothing to reconcile in this batch, so the boundary is appended and ends
+    // up sharing seq 1 with the provisional row.
+    cell.append_events(vec![cycle_event(1, "cycle_start")], Some(true));
+    // The confirmation only arrives in the next batch, at its real seq.
+    cell.append_events(vec![confirmed_user(2, "hello")], Some(true));
+
+    let snap = cell.snapshot();
+    assert!(
+        snap.events
+            .iter()
+            .any(|e| matches!(e.event, crate::ui::events::TuiEvent::CycleStart { .. })),
+        "the cycle boundary is not collateral damage"
+    );
+    assert_eq!(snap.chat_events.len(), 1, "one turn, not two");
+    assert_eq!(snap.chat_events[0].seq, 2, "and it is the confirmed copy");
+}
+
+#[test]
 fn a_confirmed_turn_nobody_echoed_is_kept() {
     // A turn submitted from another client is not this host's echo, and
     // dropping it would hide half the conversation.

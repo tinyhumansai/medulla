@@ -72,9 +72,14 @@ impl PtyState {
 /// this one gates dispatch.
 ///
 /// This is the single gate on dispatch: [`claim_idle`](super::PtyManager::claim_idle)
-/// only ever returns an orchestrator-held session. An "unmanaged" session is not a
-/// separate kind of thing — it is one that was born [`User`](Self::User)-held and
-/// has not been handed over.
+/// only ever returns an orchestrator-held session. So "unmanaged" names a
+/// *current* state rather than a kind of session — one held by
+/// [`User`](Self::User) right now, whoever started it and however it got there.
+/// A session the operator opened is unmanaged because it was born that way; a
+/// dispatched one they took is unmanaged for exactly as long as they keep it,
+/// and dispatchable again the moment they hand it back. Which of the two it is
+/// cannot be read off this value, and does not need to be — that is what
+/// [`SessionOrigin`] is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionControl {
     /// The orchestrator may dispatch task frames into this session.

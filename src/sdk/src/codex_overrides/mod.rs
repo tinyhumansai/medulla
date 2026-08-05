@@ -33,10 +33,12 @@
 mod catalog;
 #[cfg(test)]
 mod tests;
+mod types;
 
 use std::collections::HashMap;
 
 pub use catalog::{catalog_path, write_catalog};
+pub use types::CodexOverridesError;
 
 use crate::protocol::HarnessProvider;
 
@@ -90,7 +92,7 @@ pub fn launch_args(
     provider: HarnessProvider,
     model: Option<&str>,
     env: &HashMap<String, String>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, CodexOverridesError> {
     if provider != HarnessProvider::Codex || !enabled(env) {
         return Ok(Vec::new());
     }

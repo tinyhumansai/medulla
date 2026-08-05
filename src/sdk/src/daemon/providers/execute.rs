@@ -213,11 +213,10 @@ async fn run_provider_attempt(
     // provider block, an API-key auth preference, and a catalog entry it is
     // willing to describe. Read from `merged_env`, where both inputs now live —
     // the preset's opt-in knobs and the endpoint the routing above just wrote.
-    extra_args.extend(crate::codex_overrides::launch_args(
-        spec.provider,
-        spec.model.as_deref(),
-        &merged_env,
-    )?);
+    extra_args.extend(
+        crate::codex_overrides::launch_args(spec.provider, spec.model.as_deref(), &merged_env)
+            .map_err(|error| error.to_string())?,
+    );
     // Point the harness at Medulla's own skills root, when one has been
     // installed. This is what makes a workflow a harness *can* trigger visible
     // to it: the MCP tools arrive automatically, but nothing tells a session

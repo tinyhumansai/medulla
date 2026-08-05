@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
+use super::types::CodexOverridesError;
+
 /// The cached catalog Codex writes for itself, relative to its home.
 const CACHE_FILE: &str = "models_cache.json";
 
@@ -52,38 +54,75 @@ pub fn write_catalog(
     display_name: &str,
     context_window: u32,
     env: &HashMap<String, String>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, CodexOverridesError> {
     let source = codex_home(env).join(CACHE_FILE);
-    let raw = std::fs::read_to_string(&source).map_err(|error| {
-        format!(
-            "no Codex model metadata at {}: {error}. Run `codex` once — it caches \
-             the catalog on start — then start this harness again",
-            source.display()
-        )
-    })?;
-    let cached: Value = serde_json::from_str(&raw)
-        .map_err(|error| format!("{} is not valid JSON: {error}", source.display()))?;
+    let raw =
+        std::fs::read_to_string(&source).map_err(|error| CodexOverridesError::CacheMissing {
+            path: source.clone(),
+            source: error,
+        })?;
+    let cached: Value =
+        serde_json::from_str(&raw).map_err(|error| CodexOverridesError::CacheInvalidJson {
+            path: source.clone(),
+            source: error,
+        })?;
     let entry = derive_entry(&cached, model, display_name, context_window)
-        .ok_or_else(|| format!("{} holds no usable model to derive from", source.display()))?;
+        .ok_or(CodexOverridesError::NoUsableTemplate { path: source })?;
 
     let path = catalog_path(model, env);
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    std::fs::create_dir_all(parent)
-        .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    // `path`'s own directory (`codex-catalogs/`) always has a parent — it is
+    // joined onto `medulla_state_dir`/`home_dir`, which never returns a bare
+    // root — so this can only fail if the directory could not be created.
+    let parent = path.parent().unwrap_or(&path);
+    std::fs::create_dir_all(parent).map_err(|error| CodexOverridesError::CreateDir {
+        path: parent.to_path_buf(),
+        source: error,
+    })?;
     let document = serde_json::to_vec_pretty(&json!({ "models": [entry] }))
-        .map_err(|error| format!("could not encode the derived catalog: {error}"))?;
+        .map_err(|error| CodexOverridesError::Encode { source: error })?;
     // Written through a temporary file so a spawn that races another one never
-    // hands Codex a half-written catalog.
-    let temporary = path.with_extension("json.tmp");
-    std::fs::write(&temporary, &document)
-        .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
+    // hands Codex a half-written catalog. The temporary name is unique per
+    // writer (pid + a random suffix): two concurrent spawns for the same model
+    // otherwise derive the same deterministic `*.json.tmp` name, and whichever
+    // renames second finds its own temporary file already gone.
+    let temporary = parent.join(format!(
+        "{}.{}-{:x}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("catalog.json"),
+        std::process::id(),
+        random_suffix(),
+    ));
+    std::fs::write(&temporary, &document).map_err(|error| CodexOverridesError::Write {
+        path: temporary.clone(),
+        source: error,
+    })?;
     std::fs::rename(&temporary, &path).map_err(|error| {
         let _ = std::fs::remove_file(&temporary);
-        format!("could not write {}: {error}", path.display())
+        CodexOverridesError::Rename {
+            path: path.clone(),
+            source: error,
+        }
     })?;
     Ok(path)
+}
+
+/// A cheap per-call random value for the temporary catalog file name.
+///
+/// Not cryptographic — it only needs to make two writers racing at the same
+/// instant pick different names, and the process id already tells apart
+/// writers started at different times. Seeded from the address of a
+/// stack-local, which varies across calls and threads without pulling in a
+/// `rand` dependency for one non-cryptographic use.
+fn random_suffix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let marker = 0u8;
+    let address = std::ptr::addr_of!(marker) as u64;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or_default() as u64;
+    address ^ nanos.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
 /// Build the catalog entry for `model` from Codex's own cached catalog.

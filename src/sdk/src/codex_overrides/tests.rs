@@ -1,6 +1,7 @@
 //! Unit tests for the Codex config overrides and the derived model catalog.
 
 use std::collections::HashMap;
+use std::error::Error as _;
 
 use serde_json::{json, Value};
 
@@ -201,7 +202,9 @@ fn a_run_with_no_model_still_gets_the_provider_block() {
 #[test]
 fn a_missing_codex_cache_names_what_to_run() {
     let dir = scratch("no-cache");
-    let error = launch_args(HarnessProvider::Codex, Some("m"), &routed_env(&dir)).unwrap_err();
+    let error = launch_args(HarnessProvider::Codex, Some("m"), &routed_env(&dir))
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("models_cache.json"), "{error}");
     assert!(error.contains("Run `codex` once"), "{error}");
 }
@@ -214,6 +217,74 @@ fn a_slug_with_a_slash_stays_one_file() {
         path,
         std::path::Path::new("/tmp/medulla/codex-catalogs/deepseek_deepseek-v4-flash-0731.json")
     );
+}
+
+#[test]
+fn two_concurrent_writers_for_the_same_model_both_succeed() {
+    // Regression test for a race where two spawns for the same model derived
+    // the same deterministic `*.json.tmp` name: whichever renamed second found
+    // its own temporary file already gone and failed, even though the shared
+    // catalog the first writer produced was perfectly valid.
+    let dir = scratch("concurrent");
+    write_codex_cache(&dir);
+    let env = std::sync::Arc::new(routed_env(&dir));
+
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let env = std::sync::Arc::clone(&env);
+            std::thread::spawn(move || {
+                write_catalog(
+                    "deepseek/deepseek-v4",
+                    "DeepSeek",
+                    DEFAULT_CONTEXT_WINDOW,
+                    &env,
+                )
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle
+            .join()
+            .expect("writer thread did not panic")
+            .expect("concurrent catalog write must not fail");
+    }
+
+    let path = catalog_path("deepseek/deepseek-v4", &env);
+    let catalog: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(catalog["models"][0]["slug"], json!("deepseek/deepseek-v4"));
+    // No leftover temporary files: every writer's own unique name was renamed
+    // or cleaned up, never left behind under the model's catalog directory.
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn write_catalog_errors_are_actionable() {
+    let dir = scratch("errors");
+    let env = routed_env(&dir);
+
+    let missing_cache = write_catalog("m", "M", DEFAULT_CONTEXT_WINDOW, &env).unwrap_err();
+    assert!(missing_cache.to_string().contains("models_cache.json"));
+    assert!(missing_cache.source().is_some());
+
+    let home = dir.join("codex");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("models_cache.json"), "not json").unwrap();
+    let invalid_json = write_catalog("m", "M", DEFAULT_CONTEXT_WINDOW, &env).unwrap_err();
+    assert!(invalid_json.to_string().contains("not valid JSON"));
+
+    std::fs::write(
+        home.join("models_cache.json"),
+        json!({"models": []}).to_string(),
+    )
+    .unwrap();
+    let no_template = write_catalog("m", "M", DEFAULT_CONTEXT_WINDOW, &env).unwrap_err();
+    assert!(no_template.to_string().contains("no usable model"));
 }
 
 #[test]

@@ -115,6 +115,17 @@ impl HarnessControl {
 pub struct LaunchSpec {
     /// Which coding-agent CLI to run.
     pub provider: HarnessProvider,
+    /// The custom preset this session was launched from, when it was one.
+    ///
+    /// A preset is a *different agent* running the same CLI — its own model,
+    /// endpoint and environment — so its id, not the base CLI's wire name, is
+    /// what a declaration records for it. Carrying it here is what lets the rail
+    /// file the session under the agent that declared it; without it a
+    /// preset-backed session was compared as `claude` against a declaration
+    /// saying `deepseek` and listed as belonging to no agent at all.
+    ///
+    /// `None` for a native CLI entry, whose id *is* the provider's wire name.
+    pub preset: Option<String>,
     /// The resolved binary name or path.
     pub bin: String,
     /// Working directory for the child.
@@ -181,6 +192,11 @@ pub struct SessionRow {
     pub label: String,
     /// Which harness is running.
     pub provider: HarnessProvider,
+    /// The custom preset it was launched from — see [`LaunchSpec::preset`].
+    ///
+    /// Together with `provider` this gives the session's *harness id*, which is
+    /// the vocabulary a declaration is written in: [`harness_id`](Self::harness_id).
+    pub preset: Option<String>,
     /// Where the child is in its life.
     pub state: PtyState,
     /// The working directory the child runs in.
@@ -247,5 +263,18 @@ impl SessionRow {
     /// Milliseconds since the harness last wrote anything.
     pub fn idle_ms(&self, now: i64) -> i64 {
         now.saturating_sub(self.last_output_at).max(0)
+    }
+
+    /// The stable harness id this session runs as — a preset's own id, else the
+    /// provider's wire name.
+    ///
+    /// The same id a picker choice reports and a declaration records, which is
+    /// what makes matching a session to its agent a comparison of like with
+    /// like rather than of a preset against the CLI underneath it.
+    pub fn harness_id(&self) -> &str {
+        self.preset
+            .as_deref()
+            .filter(|preset| !preset.trim().is_empty())
+            .unwrap_or_else(|| self.provider.as_str())
     }
 }

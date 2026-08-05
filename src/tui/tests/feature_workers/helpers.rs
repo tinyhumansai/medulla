@@ -111,6 +111,30 @@ pub fn worker(id: &str, selected: bool) -> WorkerInfo {
     }
 }
 
+/// A roster entry on *this device* — the address the default `[host]` section
+/// binds, which is what makes it an agent on the local host rather than a
+/// remote peer, and so editable from the Hosts page.
+pub fn local_worker(id: &str, selected: bool) -> WorkerInfo {
+    WorkerInfo {
+        address: "this-device".into(),
+        // A local roster entry is an agent working *somewhere*: the directory is
+        // half of what an agent is, and the seed path that declares one from the
+        // roster has nothing to write down without it.
+        workspace: Some(format!("/w/{id}")),
+        handle: None,
+        ..worker(id, selected)
+    }
+}
+
+/// Press `↓` `count` times: the Hosts page's cursor walks host headers *and*
+/// the agents under them, so a test that wants a particular row counts rows
+/// rather than workers.
+pub fn down(app: &mut App, count: usize) {
+    for _ in 0..count {
+        let _ = app.on_event(key(KeyCode::Down));
+    }
+}
+
 /// An `App` over a three-worker roster (`w1` selected).
 pub fn app_with_workers(stream: Option<StreamState>) -> App {
     app_with_roster(

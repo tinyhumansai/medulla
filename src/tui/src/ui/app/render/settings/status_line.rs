@@ -156,6 +156,7 @@ fn sample_selected() -> SessionRow {
         id: "preview".into(),
         label: "preview".into(),
         provider: HarnessProvider::Claude,
+        preset: None,
         state: PtyState::Running,
         cwd: "/home/you/work/tinyhumans/medulla-public".into(),
         branch: Some("feat/status-line".into()),
@@ -180,6 +181,7 @@ fn sample_selected() -> SessionRow {
 fn sample_orchestrator() -> SessionRow {
     SessionRow {
         provider: HarnessProvider::Codex,
+        preset: None,
         state: PtyState::Exited { code: Some(0) },
         cwd: "/tmp/scratch".into(),
         branch: None,

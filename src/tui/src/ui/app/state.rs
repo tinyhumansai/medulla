@@ -140,6 +140,7 @@ impl App {
             hit_agents: None,
             hit_harness: None,
             hit_threads: None,
+            hit_started_sessions: None,
             hit_context: None,
             hit_workflow_preview: None,
             hit_nav: Default::default(),
@@ -558,14 +559,19 @@ impl App {
         let lanes = self.lanes();
         let rows = self.rail_rows();
         match rows.get(self.agent_index.min(rows.len().saturating_sub(1))) {
-            Some(super::rail::RailRow::Agent(row)) => row
-                .lane_index()
-                .and_then(|index| lanes.get(index))
+            // Only a lane's *own* row is a conversation. `AgentRow` also wraps
+            // the `+N more` overflow control, which carries the lane index of
+            // the lane it pages — matching it here would have read that index
+            // out of a row that is a button, and an overflow row on a rail with
+            // no folded lanes yet would fall through to the `true` below and
+            // hand the orchestrator's composer to it.
+            Some(super::rail::RailRow::Lane(AgentRow::Lane { lane_index })) => lanes
+                .get(*lane_index)
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // An empty lane list means the orchestrator lane is all there is.
                 .unwrap_or(true),
-            // The action row and the operator's own harnesses are not lanes and
-            // have no conversation of their own.
+            // Hosts, agents, sessions, the overflow control and the action row
+            // are not lanes and have no conversation of their own.
             Some(_) => false,
             None => true,
         }
@@ -584,7 +590,7 @@ impl App {
     pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
         let lanes = self.lanes();
         self.rail_rows().iter().position(|row| match row {
-            super::rail::RailRow::Agent(AgentRow::Lane { lane_index }) => lanes
+            super::rail::RailRow::Lane(AgentRow::Lane { lane_index }) => lanes
                 .get(*lane_index)
                 .map(|lane| lane.role == AgentRole::Orchestrator)
                 // Matches the same fallback `on_orchestrator_lane` makes: with

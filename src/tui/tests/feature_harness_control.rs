@@ -155,6 +155,7 @@ fn user_session(sessions: &PtyManager) -> String {
     sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin: "/bin/sh".to_string(),
             cwd: "/".to_string(),
             env,
@@ -215,13 +216,19 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
 #[test]
 fn an_unmanaged_harness_gets_its_own_rail_row() {
     // Lanes come from task events, so a session nothing dispatched into folds to
-    // no lane at all. Without its own group it would be running and invisible.
+    // no lane at all. Without a row of its own it would be running and invisible.
+    //
+    // It no longer gets a *group* of its own: §A0 collapsed the `── your
+    // harnesses ──` divider, because an operator-started session and a
+    // dispatched task are one thing seen from two sides. It is a session row on
+    // the tree like any other.
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
     let _ = user_session(&sessions);
 
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("your sessions"), "{out}");
+    assert!(!out.contains("your harnesses"), "no second group: {out}");
+    assert!(!out.contains("your sessions"), "no second group: {out}");
     assert!(out.contains("unmanaged"), "{out}");
 
     sessions.shutdown();

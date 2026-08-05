@@ -310,6 +310,23 @@ impl App {
             return None;
         }
         if tab == "Agents" {
+            // §A7: clicking an entry of the orchestrator's "sessions started"
+            // block opens that session — the rail selection follows, which is
+            // what makes the pane show its conversation. Checked before the rail
+            // because the block lives in the pane beside it.
+            if let Some((rect, tasks)) = self.hit_started_sessions.clone() {
+                if rect.contains((x, y).into()) {
+                    // Only the rows that *are* entries answer; a click on the
+                    // conversation between them falls through to the rail's own
+                    // hit test, exactly as a click above the block used to.
+                    if let Some(task_id) = tasks.get((y - rect.y) as usize).and_then(Option::as_ref)
+                    {
+                        let task_id = task_id.clone();
+                        self.focus_session_for_task(&task_id);
+                        return self.retarget_watch();
+                    }
+                }
+            }
             // The rail stacks two hit boxes — threads above lanes — so both are
             // tried; an `else if` here would leave the strip unclickable.
             if let Some((rect, window_start)) = self.hit_threads {
@@ -347,9 +364,22 @@ impl App {
                             // requiring a second keystroke to confirm what was
                             // already aimed at is the friction it exists to
                             // remove.
-                            if row.is_new_harness() {
-                                self.open_harness_picker();
-                                return None;
+                            //
+                            // Both action branches return the retarget rather
+                            // than nothing, for the same reason the overflow and
+                            // harness branches below do: an action row watches
+                            // no task, so a click arriving from one that did has
+                            // to stop that stream — and neither open method
+                            // clears `watching` on its own.
+                            if row.is_new_agent() {
+                                self.open_new_agent_picker();
+                                return self.retarget_watch();
+                            }
+                            // Same rule for the per-agent action: a click on
+                            // `+ new session` opens the flow it names.
+                            if let Some(agent_id) = row.new_session_agent().map(str::to_string) {
+                                self.open_new_session(&agent_id);
+                                return self.retarget_watch();
                             }
                             // So is a lane's `+N more`: the click that lands on
                             // it is the request to see what it is counting.

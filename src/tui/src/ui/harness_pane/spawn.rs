@@ -86,6 +86,11 @@ impl LocalHarnesses {
 
         self.sessions.open(LaunchSpec {
             provider,
+            // The preset is the agent, not the CLI under it: a declaration for a
+            // preset records the preset's id, so a session that recorded only
+            // `claude` could never be matched back to the agent that declared
+            // it and was listed as belonging to none.
+            preset: choice.preset.as_ref().map(|preset| preset.id.clone()),
             bin,
             cwd,
             env,

@@ -98,6 +98,7 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         attribution: true,
     });
     app.harness_picker = Some(HarnessPicker {
+        purpose: super::types::PickerPurpose::Spawn,
         choices: Vec::new(),
         index: 0,
         step: HarnessPickerStep::Workspace,

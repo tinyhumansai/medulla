@@ -72,7 +72,11 @@ impl App {
         }
     }
 
-    /// Browse and mutate the registered host roster.
+    /// Browse the `Host → Agents` tree and mutate the row under the cursor.
+    ///
+    /// The cursor walks hosts *and* the agents under them, because they answer
+    /// different questions: a host row is the machine (its capacity, and where a
+    /// new agent would go), an agent row is the thing a dispatch targets.
     fn hosts_key(&mut self, code: KeyCode) -> RoutingKey {
         // The preview's role toggles are a second cursor on the same page, so
         // they claim the arrows while focused. `→` drills in and `←` backs out,
@@ -85,37 +89,26 @@ impl App {
         }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.host_index = crate::ui::selection::moved(
-                    self.host_index,
-                    self.runtime.workers().len(),
-                    true,
-                );
+                self.host_index =
+                    crate::ui::selection::moved(self.host_index, self.hosts_row_count(), true);
                 RoutingKey::Handled(None)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.host_index = crate::ui::selection::moved(
-                    self.host_index,
-                    self.runtime.workers().len(),
-                    false,
-                );
+                self.host_index =
+                    crate::ui::selection::moved(self.host_index, self.hosts_row_count(), false);
                 RoutingKey::Handled(None)
             }
             KeyCode::Right | KeyCode::Char('l') => {
-                if self.selected_host().is_none() {
-                    return RoutingKey::Handled(None);
-                }
-                if self.agent_templates().is_empty() {
-                    self.set_status("No agent templates are declared — nothing to assign");
-                    return RoutingKey::Handled(None);
-                }
-                self.host_roles_focus = true;
-                self.host_role_index = 0;
-                self.set_status("Roles · Space toggles · ← back to the host list");
+                self.open_agent_roles();
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('a') => {
                 self.routing_index = RP_ADD_HOST;
                 self.open_add_host_prompt();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('n') => {
+                self.new_agent_from_hosts();
                 RoutingKey::Handled(None)
             }
             KeyCode::Char('s') | KeyCode::Enter => {
@@ -128,16 +121,7 @@ impl App {
                 });
                 RoutingKey::Handled(cmd)
             }
-            KeyCode::Char('d') | KeyCode::Char('x') => {
-                let cmd = self.selected_host().map(|worker| {
-                    self.set_status(format!(
-                        "Removing {}",
-                        worker.label.as_deref().unwrap_or(&worker.address)
-                    ));
-                    Cmd::WorkerOp(WorkerOp::Remove { id: worker.id })
-                });
-                RoutingKey::Handled(cmd)
-            }
+            KeyCode::Char('d') | KeyCode::Char('x') => RoutingKey::Handled(self.remove_host_row()),
             KeyCode::Char('e') => {
                 if let Some(worker) = self.selected_host() {
                     let mut draft = Draft::new();
@@ -164,11 +148,103 @@ impl App {
         }
     }
 
-    /// Drive the selected host's role toggles.
+    /// Give the arrows to the selected agent's role toggles, or say why not.
     ///
-    /// `None` means the key was not a role-list key and the host roster should
-    /// see it — so `a`, `r`, `d` and the rest keep working without leaving the
-    /// preview first.
+    /// Roles belong to an *agent*, not to a machine — a laptop is not "the
+    /// reviewer", the agent working in the reviewed checkout is. So the toggles
+    /// open on an agent row only, and only where the declaration behind them can
+    /// be written: on a remote host they are that machine's to assign.
+    fn open_agent_roles(&mut self) {
+        let Some(agent) = self.selected_host_agent() else {
+            if self.selected_host_row().is_some() {
+                self.set_status("Select an agent (↑↓) to assign its roles");
+            }
+            return;
+        };
+        if !agent.editable {
+            let host = self
+                .selected_host_row()
+                .map(|host| host.label)
+                .unwrap_or_else(|| "that machine".into());
+            self.set_status(format!(
+                "{} is declared on {host} — assign its roles there",
+                agent.agent_id
+            ));
+            return;
+        }
+        if self.agent_templates().is_empty() {
+            self.set_status("No agent templates are declared — nothing to assign");
+            return;
+        }
+        self.host_roles_focus = true;
+        self.host_role_index = 0;
+        self.set_status("Roles · Space toggles · ← back to the list");
+    }
+
+    /// Point the operator at where an agent is created — and, on a remote host,
+    /// explain why it cannot be created from here.
+    ///
+    /// Declaring an agent is the Agents tab's flow (it needs the harness picker
+    /// and a workspace); this page owns the *capability*, which is why the key
+    /// answers on both kinds of host rather than being silently inert on one.
+    fn new_agent_from_hosts(&mut self) {
+        let Some(host) = self.selected_host_row() else {
+            return;
+        };
+        if !host.accepts_new_agents() {
+            self.set_status(format!(
+                "Agents are declared on {} itself — this end is read-only",
+                host.label
+            ));
+            return;
+        }
+        match crate::ui::app::TABS.iter().position(|tab| *tab == "Agents") {
+            Some(index) => {
+                self.tab_index = index;
+                self.set_status(format!("New agent on {} · pick a harness", host.label));
+            }
+            None => self.set_status("Declare a new agent from the Agents tab"),
+        }
+    }
+
+    /// Remove what the cursor is on: an agent, or a whole remote host.
+    ///
+    /// An agent this machine declared is *undeclared* first — dropping only the
+    /// roster entry would leave the declaration behind to re-create it at the
+    /// next launch, which reads as a removal that did not take.
+    fn remove_host_row(&mut self) -> Option<Cmd> {
+        // Both reads happen before the undeclare: removing a declaration
+        // reshapes the tree under the cursor, and resolving the roster entry
+        // afterwards would answer for whichever row slid into its place.
+        let agent = self.selected_host_agent();
+        let worker = self.selected_host();
+        // The removal key is reachable while the role toggles hold the arrows —
+        // `host_roles_key` passes `d`/`x` through. Leaving the focus on would
+        // point the next arrow at the roles of whichever row slid up into the
+        // cursor, which is not the agent whose toggles were open.
+        self.host_roles_focus = false;
+        let undeclared = self.undeclare_selected_agent();
+        match (agent, worker) {
+            // Declared, not running: the declaration was the whole of it.
+            (Some(_), None) => None,
+            (_, Some(worker)) => {
+                if !undeclared {
+                    self.set_status(format!(
+                        "Removing {}",
+                        worker.label.as_deref().unwrap_or(&worker.address)
+                    ));
+                }
+                Some(Cmd::WorkerOp(WorkerOp::Remove { id: worker.id }))
+            }
+            (None, None) => None,
+        }
+    }
+
+    /// Drive the selected agent's role toggles.
+    ///
+    /// `None` means the key was not a role-list key and the list should see it —
+    /// so `a`, `r`, `d` and the rest keep working without leaving the preview
+    /// first.
     fn host_roles_key(&mut self, code: KeyCode) -> Option<RoutingKey> {
         let templates = self.agent_templates();
         // The catalog can empty out under us (a template file is deleted, a
@@ -194,28 +270,12 @@ impl App {
                 Some(RoutingKey::Handled(None))
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
-                let host = self.selected_host()?;
                 let role = templates.get(self.host_role_index)?.id.clone();
-                // Whole-list replacement, so the toggle reads the current set,
-                // flips one entry, and sends the result. Roles ride the hub's
-                // descriptor, so this re-registers — the point is that the
-                // orchestrator starts routing this role here.
-                let mut roles = host.roles.clone();
-                let assigned = if let Some(at) = roles.iter().position(|held| held == &role) {
-                    roles.remove(at);
-                    false
-                } else {
-                    roles.push(role.clone());
-                    true
-                };
-                self.set_status(if assigned {
-                    format!("{} now offered for {role}", host.id)
-                } else {
-                    format!("{} no longer offered for {role}", host.id)
-                });
-                Some(RoutingKey::Handled(Some(Cmd::WorkerOp(
-                    WorkerOp::SetRoles { id: host.id, roles },
-                ))))
+                // Whole-list replacement written to the declaration first: the
+                // roster is rebuilt from declarations every launch, so a role
+                // set only on the live entry is one the operator watches take
+                // effect and then loses.
+                Some(RoutingKey::Handled(self.toggle_selected_agent_role(&role)))
             }
             _ => None,
         }

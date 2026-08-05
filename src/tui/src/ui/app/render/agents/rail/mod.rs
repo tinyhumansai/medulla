@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
+use super::super::super::rail::{RailRow, NEW_AGENT_LABEL, NEW_SESSION_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
@@ -89,19 +89,21 @@ impl App {
         let waiting_sessions = std::collections::HashSet::new();
         let now = medulla::clock::now_millis();
         match row {
-            RailRow::Harness(_) => [false, true]
-                .into_iter()
-                .flat_map(|active| {
-                    self.rail_row_lines(
-                        row,
-                        lanes,
-                        active,
-                        RAIL_MAX_CONTENT,
-                        &waiting_sessions,
-                        now,
-                    )
-                })
-                .collect(),
+            RailRow::Session(session) if session.local.is_some() && session.task.is_none() => {
+                [false, true]
+                    .into_iter()
+                    .flat_map(|active| {
+                        self.rail_row_lines(
+                            row,
+                            lanes,
+                            active,
+                            RAIL_MAX_CONTENT,
+                            &waiting_sessions,
+                            now,
+                        )
+                    })
+                    .collect()
+            }
             _ => self.rail_row_lines(row, lanes, false, RAIL_MAX_CONTENT, &waiting_sessions, now),
         }
     }
@@ -274,7 +276,34 @@ impl App {
         now: i64,
     ) -> Vec<TLine<'static>> {
         match row {
-            RailRow::Harness(session) => self.own_harness_lines(session, active, width, now),
+            // A session this device runs and no task describes is the operator's
+            // own: it gets the multi-line status-line treatment, because its
+            // working directory is the only thing telling two of them apart.
+            //
+            // A name goes above that rather than into it. The status line is
+            // configurable and describes the *harness*; the name is what the
+            // person who opened the session called it, and it is the first thing
+            // they look for.
+            RailRow::Session(session) if session.task.is_none() => {
+                let Some(local) = &session.local else {
+                    return Vec::new();
+                };
+                let mut lines = Vec::new();
+                if let Some(name) = session.name() {
+                    let style = if active {
+                        self.theme.selection()
+                    } else {
+                        Style::default().fg(color("cyan"))
+                    };
+                    lines.extend(wrap_line(
+                        &TLine::from(Span::styled(format!("  {name}"), style)),
+                        width,
+                        CONT_INDENT,
+                    ));
+                }
+                lines.extend(self.own_harness_lines(local, active, width, now));
+                lines
+            }
             other => wrap_line(
                 &self.rail_row_line(other, lanes, active, waiting_sessions, now),
                 width,
@@ -293,28 +322,86 @@ impl App {
         now: i64,
     ) -> TLine<'static> {
         match row {
-            RailRow::Agent(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
-            RailRow::NewHarness => self.new_harness_line(active),
-            RailRow::HarnessSeparator => TLine::from(Span::styled(
-                "── your sessions ──",
-                Style::default().add_modifier(Modifier::DIM),
+            RailRow::Lane(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
+            RailRow::Host(host) => TLine::from(Span::styled(
+                format!("▸ {}", host.label),
+                Style::default()
+                    .fg(color("blue"))
+                    .add_modifier(Modifier::BOLD),
             )),
-            // Only reached through `rail_row_lines`, which draws a harness over
-            // several lines; kept total so measurement can call either.
-            RailRow::Harness(row) => self
-                .own_harness_lines(row, active, RAIL_MAX_CONTENT, now)
-                .into_iter()
-                .next()
-                .unwrap_or_default(),
+            RailRow::Agent(agent) => {
+                self.declared_agent_line(agent, lanes, active, waiting_sessions)
+            }
+            RailRow::NewAgent => self.new_agent_line(active),
+            RailRow::NewSession { .. } => self.new_session_line(active),
+            RailRow::Session(session) => match (&session.task, &session.local) {
+                (Some(task), _) => self.agent_row_line(
+                    &crate::ui::agents::AgentRow::Sub {
+                        lane_index: session.lane_index.unwrap_or(0),
+                        task: task.clone(),
+                        last: session.last,
+                    },
+                    lanes,
+                    active,
+                    waiting_sessions,
+                ),
+                // Only reached through `rail_row_lines`, which draws a local
+                // session over several lines; kept total so measurement can call
+                // either.
+                (None, Some(local)) => self
+                    .own_harness_lines(local, active, RAIL_MAX_CONTENT, now)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default(),
+                (None, None) => TLine::from(""),
+            },
         }
     }
 
-    /// Format the `+ New session` action row.
+    /// Format an agent row.
+    ///
+    /// An agent with a lane keeps the lane's own line — its turn count, context
+    /// window, and live state are what an operator reads it for. A *declared*
+    /// agent with no traffic has none of that, so it says what it is instead:
+    /// its harness and the folder it works in, dimmed, because "declared and
+    /// idle" should not compete with the rows that are doing something.
+    fn declared_agent_line(
+        &self,
+        agent: &super::super::super::rail::AgentRailRow,
+        lanes: &[AgentLane],
+        active: bool,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> TLine<'static> {
+        if let Some(lane_index) = agent.lane_index {
+            return self.agent_row_line(
+                &crate::ui::agents::AgentRow::Lane { lane_index },
+                lanes,
+                active,
+                waiting_sessions,
+            );
+        }
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        };
+        let detail = match (agent.harness(), agent.workspace()) {
+            (Some(harness), Some(workspace)) => format!(
+                " · {harness} · {}",
+                crate::ui::util::clip_left(workspace, 24)
+            ),
+            (Some(harness), None) => format!(" · {harness}"),
+            _ => String::new(),
+        };
+        TLine::from(Span::styled(format!("○ {}{detail}", agent.label()), style))
+    }
+
+    /// Format the `+ New agent` action row.
     ///
     /// Drawn as a button rather than as another list entry — bold and coloured,
     /// with its chord beside it — because it is the one row on the rail that
     /// *does* something rather than selecting something.
-    fn new_harness_line(&self, active: bool) -> TLine<'static> {
+    fn new_agent_line(&self, active: bool) -> TLine<'static> {
         let style = if active {
             self.theme.selection()
         } else {
@@ -323,7 +410,26 @@ impl App {
                 .add_modifier(Modifier::BOLD)
         };
         TLine::from(vec![
-            Span::styled(format!(" {NEW_SESSION_LABEL} "), style),
+            Span::styled(format!(" {NEW_AGENT_LABEL} "), style),
+            Span::styled(" ⏎", Style::default().add_modifier(Modifier::DIM)),
+        ])
+    }
+
+    /// Format the `+ new session` action row that closes an agent's group.
+    ///
+    /// Drawn as the group's last leaf — the same `└` the last session would have
+    /// carried — so it reads as part of that agent rather than as a second
+    /// machine-level button beside `+ New agent`. It carries the `^T` hint the
+    /// machine-level button used to, because `Ctrl-T` on a row belonging to an
+    /// agent opens exactly this flow.
+    fn new_session_line(&self, active: bool) -> TLine<'static> {
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default().fg(color("cyan"))
+        };
+        TLine::from(vec![
+            Span::styled(format!("   └ {NEW_SESSION_LABEL}"), style),
             Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
         ])
     }

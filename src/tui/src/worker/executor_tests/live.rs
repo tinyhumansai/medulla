@@ -213,6 +213,7 @@ async fn experiment_codex_dialog_dismissal() {
     let id = sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin,
             cwd,
             env,
@@ -297,6 +298,7 @@ async fn experiment_codex_startup_dialog_dismissal() {
     let id = sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin,
             cwd,
             env,
@@ -372,6 +374,7 @@ async fn diagnose_codex_paste_rendering() {
     let id = sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin,
             cwd,
             env,

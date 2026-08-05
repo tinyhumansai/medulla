@@ -334,6 +334,16 @@ pub enum Cmd {
     Logout,
     /// Apply a worker fleet mutation.
     WorkerOp(WorkerOp),
+    /// Apply several fleet mutations as one operator action.
+    ///
+    /// Removing a *host* is the case this exists for: a host is a group of
+    /// roster entries sharing an address, and the registry has no host-level
+    /// op — so taking one out means taking each of its agents out. Carrying
+    /// them together keeps that one keypress one status line, rather than N
+    /// racing "Worker registry updated" messages for what the operator did
+    /// once. They are applied in order, and a failure reports the op it
+    /// stopped on instead of being swallowed by the next success.
+    WorkerOps(Vec<WorkerOp>),
     /// Start a host on this device now, and register it with the hub.
     ///
     /// Carries the declaration rather than only an index into config: the

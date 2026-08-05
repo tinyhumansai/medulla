@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use medulla::ui::hosts::{HostAgentRow, HostKind, HostRow};
 
@@ -42,12 +43,23 @@ impl App {
             let footer_rows = 1 + usize::from(self.snapshot.link.is_some()) * 2;
             let visible = usize::from(inner.height).saturating_sub(footer_rows).max(1);
             let start = crate::ui::selection::viewport_start(selected, rows.len(), visible);
+            // Measured over the whole tree, not the visible window: columns that
+            // resize as the list scrolls make the text appear to shift sideways
+            // under a cursor that only moved down.
+            let columns = Columns::measure(tree);
             for (index, row) in rows.iter().enumerate().skip(start).take(visible) {
                 let Some(host) = tree.get(row.host) else {
                     continue;
                 };
                 let (text, mut style) = match row.agent.and_then(|at| host.agents.get(at)) {
-                    Some(agent) => (agent_line(agent), agent_style(agent)),
+                    Some(agent) => (
+                        agent_line(
+                            agent,
+                            row.agent == Some(host.agents.len().saturating_sub(1)),
+                            &columns,
+                        ),
+                        agent_style(agent),
+                    ),
                     None => (host_line(host), host_style(host)),
                 };
                 if index == selected {
@@ -97,38 +109,156 @@ fn host_line(host: &HostRow) -> String {
     )
 }
 
+/// The width of each aligned column in the agent rows.
+///
+/// Measured across the *whole* tree rather than per host, which is the point:
+/// columns that restart under every header are not columns, and comparing two
+/// machines' agents means reading down a line rather than across a paragraph.
+#[derive(Debug, Clone, Copy)]
+struct Columns {
+    /// Width of the agent-id column.
+    id: usize,
+    /// Width of the harness column.
+    harness: usize,
+    /// Width of the workspace column.
+    workspace: usize,
+}
+
+/// Ceilings for the measured columns.
+///
+/// A single long id or a deep checkout path would otherwise set a width every
+/// other row pays for, pushing the columns that carry the most meaning — roles,
+/// and whether the agent is running at all — off a narrow terminal.
+const MAX_ID: usize = 26;
+const MAX_HARNESS: usize = 8;
+const MAX_WORKSPACE: usize = 32;
+
+impl Columns {
+    /// Measure the columns the tree needs, each capped.
+    fn measure(tree: &[HostRow]) -> Self {
+        let agents = || tree.iter().flat_map(|host| host.agents.iter());
+        Columns {
+            id: agents()
+                .map(|agent| inline_text(&agent.agent_id).width())
+                .max()
+                .unwrap_or(0)
+                .min(MAX_ID),
+            harness: agents()
+                .filter_map(|agent| agent.harness.as_deref())
+                .map(|harness| inline_text(&harness.to_uppercase()).width())
+                .max()
+                .unwrap_or(0)
+                .min(MAX_HARNESS),
+            workspace: agents()
+                .filter_map(|agent| agent.workspace.as_deref())
+                .map(|workspace| inline_text(workspace).width())
+                .max()
+                .unwrap_or(0)
+                .min(MAX_WORKSPACE),
+        }
+    }
+}
+
+/// Pad `value` out to `width`, truncating with `…` when it does not fit.
+///
+/// Measured in display columns, not bytes or `char`s: a CJK label is two
+/// columns wide, and padding it by character count is what makes one row's
+/// columns sit a cell to the left of every other row's.
+fn cell(value: &str, width: usize) -> String {
+    let have = value.width();
+    if have <= width {
+        return format!("{value}{}", " ".repeat(width - have));
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in value.chars() {
+        let w = c.to_string().width();
+        if used + w > width.saturating_sub(1) {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push('…');
+    format!("{out}{}", " ".repeat(width.saturating_sub(used + 1)))
+}
+
+/// Pad a path out to `width`, truncating from the *left* when it does not fit.
+///
+/// The tail of a checkout path is what identifies it — `…/medulla/src/tui`
+/// says which tree it is, `/Users/sanil/Projects/…` says only that it is one
+/// of many under the same parent.
+fn path_cell(value: &str, width: usize) -> String {
+    let have = value.width();
+    if have <= width {
+        return format!("{value}{}", " ".repeat(width - have));
+    }
+    let keep = width.saturating_sub(1);
+    let mut tail: Vec<char> = Vec::new();
+    let mut used = 0;
+    for c in value.chars().rev() {
+        let w = c.to_string().width();
+        if used + w > keep {
+            break;
+        }
+        tail.push(c);
+        used += w;
+    }
+    tail.reverse();
+    let tail: String = tail.into_iter().collect();
+    format!("…{tail}{}", " ".repeat(width.saturating_sub(used + 1)))
+}
+
 /// An agent under its host: the id a dispatch targets, its harness, where it
 /// works, and the roles it is offered for.
 ///
-/// Indented under the header, and marked when it is the manual default (`●`).
-/// A declared agent the roster has no entry for is flagged rather than hidden:
-/// it is why nothing is being dispatched to it.
-fn agent_line(agent: &HostAgentRow) -> String {
+/// Drawn as a branch of its host (`├─`, `└─` for the last one) with the fields
+/// in fixed columns, so the shape of the fleet is readable down the page rather
+/// than reconstructed from separators. Marked when it is the manual default
+/// (`●`). A declared agent the roster has no entry for is flagged rather than
+/// hidden: it is why nothing is being dispatched to it.
+fn agent_line(agent: &HostAgentRow, last: bool, columns: &Columns) -> String {
+    let branch = if last { "└─" } else { "├─" };
     let mark = if agent.selected { "●" } else { " " };
     let harness = agent
         .harness
         .as_deref()
-        .map(|value| format!(" · {}", inline_text(&value.to_uppercase())))
+        .map(|value| inline_text(&value.to_uppercase()))
         .unwrap_or_default();
     let workspace = agent
         .workspace
         .as_deref()
-        .map(|value| format!(" · {}", inline_text(value)))
+        .map(inline_text)
         .unwrap_or_default();
     let roles = match agent.roles.len() {
         0 => String::new(),
-        1 => " · 1 role".to_string(),
-        count => format!(" · {count} roles"),
+        1 => "1 role".to_string(),
+        count => format!("{count} roles"),
     };
     let state = match (agent.live, agent.declared) {
-        (false, _) => " · declared, not running",
-        (true, false) => " · undeclared",
+        (false, _) => "declared, not running",
+        (true, false) => "undeclared",
         (true, true) => "",
     };
+    // The trailing columns are joined rather than padded — nothing lines up
+    // after them, and padding the last cell only adds trailing blanks that
+    // widen the selection highlight past the text.
+    let tail: Vec<&str> = [roles.as_str(), state]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    let tail = match tail.is_empty() {
+        true => String::new(),
+        false => format!(" · {}", tail.join(" · ")),
+    };
     format!(
-        "   {mark} {}{harness}{workspace}{roles}{state}",
-        inline_text(&agent.agent_id)
+        "  {branch} {mark} {} {} {}{tail}",
+        cell(&inline_text(&agent.agent_id), columns.id),
+        cell(&harness, columns.harness),
+        path_cell(&workspace, columns.workspace),
     )
+    .trim_end()
+    .to_string()
 }
 
 /// A remote host reads dim: it is context, not something to act on.

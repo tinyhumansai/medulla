@@ -207,22 +207,31 @@ impl App {
         }
     }
 
-    /// Remove what the cursor is on: an agent, or a whole remote host.
+    /// Remove what the cursor is on: one agent, or the whole host it sits under.
     ///
     /// An agent this machine declared is *undeclared* first — dropping only the
     /// roster entry would leave the declaration behind to re-create it at the
     /// next launch, which reads as a removal that did not take.
     fn remove_host_row(&mut self) -> Option<Cmd> {
-        // Both reads happen before the undeclare: removing a declaration
-        // reshapes the tree under the cursor, and resolving the roster entry
-        // afterwards would answer for whichever row slid into its place.
-        let agent = self.selected_host_agent();
-        let worker = self.selected_host();
         // The removal key is reachable while the role toggles hold the arrows —
         // `host_roles_key` passes `d`/`x` through. Leaving the focus on would
         // point the next arrow at the roles of whichever row slid up into the
         // cursor, which is not the agent whose toggles were open.
         self.host_roles_focus = false;
+        // The row kind decides what is removed, and it has to be asked first.
+        // Falling through to the agent path on a host row used to resolve
+        // `selected_host()` to that host's `detail_worker` — whichever single
+        // entry happened to have probed the machine — so `d` on a host of three
+        // agents removed *one* of them and left the host standing. The cursor
+        // says host; the removal has to mean host.
+        if self.hosts_cursor_on_host() {
+            return self.remove_selected_host();
+        }
+        // Both reads happen before the undeclare: removing a declaration
+        // reshapes the tree under the cursor, and resolving the roster entry
+        // afterwards would answer for whichever row slid into its place.
+        let agent = self.selected_host_agent();
+        let worker = self.selected_host();
         let undeclared = self.undeclare_selected_agent();
         match (agent, worker) {
             // Declared, not running: the declaration was the whole of it.

@@ -500,3 +500,128 @@ fn a_host_this_device_does_not_serve_drops_out_unless_it_still_holds_something()
         "declared agents keep their host listed"
     );
 }
+
+/// Press `d` on whatever the cursor is on, and return the fleet mutation it
+/// asked for.
+fn press_delete(app: &mut App) -> Option<Cmd> {
+    app.on_event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('d'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    ))
+}
+
+/// The ids a fleet mutation removes, in order.
+fn removed_ids(cmd: Option<Cmd>) -> Vec<String> {
+    match cmd {
+        Some(Cmd::WorkerOp(medulla::runtime::WorkerOp::Remove { id })) => vec![id],
+        Some(Cmd::WorkerOps(ops)) => ops
+            .into_iter()
+            .map(|op| match op {
+                medulla::runtime::WorkerOp::Remove { id } => id,
+                other => panic!("expected only removals, got {other:?}"),
+            })
+            .collect(),
+        other => panic!("expected a removal, got {other:?}"),
+    }
+}
+
+#[test]
+fn deleting_a_host_takes_every_agent_on_it_not_just_the_one_that_probed_it() {
+    // Two agents on one remote machine. Before this was pointer-aware, `d` on
+    // the host row resolved to the host's `detail_worker` — a single entry —
+    // and removed that one agent while leaving the host and its sibling.
+    let (mut app, _dir) = app_with(
+        vec![worker("peer-claude", "7Kx"), worker("peer-codex", "7Kx")],
+        Vec::new(),
+    );
+    // Row 0 is the local host; row 1 is the remote host header.
+    cursor_to(&mut app, 1);
+    assert!(app.hosts_cursor_on_host(), "the cursor is on the host row");
+
+    let removed = removed_ids(press_delete(&mut app));
+    assert_eq!(
+        removed,
+        vec!["peer-claude".to_string(), "peer-codex".to_string()],
+        "both agents on the host go, not only the one that probed it"
+    );
+}
+
+#[test]
+fn deleting_an_agent_leaves_its_host_and_its_siblings_standing() {
+    let (mut app, _dir) = app_with(
+        vec![worker("peer-claude", "7Kx"), worker("peer-codex", "7Kx")],
+        Vec::new(),
+    );
+    // Row 2 is the first agent under the remote host.
+    cursor_to(&mut app, 2);
+    assert_eq!(
+        app.selected_host_agent().map(|agent| agent.agent_id),
+        Some("peer-claude".to_string())
+    );
+
+    assert_eq!(
+        removed_ids(press_delete(&mut app)),
+        vec!["peer-claude".to_string()],
+        "only the agent under the cursor"
+    );
+}
+
+#[test]
+fn deleting_a_declared_agent_by_its_host_row_undeclares_it_too() {
+    // A declaration is what re-creates an agent at the next launch, so removing
+    // the host has to drop it as well or the removal does not survive a restart.
+    let (mut app, _dir) = app_with(
+        vec![worker("peer-codex", "7Kx")],
+        vec![AgentDeclaration::new(
+            "peer-codex",
+            "7Kx",
+            "codex",
+            "/w/api",
+        )],
+    );
+    cursor_to(&mut app, 1);
+    assert!(app.hosts_cursor_on_host());
+
+    assert_eq!(
+        removed_ids(press_delete(&mut app)),
+        vec!["peer-codex".to_string()]
+    );
+    // Asserted on the list the app reads, not on the file: `app_with` seeds
+    // declarations in memory only, so a file assertion here would pass whether
+    // or not the removal happened.
+    assert!(
+        app.loaded.config.fleet.agent_declarations.is_empty(),
+        "the declaration went with the host"
+    );
+}
+
+#[test]
+fn the_device_you_are_typing_on_is_not_removable() {
+    // It is declared by `[host]` rather than by a removable entry, so it would
+    // be back at the next launch — and reporting a removal that does not last
+    // is worse than refusing.
+    let (mut app, _dir) = app_with(
+        vec![worker("medulla-claude", "this-device")],
+        vec![AgentDeclaration::new(
+            "medulla-claude",
+            "this-device",
+            "claude",
+            "/w/medulla",
+        )],
+    );
+    cursor_to(&mut app, 0);
+    assert!(app.hosts_cursor_on_host());
+    assert!(app.selected_host_is_local());
+
+    assert!(
+        press_delete(&mut app).is_none(),
+        "the local host asks for no fleet mutation"
+    );
+    assert_eq!(
+        app.loaded.config.fleet.agent_declarations.len(),
+        1,
+        "and it takes nothing down with it"
+    );
+}

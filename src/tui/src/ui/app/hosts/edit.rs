@@ -162,32 +162,113 @@ impl App {
         if !agent.declared || !agent.editable {
             return false;
         }
+        self.undeclare_agent_id(&agent.agent_id)
+    }
+    /// Remove the host under the cursor, and with it every agent this machine
+    /// declared on that host.
+    ///
+    /// A host is not a registry object — it is a group of agents that share an
+    /// address — so taking one out means undeclaring what this machine wrote
+    /// down for it *and* removing its roster entries. As with a single agent,
+    /// the checkouts those agents ran in are left alone.
+    ///
+    /// The primary local host is refused: it is the machine the operator is
+    /// typing on, it is declared by `[host]` rather than by a removable entry,
+    /// and it would be back at the next launch anyway.
+    ///
+    /// Returns the roster mutations to apply on top of the writes, or `None`
+    /// when there was nothing live to remove — in which case the declarations
+    /// were still dropped and the status says so.
+    pub(in crate::ui::app) fn remove_selected_host(&mut self) -> Option<Cmd> {
+        let host = self.selected_host_row()?;
+        if self
+            .local_host_refs()
+            .iter()
+            .any(|local| local.primary && local.id.trim() == host.id.trim())
+        {
+            self.set_status(format!(
+                "{} is this device — its agents can go, but the host itself cannot",
+                host.label
+            ));
+            return None;
+        }
+        // Resolved before anything is undeclared: dropping a declaration
+        // rebuilds the tree, and reading the roster afterwards would answer for
+        // whatever slid into this host's place — the same ordering rule
+        // `remove_host_row` follows for a single agent.
+        let workers = self.runtime.workers();
+        let ops: Vec<WorkerOp> = host
+            .agents
+            .iter()
+            .filter(|agent| agent.live)
+            // Trimmed on both sides, matching how the projection claimed the
+            // worker in the first place. Comparing raw would silently leave a
+            // padded id in the registry after its host row had gone.
+            .filter_map(|agent| {
+                workers
+                    .iter()
+                    .find(|worker| worker.id.trim() == agent.agent_id.trim())
+            })
+            .map(|worker| WorkerOp::Remove {
+                id: worker.id.clone(),
+            })
+            .collect();
+        let declared: Vec<String> = host
+            .agents
+            .iter()
+            .filter(|agent| agent.declared && agent.editable)
+            .map(|agent| agent.agent_id.clone())
+            .collect();
+        let undeclared = declared
+            .iter()
+            .filter(|agent_id| self.undeclare_agent_id(agent_id))
+            .count();
+        // Written last, over whatever the per-agent undeclares left behind:
+        // this was one keypress, so it gets one answer.
+        self.set_status(format!(
+            "Removed {} · {undeclared} declaration(s), {} roster entr{} · files untouched",
+            host.label,
+            ops.len(),
+            if ops.len() == 1 { "y" } else { "ies" }
+        ));
+        (!ops.is_empty()).then_some(Cmd::WorkerOps(ops))
+    }
+
+    /// Undeclare one agent by id, writing the shortened list to disk.
+    ///
+    /// The half of [`undeclare_selected_agent`](App::undeclare_selected_agent)
+    /// that does not depend on the cursor, so removing a whole host can reach it
+    /// per agent rather than by walking the selection over each row first.
+
+    /// Undeclare one agent by id, writing the shortened list to disk.
+    ///
+    /// The half of [`undeclare_selected_agent`](App::undeclare_selected_agent)
+    /// that does not depend on the cursor, so removing a whole host can reach it
+    /// per agent rather than by walking the selection over each row first.
+    fn undeclare_agent_id(&mut self, agent_id: &str) -> bool {
         let Some(path) = self.config_path.clone() else {
             // Same rule as a role edit: nowhere to write is not a refusal, it is
             // an edit that lasts one run — and the status is what keeps the
             // agent's return at the next launch from being a surprise.
             medulla::config::remove_agent_declaration(
                 &mut self.loaded.config.fleet.agent_declarations,
-                &agent.agent_id,
+                agent_id,
             );
             self.set_status(format!(
                 "Undeclared {} (this run only — no config file)",
-                agent.agent_id
+                agent_id
             ));
             return true;
         };
         let current = self.loaded.config.fleet.agent_declarations.clone();
-        match medulla::config::undeclare_agent(&path, &current, &agent.agent_id) {
+        match medulla::config::undeclare_agent(&path, &current, agent_id) {
             Ok(declarations) => {
                 self.loaded.config.fleet.agent_declarations = declarations;
-                self.set_status(format!(
-                    "Undeclared {} · its files are untouched",
-                    agent.agent_id
-                ));
+                self.set_status(format!("Undeclared {} · its files are untouched", agent_id));
                 true
             }
             Err(error) => {
-                self.set_status(format!("{} was not undeclared: {error}", agent.agent_id));
+                self.set_status(format!("{} was not undeclared: {error}", agent_id));
                 false
             }
         }

@@ -259,6 +259,37 @@ pub(super) fn run_cmd(
                 let _ = tx.send(AppMsg::Status(status));
             });
         }
+        Cmd::WorkerOps(ops) => {
+            let rt = runtime.clone();
+            let tx = msg_tx.clone();
+            tokio::spawn(async move {
+                let total = ops.len();
+                let mut applied = 0usize;
+                let mut failure = None;
+                for op in ops {
+                    // Stop at the first failure rather than pressing on. The
+                    // ops are one operator action, and continuing past a
+                    // refusal would half-remove a host — some agents gone, the
+                    // rest still routed to — which is the state hardest to
+                    // reason about from the screen.
+                    match rt.worker_op(op).await {
+                        Ok(()) => applied += 1,
+                        Err(e) => {
+                            failure = Some(e.to_string());
+                            break;
+                        }
+                    }
+                }
+                let status = match failure {
+                    None => "Worker registry updated".to_string(),
+                    Some(e) if applied == 0 => e,
+                    // Says what landed as well as what stopped it: the operator
+                    // is looking at a list that is now partly changed.
+                    Some(e) => format!("Removed {applied} of {total}, then: {e}"),
+                };
+                let _ = tx.send(AppMsg::Status(status));
+            });
+        }
         #[cfg(feature = "workflows")]
         Cmd::RunWorkflow { id, inputs } => {
             let custom_harnesses = local_hosts

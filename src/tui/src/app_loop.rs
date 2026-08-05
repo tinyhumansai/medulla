@@ -549,9 +549,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let declared_local_hosts = std::sync::Arc::new(std::sync::Mutex::new(
         crate::local_host::all_local_hosts(&loaded.config.host, &loaded.config.hosts),
     ));
-    // Only meaningful while this device hosts: with hosting off there is no bus
-    // binding or session manager to hand a new host.
-    let local_host_spawner = hosting
+    // Only meaningful while this device hosts: with hosting off there are no
+    // host options to read declared harnesses from.
+    let local_host_harnesses = hosting
         .then(|| {
             crate::local_host::options_from_config_with_custom_and_hooks(
                 &loaded.config.host,
@@ -566,18 +566,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 },
             )
             .ok()
-            .map(|options| {
-                crate::local_host::LocalHostSpawner::new(
-                    local_network.clone(),
-                    harness_sessions.clone(),
-                    options,
-                    env.clone(),
-                    host_runtimes.clone(),
-                    started_hosts.clone(),
-                    declared_local_hosts.clone(),
-                    loaded.config.fleet.agent_declarations.clone(),
-                )
-            })
+            .map(crate::local_host::LocalHostHarnesses::new)
         })
         .flatten();
     let local_dispatch = crate::hub_relay::LocalDispatch {
@@ -665,7 +654,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             &mut terminal,
             runtime.clone(),
             SessionWiring {
-                local_hosts: local_host_spawner.clone(),
+                local_hosts: local_host_harnesses.clone(),
                 loaded: loaded.clone(),
                 startup_status: status.take(),
                 link_obs: link_obs.clone(),

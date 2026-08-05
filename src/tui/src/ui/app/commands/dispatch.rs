@@ -158,7 +158,6 @@ impl App {
                 self.save_custom_harness(Some(&id), &text);
                 None
             }
-            PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
             PromptKind::RejectProposal {
                 workflow,
                 proposal_id,

@@ -68,7 +68,7 @@ pub(super) fn run_cmd(
     runtime: &Arc<dyn Runtime>,
     _workflows_config: &medulla::config::WorkflowsConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
-    local_hosts: Option<&crate::local_host::LocalHostSpawner>,
+    local_hosts: Option<&crate::local_host::LocalHostHarnesses>,
 ) {
     let cmd = match feedback::run_feedback_cmd(cmd, runtime, msg_tx) {
         Some(cmd) => *cmd,
@@ -187,63 +187,6 @@ pub(super) fn run_cmd(
                 let status = match rt.kill_task(worker, task_id.clone()).await {
                     Ok(()) => format!("Kill requested for {task_id}"),
                     Err(e) => format!("Cannot kill {task_id}: {e}"),
-                };
-                let _ = tx.send(AppMsg::Status(status));
-            });
-        }
-        Cmd::StartLocalHost { host, index } => {
-            let Some(spawner) = local_hosts.cloned() else {
-                let _ = msg_tx.send(AppMsg::Status(
-                    "This device is not hosting, so a local host cannot start here".to_string(),
-                ));
-                return;
-            };
-            let rt = runtime.clone();
-            let tx = msg_tx.clone();
-            tokio::spawn(async move {
-                // Start it first, register it second. A roster entry whose
-                // address nothing answers on is the failure this whole feature
-                // exists to avoid — the orchestrator would dispatch to it and
-                // the task would vanish.
-                let specs = match spawner.spawn(&host, index) {
-                    Ok(specs) => specs,
-                    Err(error) => {
-                        let _ =
-                            tx.send(AppMsg::Status(format!("Local host did not start: {error}")));
-                        return;
-                    }
-                };
-                // The host's first declared agent. The registry op below is
-                // keyed by address and replaces any entry sharing one, so
-                // registering the siblings here would leave exactly one anyway —
-                // a host added mid-run advertises its default agent until the
-                // add path is agent-keyed rather than address-keyed. Every agent
-                // is advertised on the next launch, where the roster is built
-                // from the declarations directly.
-                let Some(spec) = specs.into_iter().next() else {
-                    let _ = tx.send(AppMsg::Status(
-                        "Local host started, but declares no agent".to_string(),
-                    ));
-                    return;
-                };
-                let workspace = spec
-                    .workspace
-                    .as_ref()
-                    .map(|workspace| workspace.path.clone())
-                    .unwrap_or_default();
-                // Registered through the same op a remote add uses, so both
-                // kinds reach the roster by one path.
-                let status = match rt
-                    .worker_op(medulla::runtime::WorkerOp::Add {
-                        address: Some(spec.address.clone()),
-                        handle: None,
-                        label: Some(spec.name.clone()),
-                        harness: Some(spec.harness.clone()),
-                    })
-                    .await
-                {
-                    Ok(()) => format!("Local host running · {workspace}"),
-                    Err(e) => format!("Started, but not registered: {e}"),
                 };
                 let _ = tx.send(AppMsg::Status(status));
             });

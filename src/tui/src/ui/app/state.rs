@@ -74,7 +74,6 @@ impl App {
             agent_scroll: 0,
             chat_scroll: 0,
             command_index: 0,
-            add_host_provider_cache: std::cell::OnceCell::new(),
             host_index: 0,
             host_roles_focus: false,
             host_role_index: 0,
@@ -100,9 +99,6 @@ impl App {
             wf: Default::default(),
             #[cfg(feature = "workflows")]
             workflow_store_override: None,
-            add_host_kind: 0,
-            add_host_harness: 0,
-            add_host_kind_chosen: false,
             routing_index: 0,
             routing_focused: false,
             routing_strategy_index,

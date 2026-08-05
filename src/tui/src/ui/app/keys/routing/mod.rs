@@ -16,15 +16,6 @@ use super::super::types::{
 impl App {
     /// Handle Routing navigation and the active pane's actions.
     pub(super) fn on_routing_key(&mut self, code: KeyCode) -> RoutingKey {
-        // Claimed before the pane navigation, which treats Esc as "leave the
-        // content pane". Mid-wizard that is the wrong answer: a mis-picked kind
-        // should cost one step, not the whole page. Esc leaves the page as
-        // usual once the wizard is back at its first step.
-        if code == KeyCode::Esc && self.routing_index == RP_ADD_HOST && self.add_host_kind_chosen {
-            self.add_host_kind_chosen = false;
-            self.set_status("Choose a kind of host");
-            return RoutingKey::Handled(None);
-        }
         match multi_pane::navigate(
             code,
             ROUTING_SUBPAGES.len(),

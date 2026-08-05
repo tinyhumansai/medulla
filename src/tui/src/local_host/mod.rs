@@ -471,117 +471,25 @@ pub(crate) fn start(
     .map(Some)
 }
 
-/// Starts a host on this device after the app is already running.
+/// The custom harnesses this device's hosting configuration declares.
 ///
-/// Everything a host needs to exist — the in-process bus, the session manager,
-/// the daemon options — is built once at launch and owned by the app loop. A
-/// host declared later has no way to reach any of it, which is why adding one
-/// used to mean restarting. This carries exactly those pieces to wherever the
-/// command is handled.
+/// What is left of a larger type. It used to start a host on this device after
+/// launch, for the Add Host wizard's "local" kind — a harness plus a directory,
+/// which is what an *agent* is now, declared from the host tree instead. Only
+/// one reader outlived that: a workflow's `agent` step may name a custom
+/// harness, and it resolves the name against this list.
 ///
-/// Cheap to clone: every field is already shared.
+/// Cheap to clone: the options behind it are already shared.
 #[derive(Clone)]
-pub(crate) struct LocalHostSpawner {
-    /// The bus the hub dispatches over.
-    network: LocalBridgeNetwork,
-    /// The session manager the UI reads screens from and types into. Shared, so
-    /// a host started now is as watchable as one started at launch.
-    sessions: PtyManager,
-    /// The primary's options, used as the template every extra inherits.
+pub(crate) struct LocalHostHarnesses {
+    /// The primary host's options, which carry the declared custom harnesses.
     options: EmbeddedDaemonOptions,
-    /// The process environment, for provider detection and the host switch.
-    env: HashMap<String, String>,
-    /// The runtimes the harness pane resolves tasks against. A new host's
-    /// runtime is pushed here or its screen would never be found.
-    runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
-    /// The started hosts, kept alive for the session. Dropping a `LocalHost`
-    /// stops it, so a spawner that did not hold them would start a host and
-    /// immediately kill it.
-    started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
-    /// The agent declarations a newly started host reads its roster entries
-    /// from. Carried rather than re-read so a host started now and one started
-    /// at launch are built from the same list.
-    declared: Vec<AgentDeclaration>,
-    /// Every host this device declares, shared with the hub's roster filter and
-    /// its `hosts[]` advert. A host bound here must be appended or the roster
-    /// sink will persist it as a remote entry — and the hub will advertise its
-    /// agents as running on somebody else's machine.
-    local_hosts: medulla::hub::SharedLocalHosts,
 }
 
-impl LocalHostSpawner {
-    /// Build a spawner over the pieces the app loop owns.
-    ///
-    /// Long by construction: every argument is a distinct piece of process-wide
-    /// state the app loop owns and a host started later has no other way to
-    /// reach. Grouping them into a struct would only rename the same list.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        network: LocalBridgeNetwork,
-        sessions: PtyManager,
-        options: EmbeddedDaemonOptions,
-        env: HashMap<String, String>,
-        runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
-        started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
-        local_hosts: medulla::hub::SharedLocalHosts,
-        declared: Vec<AgentDeclaration>,
-    ) -> Self {
-        Self {
-            network,
-            sessions,
-            options,
-            env,
-            runtimes,
-            started,
-            local_hosts,
-            declared,
-        }
-    }
-
-    /// Start `config` now and return the roster entries describing its declared
-    /// agents — one per agent, so a host is registered as everything it runs
-    /// rather than as one entry standing in for all of them.
-    ///
-    /// `index` is the entry's position within `[[hosts]]`, which is the basis
-    /// [`all_local_hosts`] and [`start_all`] derive an unnamed host's address
-    /// from. It is passed in rather than counted here for exactly that reason:
-    /// counting *started* hosts includes the primary, so a first unnamed extra
-    /// bound `local-host-2` this run and `local-host-1` on the next launch —
-    /// an address the roster remembered that nothing would ever bind again.
-    pub(crate) fn spawn(
-        &self,
-        config: &HostSection,
-        index: usize,
-    ) -> Result<Vec<WorkerSpec>, String> {
-        let host = start_at(
-            config,
-            &self.env,
-            &self.network,
-            extra_options(&self.options, config)?,
-            self.sessions.clone(),
-            extra_host_address(config, index),
-            false,
-            &self.declared,
-        )?;
-        let specs = host.specs().to_vec();
-        // Before the roster entry exists, so the hub's save filter and its
-        // `hosts[]` advert both already know this address is device-local by the
-        // time registration triggers one.
-        self.local_hosts
-            .lock()
-            .expect("local hosts")
-            .push(medulla::config::LocalHostRef {
-                id: host.address().to_string(),
-                name: display_name(config, host.workspace(), false),
-                workspace: host.workspace().to_string(),
-                primary: false,
-            });
-        self.runtimes
-            .lock()
-            .expect("local harness runtimes")
-            .push(host.runtime());
-        self.started.lock().expect("started hosts").push(host);
-        Ok(specs)
+impl LocalHostHarnesses {
+    /// Hold a host's options for the sake of the harnesses they declare.
+    pub(crate) fn new(options: EmbeddedDaemonOptions) -> Self {
+        Self { options }
     }
 
     /// The custom-harness presets this device's primary host was started with.

@@ -239,12 +239,6 @@ impl App {
     /// The half of [`undeclare_selected_agent`](App::undeclare_selected_agent)
     /// that does not depend on the cursor, so removing a whole host can reach it
     /// per agent rather than by walking the selection over each row first.
-
-    /// Undeclare one agent by id, writing the shortened list to disk.
-    ///
-    /// The half of [`undeclare_selected_agent`](App::undeclare_selected_agent)
-    /// that does not depend on the cursor, so removing a whole host can reach it
-    /// per agent rather than by walking the selection over each row first.
     fn undeclare_agent_id(&mut self, agent_id: &str) -> bool {
         let Some(path) = self.config_path.clone() else {
             // Same rule as a role edit: nowhere to write is not a refusal, it is

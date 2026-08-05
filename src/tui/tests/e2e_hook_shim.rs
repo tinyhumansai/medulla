@@ -22,7 +22,9 @@ use medulla::harness_hooks::{HookEvent, HookEventLog};
 /// Bind a control server on a scratch socket, with `log` as its hook sink.
 async fn serve(dir: &std::path::Path, log: HookEventLog) -> (ControlServer, String) {
     let grants = GrantRegistry::new();
-    let token = grants.mint(Grant::new("pty-under-test", 0, 2));
+    // The credential a launched harness's built-in hooks actually get: see
+    // `medulla::mcp::attach::local_hook_grant`.
+    let token = grants.mint(Grant::hook_only("pty-under-test"));
     let ops = Arc::new(
         HubFleetOps::new(
             Default::default(),
@@ -48,8 +50,8 @@ fn run_shim(
 ) -> std::process::ExitStatus {
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
         .args(["hook", event])
-        .env("MEDULLA_MCP_SOCKET", socket)
-        .env("MEDULLA_MCP_GRANT", token)
+        .env("MEDULLA_HOOK_SOCKET", socket)
+        .env("MEDULLA_HOOK_GRANT", token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -119,8 +121,8 @@ async fn a_harness_with_no_medulla_to_report_to_still_succeeds() {
     // costing the turn anything.
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
         .args(["hook", "Stop"])
-        .env_remove("MEDULLA_MCP_SOCKET")
-        .env_remove("MEDULLA_MCP_GRANT")
+        .env_remove("MEDULLA_HOOK_SOCKET")
+        .env_remove("MEDULLA_HOOK_GRANT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

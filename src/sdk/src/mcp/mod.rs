@@ -54,7 +54,8 @@ mod types;
 mod tests;
 
 pub use attach::{
-    attach_cli, config_dir_for_socket, revoke_session, sweep_stale_config_files, ServerSpec,
+    attach_cli, config_dir_for_socket, local_hook_grant, revoke_session, sweep_stale_config_files,
+    ServerSpec,
 };
 pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{

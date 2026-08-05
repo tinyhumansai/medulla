@@ -341,6 +341,25 @@ pub const MCP_SOCKET_ENV: &str = "MEDULLA_MCP_SOCKET";
 /// permissions, only present one that means nothing.
 pub const MCP_GRANT_ENV: &str = "MEDULLA_MCP_GRANT";
 
+/// Environment variable naming the control socket a launched harness's
+/// built-in hook commands may reach.
+///
+/// Unlike [`MCP_SOCKET_ENV`], this is written straight into the harness's own
+/// environment — see `medulla::mcp::attach::attach_mcp` in the `medulla-tui`
+/// crate — because there is no per-hook `env` block in either harness's hook
+/// configuration to keep it off the environment every other child of the
+/// harness inherits, the way the MCP registration's `secret_env` does. Safe
+/// only because the token it names is minted with
+/// [`super::grants::Grant::hook_only`], which carries no authority beyond
+/// attributing a report to its own session.
+pub const HOOK_SOCKET_ENV: &str = "MEDULLA_HOOK_SOCKET";
+
+/// Environment variable carrying the hook-only grant token for that socket.
+///
+/// See [`HOOK_SOCKET_ENV`] for why this is a plain environment variable rather
+/// than following the fleet grant's file-based handoff.
+pub const HOOK_GRANT_ENV: &str = "MEDULLA_HOOK_GRANT";
+
 /// Internal handoff naming the parent control socket for a nested ACP session.
 ///
 /// Unlike [`MCP_SOCKET_ENV`], this is never attached to the MCP subprocess. It
@@ -375,12 +394,34 @@ pub fn depth_from_env(env: &HashMap<String, String>) -> u8 {
 /// `None` whenever either is missing, which is the ordinary state for a harness
 /// running on a remote worker or on a host with fleet tools turned off.
 pub fn grant_from_env(env: &HashMap<String, String>) -> Option<(std::path::PathBuf, String)> {
+    socket_and_token(env, MCP_SOCKET_ENV, MCP_GRANT_ENV)
+}
+
+/// Read the hook-only socket and grant a spawn's *hook commands* were handed,
+/// if they were handed any.
+///
+/// `None` for the same reasons [`grant_from_env`] is: no control plane bound
+/// on this host, or a harness running somewhere this env was never set. Kept
+/// distinct from [`grant_from_env`] because the two name different
+/// credentials over different environment variables — see [`HOOK_SOCKET_ENV`]
+/// for why the hook grant reaches the harness this way at all.
+pub fn hook_grant_from_env(env: &HashMap<String, String>) -> Option<(std::path::PathBuf, String)> {
+    socket_and_token(env, HOOK_SOCKET_ENV, HOOK_GRANT_ENV)
+}
+
+/// Read a socket path and token from `env` under `socket_key`/`token_key`,
+/// `None` when either is missing or blank.
+fn socket_and_token(
+    env: &HashMap<String, String>,
+    socket_key: &str,
+    token_key: &str,
+) -> Option<(std::path::PathBuf, String)> {
     let socket = env
-        .get(MCP_SOCKET_ENV)
+        .get(socket_key)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())?;
     let token = env
-        .get(MCP_GRANT_ENV)
+        .get(token_key)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())?;
     Some((std::path::PathBuf::from(socket), token.to_string()))

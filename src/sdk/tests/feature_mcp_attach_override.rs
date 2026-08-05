@@ -241,3 +241,26 @@ fn naming_the_default_binary_via_the_override_key_logs_nothing() {
     );
     medulla::mcp::revoke_session(granted.as_deref().unwrap());
 }
+
+/// The P1 Codex found on this branch: a hook shim needs a real grant to
+/// report with, and — unlike the fleet grant — withholding it from an
+/// overridden binary would leave every hook Medulla installs unable to
+/// report, since the override withholding exists to protect fleet
+/// capability that a hook-only grant never carries. See
+/// `medulla::mcp::attach::local_hook_grant`.
+#[test]
+fn a_hook_only_grant_is_minted_even_for_an_overridden_binary() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    // `attach_cli` withholds the fleet grant here — proven above by
+    // `an_overridden_provider_binary_gets_no_fleet_grant` — but the hook-only
+    // grant this test mints is independent of that decision.
+    let (socket, token) = medulla::mcp::local_hook_grant("hook-only-override-test-session").expect(
+        "a hook-only grant must be minted whenever a control plane is bound, \
+             regardless of any provider-binary override",
+    );
+    assert_eq!(socket, PathBuf::from("/run/medulla-test.sock"));
+    assert!(!token.is_empty());
+    medulla::mcp::revoke_session("hook-only-override-test-session");
+}

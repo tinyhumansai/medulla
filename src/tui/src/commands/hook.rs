@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use medulla::control_socket::grant_from_env;
+use medulla::control_socket::hook_grant_from_env;
 use medulla::harness_hooks::HookEvent;
 
 /// The whole shim's budget, from process start to exit.
@@ -55,10 +55,13 @@ pub(crate) async fn run_hook_cmd(args: &[String], env: &HashMap<String, String>)
         return;
     };
     let payload = read_payload();
-    // Both are set together by the spawn that minted this session's grant;
-    // neither present means this harness was not launched with a control plane
-    // to report to, which is a normal way to run and not an error.
-    let Some((socket, token)) = grant_from_env(env) else {
+    // Both are set together by the spawn that minted this session's hook-only
+    // grant (see `medulla::mcp::attach::attach_mcp`'s doc comment for why this
+    // is a plain environment variable, unlike the fleet grant the `medulla
+    // mcp` subprocess gets); neither present means this harness was not
+    // launched with a control plane to report to, which is a normal way to
+    // run and not an error.
+    let Some((socket, token)) = hook_grant_from_env(env) else {
         return;
     };
 

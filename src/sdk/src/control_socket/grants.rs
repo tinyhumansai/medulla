@@ -44,6 +44,20 @@ pub struct Grant {
     /// wire value so a reviewer cannot escape its read-only boundary by asking
     /// another fleet worker to continue the review.
     pub tool_mode: Option<String>,
+    /// Whether this grant is restricted to the one op that carries no
+    /// authority at all: `hook.report`.
+    ///
+    /// Set for the credential handed to a launched harness's *native* hook
+    /// commands (see `medulla::mcp::attach` and the `medulla hook` shim in the
+    /// `medulla-tui` crate), which — unlike the fleet grant the MCP subprocess
+    /// gets — is written straight into the harness's own environment and so is
+    /// inherited by every subprocess the harness starts, including a shell
+    /// command the model runs. That is exactly the leak the fleet grant's
+    /// module docs describe and refuse; it is safe only because a grant with
+    /// this flag set can attribute a fabricated lifecycle line to its own
+    /// session and nothing more — see the control socket's request dispatch,
+    /// which refuses every other op for it.
+    pub hook_only: bool,
 }
 
 impl Grant {
@@ -56,6 +70,21 @@ impl Grant {
             families: ToolFamilies::default(),
             max_in_flight: 4,
             tool_mode: None,
+            hook_only: false,
+        }
+    }
+
+    /// A grant good for nothing but filing hook reports under `session`.
+    ///
+    /// Depth, family, and in-flight limits are meaningless for it — dispatch
+    /// and every other op are refused by [`Self::hook_only`] before any of
+    /// those fields are consulted — so they are left at harmless defaults
+    /// rather than given values that imply a capability this grant does not
+    /// carry.
+    pub fn hook_only(session: impl Into<String>) -> Self {
+        Grant {
+            hook_only: true,
+            ..Grant::new(session, 0, 0)
         }
     }
 

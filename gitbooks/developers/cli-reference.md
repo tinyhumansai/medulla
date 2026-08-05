@@ -85,11 +85,11 @@ service process, and a non-terminal launch selects headless automatically. The
 operator UI opens by asking two things before it listens for work: an execution
 mode (Interactive holds live, watchable harness sessions; Headless launches one
 process per task and shows logs) and a default harness from the providers
-detected on `PATH`. It then presents four tabs — **Agents** (live sessions with
+detected on `PATH`. It then presents three tabs — **Agents** (live sessions with
 an embedded PTY you can attach to or take over), **Master** (the worker address,
-saved masters, and operator messages), **Workspaces** (the canonicalized roots
-the worker may advertise), and **Requests** (pending contact requests to accept,
-decline, or block).
+saved masters, and operator messages), and **Workspaces** (the canonicalized
+roots the worker may advertise). There is no approval queue: enrollment is the
+whole admission decision.
 
 The daemon creates and stores a worker-level link identity locally; it does
 not need the master's backend token. Mode, harness, workspace, and master

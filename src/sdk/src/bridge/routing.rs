@@ -115,13 +115,6 @@ impl Bridge for RoutingBridge {
         }
     }
 
-    async fn request_contact(&self, peer: &str) -> Result<(), String> {
-        if self.is_local(peer).await {
-            return self.local.request_contact(peer).await;
-        }
-        self.require_remote(peer)?.request_contact(peer).await
-    }
-
     async fn resolve_handle(&self, name: &str) -> Option<String> {
         if let Some(address) = self.local.resolve_handle(name).await {
             return Some(address);
@@ -172,16 +165,6 @@ impl Bridge for RoutingBridge {
         match &self.remote {
             Some(remote) => remote.liveness(peer).await,
             None => BridgeLiveness::Live,
-        }
-    }
-
-    async fn contact_accepted(&self, peer: &str) -> bool {
-        if self.is_local(peer).await {
-            return true;
-        }
-        match &self.remote {
-            Some(remote) => remote.contact_accepted(peer).await,
-            None => false,
         }
     }
 

@@ -135,14 +135,18 @@ sit alongside Medulla's model and harness routing.
 
 ### Admitting a peer
 
-A worker is a machine reachable over the host link, so
-who may send it work is a real security decision, not a formality. The link
-refuses direct messages between peers that are not accepted contacts, which means
-accepting a contact is exactly what grants that peer the ability to hand your
-machine work. The default posture is manual review: incoming requests collect in
-a pending queue for you to accept, decline, or block, and blocking — being
-destructive — asks for confirmation. A relay hiccup surfaces as poller health
-rather than quietly emptying the queue.
+A worker is a machine reachable over the host link, so who may send it work is a
+real security decision, not a formality. **Enrollment is that decision, and it is
+the only one.** The pair key is generated on the orchestrator, carried to the
+host by hand, and stored in `<stateDir>/node.json`; a peer holding it may hand
+your machine work, and a peer without it cannot be addressed at all.
+
+There is no second approval step — no pending queue, no accept/decline/block.
+That model came from the tiny.place relay, which refused messages between peers
+that were not accepted contacts, so a contact edge had to be requested and
+granted on top of the transport. The host link has no such rule: it carries a
+datagram to whoever holds the matching key, so admission happens once, when you
+enroll the peer, and revocation means removing the key.
 
 ### How work reaches them
 

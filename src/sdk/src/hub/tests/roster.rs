@@ -308,28 +308,6 @@ fn address_of_prefers_the_selected_worker_over_the_first() {
     assert_eq!(address_of(&workers, "unknown"), None);
 }
 
-#[test]
-fn adding_a_peer_requests_contact_unless_it_is_already_one() {
-    use super::super::handle::should_request_contact;
-
-    assert!(
-        should_request_contact("peer-address", false),
-        "a new peer must be asked"
-    );
-    assert!(
-        should_request_contact("peer-address", false),
-        "and a duplicate re-asked, which is how a missed request is retried"
-    );
-    assert!(
-        !should_request_contact("peer-address", true),
-        "an accepted contact has nothing left to ask for"
-    );
-    assert!(
-        !should_request_contact("", false),
-        "a worker with no address has nobody to ask"
-    );
-}
-
 // ------------------------------------------------------------- roster dedupe ---
 
 fn hw(id: &str, address: &str) -> HubWorker {
@@ -423,7 +401,7 @@ fn an_implausible_address_is_refused_before_it_reaches_the_relay() {
     use super::super::handle::is_plausible_address;
 
     // A stray `>` was accepted as a worker address, registered in the roster,
-    // and had a contact request sent to it. Nothing downstream can tell that
+    // and registered as a worker. Nothing downstream can tell that
     // from a real peer that simply never replies.
     assert!(!is_plausible_address(">"));
     assert!(!is_plausible_address(""));

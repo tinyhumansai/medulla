@@ -246,6 +246,14 @@ pub struct SessionRow {
     /// [`SessionRow::control`]: taking a dispatched session does not make it
     /// yours to have started.
     pub origin: SessionOrigin,
+    /// Whether the task this session served has finished and the session is
+    /// being kept standing for the operator to read.
+    ///
+    /// Orthogonal to [`control`](SessionRow::control), which still says
+    /// `Orchestrator`: nobody has taken it, and reading it as taken would make
+    /// it hold the checkout against every task queued behind it. Cleared the
+    /// moment the operator does take it.
+    pub retained: bool,
     /// The name the operator gave it when they started it, if they gave one.
     ///
     /// `None` for a dispatched session; the UI labels those from their task.

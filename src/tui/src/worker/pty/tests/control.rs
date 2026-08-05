@@ -57,6 +57,88 @@ fn handing_a_session_back_makes_it_claimable() {
 }
 
 #[test]
+fn a_retained_session_is_never_dispatched_into() {
+    // A retained session is a finished task's, kept on screen. Reusing it would
+    // put the next task's prompt under a conversation that has already
+    // concluded — and would do it to a transcript the operator is reading.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+    // A task-opened session is born busy — it exists for the turn about to run.
+    // Freeing it first is what makes the assertion below about retention rather
+    // than about the claim it was already holding.
+    manager.release(&id);
+    assert!(
+        manager.claim_idle("test", HarnessProvider::Codex).is_some(),
+        "precondition: this session is claimable before it is retained"
+    );
+    manager.release(&id);
+
+    assert!(manager.retain(&id));
+    assert_eq!(
+        manager.claim_idle("test", HarnessProvider::Codex),
+        None,
+        "a retained session was offered to the orchestrator"
+    );
+
+    manager.close(&id);
+}
+
+#[test]
+fn a_retained_session_says_so_on_its_row() {
+    // The rail decides what to draw from the row, so retention that never
+    // reaches one is retention nothing can show.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+    assert!(!manager.row(&id).expect("row").retained);
+
+    manager.retain(&id);
+    let row = manager.row(&id).expect("row");
+    assert!(row.retained);
+    assert_eq!(
+        row.control,
+        SessionControl::Orchestrator,
+        "retention must not read as a takeover — `checkout_writer` counts \
+         user-held sessions as holding the checkout, and one that never lets go \
+         would queue every task dispatched into that directory afterwards"
+    );
+
+    manager.close(&id);
+}
+
+#[test]
+fn taking_a_retained_session_makes_it_the_operators() {
+    // Retention ends the moment someone takes the session: it stops being the
+    // leftover screen of finished work and becomes a place a person is typing.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    wait_for("session running", || {
+        manager.row(&id).is_some_and(|r| r.state.is_running())
+    });
+    manager.retain(&id);
+
+    assert!(manager.set_control(&id, SessionControl::User));
+    let row = manager.row(&id).expect("row");
+    assert!(!row.retained, "taking it should clear the retention");
+    assert_eq!(row.control, SessionControl::User);
+
+    manager.close(&id);
+}
+
+#[test]
+fn retaining_a_session_that_is_gone_is_not_an_error() {
+    // Same contract as `close`: the caller cannot tell "retained" from "already
+    // gone" by anything but the return value.
+    let manager = PtyManager::new();
+    assert!(!manager.retain("w_missing"));
+}
+
+#[test]
 fn handed_back_operator_session_adopts_the_first_real_conversation() {
     let manager = PtyManager::new();
     let mut spec = user_sh("sleep 30");

@@ -1084,6 +1084,12 @@ pub struct App {
     // which goes on believing the button is still down and misplaces everything
     // it draws in response to the pointer afterwards.
     pub(super) harness_pointer_grab: Option<PointerGrab>,
+    // Where the hand-back question drew each of its answers, and the key each
+    // one stands for. Recorded during the draw so a click can be answered by
+    // replaying the keystroke rather than by a second copy of the routing: the
+    // two would drift, and the direction they would drift in is a pointer that
+    // hands a harness back when the operator meant to keep it.
+    pub(super) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
     // The harness selected on the Agents rail, retained while another tab is
     // visible. Unlike `harness_pane_session`, this is navigation state rather
     // than a keyboard-routing capability: Changes uses it to keep following

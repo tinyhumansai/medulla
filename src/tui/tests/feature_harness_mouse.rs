@@ -223,6 +223,22 @@ fn attach_to_first_harness(app: &mut App) -> String {
     session
 }
 
+/// Where an answer's label starts on the hand-back question's answer line.
+///
+/// Found by searching the drawn frame rather than by recomputing the layout, so
+/// the tests click what an operator would actually be aiming at.
+fn answer_at(lines: &[String], label: &str) -> (u16, u16) {
+    for (row, line) in lines.iter().enumerate() {
+        if let Some(byte) = line.find(label) {
+            // Cells, not bytes: the frame is full of box-drawing characters, so
+            // a byte offset would point well to the right of the label.
+            let column = line[..byte].chars().count() as u16;
+            return (column, row as u16);
+        }
+    }
+    panic!("no answer {label:?} on screen:\n{}", lines.join("\n"));
+}
+
 /// The rows a harness occupies on the rail, top to bottom.
 fn harness_rail_rows(lines: &[String]) -> Vec<u16> {
     lines
@@ -427,6 +443,120 @@ fn clicking_the_attached_harness_own_row_neither_asks_nor_releases() {
         harnesses.control(&attached),
         Some(HarnessControl::User),
         "and must not change who holds the harness"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn the_handback_question_is_answered_by_clicking_its_answers() {
+    // The question is the one overlay a click can raise, so it is the one an
+    // operator reaches with their hand already on the mouse. Each answer is a
+    // target spanning its own label, and clicking it does exactly what pressing
+    // the key in the bracket does.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = mouse_reporting_session(&sessions);
+    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    wait_for("the child to paint", || {
+        screen(&harnesses, &id).contains("READY")
+    });
+
+    let attached = attach_to_first_harness(&mut app);
+    let _ = app.on_event(press(3, 1));
+    let lines = render(&mut app);
+    assert!(
+        lines.join("\n").contains("You still have this harness"),
+        "the question must be up before it can be clicked"
+    );
+
+    // [E] opens the note field without answering the question.
+    let (x, y) = answer_at(&lines, "[E] add a note");
+    let _ = app.on_event(press(x + 1, y));
+    let lines = render(&mut app);
+    assert!(
+        lines.join("\n").contains("Note: █"),
+        "clicking [E] must start the note: {}",
+        lines.join("\n")
+    );
+    assert_eq!(
+        harnesses.control(&attached),
+        Some(HarnessControl::User),
+        "and must not answer the question on the way"
+    );
+
+    // [Esc] on the note line goes back to the question, still unanswered.
+    let (x, y) = answer_at(&lines, "[Esc] back to the question");
+    let _ = app.on_event(press(x + 1, y));
+    let lines = render(&mut app);
+    assert!(
+        lines.join("\n").contains("[Y] hand back"),
+        "clicking [Esc] must return to the answers: {}",
+        lines.join("\n")
+    );
+
+    // [Y] hands the harness back, exactly as the key does.
+    let (x, y) = answer_at(&lines, "[Y] hand back");
+    let _ = app.on_event(press(x + 1, y));
+    assert_eq!(
+        harnesses.control(&attached),
+        Some(HarnessControl::Orchestrator),
+        "clicking [Y] must hand the harness back"
+    );
+    assert_eq!(app.attached_harness(), None, "and release the keyboard");
+    assert!(
+        !render(&mut app)
+            .join("\n")
+            .contains("You still have this harness"),
+        "and close the question"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
+    // The rest of the modal still swallows the pointer. The failure this guards
+    // is the one that would follow from answering and then falling through: a
+    // click that both closed the question and landed on the rail behind it.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = mouse_reporting_session(&sessions);
+    let harnesses = app.local_harnesses().expect("harnesses").clone();
+    wait_for("the child to paint", || {
+        screen(&harnesses, &id).contains("READY")
+    });
+
+    let attached = attach_to_first_harness(&mut app);
+    let _ = app.on_event(press(3, 1));
+    let lines = render(&mut app);
+
+    // The prose line above the answers is not a target.
+    let (x, y) = answer_at(&lines, "While you hold it");
+    let _ = app.on_event(press(x + 2, y));
+    let out = render(&mut app).join("\n");
+    assert!(
+        out.contains("You still have this harness"),
+        "a click on the body must leave the question up: {out}"
+    );
+    assert_eq!(
+        harnesses.control(&attached),
+        Some(HarnessControl::User),
+        "and must answer nothing"
+    );
+
+    // Nor is the separator between two answers.
+    let (x, y) = answer_at(&lines, "[Y] hand back");
+    let _ = app.on_event(press(x + "[Y] hand back".chars().count() as u16 + 1, y));
+    let out = render(&mut app).join("\n");
+    assert!(
+        out.contains("You still have this harness"),
+        "a click between answers must leave the question up: {out}"
+    );
+    assert_eq!(
+        harnesses.control(&attached),
+        Some(HarnessControl::User),
+        "and must answer nothing"
     );
 
     sessions.shutdown();

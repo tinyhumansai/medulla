@@ -55,6 +55,29 @@ impl App {
         if self.deliver_pointer_grab(&m) {
             return None;
         }
+        // The hand-back question's answers are click targets. It is the one
+        // overlay a click can raise, so it is the one an operator arrives at
+        // with their hand already on the mouse — being made to reach for the
+        // keyboard to answer a question the pointer just asked is the friction
+        // that makes the modal feel broken.
+        if self.handback_prompt.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+                if let Some(key) = self
+                    .hit_handback
+                    .iter()
+                    .find(|(rect, _)| rect.contains((m.column, m.row).into()))
+                    .map(|(_, key)| *key)
+                {
+                    self.handle_handback_key(key);
+                    // Returned from here rather than falling through: answering
+                    // can close the question, and the swallow below would then
+                    // see no modal and let the very same click carry on into
+                    // the rail underneath it.
+                    return None;
+                }
+            }
+            // Everything else the question is over is still swallowed, below.
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // The harness picker is one: a click that navigated the rail behind it
         // left an overlay on screen describing a row nobody was pointing at.

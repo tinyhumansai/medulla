@@ -155,6 +155,7 @@ impl App {
             harness_picker: None,
             handback_prompt: None,
             harness_pointer_grab: None,
+            hit_handback: Vec::new(),
             help_scroll: 0,
             handback_policy,
             harness_took_control: false,

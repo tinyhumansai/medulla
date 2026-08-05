@@ -6,6 +6,7 @@
 //! directory the rail is already showing, and the hand-back question is about
 //! the pane immediately behind it.
 
+use crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
@@ -205,6 +206,56 @@ impl App {
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
+    /// Build the question's answer line, recording where each answer landed.
+    ///
+    /// `row` is the answer line's offset from the top of `inner`. The segments
+    /// are joined with the same separator the line has always used, and each one
+    /// carrying a key becomes a click target spanning exactly its own label —
+    /// including the `[Y]` bracket, because that is the part of "[Y] hand back"
+    /// an operator aims at.
+    ///
+    /// A click replays the key rather than calling the answer directly, so the
+    /// pointer and the keyboard cannot come to disagree about what `[N]` does.
+    fn handback_answers(
+        &mut self,
+        inner: Rect,
+        row: u16,
+        segments: &[(&'static str, Option<KeyCode>)],
+    ) -> TLine<'static> {
+        const SEPARATOR: &str = " · ";
+        self.hit_handback.clear();
+        let y = inner.y + row;
+        let mut x = inner.x;
+        let mut spans = Vec::with_capacity(segments.len() * 2);
+        for (index, (label, key)) in segments.iter().enumerate() {
+            if index > 0 {
+                spans.push(Span::raw(SEPARATOR));
+                x = x.saturating_add(SEPARATOR.chars().count() as u16);
+            }
+            let width = label.chars().count() as u16;
+            if let Some(key) = key {
+                // Clipped to the pane: a narrow terminal truncates the line, and
+                // a hit box reaching past the right edge would answer the
+                // question for a click that landed on whatever is beside it.
+                if x < inner.right() {
+                    let rect = Rect {
+                        x,
+                        y,
+                        width: width.min(inner.right() - x),
+                        height: 1,
+                    };
+                    self.hit_handback.push((rect, *key));
+                }
+            }
+            spans.push(Span::styled(
+                *label,
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            x = x.saturating_add(width);
+        }
+        TLine::from(spans)
+    }
+
     /// Draw the harness handover question, in whichever direction it is asked.
     pub(super) fn draw_handback_prompt(&mut self, f: &mut Frame, area: Rect) {
         let Some(prompt) = &self.handback_prompt else {
@@ -234,14 +285,19 @@ impl App {
         // nothing to release, so the body says only what pressing Enter costs
         // the orchestrator.
         if prompt.is_takeover {
+            let hint = self.handback_answers(
+                inner,
+                3,
+                &[
+                    ("[Enter] take control", Some(KeyCode::Enter)),
+                    ("[Esc] cancel", Some(KeyCode::Esc)),
+                ],
+            );
             let lines = vec![
                 TLine::from("The orchestrator is using this harness."),
                 TLine::from("Take control to type into it."),
                 TLine::from(""),
-                TLine::from(Span::styled(
-                    "[Enter] take control · [Esc] cancel",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )),
+                hint,
             ];
             f.render_widget(Paragraph::new(Text::from(lines)), inner);
             return;
@@ -271,10 +327,28 @@ impl App {
         } else {
             TLine::from(format!("Note: {}", prompt.note.text))
         };
-        let hint = if prompt.editing_note {
-            "Type your note · [Enter] hand back · [Esc] back to the question"
+        let editing_note = prompt.editing_note;
+        let hint = if editing_note {
+            self.handback_answers(
+                inner,
+                6,
+                &[
+                    ("Type your note", None),
+                    ("[Enter] hand back", Some(KeyCode::Enter)),
+                    ("[Esc] back to the question", Some(KeyCode::Esc)),
+                ],
+            )
         } else {
-            "[Y] hand back · [E] add a note · [N] keep it · [Esc] stay here"
+            self.handback_answers(
+                inner,
+                6,
+                &[
+                    ("[Y] hand back", Some(KeyCode::Char('y'))),
+                    ("[E] add a note", Some(KeyCode::Char('e'))),
+                    ("[N] keep it", Some(KeyCode::Char('n'))),
+                    ("[Esc] stay here", Some(KeyCode::Esc)),
+                ],
+            )
         };
         let lines = vec![
             TLine::from(how),
@@ -288,10 +362,7 @@ impl App {
             )),
             note,
             TLine::from(""),
-            TLine::from(Span::styled(
-                hint,
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
+            hint,
         ];
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }

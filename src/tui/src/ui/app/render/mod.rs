@@ -297,6 +297,10 @@ impl App {
         // terminal that is no longer on screen.
         self.hit_harness = None;
         self.hit_workflow_preview = None;
+        // Same again for the hand-back question's answers: a click must never
+        // reach a `[Y]` that was on screen two frames ago, least of all when
+        // what it now sits over is the harness the operator went back to.
+        self.hit_handback.clear();
         // Focus follows the pane, not the other way round. `agents_selection`
         // (called only while drawing the Agents tab) is what notices the cursor
         // moving off the attached session; it has nothing to say once the

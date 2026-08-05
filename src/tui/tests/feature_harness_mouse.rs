@@ -50,6 +50,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),
@@ -82,6 +83,8 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
 
     app.set_local_harnesses(LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -124,7 +127,9 @@ fn mouse_reporting_session(sessions: &PtyManager) -> String {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: medulla_tui::worker::pty::SessionOrigin::User,
+            name: None,
+            mcp_grant_session: None,
         })
         .expect("open a session")
 }

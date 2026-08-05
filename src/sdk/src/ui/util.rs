@@ -200,6 +200,16 @@ pub const SLUG_MAX_WORDS: usize = 3;
 /// Hard character ceiling on a slug, so one very long word cannot widen a row.
 pub const SLUG_MAX_CHARS: usize = 48;
 
+/// How much of the input [`slug`] scans before giving up on finding three
+/// meaningful words.
+///
+/// `slug` runs on every rail render against an untrusted harness/PTY title.
+/// Without a scan bound, a title that is megabytes of filler ("so so so
+/// so…") makes every render walk the whole string looking for words that
+/// never arrive. This is generous enough to skip a realistic run of leading
+/// filler while staying independent of how large the source title is.
+const SLUG_SCAN_MAX_CHARS: usize = 512;
+
 /// Filler a slug is better off without.
 ///
 /// Prompts open with conversational scaffolding ("okay so can you please…"),
@@ -223,19 +233,35 @@ const FILLER_WORDS: &[&str] = &[
 /// Returns an empty string when no word survives — callers decide what an
 /// unnameable session shows instead.
 pub fn slug(text: &str) -> String {
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(|word| word.to_lowercase())
-        .collect();
-    let meaningful: Vec<&String> = words
-        .iter()
-        .filter(|word| !FILLER_WORDS.contains(&word.as_str()))
-        .collect();
+    // Bound the scan itself, not just the output: split/lowercase/collect over
+    // the whole string would let an unbounded title allocate and scan without
+    // limit before the three-word cap below ever applies.
+    let bounded = text.chars().take(SLUG_SCAN_MAX_CHARS);
+    let bounded: String = bounded.collect();
+
+    let mut first_words: Vec<String> = Vec::with_capacity(SLUG_MAX_WORDS);
+    let mut meaningful: Vec<String> = Vec::with_capacity(SLUG_MAX_WORDS);
+    for word in bounded.split(|c: char| !c.is_alphanumeric()) {
+        if word.is_empty() {
+            continue;
+        }
+        let word = word.to_lowercase();
+        if first_words.len() < SLUG_MAX_WORDS {
+            first_words.push(word.clone());
+        }
+        if meaningful.len() < SLUG_MAX_WORDS && !FILLER_WORDS.contains(&word.as_str()) {
+            meaningful.push(word);
+        }
+        // Once three meaningful words are in hand nothing later in the title
+        // can change the result, so stop walking it.
+        if meaningful.len() == SLUG_MAX_WORDS {
+            break;
+        }
+    }
     // All-filler input ("can you please") still gets a name, badly-but-stably,
     // rather than rendering as nothing at all.
-    let source: Vec<&String> = if meaningful.is_empty() {
-        words.iter().collect()
+    let source = if meaningful.is_empty() {
+        first_words
     } else {
         meaningful
     };

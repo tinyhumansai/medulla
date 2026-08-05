@@ -153,3 +153,22 @@ fn slug_is_empty_without_a_word() {
     assert_eq!(slug("   \n\t  "), "");
     assert_eq!(slug("///"), "");
 }
+
+#[test]
+fn slug_stops_scanning_once_three_meaningful_words_are_found() {
+    // Real content up front, followed by megabytes of filler: the scan must
+    // not walk the whole string to produce a result.
+    let huge_tail = "so ".repeat(1_000_000);
+    let title = format!("fix session handoff {huge_tail}");
+    assert_eq!(slug(&title), "fix-session-handoff");
+}
+
+#[test]
+fn slug_bounds_the_scan_even_when_every_word_is_filler() {
+    // All filler, and long enough that scanning it unbounded would be the
+    // regression this guards against. The fallback still has to produce
+    // something stable rather than hang or allocate without limit.
+    let huge_filler = "so ".repeat(1_000_000);
+    let out = slug(&huge_filler);
+    assert_eq!(out, "so-so-so");
+}

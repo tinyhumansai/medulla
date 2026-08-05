@@ -250,6 +250,13 @@ pub enum WorkflowAction {
     AddNote(String),
     /// `evolve <id>` — review a workflow against its own history.
     Evolve(String),
+    /// `author [id]` — run one copilot turn; `--text` carries the instruction.
+    ///
+    /// With an id it revises that workflow, without one it builds a new one.
+    /// The same turn the Workflows pane runs, reachable without a terminal —
+    /// which is what makes "does the harness actually get its tools?" a
+    /// question a test can ask.
+    Author(Option<String>),
     /// `proposals <id>` — changes proposed for a workflow.
     Proposals(String),
     /// `accept <proposal-id>` — apply a proposal to the saved graph.

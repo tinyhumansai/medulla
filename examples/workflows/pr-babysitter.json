@@ -54,7 +54,7 @@
       "config": {
         "slug": "medulla:shell",
         "args": {
-          "language": "shell",
+          "language": "bash",
           "cwd": "=inputs.cwd",
           "env": {
             "PR": "=inputs.pr",
@@ -117,7 +117,7 @@
       "config": {
         "slug": "medulla:shell",
         "args": {
-          "language": "shell",
+          "language": "bash",
           "cwd": "=inputs.cwd",
           "env": {
             "PENDING": "=.nodes.assess.item.pending | tostring"

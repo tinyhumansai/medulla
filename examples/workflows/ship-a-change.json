@@ -26,7 +26,10 @@
       "id": "start",
       "kind": "trigger",
       "name": "start",
-      "config": { "trigger_kind": "manual", "max_node_visits": 40 }
+      "config": {
+        "trigger_kind": "manual",
+        "max_node_visits": 40
+      }
     },
     {
       "id": "implement",
@@ -43,9 +46,11 @@
       "config": {
         "slug": "medulla:shell",
         "args": {
-          "language": "shell",
+          "language": "bash",
           "cwd": "=inputs.cwd",
-          "env": { "REPO": "=inputs.repo" },
+          "env": {
+            "REPO": "=inputs.repo"
+          },
           "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# No argument: `gh pr view` resolves the PR for the branch that is checked\n# out, which is the one the agent just pushed.\n#\n# Two very different failures hide behind the same exit code here. \"No pull\n# request for this branch\" is a real answer — the agent did not open one — and\n# routes to the `no_pr` branch. A missing `gh`, a bad token, or the wrong repo\n# is a host problem, and blaming the agent for it would send someone reading\n# this report looking in entirely the wrong place. So the message decides.\n# `gh --jq` builds the whole document, so this step never has to pick a\n# delimiter and split on it — there is nothing to get wrong in a URL that\n# contains almost any character you might have chosen.\n#\n# `pr` is a string, not a number: the babysitter declares it as a string input\n# and the child validates what arrives against its own declaration.\nif out=$(gh pr view $repo_arg --json number,url --jq '{pr: (.number | tostring), url: .url, found: true}' 2>&1); then\n  printf '%s\\n' \"$out\"\nelse\n  case \"$out\" in\n    *\"no pull requests found\"*|*\"no open pull requests\"*)\n      printf '{\"pr\":\"\",\"url\":\"\",\"found\":false}\\n' ;;\n    *)\n      printf 'cannot look up the pull request for this branch: %s\\n' \"$out\" >&2\n      exit 1 ;;\n  esac\nfi\n"
         }
       }
@@ -54,7 +59,9 @@
       "id": "opened",
       "kind": "condition",
       "name": "Did a PR get opened?",
-      "config": { "field": "=.item.json.output.found" }
+      "config": {
+        "field": "=.item.json.output.found"
+      }
     },
     {
       "id": "babysit",
@@ -96,11 +103,31 @@
     }
   ],
   "edges": [
-    { "from_node": "start", "to_node": "implement" },
-    { "from_node": "implement", "to_node": "locate" },
-    { "from_node": "locate", "to_node": "opened" },
-    { "from_node": "opened", "from_port": "true", "to_node": "babysit" },
-    { "from_node": "babysit", "to_node": "report" },
-    { "from_node": "opened", "from_port": "false", "to_node": "no_pr" }
+    {
+      "from_node": "start",
+      "to_node": "implement"
+    },
+    {
+      "from_node": "implement",
+      "to_node": "locate"
+    },
+    {
+      "from_node": "locate",
+      "to_node": "opened"
+    },
+    {
+      "from_node": "opened",
+      "from_port": "true",
+      "to_node": "babysit"
+    },
+    {
+      "from_node": "babysit",
+      "to_node": "report"
+    },
+    {
+      "from_node": "opened",
+      "from_port": "false",
+      "to_node": "no_pr"
+    }
   ]
 }

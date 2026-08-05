@@ -212,12 +212,10 @@ fn hosts_r_refreshes_selected_machine_details() {
 fn add_host_page_renders_guidance_and_opens_the_prompt() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Add Host");
-    // Local leads the picker; choosing Remote lights up the pairing guidance.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Enter));
+    // The page is the pairing guidance — there is no kind to choose first.
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Add a host for the orchestrator to delegate to."));
+    assert!(out.contains("Connect another machine for the orchestrator to delegate to."));
     assert!(out.contains("Example: 7Kx…9fQ"));
     assert!(!out.contains("@build-box"));
 
@@ -229,13 +227,10 @@ fn add_host_page_renders_guidance_and_opens_the_prompt() {
 
 #[test]
 fn adding_a_remote_host_still_lands_on_the_tree() {
-    // The wizard is unchanged by the tree: choose Remote, confirm the pairing
-    // instructions, type the address, and the add op is emitted while the page
-    // returns to the list the add is about.
+    // Read the pairing instructions, Enter for the address prompt, type it, and
+    // the add op is emitted while the page returns to the list the add is about.
     let mut app = app_with_roster(Vec::new(), None);
     app.focus_routing_subpage("Add Host");
-    let _ = app.on_event(key(KeyCode::Down)); // Local leads; Remote is second
-    let _ = app.on_event(key(KeyCode::Enter)); // settle the kind
     let _ = app.on_event(key(KeyCode::Enter)); // open the address prompt
     assert!(app.prompt_state().is_some(), "the address prompt opened");
     for ch in "@build-box".chars() {
@@ -466,42 +461,4 @@ fn hosts_e_opens_edit_label_prompt_prefilled() {
         }
         other => panic!("expected Update, got {other:?}"),
     }
-}
-
-#[test]
-fn a_local_host_that_could_not_be_saved_can_be_retried() {
-    // The entry used to be pushed into the in-process config before the write,
-    // so a failed save left a host that was never written and never started —
-    // and the duplicate check then refused every retry for that directory,
-    // which the operator could not clear without restarting.
-    let mut app = app_with_roster(Vec::new(), None);
-    let workspace = std::env::temp_dir().to_string_lossy().into_owned();
-
-    // Drive the wizard: Local is first, one Enter settles the harness step, the
-    // next opens the directory prompt. No config path is set on this app, so
-    // the save cannot succeed.
-    let add = |app: &mut App, workspace: &str| {
-        app.focus_routing_subpage("Add Host");
-        let _ = app.on_event(key(KeyCode::Enter));
-        let _ = app.on_event(key(KeyCode::Enter));
-        assert!(app.prompt_state().is_some(), "the directory prompt opened");
-        for ch in workspace.chars() {
-            let _ = app.on_event(key(KeyCode::Char(ch)));
-        }
-        app.on_event(key(KeyCode::Enter))
-    };
-
-    assert!(
-        add(&mut app, &workspace).is_none(),
-        "nothing starts when nothing was saved"
-    );
-    assert!(app.status().contains("No config file"), "{}", app.status());
-
-    // The second attempt must reach the same failure, not "Already hosted".
-    assert!(add(&mut app, &workspace).is_none());
-    assert!(
-        !app.status().contains("Already hosted"),
-        "a failed save must not block the retry: {}",
-        app.status()
-    );
 }

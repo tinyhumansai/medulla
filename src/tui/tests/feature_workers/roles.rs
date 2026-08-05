@@ -129,10 +129,16 @@ fn removing_a_row_takes_the_arrows_back_off_the_role_list() {
 
     let _ = app.on_event(key(KeyCode::Char('d')));
 
-    // Down now walks the tree again rather than the role list.
+    // Down now walks the tree again rather than the role list. Which agent it
+    // lands on is deliberately not asserted: removing an undeclared row writes
+    // the survivors down (they stop being seeded), and a newly declared agent
+    // sorts above the roster-only rows — so the row order after this keypress is
+    // not the one the cursor started in. What matters here is that the arrows
+    // are back on the tree, which is a preview of an agent rather than toggles
+    // being driven.
     let _ = app.on_event(key(KeyCode::Down));
     let out = render(&mut app, 130, 44);
-    assert!(out.contains("Agent · w2"), "the cursor moved on: {out}");
+    assert!(out.contains("Agent · "), "back on the tree: {out}");
 }
 
 #[test]

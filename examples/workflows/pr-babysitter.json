@@ -90,7 +90,7 @@
       "kind": "agent",
       "name": "Fix and push",
       "config": {
-        "prompt": "=\"Pull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
+        "prompt": "=\"Work in the checkout at \" + .inputs.cwd + \", which is the one the pull request was read from — an agent step starts at the workspace root, not there.\\n\\nPull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
       }
     },
     {

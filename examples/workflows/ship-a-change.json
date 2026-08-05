@@ -33,7 +33,7 @@
       "kind": "agent",
       "name": "Do the work and open a PR",
       "config": {
-        "prompt": "=\"Work in this repository on the following task:\\n\\n\" + .inputs.task + \"\\n\\nCreate a branch, implement it, run the repository's own build, lint and test commands until they pass, and commit. Push the branch and open a pull request against the upstream default branch with `gh pr create` — ready for review, not a draft. Do not merge it. Finish by printing the pull request URL on its own line.\""
+        "prompt": "=\"Work in the checkout at \" + .inputs.cwd + \", which is where the next step looks for the pull request — an agent step starts at the workspace root, not there.\\n\\nWork on the following task:\\n\\n\" + .inputs.task + \"\\n\\nCreate a branch, implement it, run the repository's own build, lint and test commands until they pass, and commit. Push the branch and open a pull request against the upstream default branch with `gh pr create` — ready for review, not a draft. Do not merge it. Finish by printing the pull request URL on its own line.\""
       }
     },
     {

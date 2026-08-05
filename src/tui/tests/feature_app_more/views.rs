@@ -11,11 +11,8 @@ fn hosts_add_prompt_emits_add_cmd_for_address() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Add Host");
-    // Local leads the picker, so a remote add starts by choosing Remote — the
-    // page asks which kind before it asks for anything kind-specific, then a
-    // second confirm opens the address prompt.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Char('a')));
+    // The page adds a machine and nothing else, so there is no kind to choose:
+    // one confirm opens the address prompt.
     let _ = app.on_event(key(KeyCode::Char('a')));
     let (title, _) = app.prompt_state().expect("add prompt open");
     assert!(title.starts_with("Add host"));
@@ -36,11 +33,8 @@ fn workers_add_prompt_handle_form() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Add Host");
-    // Local leads the picker, so a remote add starts by choosing Remote — the
-    // page asks which kind before it asks for anything kind-specific, then a
-    // second confirm opens the address prompt.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Char('a')));
+    // The page adds a machine and nothing else, so there is no kind to choose:
+    // one confirm opens the address prompt.
     let _ = app.on_event(key(KeyCode::Char('a')));
     type_str(&mut app, "@dev-2");
     let cmd = app.on_event(key(KeyCode::Enter));
@@ -60,11 +54,8 @@ fn workers_add_prompt_empty_is_cancelled() {
     let (mut app, _rt) = empty_app();
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Add Host");
-    // Local leads the picker, so a remote add starts by choosing Remote — the
-    // page asks which kind before it asks for anything kind-specific, then a
-    // second confirm opens the address prompt.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Char('a')));
+    // The page adds a machine and nothing else, so there is no kind to choose:
+    // one confirm opens the address prompt.
     let _ = app.on_event(key(KeyCode::Char('a')));
     let cmd = app.on_event(key(KeyCode::Enter));
     assert!(cmd.is_none());

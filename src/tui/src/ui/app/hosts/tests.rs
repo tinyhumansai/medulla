@@ -598,10 +598,11 @@ fn deleting_a_declared_agent_by_its_host_row_undeclares_it_too() {
 }
 
 #[test]
-fn the_device_you_are_typing_on_is_not_removable() {
+fn a_host_this_device_runs_is_not_removable() {
     // It is declared by `[host]` rather than by a removable entry, so it would
-    // be back at the next launch — and reporting a removal that does not last
-    // is worse than refusing.
+    // be back at the next launch — and a running host with no declarations
+    // seeds one agent per CLI on PATH, so emptying it is exactly what brings
+    // them back. Reporting a removal that does not last is worse than refusing.
     let (mut app, _dir) = app_with(
         vec![worker("medulla-claude", "this-device")],
         vec![AgentDeclaration::new(
@@ -666,5 +667,48 @@ fn deleting_a_seeded_agent_declares_the_rest_so_the_removal_survives() {
     assert!(
         !declared.is_empty(),
         "and its siblings now are, so the list stops being seeded: {declared:?}"
+    );
+}
+
+#[test]
+fn adopting_seeds_does_not_rewrite_the_agents_already_declared() {
+    // A host can hold both kinds of row at once. The declared one carries fields
+    // the projection never sees — the operator's name for it, and any strategy
+    // other than the default — so rebuilding it from the row would drop them
+    // while looking like it had preserved everything.
+    let mut named = AgentDeclaration::new("medulla-claude", "this-device", "claude", "/w/medulla");
+    named.name = Some("build box".into());
+    let (mut app, _dir) = app_with(
+        vec![
+            worker("medulla-claude", "this-device"),
+            worker("medulla-codex", "this-device"),
+        ],
+        vec![named],
+    );
+    // Row 2 is the seeded sibling: undeclared, so removing it adopts the rest.
+    cursor_to(&mut app, 2);
+    let target = app
+        .selected_host_agent()
+        .expect("row 2 is an agent")
+        .agent_id;
+    assert_ne!(
+        target, "medulla-claude",
+        "the seeded row, not the declared one"
+    );
+
+    let _ = press_delete(&mut app);
+
+    let kept = app
+        .loaded
+        .config
+        .fleet
+        .agent_declarations
+        .iter()
+        .find(|declaration| declaration.agent_id == "medulla-claude")
+        .expect("the declared survivor is still declared");
+    assert_eq!(
+        kept.name.as_deref(),
+        Some("build box"),
+        "and kept the name the projection does not carry"
     );
 }

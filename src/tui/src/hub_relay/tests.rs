@@ -355,8 +355,8 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
 #[test]
 fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
     // The sink filters at *save* time, so a launch-time snapshot of the local
-    // addresses did not know about a host started mid-session through
-    // `LocalHostHarnesses`. Its device-local entry was written into the saved
+    // addresses did not know about a host that joined the local list after that
+    // snapshot was taken. Its device-local entry was written into the saved
     // roster and would be advertised on a later run at an address nothing binds.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();

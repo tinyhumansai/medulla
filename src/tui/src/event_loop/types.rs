@@ -106,9 +106,9 @@ pub(crate) enum SessionExit {
 pub(crate) struct SessionWiring {
     /// The loaded configuration for this session.
     pub loaded: medulla::config::LoadedConfig,
-    /// Starts a host on this device after launch. `None` when this device is
-    /// not hosting — there is then no bus binding or session manager to hand a
-    /// new host, and the command says so rather than half-starting one.
+    /// The custom harnesses this device's primary host declares, for a
+    /// workflow `agent` step to resolve a harness name against. `None` when this
+    /// device is not hosting — there are then no host options to read them from.
     pub local_hosts: Option<crate::local_host::LocalHostHarnesses>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,

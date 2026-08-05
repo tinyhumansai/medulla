@@ -190,21 +190,44 @@ impl App {
     /// were still dropped and the status says so.
     pub(in crate::ui::app) fn remove_selected_host(&mut self) -> Option<Cmd> {
         let host = self.selected_host_row()?;
+        // A host this device *runs* is not a registry entry to drop — it is
+        // `[host]` or an entry in `[[hosts]]`, and it starts again from that at
+        // the next launch. Worse, a running host with no declarations seeds one
+        // agent per CLI on PATH, so emptying it is what brings them back.
+        // Removing it would look like a removal for as long as the process lived
+        // and undo itself on restart, which is the failure this whole change is
+        // about. Its agents are still removable one by one.
+        //
+        // Asked of the *running* hosts rather than of `host.kind`: a row is also
+        // `Local` when it exists only because agents are declared against its id
+        // with no daemon here, and that host has no config entry to come back
+        // from — undeclaring its agents removes it for good.
         if self
             .local_host_refs()
             .iter()
-            .any(|local| local.primary && local.id.trim() == host.id.trim())
+            .any(|local| local.id.trim() == host.id.trim())
         {
             self.set_status(format!(
-                "{} is this device — its agents can go, but the host itself cannot",
+                "{} is declared on this device — remove its agents individually",
                 host.label
             ));
             return None;
         }
-        // Resolved before anything is undeclared: dropping a declaration
-        // rebuilds the tree, and reading the roster afterwards would answer for
-        // whatever slid into this host's place — the same ordering rule
-        // `remove_host_row` follows for a single agent.
+        // Anything else is a host this device does not run: a remote machine, or
+        // one that exists only because agents were declared against its id. The
+        // declarations are what keep such a row alive, so they go first — and
+        // seeded rows cannot occur here, because seeding is done by a running
+        // daemon and this host has none.
+        let declared: Vec<String> = host
+            .agents
+            .iter()
+            .filter(|agent| agent.declared && agent.editable)
+            .map(|agent| agent.agent_id.clone())
+            .collect();
+        let undeclared = declared
+            .iter()
+            .filter(|agent_id| self.undeclare_agent_id(agent_id))
+            .count();
         let workers = self.runtime.workers();
         let ops: Vec<WorkerOp> = host
             .agents
@@ -222,24 +245,25 @@ impl App {
                 id: worker.id.clone(),
             })
             .collect();
-        let declared: Vec<String> = host
-            .agents
-            .iter()
-            .filter(|agent| agent.declared && agent.editable)
-            .map(|agent| agent.agent_id.clone())
-            .collect();
-        let undeclared = declared
-            .iter()
-            .filter(|agent_id| self.undeclare_agent_id(agent_id))
-            .count();
-        // Written last, over whatever the per-agent undeclares left behind:
-        // this was one keypress, so it gets one answer.
-        self.set_status(format!(
-            "Removed {} · {undeclared} declaration(s), {} roster entr{} · files untouched",
-            host.label,
-            ops.len(),
-            if ops.len() == 1 { "y" } else { "ies" }
-        ));
+        // Compared against what was attempted, not just counted: a declaration
+        // that would not write is an agent that comes back at the next launch,
+        // and reporting the removal as complete is how the operator finds that
+        // out later rather than now.
+        let shortfall = declared.len().saturating_sub(undeclared);
+        self.set_status(if shortfall > 0 {
+            format!(
+                "{}: {shortfall} of {} declaration(s) could not be removed",
+                host.label,
+                declared.len()
+            )
+        } else {
+            format!(
+                "Removed {} · {undeclared} declaration(s), {} roster entr{}",
+                host.label,
+                ops.len(),
+                if ops.len() == 1 { "y" } else { "ies" }
+            )
+        });
         (!ops.is_empty()).then_some(Cmd::WorkerOps(ops))
     }
 
@@ -261,7 +285,8 @@ impl App {
     ///
     /// Returns whether the list was written.
     fn adopt_seeded_agents(&mut self, host: &HostRow, removing: &str) -> bool {
-        let survivors = host
+        let current = self.loaded.config.fleet.agent_declarations.clone();
+        let survivors: Vec<AgentDeclaration> = host
             .agents
             .iter()
             .filter(|agent| agent.agent_id.trim() != removing.trim())
@@ -269,7 +294,19 @@ impl App {
             // ours to write down, and writing it would claim an agent that
             // belongs to another host's config.
             .filter(|agent| agent.editable)
-            .filter_map(|agent| declaration_for(host, agent));
+            .filter_map(|agent| {
+                // A host can hold both kinds of row at once, so the declared
+                // ones are carried through *as they are*. Rebuilding them from
+                // the projection would look harmless — the id, harness,
+                // workspace and roles all survive the trip — and would silently
+                // drop the two fields the projection does not carry: the name
+                // the operator gave the agent, and any strategy other than the
+                // `checkout` default `AgentDeclaration::new` hardcodes.
+                medulla::config::agent_declaration(&current, &agent.agent_id)
+                    .cloned()
+                    .or_else(|| declaration_for(host, agent))
+            })
+            .collect();
         let mut declarations: Vec<AgentDeclaration> = self
             .loaded
             .config

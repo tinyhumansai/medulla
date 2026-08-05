@@ -159,8 +159,17 @@ impl App {
         let Some(agent) = self.selected_host_agent() else {
             return false;
         };
-        if !agent.declared || !agent.editable {
+        if !agent.editable {
             return false;
+        }
+        // A seeded agent has no declaration to remove, so removing one has to
+        // *start* the list rather than shorten it — see
+        // [`adopt_seeded_agents`](App::adopt_seeded_agents).
+        if !agent.declared {
+            let Some(host) = self.selected_host_row() else {
+                return false;
+            };
+            return self.adopt_seeded_agents(&host, &agent.agent_id);
         }
         self.undeclare_agent_id(&agent.agent_id)
     }
@@ -234,6 +243,65 @@ impl App {
         (!ops.is_empty()).then_some(Cmd::WorkerOps(ops))
     }
 
+    /// Write a host's seeded agents down as declarations, minus the one being
+    /// removed.
+    ///
+    /// An install that has never declared anything advertises a *seeded* list —
+    /// one agent per coding-agent CLI found on `PATH`
+    /// ([`seed_declarations`](medulla::runtime::seed_declarations)) — so those
+    /// rows have no declaration behind them to delete. Removing the roster entry
+    /// alone is not a removal: the seed is recomputed from `PATH` at the next
+    /// start and the agent is back, which is exactly what "I deleted it and it
+    /// is still there" looks like.
+    ///
+    /// So the first removal is what makes the list real. The survivors are
+    /// written as declarations, and from then on the fleet is what the operator
+    /// declared rather than what happened to be installed. Declarations on other
+    /// hosts are carried through untouched.
+    ///
+    /// Returns whether the list was written.
+    fn adopt_seeded_agents(&mut self, host: &HostRow, removing: &str) -> bool {
+        let survivors = host
+            .agents
+            .iter()
+            .filter(|agent| agent.agent_id.trim() != removing.trim())
+            // Only what this machine can declare. A row it may not edit is not
+            // ours to write down, and writing it would claim an agent that
+            // belongs to another host's config.
+            .filter(|agent| agent.editable)
+            .filter_map(|agent| declaration_for(host, agent));
+        let mut declarations: Vec<AgentDeclaration> = self
+            .loaded
+            .config
+            .fleet
+            .agent_declarations
+            .iter()
+            .filter(|declaration| !declaration.on_host(&host.id))
+            .cloned()
+            .collect();
+        declarations.extend(survivors);
+        let Some(path) = self.config_path.clone() else {
+            self.loaded.config.fleet.agent_declarations = declarations;
+            self.set_status(format!(
+                "Removed {removing} (this run only — no config file)"
+            ));
+            return true;
+        };
+        match medulla::config::persist_agent_declarations(&path, &declarations) {
+            Ok(()) => {
+                self.loaded.config.fleet.agent_declarations = declarations;
+                self.set_status(format!(
+                    "Removed {removing} · the remaining agents are now declared"
+                ));
+                true
+            }
+            Err(error) => {
+                self.set_status(format!("{removing} was not removed: {error}"));
+                false
+            }
+        }
+    }
+
     /// Undeclare one agent by id, writing the shortened list to disk.
     ///
     /// The half of [`undeclare_selected_agent`](App::undeclare_selected_agent)
@@ -300,4 +368,17 @@ impl App {
             Err(error) => self.set_status(format!("The new name was not saved: {error}")),
         }
     }
+}
+
+/// The declaration a seeded row stands for.
+///
+/// `None` when the row names no harness or no workspace: a declaration is a
+/// `harness × workspace` pair, and one missing half cannot be written down.
+fn declaration_for(host: &HostRow, agent: &HostAgentRow) -> Option<AgentDeclaration> {
+    let harness = agent.harness.as_deref()?;
+    let workspace = agent.workspace.as_deref()?;
+    let mut declaration =
+        AgentDeclaration::new(agent.agent_id.trim(), host.id.trim(), harness, workspace);
+    declaration.roles = agent.roles.clone();
+    Some(declaration)
 }

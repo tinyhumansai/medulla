@@ -625,3 +625,46 @@ fn the_device_you_are_typing_on_is_not_removable() {
         "and it takes nothing down with it"
     );
 }
+
+#[test]
+fn deleting_a_seeded_agent_declares_the_rest_so_the_removal_survives() {
+    // The state every fresh install is in: agents in the roster, nothing in
+    // `[fleet].agentDeclarations`. Those rows are seeded from the CLIs on PATH,
+    // so there is no declaration to shorten — and removing only the roster entry
+    // would let the seed put it back at the next start.
+    let (mut app, _dir) = app_with(
+        vec![
+            worker("medulla-claude", "this-device"),
+            worker("medulla-codex", "this-device"),
+        ],
+        Vec::new(),
+    );
+    cursor_to(&mut app, 1);
+    let target = app
+        .selected_host_agent()
+        .expect("row 1 is an agent")
+        .agent_id;
+    assert!(
+        app.loaded.config.fleet.agent_declarations.is_empty(),
+        "nothing is declared yet"
+    );
+
+    let _ = press_delete(&mut app);
+
+    let declared: Vec<String> = app
+        .loaded
+        .config
+        .fleet
+        .agent_declarations
+        .iter()
+        .map(|declaration| declaration.agent_id.clone())
+        .collect();
+    assert!(
+        !declared.contains(&target),
+        "the removed agent is not declared: {declared:?}"
+    );
+    assert!(
+        !declared.is_empty(),
+        "and its siblings now are, so the list stops being seeded: {declared:?}"
+    );
+}

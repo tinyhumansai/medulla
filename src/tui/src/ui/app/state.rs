@@ -82,6 +82,8 @@ impl App {
             template_index: 0,
             custom_harnesses: Vec::new(),
             custom_harness_index: 0,
+            hook_index: 0,
+            hook_log: medulla::harness_hooks::HookEventLog::new(),
             template_scroll: 0,
             template_modal: false,
             #[cfg(feature = "workflows")]
@@ -340,6 +342,13 @@ impl App {
     /// there is no screen to render and no PTY to type into.
     pub fn set_local_harnesses(&mut self, harnesses: crate::ui::harness_pane::LocalHarnesses) {
         self.harnesses = Some(harnesses);
+    }
+
+    /// Read lifecycle reports out of the log the control socket writes into.
+    ///
+    /// Shared, not copied: the point is to render what is arriving now.
+    pub fn set_hook_log(&mut self, log: medulla::harness_hooks::HookEventLog) {
+        self.hook_log = log;
     }
 
     /// The live harness sessions this device is running, if it hosts.

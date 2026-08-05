@@ -1,10 +1,15 @@
 //! Standardized lifecycle hooks for Medulla-launched harnesses.
 //!
-//! An operator declares a hook once, in Medulla's own config, and Medulla
-//! installs it into whichever coding CLI it spawns. Without this, the same
-//! policy — "checkpoint after every edit", "refuse writes outside the worktree",
-//! "log every prompt" — has to be written once per harness, in three different
-//! config languages, and drifts the moment one of them is edited.
+//! An operator declares a hook once, in Medulla's own config or on the TUI's
+//! Hosts → Hooks page, and Medulla installs it into whichever coding CLI it
+//! spawns. Without this, the same policy — "checkpoint after every edit",
+//! "refuse writes outside the worktree", "log every prompt" — has to be written
+//! once per harness, in three different config languages, and drifts the moment
+//! one of them is edited.
+//!
+//! Medulla installs hooks of its own too, on by default: see [`builtin`] for the
+//! reporting set that makes a harness on a pty legible, and [`HookReport`] for
+//! what one of them puts on the wire.
 //!
 //! # Vocabulary
 //!
@@ -47,14 +52,17 @@
 
 use crate::protocol::HarnessProvider;
 
+pub mod builtin;
 mod claude;
 mod codex;
 mod native;
+mod report;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
+pub use report::{HookEventLog, HookReport};
 pub use types::{DroppedHook, HookEvent, HookHandler, HookInjection, HookSpec, HooksConfig};
 
 /// Build the per-spawn injection that installs `hooks` into `provider`.

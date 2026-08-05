@@ -45,18 +45,19 @@ pub use custom_harnesses::{
 };
 pub use load::{default_link_config, explicit_config_from_env, load_config, CONFIG_PATH_ENV};
 pub use persist::{
-    clear_setting, persist_agent_declarations, persist_custom_harnesses, persist_host_workspaces,
-    persist_hub_workers, persist_link_peers, persist_local_hosts, persist_root_setting,
-    persist_routing_strategy, persist_section, persist_setting,
-    persist_subscription_routing_strategy, persist_welcome_completed, persist_workflow_workspaces,
+    clear_setting, persist_agent_declarations, persist_custom_harnesses, persist_hook_defaults,
+    persist_hooks, persist_host_workspaces, persist_hub_workers, persist_link_peers,
+    persist_local_hosts, persist_root_setting, persist_routing_strategy, persist_section,
+    persist_setting, persist_subscription_routing_strategy, persist_welcome_completed,
+    persist_workflow_workspaces,
 };
 pub use types::{
     wire_value, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle, CoreConfig,
     EvolveSettings, FieldPlacement, FieldVisibility, FleetConfig, HarnessNameStyle, HarnessSection,
-    HostSection, HubSection, HubWorkerConfig, LinkConfig, LoadedConfig, McpSection, MedullaConfig,
-    OnboardingConfig, OpencodeConfig, PathStyle, Peer, ProviderBudgetConfig, RouterConfig,
-    RouterProviderConfig, StatusLineConfig, ThemeConfig, TuiConfig, UpdateConfig, WorkflowConfig,
-    WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    HookDefaultsConfig, HostSection, HubSection, HubWorkerConfig, LinkConfig, LoadedConfig,
+    McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig, PathStyle, Peer,
+    ProviderBudgetConfig, RouterConfig, RouterProviderConfig, StatusLineConfig, ThemeConfig,
+    TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, default_tinyplace_base_url, display_host, is_staging,

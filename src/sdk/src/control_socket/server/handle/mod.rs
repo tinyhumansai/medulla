@@ -4,6 +4,7 @@
 //! task lifecycle operations to focused submodules. The accept loop in
 //! [`super`] only frames lines and writes the returned response.
 
+mod hooks;
 mod params;
 mod tasks;
 mod workers;
@@ -87,6 +88,7 @@ pub async fn handle_control(
             .map(tasks::task_json)
             .collect::<Vec<_>>() })),
         "task.abort" => tasks::task_abort(ops, registry, &token, &params),
+        "hook.report" => hooks::hook_report(ops, &grant, &params),
         other => Err(ControlFailure::new(
             ErrorKind::BadRequest,
             format!("unknown op: {other}"),

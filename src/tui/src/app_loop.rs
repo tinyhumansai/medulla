@@ -622,6 +622,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     )
     .await;
 
+    // Every harness Medulla launches reports its lifecycle here, through the
+    // hooks Medulla installs into it. Created before the control plane because
+    // that is what writes into it, and shared with the app, which reads it.
+    let hook_log = medulla::harness_hooks::HookEventLog::new();
+
     // Bound once, here, and held for the whole process: the socket belongs to
     // this process rather than to a login session, and rebinding inside the
     // relogin loop below would race this process's own live socket. The server
@@ -641,6 +646,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             hub_session.is_some(),
             hub_slot.clone(),
             local_default_worker,
+            hook_log.clone(),
             &hub_logs,
         )
         .await
@@ -679,6 +685,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // reflected there — a UI gap, not a hosting one.
                 host: primary_observation.clone(),
                 harnesses: local_harnesses.clone(),
+                hook_log: hook_log.clone(),
             },
         )
         .await;

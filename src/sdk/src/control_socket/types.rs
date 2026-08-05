@@ -286,6 +286,15 @@ pub trait FleetOps: Send + Sync + 'static {
     /// already settled returns false so callers never claim cancellation
     /// succeeded after the result became final.
     fn abort(&self, abort_id: &str) -> bool;
+
+    /// Record one lifecycle report from a harness this Medulla launched.
+    ///
+    /// Defaulted to a no-op because it is the one operation that is *not* about
+    /// the fleet: an implementation with nowhere to put the report — a test
+    /// fake, a build with no screen to show it on — should not have to say so.
+    /// Synchronous by design; the caller is holding a hook that a live session
+    /// is blocked on, so this must never await anything.
+    fn record_hook_event(&self, _report: crate::harness_hooks::HookReport) {}
 }
 
 /// What a successful `hello` tells the shim about the fleet it just reached.

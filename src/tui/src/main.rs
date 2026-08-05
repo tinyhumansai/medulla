@@ -9,6 +9,7 @@ use std::io::{self, IsTerminal};
 use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
+use crate::commands::run_hook_cmd;
 use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
 #[cfg(feature = "workflows")]
 use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
@@ -86,6 +87,14 @@ async fn async_main() -> anyhow::Result<()> {
                 Ok(json) => println!("{json}"),
                 Err(err) => eprintln!("failed to serialize sessions: {err}"),
             }
+            Ok(())
+        }
+        // Deliberately ahead of everything that loads config or touches the
+        // terminal: the shim runs inside an operator's live turn, and its whole
+        // job is to be cheap and silent.
+        Command::Hook => {
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            run_hook_cmd(&raw[1..], &env).await;
             Ok(())
         }
         Command::Login => run_login(&raw[1..]).await,

@@ -52,7 +52,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
 
     // Number keys jump positionally, so this index moves whenever a page is
     // added. Strategies is last, which is what this is really asserting.
-    assert!(app.on_event(key(KeyCode::Char('5'))).is_none());
+    assert!(app.on_event(key(KeyCode::Char('6'))).is_none());
     assert_eq!(app.routing_subpage(), "Strategies");
     assert!(app.routing_focused());
 }

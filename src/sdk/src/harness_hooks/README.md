@@ -1,8 +1,12 @@
 # Harness Hooks
 
 Standardized lifecycle hooks for Medulla-launched harnesses: declare a hook once
-in Medulla's `[[hooks]]` config, and Medulla installs it into whichever coding
-CLI it spawns.
+in Medulla's `[[hooks]]` config — or on the TUI's Hosts → Hooks page — and
+Medulla installs it into whichever coding CLI it spawns.
+
+Medulla also installs hooks of its own, on by default, that report each
+harness's lifecycle back to it. Without them a harness on a pty is opaque:
+"did that turn finish?" is answerable only by pattern-matching a screen.
 
 ## Contents
 
@@ -10,13 +14,37 @@ CLI it spawns.
   point, and [`launch_args`], which merges hooks with commit attribution because
   Claude Code carries both through one `--settings` flag.
 - [`types.rs`](./types.rs) — The canonical event vocabulary, one declared hook,
-  and the injection a translator produces.
+  the one-line editor form the Hooks page reads and writes, and the injection a
+  translator produces.
+- [`builtin.rs`](./builtin.rs) — Medulla's own reporting hooks: which events they
+  cover, why the deciding events (`PreToolUse`, `PermissionRequest`) are
+  deliberately not among them, and how the command reaches the launching binary.
+- [`report.rs`](./report.rs) — One report's shape and the bounded log it lands
+  in, plus the rule that a summary travels and a payload never does.
 - [`native.rs`](./native.rs) — The hook document both Claude Code and Codex
   accept, plus the inline-TOML encoder Codex's `-c` override needs.
 - [`claude.rs`](./claude.rs) — Claude Code delivery via `--settings`.
 - [`codex.rs`](./codex.rs) — Codex delivery via `-c hooks=…` and the trust bypass.
 - [`tests.rs`](./tests.rs) — Vocabulary, document folding, and the exact flags and
   JSON/TOML spelling each harness was verified against.
+
+## Medulla's own hooks
+
+Resolved at config load, ahead of the operator's own, and switched off with
+`[hookDefaults] enabled = false` (or `b` on the Hooks page). Each runs
+`medulla hook <Event>`, which reads the harness's native payload on stdin and
+files a one-line summary on the control socket that spawn was already handed.
+
+Two properties are load-bearing:
+
+- They only **observe**. `PreToolUse` and `PermissionRequest` can deny a call, so
+  no built-in attaches to them: a hook Medulla installs everywhere must not be
+  able to change what a session does.
+- The **payload never travels**. Prompt text, tool inputs, and file contents stay
+  in the harness's own process tree; the shim summarizes at the source.
+
+They are also never written to an operator's config file, so a later release can
+change or withdraw them.
 
 ## Why this exists
 

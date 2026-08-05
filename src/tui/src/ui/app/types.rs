@@ -82,9 +82,10 @@ pub const TABS: [&str; 6] = [
 /// host actually runs work in its directory. Its draw arm, keys and
 /// `[host].workspaces` persistence all still build, so restoring it is putting
 /// its name back here and renumbering.
-pub const ROUTING_SUBPAGES: [&str; 5] = [
+pub const ROUTING_SUBPAGES: [&str; 6] = [
     "Hosts",
     "Harnesses",
+    "Hooks",
     "Agent Templates",
     "Add Host",
     "Strategies",
@@ -92,12 +93,15 @@ pub const ROUTING_SUBPAGES: [&str; 5] = [
 
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
-pub(super) const RP_TEMPLATES: usize = 2;
-pub(super) const RP_ADD_HOST: usize = 3;
-pub(super) const RP_STRATEGIES: usize = 4;
+// Beside Harnesses on purpose: a hook is a property of every harness Medulla
+// launches, and this page is the one place they are declared for all of them.
+pub(super) const RP_HOOKS: usize = 2;
+pub(super) const RP_TEMPLATES: usize = 3;
+pub(super) const RP_ADD_HOST: usize = 4;
+pub(super) const RP_STRATEGIES: usize = 5;
 // Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach it and its
 // arm is unreachable — the page is off without its code rotting.
-pub(super) const RP_WORKSPACES: usize = 5;
+pub(super) const RP_WORKSPACES: usize = 6;
 
 /// The TokenMaxxxing tab's sidebar pages.
 pub(super) const TOKENMAXXING_SUBPAGES: [&str; 3] = ["Overview", "Bounties", "Leaderboard"];
@@ -711,6 +715,10 @@ pub(super) enum PromptKind {
     CustomHarnessAdd,
     /// Edit the custom harness with the given stable id.
     CustomHarnessEdit(String),
+    /// Declare a lifecycle hook for every harness Medulla launches.
+    HookAdd,
+    /// Edit the hook at the given row of the Hooks page.
+    HookEdit(usize),
     /// The working directory for a new local host, with the harness already
     /// chosen. Blank accepts the default — where this process is running.
     LocalHostWorkspace(medulla::protocol::HarnessProvider),
@@ -900,6 +908,13 @@ pub struct App {
     pub(super) custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
     /// Selected row on the Routing Harnesses page.
     pub(super) custom_harness_index: usize,
+    /// Selected row on the Routing Hooks page.
+    pub(super) hook_index: usize,
+    /// Lifecycle reports arriving from the harnesses this Medulla launched.
+    ///
+    /// Written by the control socket's `hook.report` handler and read here; an
+    /// app with no control plane bound simply renders an empty log.
+    pub(super) hook_log: medulla::harness_hooks::HookEventLog,
     /// Scroll offset inside the open agent-template popup.
     pub(super) template_scroll: usize,
     /// Whether the agent-template popup is open over the catalog.

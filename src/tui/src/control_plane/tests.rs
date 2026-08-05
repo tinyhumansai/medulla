@@ -75,6 +75,7 @@ async fn fleet_tools_off_binds_nothing_at_all() {
         true,
         HubSlot::default(),
         None,
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;
@@ -94,6 +95,7 @@ async fn a_hub_that_did_not_start_gets_no_control_plane() {
         false,
         HubSlot::default(),
         None,
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;
@@ -134,6 +136,7 @@ async fn binding_sweeps_a_previous_runs_leftover_config_file() {
         true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -160,6 +163,7 @@ async fn binding_serves_and_cleans_up_after_itself() {
         true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -193,6 +197,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
         true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -204,6 +209,7 @@ async fn a_second_instance_does_not_take_a_live_address() {
         true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;
@@ -236,6 +242,7 @@ async fn an_environment_socket_path_does_not_bypass_parent_security() {
         true,
         HubSlot::default(),
         None,
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;

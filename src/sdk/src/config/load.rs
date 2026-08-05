@@ -225,6 +225,19 @@ pub fn load_config(
         }
     }
 
+    // Medulla's own reporting hooks are resolved here, not at each spawn, so
+    // every door a harness can come through — the pty pane, the executor, the
+    // wrapper, the headless daemon — installs the same set without having to
+    // know it exists, and the Hooks page can show the operator exactly what
+    // their harnesses will carry.
+    if config.hook_defaults.enabled {
+        config.hooks = config
+            .hooks
+            .with_builtin(crate::harness_hooks::builtin::hooks(
+                &crate::harness_hooks::builtin::medulla_bin(),
+            ));
+    }
+
     let path = if let Some(explicit) = explicit_config {
         display_path(Path::new(explicit))
     } else {

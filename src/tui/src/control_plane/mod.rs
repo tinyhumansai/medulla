@@ -45,6 +45,7 @@ pub(crate) async fn start(
     hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
+    hook_log: medulla::harness_hooks::HookEventLog,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<ControlServer> {
     if !config.mcp.fleet_tools || !hub_available {
@@ -61,7 +62,10 @@ pub(crate) async fn start(
     let defaults = FleetDefaults {
         worker_address: local_default_worker,
     };
-    let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults));
+    // The one op on this socket that is not about the fleet: a launched
+    // harness's own hooks reporting what just happened to it, into the log the
+    // app renders.
+    let ops: Arc<dyn FleetOps> = Arc::new(HubFleetOps::new(hub, defaults).with_hook_log(hook_log));
     // Binding preserves every existing parent directory's mode, then rejects
     // any replaceable ancestor. Only a directory it creates is chmodded.
     match ControlServer::bind(&path, ops, Default::default()).await {
@@ -119,8 +123,17 @@ pub(crate) async fn start(
     hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
+    hook_log: medulla::harness_hooks::HookEventLog,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<()> {
-    let _ = (env, config, hub_available, hub, local_default_worker, logs);
+    let _ = (
+        env,
+        config,
+        hub_available,
+        hub,
+        local_default_worker,
+        hook_log,
+        logs,
+    );
     None
 }

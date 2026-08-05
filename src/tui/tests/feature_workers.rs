@@ -25,3 +25,6 @@ mod fleet;
 
 #[path = "feature_workers/workspaces.rs"]
 mod workspaces;
+
+#[path = "feature_workers/hooks.rs"]
+mod hooks;

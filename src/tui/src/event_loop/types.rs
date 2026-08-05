@@ -143,4 +143,10 @@ pub(crate) struct SessionWiring {
     /// or to the transcript. Shared with the host's executor — the sessions it
     /// opens are the ones rendered here.
     pub harnesses: Option<medulla_tui::ui::harness_pane::LocalHarnesses>,
+    /// Lifecycle reports from the harnesses this Medulla launched, as their
+    /// hooks file them.
+    ///
+    /// The same log the control socket writes into, shared rather than copied:
+    /// the Hooks page renders what is arriving right now.
+    pub hook_log: medulla::harness_hooks::HookEventLog,
 }

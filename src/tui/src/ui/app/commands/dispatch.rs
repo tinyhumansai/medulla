@@ -160,6 +160,14 @@ impl App {
                 self.save_custom_harness(Some(&id), &text);
                 None
             }
+            PromptKind::HookAdd => {
+                self.save_hook(None, &text);
+                None
+            }
+            PromptKind::HookEdit(index) => {
+                self.save_hook(Some(index), &text);
+                None
+            }
             PromptKind::LocalHostWorkspace(harness) => self.add_local_host(harness, &text),
             PromptKind::RejectProposal {
                 workflow,

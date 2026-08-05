@@ -207,6 +207,41 @@ pub fn persist_custom_harnesses(
     write_document(path, &doc)
 }
 
+/// Replace the top-level `hooks` array while preserving all unrelated
+/// configuration.
+///
+/// `hooks` must be the operator's own hooks only — see
+/// [`HooksConfig::operator_hooks`](crate::harness_hooks::HooksConfig::operator_hooks).
+/// Writing Medulla's built-ins here would freeze one release's defaults into the
+/// operator's file, where nothing could later fix or withdraw them, and would
+/// survive `[hookDefaults] enabled = false` as a set of hooks the operator never
+/// wrote and cannot recognize.
+pub fn persist_hooks(path: &Path, hooks: &[crate::harness_hooks::HookSpec]) -> anyhow::Result<()> {
+    debug_assert!(
+        !hooks.iter().any(|hook| hook.builtin),
+        "built-in hooks must never be written to an operator's config file"
+    );
+    let mut doc = read_document(path)?;
+    if hooks.is_empty() {
+        doc.remove("hooks");
+    } else {
+        let value = toml::Value::try_from(hooks)
+            .map_err(|error| anyhow::anyhow!("Cannot serialize hooks: {error}"))?;
+        doc.insert("hooks".to_string(), value);
+    }
+    write_document(path, &doc)
+}
+
+/// Turn Medulla's own reporting hooks on or off (`[hookDefaults] enabled`).
+pub fn persist_hook_defaults(path: &Path, enabled: bool) -> anyhow::Result<()> {
+    persist_setting(
+        path,
+        "hookDefaults",
+        "enabled",
+        toml::Value::Boolean(enabled),
+    )
+}
+
 /// Parse `path` into a TOML table, treating an absent file as an empty document.
 fn read_document(path: &Path) -> anyhow::Result<toml::Table> {
     match std::fs::read_to_string(path) {

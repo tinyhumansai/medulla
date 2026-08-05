@@ -11,11 +11,12 @@ use ratatui::Frame;
 use crate::ui::multi_pane;
 
 use super::super::types::{
-    App, RP_ADD_HOST, RP_HARNESSES, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES,
+    App, RP_ADD_HOST, RP_HARNESSES, RP_HOOKS, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES,
 };
 
 mod add_host;
 mod harnesses;
+mod hooks;
 mod hosts;
 mod nav;
 mod strategies;
@@ -32,6 +33,7 @@ impl App {
         match self.routing_index {
             RP_HOSTS => self.draw_hosts(f, content),
             RP_HARNESSES => self.draw_harnesses(f, content),
+            RP_HOOKS => self.draw_hooks(f, content),
             RP_WORKSPACES => self.draw_workspaces(f, content),
             RP_TEMPLATES => self.draw_templates(f, content),
             RP_ADD_HOST => self.draw_add_host(f, content),

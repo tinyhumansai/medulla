@@ -53,6 +53,7 @@ pub(crate) async fn run(
         link_obs,
         host,
         harnesses,
+        hook_log,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
@@ -67,6 +68,7 @@ pub(crate) async fn run(
     if let Some(harnesses) = harnesses {
         app.set_local_harnesses(harnesses);
     }
+    app.set_hook_log(hook_log);
     if let Some(status) = startup_status {
         app.set_status(status);
     }

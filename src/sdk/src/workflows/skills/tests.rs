@@ -107,6 +107,24 @@ fn a_marker_deeper_in_a_closed_frontmatter_block_is_not_recognised() {
     assert_eq!(parse_marker(deeper), None);
 }
 
+/// The slot is a byte position, not a line number: YAML accepts an indented
+/// comment, `seal` never writes one, and adopting a file on the strength of
+/// whitespace we could not have produced is the same mistake as adopting one
+/// for a marker in the wrong place.
+#[test]
+fn an_indented_marker_is_not_one_we_wrote() {
+    let indented = "---\n  # medulla:managed workflow=babysit rev=abc\nname: theirs\n---\nbody\n";
+    assert_eq!(parse_marker(indented), None);
+
+    // Trailing whitespace, by contrast, is what an editor does to a line we
+    // did write, so it stays tolerated.
+    let trailing = "---\n# medulla:managed workflow=babysit rev=abc \nname: ours\n---   \nbody\n";
+    assert_eq!(
+        parse_marker(trailing),
+        Some(("babysit".to_string(), "abc".to_string()))
+    );
+}
+
 #[test]
 fn codex_and_generic_share_one_directory_and_are_visited_once() {
     // Both resolve to `.agents/skills`. Naming both must not write the file

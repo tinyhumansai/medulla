@@ -254,6 +254,13 @@ fn decode_marker_id(field: &str) -> Option<String> {
 /// written it. A `---` that never closes is rejected outright for the same
 /// reason: it is not frontmatter any parser would recognise, so nothing
 /// inside it can be read as ours either.
+///
+/// "Exact slot" includes the indentation: the line is matched without being
+/// left-trimmed first, because `seal` never indents it and YAML happily accepts
+/// an indented comment. Trimming would adopt a hand-written
+/// `  # medulla:managed …` on the strength of whitespace we could not have
+/// produced. The legacy HTML form keeps its tolerance — files already on disk
+/// were written before this rule existed.
 pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     let mut lines = file.lines();
     let first = lines.next()?.trim();
@@ -263,11 +270,12 @@ pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     if first != "---" {
         return None;
     }
-    let second = lines.next()?.trim();
-    let rest = second.strip_prefix("# medulla:managed ")?;
+    // Trailing whitespace only: an editor may strip or add it at end of line,
+    // but a leading space is a different line from the one we write.
+    let rest = lines.next()?.strip_prefix("# medulla:managed ")?;
     // The block still has to close for this to be frontmatter at all — a
     // marker-shaped second line above an unclosed `---` is not one either.
-    if !lines.any(|line| line.trim() == "---") {
+    if !lines.any(|line| line.trim_end() == "---") {
         return None;
     }
     parse_marker_fields(rest.trim())

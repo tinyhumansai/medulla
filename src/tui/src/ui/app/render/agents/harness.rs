@@ -36,8 +36,8 @@ impl App {
     /// `None` when this device does not host, when the work settled (the
     /// runtime drops the record then, so the pane stops claiming a screen for
     /// work that is over), or when the answer would be a guess.
-    pub(super) fn local_harness_session(&self, selection: &Selection) -> Option<String> {
-        let harnesses = self.harnesses.as_ref()?;
+    pub(super) fn local_session(&self, selection: &Selection) -> Option<String> {
+        let harnesses = self.local_sessions.as_ref()?;
         // An operator-started harness row *is* a session — it names one
         // directly rather than through a task, which is the whole reason it
         // needs its own rail group: nothing ever dispatched into it, so the
@@ -68,7 +68,7 @@ impl App {
     /// pane is attached the harness's cursor is drawn too — an operator typing
     /// into a terminal with no cursor cannot tell where their text is going.
     pub(super) fn draw_local_harness(&mut self, f: &mut Frame, area: Rect, session_id: &str) {
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             return;
         };
         let attached = self.harness_focus.is_attached_to(session_id);
@@ -89,7 +89,7 @@ impl App {
 
         // Recorded before the paint so a wheel event landing between frames
         // still has somewhere to go.
-        self.hit_harness = Some((inner, session_id.to_string()));
+        self.hit_session = Some((inner, session_id.to_string()));
         harnesses.fit(session_id, inner.width, inner.height);
         let Some(snapshot) = harnesses.screen(session_id) else {
             return;
@@ -120,7 +120,7 @@ impl App {
     /// the reason people avoid them.
     fn harness_title(&self, session_id: &str, attached: bool) -> String {
         let row = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .and_then(|harnesses| harnesses.sessions.row(session_id));
         // What it is waiting for, before what it is: an operator who opened this
@@ -144,7 +144,7 @@ impl App {
             ),
             // A session that vanished between resolving and drawing. Rare, and
             // naming it beats a title that claims a provider we no longer know.
-            None => "harness".to_string(),
+            None => "session".to_string(),
         };
         if attached {
             format!("{what} · typing here · {FOCUS_CHORD_LABEL} to release")

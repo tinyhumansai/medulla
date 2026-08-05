@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use super::super::attention;
 use super::super::sync::lock;
-use super::super::types::HarnessControl;
+use super::super::types::SessionControl;
 use super::super::AttentionKind;
 use super::SessionHandle;
 
@@ -13,11 +13,11 @@ const COMPLETION_CHIME_GRACE: std::time::Duration = std::time::Duration::from_mi
 
 impl SessionHandle {
     /// Who holds this session right now.
-    pub fn control(&self) -> HarnessControl {
+    pub fn control(&self) -> SessionControl {
         if self.operator_held.load(Ordering::Acquire) {
-            HarnessControl::User
+            SessionControl::User
         } else {
-            HarnessControl::Orchestrator
+            SessionControl::Orchestrator
         }
     }
 
@@ -28,10 +28,10 @@ impl SessionHandle {
     /// allowed to start one" — and a session taken over mid-turn is still
     /// running that turn. Clearing `busy` on handback would advertise a harness
     /// as free while it was still finishing someone else's work.
-    pub(in super::super) fn set_control(&self, control: HarnessControl) {
+    pub(in super::super) fn set_control(&self, control: SessionControl) {
         let _cold = lock(&self.cold);
         self.operator_held
-            .store(control == HarnessControl::User, Ordering::Release);
+            .store(control == SessionControl::User, Ordering::Release);
     }
 
     /// Interrupt and close only while orchestration still owns the session.

@@ -27,7 +27,7 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::util::slug;
-use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{PtyState, SessionControl, SessionRow};
 
 use super::super::wrap::{short_home, wrap_path};
 
@@ -248,17 +248,17 @@ fn harness_text(row: &SessionRow, style: HarnessNameStyle) -> String {
 
 /// Who holds the session, in the operator's chosen spelling.
 ///
-/// "unmanaged" rather than [`HarnessControl::as_str`]'s "you": this is the whole
+/// "unmanaged" rather than [`SessionControl::as_str`]'s "you": this is the whole
 /// reason an operator-started row exists, and someone who hands one to the
 /// orchestrator needs to see that it took effect.
-fn control_text(control: HarnessControl, style: ControlStyle) -> String {
+fn control_text(control: SessionControl, style: ControlStyle) -> String {
     match (style, control) {
-        (ControlStyle::Text, HarnessControl::User) => "unmanaged",
-        (ControlStyle::Text, HarnessControl::Orchestrator) => "orchestrator",
+        (ControlStyle::Text, SessionControl::User) => "unmanaged",
+        (ControlStyle::Text, SessionControl::Orchestrator) => "orchestrator",
         // `⊘` reads as "dispatch does not enter here", which is exactly what an
         // operator-held session means; `⊙` is the orchestrator holding it.
-        (ControlStyle::Icon, HarnessControl::User) => "⊘",
-        (ControlStyle::Icon, HarnessControl::Orchestrator) => "⊙",
+        (ControlStyle::Icon, SessionControl::User) => "⊘",
+        (ControlStyle::Icon, SessionControl::Orchestrator) => "⊙",
     }
     .to_string()
 }

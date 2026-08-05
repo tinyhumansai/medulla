@@ -35,7 +35,7 @@ pub use boot::{
 pub use handle::HubHandle;
 pub use handoff::{HandoffControl, HarnessHandoff};
 pub use relay::Relay;
-pub use roster::HubWorker;
+pub use roster::{HubWorker, SharedLocalHosts};
 pub use runner::TaskRunner;
 pub use screens::{ScreenStore, WatchedScreen};
 pub use types::{stderr_log, HubLog, RosterSink, RunError, TaskOutcome, TaskRequest};

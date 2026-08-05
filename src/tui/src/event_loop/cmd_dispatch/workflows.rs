@@ -88,7 +88,7 @@ async fn run(
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
         // The same presets this session's primary host advertises (see
-        // `LocalHostSpawner::custom_harnesses`), so an `agent` step naming a
+        // `LocalHostHarnesses::custom_harnesses`), so an `agent` step naming a
         // custom harness preset does not fail with "not configured on this
         // host" purely because this one-shot daemon started with none.
         custom_harnesses: custom_harnesses.to_vec(),

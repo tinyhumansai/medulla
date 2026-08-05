@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
+use super::super::super::rail::{RailRow, NEW_AGENT_LABEL, NEW_SESSION_LABEL};
 use super::super::super::types::App;
 use super::super::color;
 use super::types::{AgentsPanes, Selection};
@@ -52,8 +52,15 @@ pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 /// two lines still reads as one row rather than as two entries.
 const CONT_INDENT: usize = 5;
 
-/// Build the rail title from the lane inventory and one attention snapshot.
-fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
+/// Build the rail title from the tree, the lane inventory, and one attention
+/// snapshot.
+///
+/// The count is of **agents** — the rows of the tree — not of lanes. A lane is
+/// folded from traffic, so counting lanes said how many things had been
+/// dispatched to, which is not what "Agents · 3" claims and drops to zero on a
+/// machine with three declared agents and a quiet morning. Running tasks still
+/// come from the lanes: that *is* a fact about traffic.
+fn rail_title(rows: &[RailRow], lanes: &[AgentLane], waiting: usize) -> String {
     let running_tasks: usize = lanes
         .iter()
         .map(|lane| {
@@ -63,7 +70,10 @@ fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
                 .count()
         })
         .sum();
-    let agents = lanes.iter().filter(|lane| !lane.role.is_function()).count();
+    let agents = rows
+        .iter()
+        .filter(|row| matches!(row, RailRow::Agent(_)))
+        .count();
     let mut title = if running_tasks > 0 {
         format!("Agents · {agents} · {running_tasks} running")
     } else {
@@ -89,19 +99,21 @@ impl App {
         let waiting_sessions = std::collections::HashSet::new();
         let now = medulla::clock::now_millis();
         match row {
-            RailRow::Harness(_) => [false, true]
-                .into_iter()
-                .flat_map(|active| {
-                    self.rail_row_lines(
-                        row,
-                        lanes,
-                        active,
-                        RAIL_MAX_CONTENT,
-                        &waiting_sessions,
-                        now,
-                    )
-                })
-                .collect(),
+            RailRow::Session(session) if session.local.is_some() && session.task.is_none() => {
+                [false, true]
+                    .into_iter()
+                    .flat_map(|active| {
+                        self.rail_row_lines(
+                            row,
+                            lanes,
+                            active,
+                            RAIL_MAX_CONTENT,
+                            &waiting_sessions,
+                            now,
+                        )
+                    })
+                    .collect()
+            }
             _ => self.rail_row_lines(row, lanes, false, RAIL_MAX_CONTENT, &waiting_sessions, now),
         }
     }
@@ -125,7 +137,7 @@ impl App {
         // disagree with each other — and the render thread takes the sessions
         // lock once rather than once per lane per task.
         let waiting_sessions = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .map(|h| h.sessions.waiting_sessions())
             .unwrap_or_default();
@@ -133,7 +145,7 @@ impl App {
         // rather than on rows of their own — the same number the tab badge
         // carries, so the two can never disagree.
         let waiting = App::count_waiting(&waiting_sessions, &self.harness_focus);
-        let title = rail_title(&selection.lanes, waiting);
+        let title = rail_title(&selection.rows, &selection.lanes, waiting);
         // The border says which half the keyboard is driving. Without it, Esc
         // moving focus to the rail is invisible until the next arrow press.
         let block = crate::ui::widgets::panel(&self.theme, title, self.agents_rail_focused());
@@ -274,7 +286,34 @@ impl App {
         now: i64,
     ) -> Vec<TLine<'static>> {
         match row {
-            RailRow::Harness(session) => self.own_harness_lines(session, active, width, now),
+            // A session this device runs and no task describes is the operator's
+            // own: it gets the multi-line status-line treatment, because its
+            // working directory is the only thing telling two of them apart.
+            //
+            // A name goes above that rather than into it. The status line is
+            // configurable and describes the *harness*; the name is what the
+            // person who opened the session called it, and it is the first thing
+            // they look for.
+            RailRow::Session(session) if session.task.is_none() => {
+                let Some(local) = &session.local else {
+                    return Vec::new();
+                };
+                let mut lines = Vec::new();
+                if let Some(name) = session.name() {
+                    let style = if active {
+                        self.theme.selection()
+                    } else {
+                        Style::default().fg(color("cyan"))
+                    };
+                    lines.extend(wrap_line(
+                        &TLine::from(Span::styled(format!("  {name}"), style)),
+                        width,
+                        CONT_INDENT,
+                    ));
+                }
+                lines.extend(self.own_session_lines(local, active, width, now));
+                lines
+            }
             other => wrap_line(
                 &self.rail_row_line(other, lanes, active, waiting_sessions, now),
                 width,
@@ -293,28 +332,102 @@ impl App {
         now: i64,
     ) -> TLine<'static> {
         match row {
-            RailRow::Agent(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
-            RailRow::NewHarness => self.new_harness_line(active),
-            RailRow::HarnessSeparator => TLine::from(Span::styled(
-                "── your sessions ──",
+            RailRow::Lane(row) => self.agent_row_line(row, lanes, active, waiting_sessions),
+            RailRow::Host(host) => TLine::from(Span::styled(
+                format!("▸ {}", host.label),
+                Style::default()
+                    .fg(color("blue"))
+                    .add_modifier(Modifier::BOLD),
+            )),
+            RailRow::Agent(agent) => {
+                self.declared_agent_line(agent, lanes, active, waiting_sessions)
+            }
+            RailRow::NewAgent => self.new_agent_line(active),
+            // Same shape as the lane list's `── functions ──`, so the two
+            // headings on one rail read as the same kind of thing.
+            RailRow::AgentsHeader => TLine::from(Span::styled(
+                "── agents ──",
                 Style::default().add_modifier(Modifier::DIM),
             )),
-            // Only reached through `rail_row_lines`, which draws a harness over
-            // several lines; kept total so measurement can call either.
-            RailRow::Harness(row) => self
-                .own_harness_lines(row, active, RAIL_MAX_CONTENT, now)
-                .into_iter()
-                .next()
-                .unwrap_or_default(),
+            RailRow::NewSession { .. } => self.new_session_line(active),
+            RailRow::Session(session) => match (&session.task, &session.local) {
+                (Some(task), _) => self.agent_row_line(
+                    &crate::ui::agents::AgentRow::Sub {
+                        lane_index: session.lane_index.unwrap_or(0),
+                        task: task.clone(),
+                        last: session.last,
+                    },
+                    lanes,
+                    active,
+                    waiting_sessions,
+                ),
+                // Only reached through `rail_row_lines`, which draws a local
+                // session over several lines; kept total so measurement can call
+                // either.
+                (None, Some(local)) => self
+                    .own_session_lines(local, active, RAIL_MAX_CONTENT, now)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default(),
+                (None, None) => TLine::from(""),
+            },
         }
     }
 
-    /// Format the `+ New session` action row.
+    /// Format an agent row.
+    ///
+    /// An agent with a lane keeps the lane's own line — its turn count, context
+    /// window, and live state are what an operator reads it for. A *declared*
+    /// agent with no traffic has none of that, so it says what it is instead:
+    /// its harness and the folder it works in, dimmed, because "declared and
+    /// idle" should not compete with the rows that are doing something.
+    fn declared_agent_line(
+        &self,
+        agent: &super::super::super::rail::AgentRailRow,
+        lanes: &[AgentLane],
+        active: bool,
+        waiting_sessions: &std::collections::HashSet<String>,
+    ) -> TLine<'static> {
+        if let Some(lane_index) = agent.lane_index {
+            return self.agent_row_line(
+                &crate::ui::agents::AgentRow::Lane { lane_index },
+                lanes,
+                active,
+                waiting_sessions,
+            );
+        }
+        // The name carries the row; the harness and directory qualify it. Both
+        // were dim, which left an idle agent with nothing to read it by — the
+        // whole row receded, including the one word that identifies it. Only the
+        // qualifier recedes now.
+        let (name_style, detail_style) = if active {
+            (self.theme.selection(), self.theme.selection())
+        } else {
+            (
+                Style::default().fg(color("cyan")),
+                Style::default().add_modifier(Modifier::DIM),
+            )
+        };
+        let detail = match (agent.harness(), agent.workspace()) {
+            (Some(harness), Some(workspace)) => format!(
+                " · {harness} · {}",
+                crate::ui::util::clip_left(workspace, 24)
+            ),
+            (Some(harness), None) => format!(" · {harness}"),
+            _ => String::new(),
+        };
+        TLine::from(vec![
+            Span::styled(format!("○ {}", agent.label()), name_style),
+            Span::styled(detail, detail_style),
+        ])
+    }
+
+    /// Format the `+ New agent` action row.
     ///
     /// Drawn as a button rather than as another list entry — bold and coloured,
     /// with its chord beside it — because it is the one row on the rail that
     /// *does* something rather than selecting something.
-    fn new_harness_line(&self, active: bool) -> TLine<'static> {
+    fn new_agent_line(&self, active: bool) -> TLine<'static> {
         let style = if active {
             self.theme.selection()
         } else {
@@ -323,7 +436,26 @@ impl App {
                 .add_modifier(Modifier::BOLD)
         };
         TLine::from(vec![
-            Span::styled(format!(" {NEW_SESSION_LABEL} "), style),
+            Span::styled(format!(" {NEW_AGENT_LABEL} "), style),
+            Span::styled(" ⏎", Style::default().add_modifier(Modifier::DIM)),
+        ])
+    }
+
+    /// Format the `+ new session` action row that closes an agent's group.
+    ///
+    /// Drawn as the group's last leaf — the same `└` the last session would have
+    /// carried — so it reads as part of that agent rather than as a second
+    /// machine-level button beside `+ New agent`. It carries the `^T` hint the
+    /// machine-level button used to, because `Ctrl-T` on a row belonging to an
+    /// agent opens exactly this flow.
+    fn new_session_line(&self, active: bool) -> TLine<'static> {
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default().fg(color("cyan"))
+        };
+        TLine::from(vec![
+            Span::styled(format!("   └ {NEW_SESSION_LABEL}"), style),
             Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
         ])
     }

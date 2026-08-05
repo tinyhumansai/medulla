@@ -42,7 +42,7 @@ pub enum ScriptLanguage {
     JavaScript,
     /// CPython 3.
     Python,
-    /// POSIX shell, run with `bash`.
+    /// POSIX shell, run with `bash` unless an [`Interpreter`] says otherwise.
     Shell,
 }
 
@@ -52,7 +52,7 @@ impl ScriptLanguage {
         match self {
             Self::JavaScript => ("node", "js"),
             Self::Python => ("python3", "py"),
-            Self::Shell => ("bash", "sh"),
+            Self::Shell => (DEFAULT_SHELL, "sh"),
         }
     }
 
@@ -80,6 +80,151 @@ impl ScriptLanguage {
 
     /// Every spelling an author may write, for an error that teaches.
     pub const NAMES: [&'static str; 3] = ["javascript", "python", "shell"];
+
+    /// Whether `name` picks a specific interpreter rather than naming the
+    /// shell family generically.
+    ///
+    /// `"bash"` and `"sh"` are an author saying *which* shell, and they said it
+    /// before `workflows.shell` existed — a step spelled that way keeps
+    /// [`DEFAULT_SHELL`] even on a host that configured another shell, so
+    /// enabling `shell = "zsh"` cannot silently re-run bash-specific scripts
+    /// somewhere else. Only the generic `"shell"` follows the host.
+    #[must_use]
+    pub fn pins_interpreter(name: &str) -> bool {
+        matches!(name.trim().to_ascii_lowercase().as_str(), "bash" | "sh")
+    }
+}
+
+/// The shell a `shell` script runs under when nothing chooses another.
+///
+/// Not the operator's login shell: an existing workflow's script was written
+/// against *this*, and quietly re-running it under `fish` or `dash` because that
+/// is what `$SHELL` happens to say would break it in ways that look like the
+/// script's fault. Tracking the login shell is available, but it is opted into —
+/// see [`Interpreter::resolve`].
+pub const DEFAULT_SHELL: &str = "bash";
+
+/// The configured value that means "whatever the operator's login shell is".
+pub const USER_SHELL: &str = "user";
+
+/// The program a script runs under, and the arguments that precede its path.
+///
+/// Exists so the shell is a decision rather than a constant. The reason an
+/// operator reaches for it is almost always the same one: their own functions,
+/// aliases, and `PATH` live in `~/.zshrc`, and a script run as
+/// `bash <path>` — non-login, non-interactive — sees none of it. Naming `zsh`
+/// with `args: ["-l"]` is what puts those back in scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Interpreter {
+    /// The program to spawn: a bare name resolved on `PATH`, or an absolute
+    /// path.
+    pub program: String,
+    /// Arguments passed before the script path — `["-l"]` for a login shell,
+    /// `["-l", "-i"]` to also get aliases, which are not exported.
+    pub args: Vec<String>,
+}
+
+impl Interpreter {
+    /// The default shell, with no leading arguments.
+    #[must_use]
+    pub fn default_shell() -> Self {
+        Self {
+            program: DEFAULT_SHELL.to_string(),
+            args: Vec::new(),
+        }
+    }
+
+    /// Choose the interpreter an operator's configuration asks for.
+    ///
+    /// `configured` is `workflows.shell` (or a node's own `args.shell`):
+    ///
+    /// - empty — [`DEFAULT_SHELL`], so an unconfigured host is unchanged.
+    /// - [`USER_SHELL`] — the login shell `login_shell` reports, falling back to
+    ///   [`DEFAULT_SHELL`] when the environment names none. This is the opt-in
+    ///   that makes scripts run under whatever the operator actually uses.
+    /// - anything else — that program.
+    ///
+    /// `login_shell` is passed in rather than read from the environment here so
+    /// the choice is a pure function of its inputs, testable without mutating
+    /// process-global state.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a program that is not a bare name or an absolute path, and any
+    /// program or argument carrying an interior NUL. A relative path is refused
+    /// rather than resolved because what it would resolve *against* is the
+    /// script's working directory, which the workflow author chose — so
+    /// `workflows.shell = "./sh"` would let a graph decide which binary the
+    /// operator's own configuration named.
+    pub fn resolve(configured: &str, args: &[String], login_shell: Option<&str>) -> Result<Self> {
+        let configured = configured.trim();
+        let program = match configured {
+            "" => DEFAULT_SHELL,
+            USER_SHELL => login_shell
+                .map(str::trim)
+                .filter(|shell| !shell.is_empty())
+                .unwrap_or(DEFAULT_SHELL),
+            other => other,
+        };
+        Self::validated(program, args)
+    }
+
+    /// An interpreter from an already-chosen program name, checked.
+    ///
+    /// # Errors
+    ///
+    /// As [`resolve`](Self::resolve).
+    pub fn validated(program: &str, args: &[String]) -> Result<Self> {
+        let program = program.trim();
+        if program.is_empty() {
+            return Err(refused("the interpreter must not be empty"));
+        }
+        if program.contains('\0') {
+            return Err(refused(format!(
+                "the interpreter {program:?} contains a NUL byte, which cannot be passed to a \
+                 process"
+            )));
+        }
+        // `is_separator` rather than `MAIN_SEPARATOR`: Windows accepts `/` as
+        // well as `\`, so matching only the platform's *preferred* separator
+        // would wave `./sh` straight through on the one platform where two
+        // spellings exist. It stays exact on unix, where `\` is an ordinary
+        // filename character.
+        if program.chars().any(std::path::is_separator) && !Path::new(program).is_absolute() {
+            return Err(refused(format!(
+                "the interpreter {program:?} is a relative path; name a program on PATH (\"zsh\") \
+                 or give an absolute path (\"/bin/zsh\")"
+            )));
+        }
+        for arg in args {
+            if arg.contains('\0') {
+                return Err(refused(format!(
+                    "the interpreter argument {arg:?} contains a NUL byte, which cannot be passed \
+                     to a process"
+                )));
+            }
+        }
+        Ok(Self {
+            program: program.to_string(),
+            args: args.to_vec(),
+        })
+    }
+
+    /// The operator's login shell, as the environment reports it.
+    ///
+    /// `$SHELL` only — no `/etc/passwd` lookup, because the environment is what
+    /// a daemon started from a login session actually carries, and a passwd
+    /// entry would disagree with it exactly when a user has changed shells
+    /// without re-logging in.
+    #[must_use]
+    pub fn login_shell() -> Option<String> {
+        std::env::var("SHELL").ok()
+    }
+}
+
+/// A refusal about the interpreter, prefixed so a run record says what refused.
+fn refused(message: impl AsRef<str>) -> EngineError {
+    EngineError::Capability(format!("script: {}", message.as_ref()))
 }
 
 impl From<tinyflows::caps::CodeLanguage> for ScriptLanguage {
@@ -122,8 +267,14 @@ pub enum ScriptSource<'a> {
 /// without the compiler noticing.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptRequest<'a> {
-    /// The interpreter to run under.
+    /// The language the script is written in. Decides the interpreter, unless
+    /// `interpreter` names one, and always decides the staged file's extension.
     pub language: ScriptLanguage,
+    /// The interpreter to run under, overriding the one `language` implies.
+    ///
+    /// `None` keeps the language's own program, which is what a `code` node
+    /// wants: its `javascript` and `python` are the contract, not a preference.
+    pub interpreter: Option<&'a Interpreter>,
     /// The script itself.
     pub source: ScriptSource<'a>,
     /// The JSON handed to the script on stdin, and written to `argv[1]`.
@@ -150,6 +301,7 @@ impl<'a> ScriptRequest<'a> {
     ) -> Self {
         Self {
             language,
+            interpreter: None,
             source: ScriptSource::Inline(source),
             input,
             timeout,
@@ -171,6 +323,7 @@ pub async fn run_script(request: ScriptRequest<'_>) -> Result<ScriptOutput> {
 
     let ScriptRequest {
         language,
+        interpreter,
         source,
         input,
         timeout,
@@ -194,7 +347,13 @@ pub async fn run_script(request: ScriptRequest<'_>) -> Result<ScriptOutput> {
         ));
     }
 
-    let (program, extension) = language.program();
+    // The extension always comes from the language; only the program is
+    // negotiable. A `.sh` staged for `zsh` is still a shell script.
+    let (default_program, extension) = language.program();
+    let (program, leading_args) = match interpreter {
+        Some(chosen) => (chosen.program.as_str(), chosen.args.as_slice()),
+        None => (default_program, &[][..]),
+    };
     let dir =
         tempfile::tempdir().map_err(|err| EngineError::Capability(format!("script: {err}")))?;
 
@@ -219,6 +378,7 @@ pub async fn run_script(request: ScriptRequest<'_>) -> Result<ScriptOutput> {
 
     let mut command = tokio::process::Command::new(program);
     command
+        .args(leading_args)
         .arg(&script)
         .arg(&input_path)
         .env("MEDULLA_INPUT", &input_path)

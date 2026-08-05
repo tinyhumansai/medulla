@@ -21,26 +21,41 @@ pub(super) struct Selection {
     /// Every lane the fold produced, in display order.
     pub(super) lanes: Vec<AgentLane>,
     /// The lane whose transcript the pane shows, when the cursor is on one.
-    pub(super) lane_index: usize,
+    ///
+    /// `None` for a row that has no lane of its own — a host header, an agent
+    /// nothing has been dispatched to, and either action row. Deliberately an
+    /// `Option` rather than a defaulted index: this used to fall back to lane
+    /// **0**, which is the orchestrator's, so selecting `+ New agent` or an idle
+    /// agent rendered the orchestrator's own thinking as if it belonged to that
+    /// row. A row with no lane now has no lane, and the caller renders what the
+    /// row actually is.
+    pub(super) lane_index: Option<usize>,
     /// The task sublane under the cursor, if the cursor is on one.
     pub(super) task: Option<TaskState>,
     /// Whether the pane is showing the operator's own conversation, which
     /// scrolls separately and renders the chat log rather than model calls.
     pub(super) on_orchestrator: bool,
-    /// The live local harness session this row resolves to, when it resolves to
-    /// one.
+    /// The live local session this row resolves to, when it resolves to one.
     ///
     /// Decided here rather than at draw time because it changes the *layout*,
-    /// not just the contents: a harness paints its own composer, so ours has no
+    /// not just the contents: a session paints its own composer, so ours has no
     /// rows and the work panel no columns. Resolving it after the split would
     /// mean laying out for a transcript and then drawing a terminal into it.
-    pub(super) harness: Option<String>,
+    pub(super) session: Option<String>,
 }
 
 impl Selection {
     /// The lane the pane describes, if any.
+    ///
+    /// `None` is a real answer — the row under the cursor has no transcript —
+    /// and never a stand-in for lane 0.
     pub(super) fn lane(&self) -> Option<&AgentLane> {
-        self.lanes.get(self.lane_index)
+        self.lanes.get(self.lane_index?)
+    }
+
+    /// The rail row under the cursor, if the rail has one.
+    pub(super) fn row(&self) -> Option<&RailRow> {
+        self.rows.get(self.active)
     }
 }
 

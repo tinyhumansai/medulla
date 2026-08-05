@@ -528,8 +528,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         (primary.workspace().to_string(), providers, presets)
     });
     let started_hosts = std::sync::Arc::new(std::sync::Mutex::new(local_hosts));
-    let local_harnesses = primary_defaults.map(|(workspace, providers, custom_harnesses)| {
-        medulla_tui::ui::harness_pane::LocalHarnesses {
+    let local_sessions = primary_defaults.map(|(workspace, providers, custom_harnesses)| {
+        medulla_tui::ui::harness_pane::LocalSessions {
             sessions: harness_sessions.clone(),
             runtimes: host_runtimes.clone(),
             hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
@@ -546,12 +546,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Shared with the hub's roster filter and appended to by the spawner, so a
     // host added mid-session is recognised as device-local the next time the
     // roster is saved rather than being remembered as a remote peer.
-    let local_addresses = std::sync::Arc::new(std::sync::Mutex::new(
-        crate::local_host::all_host_addresses(&loaded.config.host, &loaded.config.hosts),
+    let declared_local_hosts = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::local_host::all_local_hosts(&loaded.config.host, &loaded.config.hosts),
     ));
-    // Only meaningful while this device hosts: with hosting off there is no bus
-    // binding or session manager to hand a new host.
-    let local_host_spawner = hosting
+    // Only meaningful while this device hosts: with hosting off there are no
+    // host options to read declared harnesses from.
+    let local_host_harnesses = hosting
         .then(|| {
             crate::local_host::options_from_config_with_custom_and_hooks(
                 &loaded.config.host,
@@ -566,18 +566,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 },
             )
             .ok()
-            .map(|options| {
-                crate::local_host::LocalHostSpawner::new(
-                    local_network.clone(),
-                    harness_sessions.clone(),
-                    options,
-                    env.clone(),
-                    host_runtimes.clone(),
-                    started_hosts.clone(),
-                    local_addresses.clone(),
-                    loaded.config.fleet.agent_declarations.clone(),
-                )
-            })
+            .map(crate::local_host::LocalHostHarnesses::new)
         })
         .flatten();
     let local_dispatch = crate::hub_relay::LocalDispatch {
@@ -585,7 +574,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         hub_address: medulla::hub::DEFAULT_LOCAL_HUB_ADDRESS.to_string(),
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
-        host_addresses: local_addresses,
+        local_hosts: declared_local_hosts,
         // Flattened: a host contributes one entry per agent declared on it, not
         // one entry standing in for the machine.
         hosts: started_hosts
@@ -665,7 +654,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             &mut terminal,
             runtime.clone(),
             SessionWiring {
-                local_hosts: local_host_spawner.clone(),
+                local_hosts: local_host_harnesses.clone(),
                 loaded: loaded.clone(),
                 startup_status: status.take(),
                 link_obs: link_obs.clone(),
@@ -678,7 +667,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // one host, so extras are served and dispatchable but not yet
                 // reflected there — a UI gap, not a hosting one.
                 host: primary_observation.clone(),
-                harnesses: local_harnesses.clone(),
+                local_sessions: local_sessions.clone(),
             },
         )
         .await;

@@ -1,8 +1,11 @@
 //! PTY-backed execution of delegated harness tasks.
 //!
 //! [`PtySessionExecutor`] is the public adapter. [`run`] owns its execution
-//! behavior, while [`types`] owns the executor and session-planning data.
+//! behavior, [`hold`] owns what happens when an operator is in the way — queue,
+//! suspend, hand back — and [`types`] owns the executor and session-planning
+//! data.
 
+mod hold;
 mod run;
 #[cfg(test)]
 mod tests;

@@ -45,6 +45,7 @@ impl HarnessDispatch for StubReviewer {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         })
     }
 }

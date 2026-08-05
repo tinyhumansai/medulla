@@ -361,3 +361,62 @@ tokenEnv = "MEDULLA_TOKEN"
 # name = "Implementer"
 # description = "Implements a scoped change and reports what it did."
 # model = "reasoning"        # an abstract tier, never a concrete SKU
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks
+# ---------------------------------------------------------------------------
+#
+# Commands Medulla installs into every harness it launches. Declared once here
+# rather than once per harness, in each harness's own config language: a hook
+# written here reaches Claude Code (through `--settings`) and Codex (through a
+# `-c` override) from the same three lines, and cannot drift between them.
+#
+# These are *Medulla's* hooks. Your own `~/.claude/settings.json` hooks keep
+# running exactly as they do outside Medulla — nothing here replaces them.
+#
+# event    — required. Both spellings are accepted: the canonical PascalCase
+#            name the harnesses themselves use, and its camelCase form, which
+#            is what the rest of this file's key style would lead you to write.
+#            "PostToolUse" and "postToolUse" mean the same thing.
+#
+#            PreToolUse · PostToolUse · PermissionRequest · UserPromptSubmit
+#            Stop · SubagentStart · SubagentStop · PreCompact · PostCompact
+#            SessionStart · SessionEnd · Notification
+#
+#            Notification is Claude Code only. A hook on an event a harness
+#            does not implement is dropped for that harness, with a line in
+#            the log saying which and why — never silently.
+#
+# type     — required, and "command" is the only handler. The command runs
+#            through your shell, receives the harness's native hook payload on
+#            stdin, and speaks the harness's native decision protocol back on
+#            stdout.
+#
+# command  — required. The command line to run.
+#
+# matcher  — optional, default "*". A tool-name pattern for the tool-scoped
+#            events; ignored by events that carry no tool.
+#
+# timeout  — optional. Seconds before the harness gives up on the hook. The
+#            harness's own default when omitted.
+#
+# harnesses — optional, default every harness that supports the event. Note
+#            these are lowercase (claude · codex · opencode · openhuman),
+#            unlike the event names.
+#
+# An event name that is neither spelling fails the whole config load, naming
+# the value it rejected. That is deliberate: a hook you believe is installed
+# and is not is worse than a startup that stops and tells you.
+#
+# [[hooks]]
+# event = "PostToolUse"
+# matcher = "Edit|Write"
+# type = "command"
+# command = "just fmt"
+#
+# [[hooks]]
+# event = "sessionStart"        # camelCase is accepted too
+# type = "command"
+# command = "git fetch --all --prune"
+# timeout = 30
+# harnesses = ["claude"]        # this one only, and lowercase

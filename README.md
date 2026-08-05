@@ -4,7 +4,7 @@
 
 **One terminal. Every agent you have. Working at once.**
 
-Claude Code, Codex, and OpenCode are remarkable at running one task deeply. Medulla is what runs a hundred of them. It decides what work to hand out, places each piece on a harness that can do it, streams back what every one of them is doing, and keeps a live picture of the whole operation in front of you.
+Claude Code, Codex, and OpenCode are remarkable at running one task deeply. Medulla is what runs a hundred of them. It decides what work to hand out, places each piece on an agent that can do it, streams back what every one of them is doing, and keeps a live picture of the whole operation in front of you.
 
 Fleets with everyone.
 
@@ -43,14 +43,14 @@ Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and 
 
 **Repositories it understands.** Point Medulla at your projects once. It writes a short profile for each and uses it to route work to the right place, rather than guessing from a directory name.
 
-**Plans that actually run.** A workflow is a saved, multi-step plan whose steps each run as a real harness session — with parallel branches, and approval gates where a human has to say yes. Ask for one in plain words and an agent will build it for you.
+**Plans that actually run.** A workflow is a saved, multi-step plan whose steps each run as a real agent session — with parallel branches, and approval gates where a human has to say yes. Ask for one in plain words and an agent will build it for you.
 
 **Small surface, low spend.** The bulk of your fleet's output never reaches the orchestrator's context. It reasons over a distilled, current picture, so what you pay orchestrator rates on stays small however much is running underneath.
 
 ## Documentation
 
-**Routing › Harnesses** also manages named OpenRouter-backed presets that reuse
-Claude Code or Codex as the coding harness. Presets select an OpenRouter model
+**Routing › Harness Types** also manages named OpenRouter-backed presets that
+reuse Claude Code or Codex as the coding CLI. Presets select an OpenRouter model
 and fleet host while referring to `OPENROUTER_API_KEY` by environment-variable
 name only; restart the local host after saving one. See
 [`config.example.toml`](config.example.toml) for the complete shape.
@@ -60,7 +60,7 @@ Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook
 * [Workers and Sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions) — capacity, threads, and what survives.
 * [Workflows](https://tinyhumans.gitbook.io/medulla/features/workflows) — authored multi-step plans and their runs.
 * [MEDULLA.md Workspace Profiles](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles) — telling the orchestrator what a repo is.
-* [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing) — cognitive tiers, harness selection, strategies.
+* [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing) — cognitive tiers, harness-type selection, strategies.
 * [Token Efficiency and Budgets](https://tinyhumans.gitbook.io/medulla/features/token-efficiency) — small surfaces and enforced budgets.
 
 Building on Medulla, or running it yourself? Everything technical — the TUI in depth, the CLI, worker daemons, configuration, architecture, and the SDK — is in **[Developers](https://tinyhumans.gitbook.io/medulla/developers)**.
@@ -73,7 +73,7 @@ Request access and tell us what you are orchestrating.
 
 ## Why an orchestrator
 
-Ask a harness to coordinate other harnesses and you hit the same quiet failure mode everywhere: the orchestrator is just another model with a transcript, and every harness it manages writes into that transcript. Accuracy degrades well before the context window fills. An orchestrator that reads raw fleet traffic stops scaling at a handful of agents — long before it runs out of room, it stops being able to think.
+Ask a coding agent to coordinate other coding agents and you hit the same quiet failure mode everywhere: the orchestrator is just another model with a transcript, and every agent it manages writes into that transcript. Accuracy degrades well before the context window fills. An orchestrator that reads raw fleet traffic stops scaling at a handful of agents — long before it runs out of room, it stops being able to think.
 
 Orchestration is becoming the dominant pattern in agentic systems, yet it has been running on architectures designed for chat. A chat model manages one thread. An orchestrator has to hold an operation in its head: agents in flight, work being decomposed and delegated, results streaming back, decisions made continuously. Medulla is built for that.
 

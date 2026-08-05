@@ -35,7 +35,7 @@ impl App {
                 .as_deref()
                 .map(|id| id.get(..7).unwrap_or(id))
                 .unwrap_or("unavailable");
-            rows.push(ListItem::new(format!("Harness launch  {launch}")));
+            rows.push(ListItem::new(format!("Session launch  {launch}")));
             rows.extend(
                 self.changes.recent_commits.iter().map(|commit| {
                     ListItem::new(format!("{}  {}", commit.short_id(), commit.subject))

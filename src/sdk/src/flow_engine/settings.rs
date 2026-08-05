@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use crate::flow_engine::caps::script::Interpreter;
 use crate::protocol::HarnessProvider;
 
 /// Settings governing one workflow run's capabilities.
@@ -78,6 +79,13 @@ pub struct CapabilitySettings {
     /// A workflow received through `fleet_dispatch` is already delegated work;
     /// its child nodes must stay at that depth rather than becoming new roots.
     pub fleet_depth: u8,
+    /// The interpreter a `shell` script runs under when its node names none.
+    ///
+    /// Resolved once, here, rather than at each spawn: `workflows.shell = "user"`
+    /// reads `$SHELL`, and a run whose steps disagreed about the answer because
+    /// the environment changed under them would be a genuinely confusing thing
+    /// to debug.
+    pub shell: Interpreter,
     /// The directory a `medulla:shell` script runs in.
     ///
     /// The operator's project, normally: a step that shells out almost always
@@ -129,6 +137,7 @@ impl CapabilitySettings {
             max_parallel_agents: DEFAULT_MAX_PARALLEL_AGENTS,
             max_loop_iterations: DEFAULT_MAX_LOOP_ITERATIONS,
             fleet_depth: 0,
+            shell: Interpreter::default_shell(),
             workspace: String::new(),
         }
     }
@@ -211,6 +220,23 @@ impl CapabilitySettings {
         settings.default_model =
             (!config.default_model.is_empty()).then(|| config.default_model.clone());
         settings.allow_code = config.allow_code;
+        // A shell this host cannot accept is a configuration mistake worth
+        // saying out loud, but it is not worth refusing to run workflows over:
+        // the default still works, and a hard failure here would take out every
+        // `code` node too, none of which use it.
+        settings.shell = Interpreter::resolve(
+            &config.shell,
+            &config.shell_args,
+            Interpreter::login_shell().as_deref(),
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                configured = %config.shell,
+                %err,
+                "workflows.shell is unusable; falling back to the default shell"
+            );
+            Interpreter::default_shell()
+        });
         settings.tool_allowlist = config.tool_allowlist.clone();
         settings.http_allowlist = config.http_allowlist.clone();
         // A zero timeout would abandon every run instantly, which reads as the

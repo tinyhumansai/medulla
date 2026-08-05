@@ -1,4 +1,4 @@
-//! Resolves immutable launch baselines for live harness sessions.
+//! Resolves immutable launch baselines for live agent sessions.
 
 use std::path::Path;
 
@@ -29,7 +29,7 @@ pub(super) fn launch_baseline(
     }
 }
 
-/// Resolve the selected harness without silently substituting another
+/// Resolve the selected session without silently substituting another
 /// repository. The newest eligible harness is only a default when no live
 /// preferred row exists.
 pub(super) fn select_harness_baseline(
@@ -44,7 +44,7 @@ pub(super) fn select_harness_baseline(
                 row.launch_commit.as_deref(),
                 row.launch_checkout_identity.as_deref(),
             )
-            .ok_or_else(|| format!("Selected harness {} is not in a Git repository", row.label))?;
+            .ok_or_else(|| format!("Selected session {} is not in a Git repository", row.label))?;
             return Ok(Some((row, commit)));
         }
     }

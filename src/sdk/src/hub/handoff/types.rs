@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Who holds a harness, as the orchestrator is told.
 ///
-/// The SDK-side spelling of the TUI's `HarnessControl`. Deliberately a second
+/// The SDK-side spelling of the TUI's `SessionControl`. Deliberately a second
 /// type rather than `serde` on the first: that enum's contract is that it is
 /// process-local and never serialized, and it is the single gate on dispatch.
 /// Deriving `Serialize` onto it would quietly make it a wire type and put the

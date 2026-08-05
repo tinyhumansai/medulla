@@ -11,8 +11,8 @@ use crate::protocol::{AgentCapabilities, HarnessEvent, TaskFrameKind};
 
 use super::{
     base_config, capabilities_frame, chatter_status_runner, counting_capability_runner,
-    decoded_frames, quick_thinking_runner, quick_tool_runner, recording_send, status_runner,
-    task_frame, tool_call_event,
+    decoded_frames, held_then_resumed_runner, quick_thinking_runner, quick_tool_runner,
+    recording_send, status_runner, task_frame, tool_call_event,
 };
 
 #[tokio::test]
@@ -50,6 +50,53 @@ async fn throttles_status_frames() {
     assert!(frames
         .iter()
         .any(|f| f.kind == TaskFrameKind::Reply && f.text == "ok"));
+}
+
+#[tokio::test]
+async fn control_markers_are_never_throttled_away() {
+    // The throttle is a rate cap on *chatter*, and a hold is not chatter: it is
+    // the frame that pauses the requester's no-progress watchdog, and the
+    // hand-back is the one that resumes it. Dropped by the throttle — which is
+    // exactly what happens when a person takes a session a second after the last
+    // status — the hub would go on counting the silence of a session somebody is
+    // sitting in, and reap a healthy task while they worked.
+    let (send, recorded) = recording_send();
+    let runtime = DaemonRuntime::new(base_config(), held_then_resumed_runner(), send);
+    // All three events inside one 4s window: ordinarily only the first survives
+    // (see `throttles_status_frames`, which is the same clock).
+    let seq = Arc::new(vec![10_000i64, 11_000, 12_000]);
+    let index = Arc::new(AtomicUsize::new(0));
+    let now: NowFn = Arc::new(move || {
+        let position = index.fetch_add(1, Ordering::SeqCst);
+        *seq.get(position).unwrap_or(seq.last().unwrap())
+    });
+    let runtime = runtime.with_now(now);
+
+    runtime.handle_message(
+        "peer".into(),
+        String::new(),
+        Some(task_frame("t1", "work", None)),
+    );
+    runtime.idle().await;
+
+    let frames = decoded_frames(&recorded);
+    let statuses: Vec<&str> = frames
+        .iter()
+        .filter(|f| f.kind == TaskFrameKind::Status)
+        .map(|f| f.text.as_str())
+        .collect();
+    assert!(
+        statuses
+            .iter()
+            .any(|text| text.starts_with(crate::daemon::SESSION_HELD_STATUS_PREFIX)),
+        "the hold must reach the requester: {statuses:?}"
+    );
+    assert!(
+        statuses
+            .iter()
+            .any(|text| text.starts_with(crate::daemon::SESSION_RESUMED_STATUS_PREFIX)),
+        "and so must the hand-back, or the watchdog never resumes: {statuses:?}"
+    );
 }
 
 #[tokio::test]

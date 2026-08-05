@@ -177,11 +177,15 @@ impl App {
             PromptKind::HostEditLabel(id) => {
                 let mut patch = serde_json::Map::new();
                 patch.insert("label".into(), serde_json::Value::String(text.clone()));
+                // Set first so the persist can overrule it: renaming has two
+                // outcomes worth more than "Updating label…" — a write that
+                // failed, and an install with no config file, where the new name
+                // lasts one run and the operator has to be told so.
+                self.set_status("Updating label…");
                 // The roster label is this run's; the declaration's name is the
                 // one that comes back after a restart, so an agent this machine
                 // declared is renamed in both places or the edit half-survives.
                 self.persist_agent_name(&id, &text);
-                self.set_status("Updating label…");
                 Some(Cmd::WorkerOp(WorkerOp::Update { id, patch }))
             }
             PromptKind::AnswerQuestion {

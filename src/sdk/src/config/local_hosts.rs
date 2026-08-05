@@ -32,7 +32,21 @@ pub struct LocalHostRef {
 /// declaration order.
 ///
 /// Addresses come from [`local_host_address`], names from [`local_host_name`].
+///
+/// **The resolved ids are unique.** An address is a bus address, so two sections
+/// that resolve to one can never both exist: the first binds and the second's
+/// `bind` fails, which the host starter already reports as a start-up problem.
+/// This is the same fact stated for the readers — a second row for a host that will
+/// not be there is not a host, it is the collision drawn twice. The first claim
+/// on an address keeps it, which is also the one that binds, so the list and the
+/// binder still agree.
+///
+/// Two sections collide by two routes, and both are dropped here: an extra that
+/// *types* an address another section already resolved to, and two names that
+/// slug to the same thing — `"API"` and `"api"` both give `local-api`, because
+/// the slug is lowercased.
 pub fn local_hosts(primary: &HostSection, extras: &[HostSection]) -> Vec<LocalHostRef> {
+    let mut taken: Vec<String> = Vec::new();
     std::iter::once(LocalHostRef {
         id: primary.effective_address(),
         name: local_host_name(primary, &primary.workspace, true),
@@ -44,12 +58,23 @@ pub fn local_hosts(primary: &HostSection, extras: &[HostSection]) -> Vec<LocalHo
             .iter()
             .enumerate()
             .map(|(index, extra)| LocalHostRef {
+                // Positional, so dropping a collision must not renumber the ones
+                // after it: the index is the entry's place in `[[hosts]]`, which
+                // is what the binder counts too.
                 id: local_host_address(extra, index),
                 name: local_host_name(extra, &extra.workspace, false),
                 workspace: extra.workspace.clone(),
                 primary: false,
             }),
     )
+    .filter(|host| {
+        let id = host.id.trim().to_string();
+        let fresh = !taken.contains(&id);
+        if fresh {
+            taken.push(id);
+        }
+        fresh
+    })
     .collect()
 }
 

@@ -102,6 +102,7 @@ fn flooding(label: &str) -> LaunchSpec {
         // Codex takes no preset session id, so its interactive argv is empty and
         // the script below is the whole command.
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,

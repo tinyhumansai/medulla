@@ -49,6 +49,7 @@ fn sh(script: &str) -> LaunchSpec {
         // `/bin/sh` would reject as an unknown option. Codex takes no preset id,
         // so its interactive argv is empty and the script is the whole command.
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,

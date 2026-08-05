@@ -30,6 +30,13 @@ use crate::worker::pty::SessionRow;
 /// the spawner disagree about the trailing slash far more often than they
 /// disagree about the directory.
 ///
+/// The harness compared is the session's *id*
+/// ([`harness_id`](SessionRow::harness_id)) — a custom preset's own id, else the
+/// CLI's wire name — because that is the vocabulary a declaration is written in.
+/// A preset is a different agent running the same CLI, so comparing the CLI
+/// underneath it matched a `deepseek` declaration against `claude` and left
+/// every preset-backed session in the orphan list.
+///
 /// The first match wins. Two declarations of the same harness in the same
 /// directory are the same agent declared twice, so which one claims the session
 /// changes nothing an operator can see.
@@ -38,7 +45,7 @@ pub fn agent_for_session<'a>(
     row: &SessionRow,
 ) -> Option<&'a AgentDeclaration> {
     let cwd = normalize_path(&row.cwd);
-    let harness = row.provider.as_str();
+    let harness = row.harness_id();
     declarations.iter().find(|declaration| {
         declaration.harness.trim().eq_ignore_ascii_case(harness)
             && normalize_path(&declaration.workspace.path) == cwd
@@ -73,6 +80,7 @@ mod tests {
             id: "w_1".into(),
             label: "local".into(),
             provider,
+            preset: None,
             state: PtyState::Running,
             cwd: cwd.into(),
             branch: None,
@@ -134,6 +142,50 @@ mod tests {
             .is_none(),
             "claude in the codex agent's directory is not that agent"
         );
+    }
+
+    #[test]
+    fn a_preset_backed_session_belongs_to_the_agent_declared_for_that_preset() {
+        // A custom preset is its own agent — its own model, endpoint and
+        // environment — so a declaration records the *preset's* id. Matching on
+        // the CLI underneath it compared `claude` against `deepseek`, and every
+        // session an operator started from a preset was listed as belonging to
+        // no agent at all.
+        let declarations = vec![AgentDeclaration::new(
+            "api-deepseek",
+            "host",
+            "deepseek",
+            "/work/api",
+        )];
+        let mut row = session(HarnessProvider::Claude, "/work/api");
+        row.preset = Some("deepseek".into());
+
+        let matched = agent_for_session(&declarations, &row).expect("its own agent claims it");
+        assert_eq!(matched.agent_id, "api-deepseek");
+        assert_eq!(row.harness_id(), "deepseek");
+    }
+
+    #[test]
+    fn a_preset_is_not_the_base_cli_declared_in_the_same_directory() {
+        // The other direction of the same rule: an agent declared as plain
+        // `claude` is not the one a `deepseek` preset session belongs to, even
+        // though both run the claude binary in that folder.
+        let declarations = vec![AgentDeclaration::new(
+            "api-claude",
+            "host",
+            "claude",
+            "/work/api",
+        )];
+        let mut row = session(HarnessProvider::Claude, "/work/api");
+        row.preset = Some("deepseek".into());
+        assert!(agent_for_session(&declarations, &row).is_none());
+
+        // And a native session still resolves by the provider's wire name: a
+        // blank preset is no preset.
+        let mut native = session(HarnessProvider::Claude, "/work/api");
+        native.preset = Some("   ".into());
+        assert_eq!(native.harness_id(), "claude");
+        assert!(agent_for_session(&declarations, &native).is_some());
     }
 
     #[test]

@@ -41,21 +41,20 @@ fn space_on_a_role_offers_the_selected_agent_for_it_and_takes_it_back() {
         app.status()
     );
 
-    // And back off again. The op is a whole-list replacement, so removing the
-    // only role must send an *empty* list — not omit the field, which would
-    // read as "leave the roles alone" and make the toggle one-way.
-    let mut held = app_with_roster(
-        vec![{
-            let mut w = local_worker("w1", true);
-            w.roles = assigned;
-            w
-        }],
-        None,
+    // The row redraws assigned rather than reverting: the assignment landed on
+    // the declaration the tree reads roles from, not on the roster alone.
+    let out = render(&mut app, 120, 44);
+    assert!(
+        out.contains(&format!("[x] {}", assigned[0])),
+        "the checkbox the operator just ticked stays ticked: {out}"
     );
-    held.focus_routing_subpage("Hosts");
-    down(&mut held, 1);
-    let _ = held.on_event(key(KeyCode::Right));
-    match held.on_event(key(KeyCode::Char(' '))) {
+
+    // And back off again, on the *same* app — which is only a real round trip
+    // because the first press is still there to be undone. The op is a
+    // whole-list replacement, so removing the only role must send an *empty*
+    // list — not omit the field, which would read as "leave the roles alone"
+    // and make the toggle one-way.
+    match app.on_event(key(KeyCode::Char(' '))) {
         Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
             assert_eq!(id, "w1");
             assert!(
@@ -110,6 +109,30 @@ fn leaving_the_role_list_hands_the_arrows_back_to_the_tree() {
     let _ = app.on_event(key(KeyCode::Down));
     let out = render(&mut app, 120, 44);
     assert!(out.contains("Agent · w2"), "back on the tree: {out}");
+}
+
+#[test]
+fn removing_a_row_takes_the_arrows_back_off_the_role_list() {
+    // `d` is reachable while the toggles hold the arrows — `host_roles_key`
+    // passes it through — and it reshapes the tree under the cursor. Leaving the
+    // focus on would point the next arrow at the roles of whichever row slid
+    // into the cursor's place, which is not the agent whose toggles were open.
+    let mut app = app_with_roster(
+        vec![local_worker("w1", true), local_worker("w2", false)],
+        None,
+    );
+    app.focus_routing_subpage("Hosts");
+    down(&mut app, 1);
+    let _ = app.on_event(key(KeyCode::Right));
+    let out = render(&mut app, 130, 44);
+    assert!(out.contains("[ ]"), "the toggles have the arrows: {out}");
+
+    let _ = app.on_event(key(KeyCode::Char('d')));
+
+    // Down now walks the tree again rather than the role list.
+    let _ = app.on_event(key(KeyCode::Down));
+    let out = render(&mut app, 130, 44);
+    assert!(out.contains("Agent · w2"), "the cursor moved on: {out}");
 }
 
 #[test]

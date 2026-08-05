@@ -238,3 +238,65 @@ fn opening_a_session_for_an_undeclared_agent_says_so() {
     assert!(app.status().contains("nobody"), "{}", app.status());
     assert!(app.prompt_state().is_none());
 }
+
+#[test]
+fn a_remote_agent_cannot_be_given_a_local_session() {
+    // `^T` acts on whatever agent row the cursor is on, and a remote host's
+    // agents have rows. Starting a process here for one of them would file a
+    // local session under an agent that runs on another machine — where the
+    // rail, which resolves sessions against the *local* declarations, would
+    // then show it loose in the orphan list.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
+        "studio-codex",
+        "studio",
+        "codex",
+        "/work",
+    )];
+    // The cursor can reach it: the agent has a row even though the action does
+    // not, which is exactly how the chord gets there.
+    let index = app
+        .rail_rows()
+        .iter()
+        .position(|row| matches!(row, RailRow::Agent(agent) if agent.agent_id == "studio-codex"))
+        .expect("a remote agent still has a rail row");
+    app.agent_index = index;
+    assert_eq!(app.selected_agent_id().as_deref(), Some("studio-codex"));
+
+    app.open_new_session("studio-codex");
+
+    assert!(app.prompt_state().is_none(), "no session flow opened");
+    assert!(
+        app.status().contains("studio"),
+        "the refusal names the host that owns it: {}",
+        app.status()
+    );
+}
+
+#[test]
+fn starting_a_session_for_a_remote_agent_refuses_before_it_spawns() {
+    // The same guard on the other door: `start_agent_session` is reached from
+    // the name prompt, so it must not trust that `open_new_session` vetted the
+    // agent for it.
+    // `hosting_app` already carries the local harnesses, so the refusal has to
+    // come from the declaration and not from having nothing to launch with.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
+        "studio-codex",
+        "studio",
+        "codex",
+        "/",
+    )];
+
+    app.start_agent_session("studio-codex", "anything", false);
+
+    assert!(
+        app.status().contains("studio"),
+        "the refusal names the host: {}",
+        app.status()
+    );
+    assert!(
+        app.rail_rows().iter().all(|row| row.session_id().is_none()),
+        "nothing was started"
+    );
+}

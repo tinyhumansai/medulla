@@ -43,6 +43,8 @@ mod session_focus;
 mod session_focus_tests;
 mod settings_edit;
 mod state;
+#[cfg(test)]
+mod state_tests;
 mod status_line;
 mod templates;
 mod types;

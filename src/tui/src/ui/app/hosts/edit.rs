@@ -10,6 +10,20 @@
 //! fails, the live change is not made either, because a UI showing a role the
 //! file does not have is worse than one that refused.
 //!
+//! **The no-config-file path.** An install with nowhere to write — no
+//! `--config`, no discovered file — still has a live roster in front of the
+//! operator, so an edit is not refused there. It applies to *this run*, in both
+//! places at once (the in-memory declaration list and the roster), and the
+//! status says how long it lasts. That is one rule for all three edits here, and
+//! it is the same one `save_workspaces` follows for `[host].workspaces`.
+//!
+//! It is deliberately not the same thing as a write *failure*. A failed write
+//! means the file exists and disagrees, so nothing is applied at all — see
+//! [`persist_agent_roles`](App::persist_agent_roles). Having no file to
+//! disagree with is not a failure, and refusing there would leave the operator
+//! unable to touch a roster they can see. What is never allowed is the third
+//! option: applying the edit and saying nothing, which reads as "saved".
+//!
 //! [`HubHandle::set_roles`]: medulla::hub::HubHandle::set_roles
 
 use medulla::runtime::{AgentDeclaration, WorkerOp};
@@ -92,18 +106,33 @@ impl App {
                     ));
                     return false;
                 };
-                AgentDeclaration::new(
-                    agent.agent_id.clone(),
-                    host.id.clone(),
-                    harness,
-                    agent.workspace.clone().unwrap_or_default(),
-                )
+                let Some(workspace) = agent.workspace.clone().filter(|w| !w.trim().is_empty())
+                else {
+                    // The same reason as the harness, one step further on: an
+                    // agent is `harness × workspace`, and a declaration with no
+                    // directory is one `open_new_session` then refuses with
+                    // "declares no workspace". Saving the role would leave the
+                    // operator looking at an agent they cannot use.
+                    self.set_status(format!(
+                        "{} reports no workspace, so its roles cannot be saved",
+                        agent.agent_id
+                    ));
+                    return false;
+                };
+                AgentDeclaration::new(agent.agent_id.clone(), host.id.clone(), harness, workspace)
             }
         };
         declaration.roles = roles;
         let Some(path) = self.config_path.clone() else {
-            // Nowhere to write: the change still applies for this run, and the
-            // status says exactly how long it lasts.
+            // Nowhere to write, so the edit is this run's. It has to land on the
+            // declaration list as well as the roster: the Hosts tree reads a
+            // declared agent's roles from the declaration, so updating only the
+            // roster would redraw the row with the roles it had before while
+            // `SetRoles` carried the new ones.
+            medulla::config::upsert_agent_declaration(
+                &mut self.loaded.config.fleet.agent_declarations,
+                declaration,
+            );
             self.set_status(format!("{outcome} (this run only — no config file)"));
             return true;
         };
@@ -134,11 +163,18 @@ impl App {
             return false;
         }
         let Some(path) = self.config_path.clone() else {
+            // Same rule as a role edit: nowhere to write is not a refusal, it is
+            // an edit that lasts one run — and the status is what keeps the
+            // agent's return at the next launch from being a surprise.
+            medulla::config::remove_agent_declaration(
+                &mut self.loaded.config.fleet.agent_declarations,
+                &agent.agent_id,
+            );
             self.set_status(format!(
-                "{} stays declared — there is no config file to remove it from",
+                "Undeclared {} (this run only — no config file)",
                 agent.agent_id
             ));
-            return false;
+            return true;
         };
         let current = self.loaded.config.fleet.agent_declarations.clone();
         match medulla::config::undeclare_agent(&path, &current, &agent.agent_id) {
@@ -171,6 +207,17 @@ impl App {
         let mut declaration = declaration.clone();
         declaration.name = (!name.trim().is_empty()).then(|| name.trim().to_string());
         let Some(path) = self.config_path.clone() else {
+            // The roster label has already changed by the time this runs, so a
+            // silent return is the one outcome the module forbids: the operator
+            // would read the new name off the row and have nothing telling them
+            // it goes away at the next launch.
+            medulla::config::upsert_agent_declaration(
+                &mut self.loaded.config.fleet.agent_declarations,
+                declaration,
+            );
+            self.set_status(format!(
+                "Renamed {agent_id} (this run only — no config file)"
+            ));
             return;
         };
         match medulla::config::declare_agent(&path, &current, declaration) {

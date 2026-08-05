@@ -49,6 +49,18 @@ impl App {
         self.preview_lines_within(tree, row, None)
     }
 
+    /// How many rows the preview would draw in `budget` of them. Test seam for
+    /// the one property the budget exists to hold: it is never exceeded.
+    #[cfg(test)]
+    pub(in crate::ui::app) fn preview_height_within(
+        &self,
+        tree: &[HostRow],
+        row: HostsRow,
+        budget: usize,
+    ) -> usize {
+        self.preview_lines_within(tree, row, Some(budget)).len()
+    }
+
     /// Build the preview body, windowing the role list when `budget` rows is
     /// less than it needs. Shared with the height calculation so the pane is
     /// sized to what it will actually draw rather than a guess.
@@ -205,7 +217,18 @@ impl App {
     /// `budget` caps the rows; the window follows the cursor so a role can never
     /// be selected but off-screen. A remote agent gets the summary and no
     /// checkboxes: its roles are assigned on the machine that declares it.
+    ///
+    /// The cap is a hard one — the result never exceeds `budget`. A zero budget
+    /// returns nothing at all and a budget of one returns only the summary,
+    /// because the alternative is drawing past the bottom of the pane, which on
+    /// a short terminal clipped the role cursor: the row the operator was about
+    /// to toggle was the one that fell off.
     fn role_lines(&self, agent: &HostAgentRow, budget: Option<usize>) -> Vec<TLine<'static>> {
+        if budget == Some(0) {
+            return Vec::new();
+        }
+        // What is left once the summary below has taken its row.
+        let remaining = budget.map(|rows| rows.saturating_sub(1));
         // The summary leads, because "none assigned" is the state most agents
         // are in and it must not read as one excluded from every role. Trailing
         // it under a dozen checkboxes buried exactly the line that says
@@ -232,28 +255,34 @@ impl App {
             ),
         ])];
         if !agent.editable {
-            lines.push(TLine::from(vec![
-                Span::styled("           ", dim()),
-                Span::styled(
-                    "read-only · assign roles on that machine".to_string(),
-                    dim(),
-                ),
-            ]));
+            if remaining != Some(0) {
+                lines.push(TLine::from(vec![
+                    Span::styled("           ", dim()),
+                    Span::styled(
+                        "read-only · assign roles on that machine".to_string(),
+                        dim(),
+                    ),
+                ]));
+            }
             return lines;
         }
         let templates = self.agent_templates();
         if templates.is_empty() {
-            lines.push(TLine::from(vec![
-                Span::styled("           ", dim()),
-                Span::styled("no agent templates are declared".to_string(), dim()),
-            ]));
+            if remaining != Some(0) {
+                lines.push(TLine::from(vec![
+                    Span::styled("           ", dim()),
+                    Span::styled("no agent templates are declared".to_string(), dim()),
+                ]));
+            }
             return lines;
         }
-        // One row is already spent on the summary.
-        let visible = budget
-            .map(|rows| rows.saturating_sub(1).max(1))
-            .unwrap_or(templates.len())
-            .min(templates.len());
+        let visible = remaining.unwrap_or(templates.len()).min(templates.len());
+        if visible == 0 {
+            // One row left, and the summary has it. Better the sentence that
+            // says what the agent is offered for than one checkbox out of a
+            // dozen, which reads as the whole list.
+            return lines;
+        }
         let start =
             crate::ui::selection::viewport_start(self.host_role_index, templates.len(), visible);
         for (index, template) in templates.iter().enumerate().skip(start).take(visible) {

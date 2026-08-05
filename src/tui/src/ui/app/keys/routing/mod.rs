@@ -218,6 +218,11 @@ impl App {
         // afterwards would answer for whichever row slid into its place.
         let agent = self.selected_host_agent();
         let worker = self.selected_host();
+        // The removal key is reachable while the role toggles hold the arrows —
+        // `host_roles_key` passes `d`/`x` through. Leaving the focus on would
+        // point the next arrow at the roles of whichever row slid up into the
+        // cursor, which is not the agent whose toggles were open.
+        self.host_roles_focus = false;
         let undeclared = self.undeclare_selected_agent();
         match (agent, worker) {
             // Declared, not running: the declaration was the whole of it.

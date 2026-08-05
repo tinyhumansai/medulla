@@ -273,6 +273,7 @@ fn row(
         id: id.to_owned(),
         label: label.to_owned(),
         provider: medulla::protocol::HarnessProvider::Codex,
+        preset: None,
         state: PtyState::Running,
         cwd: cwd.to_string_lossy().into_owned(),
         branch: None,

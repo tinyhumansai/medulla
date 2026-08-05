@@ -57,6 +57,25 @@ pub const REPORTED_EVENTS: [HookEvent; 8] = [
 /// right answer is to drop the report rather than hold up the session.
 const REPORT_TIMEOUT_SECS: u64 = 5;
 
+/// [`REPORT_TIMEOUT_SECS`] for `SessionEnd` alone.
+///
+/// Codex's hook config refuses a `SessionEnd` handler whose declared timeout
+/// exceeds three seconds (its own hook docs cap it there), so serializing the
+/// ordinary five-second budget onto that one event would hand a default Codex
+/// launch an unsupported hook definition for the very event it is supposed to
+/// report on exit. Capping it costs nothing here: the shim's own internal
+/// budget ([`REPORT_TIMEOUT_SECS`]'s sibling `BUDGET` in the `medulla-tui`
+/// crate's `commands::hook`) is already three seconds, under both caps.
+const SESSION_END_TIMEOUT_SECS: u64 = 3;
+
+/// The declared timeout for `event`'s built-in, in seconds.
+fn timeout_for(event: HookEvent) -> u64 {
+    match event {
+        HookEvent::SessionEnd => SESSION_END_TIMEOUT_SECS,
+        _ => REPORT_TIMEOUT_SECS,
+    }
+}
+
 /// The `medulla hook` subcommand name, shared with the CLI that implements it.
 pub const HOOK_SUBCOMMAND: &str = "hook";
 
@@ -80,7 +99,7 @@ fn spec(bin: &str, event: HookEvent) -> HookSpec {
         matcher: "*".to_string(),
         handler: HookHandler::Command {
             command: format!("{} {HOOK_SUBCOMMAND} {}", shell_quote(bin), event.as_str()),
-            timeout: Some(REPORT_TIMEOUT_SECS),
+            timeout: Some(timeout_for(event)),
         },
         // Empty for everything both harnesses raise; see `REPORTED_EVENTS`.
         harnesses: match event {
@@ -107,13 +126,32 @@ pub fn medulla_bin() -> String {
         .unwrap_or_else(|| "medulla".to_string())
 }
 
-/// Single-quote `value` for the shell that runs a hook command.
+/// Quote `value` — always [`medulla_bin`]'s own path, never operator input —
+/// for the shell that runs a hook command on this platform.
 ///
-/// Hook commands are shell strings in both harnesses, and an installation path
-/// containing a space is not exotic — `/Applications/…` and Windows-style home
-/// directories both produce one. Embedded single quotes are closed, escaped, and
-/// reopened, the one form POSIX shells accept inside a quoted word.
+/// A thin wrapper over [`shell_quote_for`] so production code always quotes
+/// for the platform it is actually running on, while tests can exercise both
+/// rules regardless of which platform runs them.
 fn shell_quote(value: &str) -> String {
+    shell_quote_for(value, cfg!(windows))
+}
+
+/// Quote `value` for a POSIX shell, or for `cmd.exe`/PowerShell when
+/// `windows` is set.
+///
+/// An installation path containing a space is not exotic — `/Applications/…`
+/// and `C:\Program Files\…` both produce one — so both rules exist for the
+/// same reason: the built-in's own command line must survive being split by
+/// the shell that reads it. POSIX closes, escapes, and reopens an embedded
+/// single quote, the one form those shells accept inside a quoted word;
+/// Windows instead doubles an embedded double quote, which both `cmd.exe` and
+/// PowerShell accept inside a double-quoted argument. This only ever has to
+/// survive quoting the running binary's own path — never an operator's hook
+/// command, which is never passed through here — so it does not attempt
+/// Codex's separate `commandWindows` override or Claude's Git-Bash-vs-
+/// PowerShell distinction for arbitrary shell text, neither of which this
+/// crate can verify without a real Windows harness to run against.
+fn shell_quote_for(value: &str, windows: bool) -> String {
     if !value.is_empty()
         && value
             .chars()
@@ -121,7 +159,11 @@ fn shell_quote(value: &str) -> String {
     {
         return value.to_string();
     }
-    format!("'{}'", value.replace('\'', r"'\''"))
+    if windows {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        format!("'{}'", value.replace('\'', r"'\''"))
+    }
 }
 
 #[cfg(test)]

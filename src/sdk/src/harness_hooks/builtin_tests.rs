@@ -26,30 +26,73 @@ fn every_builtin_calls_the_launching_binary() {
             hook.command(),
             format!("/opt/medulla/bin/medulla hook {}", hook.event.as_str())
         );
-        assert_eq!(hook.timeout(), Some(REPORT_TIMEOUT_SECS));
+        assert_eq!(hook.timeout(), Some(timeout_for(hook.event)));
         assert!(hook.label.is_some(), "the Hooks page needs a name to show");
     }
 }
 
+/// Codex's own hook config docs cap a `SessionEnd` handler's timeout at three
+/// seconds; serializing the ordinary five-second budget onto it would hand a
+/// default Codex launch an unsupported hook definition for the event it is
+/// supposed to report on exit.
 #[test]
-fn a_path_with_spaces_stays_one_word() {
-    let hooks = hooks("/Applications/My Tools/medulla");
-    let start = &hooks[0];
+fn session_end_never_declares_a_timeout_codex_would_refuse() {
+    let session_end = hooks("medulla")
+        .into_iter()
+        .find(|hook| hook.event == HookEvent::SessionEnd)
+        .expect("a SessionEnd built-in");
+    // Codex refuses a `SessionEnd` hook whose timeout exceeds three seconds;
+    // pinning the exact value (rather than a `<=` bound) means this fails
+    // loudly if the constant is ever raised past what Codex accepts.
+    assert_eq!(session_end.timeout(), Some(3));
+}
+
+/// The tests below call `shell_quote_for` directly with an explicit platform
+/// rather than through `hooks()` (which quotes for `cfg!(windows)`, i.e.
+/// whichever platform actually runs the test): the POSIX and Windows rules
+/// both need coverage regardless of which CI runner executes this file.
+#[test]
+fn a_path_with_spaces_stays_one_word_on_posix() {
     assert_eq!(
-        start.command(),
-        format!(
-            "'/Applications/My Tools/medulla' hook {}",
-            start.event.as_str()
-        )
+        shell_quote_for("/Applications/My Tools/medulla", false),
+        "'/Applications/My Tools/medulla'"
     );
 }
 
 #[test]
-fn an_embedded_quote_cannot_break_out() {
-    let hooks = hooks("/tmp/it's here/medulla");
-    assert!(hooks[0]
-        .command()
-        .starts_with(r"'/tmp/it'\''s here/medulla' hook "));
+fn an_embedded_single_quote_cannot_break_out_on_posix() {
+    assert_eq!(
+        shell_quote_for("/tmp/it's here/medulla", false),
+        r"'/tmp/it'\''s here/medulla'"
+    );
+}
+
+#[test]
+fn a_path_with_spaces_is_double_quoted_on_windows() {
+    assert_eq!(
+        shell_quote_for(r"C:\Program Files\medulla", true),
+        "\"C:\\Program Files\\medulla\""
+    );
+}
+
+#[test]
+fn an_embedded_double_quote_is_doubled_on_windows() {
+    assert_eq!(
+        shell_quote_for(r#"C:\Program "Files"\medulla"#, true),
+        "\"C:\\Program \"\"Files\"\"\\medulla\""
+    );
+}
+
+#[test]
+fn a_plain_path_needs_no_quoting_on_either_platform() {
+    assert_eq!(
+        shell_quote_for("/opt/medulla/bin/medulla", false),
+        "/opt/medulla/bin/medulla"
+    );
+    assert_eq!(
+        shell_quote_for("/opt/medulla/bin/medulla", true),
+        "/opt/medulla/bin/medulla"
+    );
 }
 
 #[test]

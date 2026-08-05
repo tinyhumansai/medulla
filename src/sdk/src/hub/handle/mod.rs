@@ -25,8 +25,8 @@ pub(super) fn is_handle(address: &str) -> bool {
 /// they are easy to confuse. A handle is anything after a leading `@`.
 ///
 /// This exists because a mis-paste is silent otherwise: a stray `>` was accepted
-/// as an address, registered as a worker, and had a contact request sent to it.
-/// Nothing downstream can tell that from a real peer that never replies.
+/// as an address and registered as a worker. Nothing downstream can tell that
+/// from a real peer that never replies.
 #[cfg(test)]
 pub(super) fn is_plausible_address(address: &str) -> bool {
     let address = address.trim();
@@ -38,14 +38,6 @@ pub(super) fn is_plausible_address(address: &str) -> bool {
         && address
             .chars()
             .all(|c| c.is_ascii_alphanumeric() && !matches!(c, '0' | 'O' | 'I' | 'l'))
-}
-
-/// Whether adding a worker at `address` should send a contact request.
-///
-/// Split out so the rule is testable without a live Socket.IO client, which the
-/// rest of this handle needs.
-pub(super) fn should_request_contact(address: &str, accepted: bool) -> bool {
-    !address.trim().is_empty() && !accepted
 }
 
 /// Cache a probe result only while the roster id still names the probed peer.
@@ -267,20 +259,13 @@ impl HubHandle {
             .expect("subscription strategy lock") = strategy;
     }
 
-    /// Add (or replace, by id) a worker, open a contact edge, and re-register.
+    /// Add (or replace, by id) a worker and re-register.
     ///
-    /// The contact request is sent here rather than only at first dispatch.
-    /// A worker cannot receive a DM until it has accepted one, and its operator
-    /// approves that request on screen — so deferring it means adding a peer
-    /// looks like nothing happened, and the approval only appears much later,
-    /// attached to a task that is already waiting on it.
+    /// There is no handshake to open: enrollment already established the pair
+    /// key, so an address this hub can resolve is an address it may send to. The
+    /// enrollment check above is the whole admission decision.
     ///
-    /// Re-adding an address that is already present therefore re-sends the
-    /// request when the edge is not yet accepted, which is the natural way to
-    /// retry one the peer missed. Requesting an existing contact is harmless, so
-    /// the accepted case simply does nothing.
-    ///
-    /// It also *replaces* rather than duplicates: an entry matching either the
+    /// It *replaces* rather than duplicates: an entry matching either the
     /// id or the address is dropped first, so one peer can never occupy two
     /// roster slots however it was named.
     pub async fn add(&self, mut worker: HubWorker) -> anyhow::Result<()> {
@@ -337,35 +322,9 @@ impl HubHandle {
                 details.remove(&id);
             }
         }
-        let accepted = if address.is_empty() {
-            false
-        } else {
-            self.relay.contact_accepted(&address).await
-        };
-        if should_request_contact(&address, accepted) {
-            // Best-effort: a peer that is unreachable right now is still a valid
-            // roster entry, and dispatch retries the handshake anyway.
-            match self.relay.request_contact(&address).await {
-                Ok(()) => (self.log)(&format!(
-                    "hub: worker {address} added · contact requested, awaiting its approval"
-                )),
-                Err(err) => (self.log)(&format!(
-                    "hub: worker {address} added · contact request FAILED: {err}"
-                )),
-            }
-        } else {
-            (self.log)(&format!("hub: worker {address} added · already a contact"));
-        }
+        (self.log)(&format!("hub: worker {address} added"));
         self.save();
         self.reregister().await
-    }
-
-    /// Whether `address` has accepted this hub's contact request.
-    ///
-    /// Lets a caller tell "added but waiting on approval" from "ready", which
-    /// otherwise look identical in the roster.
-    pub async fn contact_accepted(&self, address: &str) -> bool {
-        self.relay.contact_accepted(address).await
     }
 
     /// Remove a worker by id and re-register.

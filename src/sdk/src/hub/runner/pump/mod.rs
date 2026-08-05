@@ -38,7 +38,7 @@ const DEFAULT_SCREEN_FPS: u8 = 1;
 /// just counted as activity.
 ///
 /// A frame is only ever routed to a waiter registered for `from`. The inbox is
-/// shared by every peer holding a contact edge with this identity, and a
+/// shared by every peer enrolled against this identity, and a
 /// correlation id is not a secret — probe ids are plain counters — so without
 /// the check any contact could settle another worker's dispatch, or answer a
 /// capability/system-info probe on its behalf, by guessing one. Mismatches are

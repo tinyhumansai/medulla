@@ -24,7 +24,7 @@
       "name": "feedback_command",
       "type": "string",
       "default": "",
-      "description": "Optional command collecting review feedback. It must print JSON carrying `unresolvedThreads` and `changesRequested` counts, and it can read $PR and $REPO from the environment — e.g. `pr-comments \"$PR\" --json -R \"$REPO\"`. The inspect step runs as a login shell, so the operator's own PATH and helper scripts are in scope. Empty falls back to `gh pr view`, which sees review verdicts but not thread resolution state."
+      "description": "Optional command collecting review feedback. It must print JSON carrying `unresolvedThreads` and `changesRequested` counts, and it can read $PR and $REPO from the environment — e.g. `pr-comments \"$PR\" --json -R \"$REPO\"`. It runs through `$SHELL -l`, so it is written in the operator's own login shell and sees their PATH and helper scripts; the rest of the step stays POSIX. Empty falls back to `gh pr view`, which sees review verdicts but not thread resolution state."
     }
   ],
   "nodes": [
@@ -32,7 +32,10 @@
       "id": "start",
       "kind": "trigger",
       "name": "start",
-      "config": { "trigger_kind": "manual", "max_node_visits": 60 }
+      "config": {
+        "trigger_kind": "manual",
+        "max_node_visits": 60
+      }
     },
     {
       "id": "watch",
@@ -53,14 +56,12 @@
         "args": {
           "language": "shell",
           "cwd": "=inputs.cwd",
-          "shell": "user",
-          "shell_args": ["-l"],
           "env": {
             "PR": "=inputs.pr",
             "REPO": "=inputs.repo",
             "FEEDBACK_COMMAND": "=inputs.feedback_command"
           },
-          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# Reading the pull request is the one thing this step cannot fail quietly at:\n# a missing `gh`, a stale token, or the wrong repo would otherwise yield an\n# empty document that `assess` reads as \"nothing to do\" and reports green. So\n# this one is fatal, and says which pull request it could not read.\nif ! pr=$(gh pr view \"$PR\" $repo_arg --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName 2>&1); then\n  printf 'cannot read pull request %s: %s\\n' \"$PR\" \"$pr\" >&2\n  exit 1\nfi\n\n# `gh pr checks` exits non-zero when checks are failing or pending, which is\n# exactly the case this node exists to report — so its status is ignored and\n# only its output is read. `bucket` is what collapses GitHub's dozen states\n# into pass/fail/pending/skipping/cancel; classifying on raw `state` misses\n# ACTION_REQUIRED and EXPECTED, which block a merge while looking like\n# neither a failure nor a pending run.\nchecks=$(gh pr checks \"$PR\" $repo_arg --json name,state,bucket,link 2>/dev/null || true)\n[ -n \"$checks\" ] || checks='[]'\n\nif [ -n \"${FEEDBACK_COMMAND:-}\" ]; then\n  # `shell: \"user\"` with `shell_args: [\"-l\"]` above made this the operator's\n  # own login shell, so their PATH and helper scripts (`pr-comments` and\n  # friends) are already on hand.\n  feedback=$(eval \"$FEEDBACK_COMMAND\" 2>/dev/null || true)\nelse\n  feedback=$(gh pr view \"$PR\" $repo_arg --json reviewDecision,reviews,comments -q '{unresolvedThreads: 0, changesRequested: (if .reviewDecision == \"CHANGES_REQUESTED\" then 1 else 0 end), detail: .}' 2>/dev/null || true)\nfi\n[ -n \"$feedback\" ] || feedback='{}'\n\nprintf '{\"checks\":%s,\"pr\":%s,\"feedback\":%s}\\n' \"$checks\" \"$pr\" \"$feedback\"\n"
+          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# Reading the pull request is the one thing this step cannot fail quietly at:\n# a missing `gh`, a stale token, or the wrong repo would otherwise yield an\n# empty document that `assess` reads as \"nothing to do\" and reports green. So\n# this one is fatal, and says which pull request it could not read.\nif ! pr=$(gh pr view \"$PR\" $repo_arg --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName 2>&1); then\n  printf 'cannot read pull request %s: %s\\n' \"$PR\" \"$pr\" >&2\n  exit 1\nfi\n\n# `gh pr checks` exits non-zero when checks are failing or pending, which is\n# exactly the case this node exists to report — so its status is ignored and\n# only its output is read. `bucket` is what collapses GitHub's dozen states\n# into pass/fail/pending/skipping/cancel; classifying on raw `state` misses\n# ACTION_REQUIRED and EXPECTED, which block a merge while looking like\n# neither a failure nor a pending run.\nchecks=$(gh pr checks \"$PR\" $repo_arg --json name,state,bucket,link 2>/dev/null || true)\n[ -n \"$checks\" ] || checks='[]'\n\nif [ -n \"${FEEDBACK_COMMAND:-}\" ]; then\n  # Only the operator's own command crosses into the operator's own shell.\n  # This script body is POSIX and stays on the step's POSIX shell: running the\n  # whole thing under `$SHELL` would break outright for anyone whose login\n  # shell is fish, which is precisely the user this option exists to serve.\n  # `-l` sources their startup files, so their PATH and helper scripts\n  # (`pr-comments` and friends) are on hand for that one call.\n  feedback=$(\"${SHELL:-/bin/sh}\" -l -c \"$FEEDBACK_COMMAND\" 2>/dev/null || true)\nelse\n  feedback=$(gh pr view \"$PR\" $repo_arg --json reviewDecision,reviews,comments -q '{unresolvedThreads: 0, changesRequested: (if .reviewDecision == \"CHANGES_REQUESTED\" then 1 else 0 end), detail: .}' 2>/dev/null || true)\nfi\n[ -n \"$feedback\" ] || feedback='{}'\n\nprintf '{\"checks\":%s,\"pr\":%s,\"feedback\":%s}\\n' \"$checks\" \"$pr\" \"$feedback\"\n"
         }
       }
     },
@@ -85,7 +86,9 @@
       "id": "decide",
       "kind": "condition",
       "name": "Anything to fix?",
-      "config": { "field": "=.item.actionable" }
+      "config": {
+        "field": "=.item.actionable"
+      }
     },
     {
       "id": "fix",
@@ -115,7 +118,9 @@
         "args": {
           "language": "shell",
           "cwd": "=inputs.cwd",
-          "env": { "PENDING": "=.nodes.assess.item.pending | tostring" },
+          "env": {
+            "PENDING": "=.nodes.assess.item.pending | tostring"
+          },
           "script": "set -u\n# Nothing is actionable. If checks are still running, sleeping before the\n# next poll is the whole point of the round; if none are, this settles.\nif [ \"${PENDING:-0}\" != \"0\" ]; then sleep 60; fi\nprintf '{\"settled\":%s}\\n' \"$([ \"${PENDING:-0}\" = \"0\" ] && echo true || echo false)\"\n"
         }
       }
@@ -151,16 +156,53 @@
     }
   ],
   "edges": [
-    { "from_node": "start", "to_node": "watch" },
-    { "from_node": "watch", "from_port": "body", "to_node": "inspect" },
-    { "from_node": "inspect", "to_node": "assess" },
-    { "from_node": "assess", "to_node": "decide" },
-    { "from_node": "decide", "from_port": "true", "to_node": "fix" },
-    { "from_node": "fix", "to_node": "again" },
-    { "from_node": "again", "to_node": "watch" },
-    { "from_node": "decide", "from_port": "false", "to_node": "wait" },
-    { "from_node": "wait", "to_node": "settle" },
-    { "from_node": "settle", "to_node": "watch" },
-    { "from_node": "watch", "from_port": "done", "to_node": "report" }
+    {
+      "from_node": "start",
+      "to_node": "watch"
+    },
+    {
+      "from_node": "watch",
+      "from_port": "body",
+      "to_node": "inspect"
+    },
+    {
+      "from_node": "inspect",
+      "to_node": "assess"
+    },
+    {
+      "from_node": "assess",
+      "to_node": "decide"
+    },
+    {
+      "from_node": "decide",
+      "from_port": "true",
+      "to_node": "fix"
+    },
+    {
+      "from_node": "fix",
+      "to_node": "again"
+    },
+    {
+      "from_node": "again",
+      "to_node": "watch"
+    },
+    {
+      "from_node": "decide",
+      "from_port": "false",
+      "to_node": "wait"
+    },
+    {
+      "from_node": "wait",
+      "to_node": "settle"
+    },
+    {
+      "from_node": "settle",
+      "to_node": "watch"
+    },
+    {
+      "from_node": "watch",
+      "from_port": "done",
+      "to_node": "report"
+    }
   ]
 }

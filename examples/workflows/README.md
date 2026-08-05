@@ -110,8 +110,28 @@ what `$SHELL` says would break them in ways that look like the script's fault.
 Unset keeps `bash`.
 
 Add `-i` alongside `-l` if the command you need is an *alias* — aliases are
-never exported, so a login shell alone will not find one. `pr-babysitter`'s
-inspect step takes `["-l"]` and is the worked example.
+never exported, so a login shell alone will not find one.
+
+### Which shell the *body* is written in
+
+Whatever you point a step at has to be able to run the script you wrote. A
+POSIX body — `set -u`, `[ … ]`, `${VAR:-}` — is not valid fish, so
+`shell = "user"` on a fish host does not give that step the operator's
+environment, it fails the step outright. That is the trap: the option exists
+for people with a non-default shell, and naively applied it breaks for exactly
+them.
+
+So when only *part* of a step needs the operator's environment, keep the body
+portable and send just that part across. `pr-babysitter`'s inspect step is the
+worked example — the script is POSIX and runs on the step's default shell, and
+the one operator-supplied command goes through:
+
+```bash
+feedback=$("${SHELL:-/bin/sh}" -l -c "$FEEDBACK_COMMAND" 2>/dev/null || true)
+```
+
+Reach for `shell`/`shellArgs` on the step itself when the *whole* body is
+written for that shell, and for the inner-invocation form when it is not.
 
 Three things to keep in mind. `medulla:shell` needs `workflows.allowCode`,
 which is on by default and runs with the daemon's full privileges. A script

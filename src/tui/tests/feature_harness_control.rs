@@ -133,6 +133,32 @@ fn render(app: &mut App, w: u16, h: u16) -> String {
         .collect()
 }
 
+/// The same frame as [`render`], kept as rows so a test can find where a label
+/// was drawn and aim the pointer at it.
+fn render_lines(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| app.draw(f)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    (0..h)
+        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+        .collect()
+}
+
+/// Where `label` was drawn, as the column and row an operator would click.
+///
+/// Searched in the rendered frame rather than recomputed from the layout, so
+/// the tests aim at what is actually on screen.
+fn label_at(lines: &[String], label: &str) -> (u16, u16) {
+    for (row, line) in lines.iter().enumerate() {
+        if let Some(byte) = line.find(label) {
+            // Cells, not bytes: the frame is full of box-drawing characters.
+            let column = line[..byte].chars().count() as u16;
+            return (column, row as u16);
+        }
+    }
+    panic!("no {label:?} on screen:\n{}", lines.join("\n"));
+}
+
 /// Spin until `check` passes; children on real ptys are at the mercy of load.
 fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -202,6 +228,109 @@ fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
     assert!(
         app.status().contains("unmanaged"),
         "the operator is told what they just started: {}",
+        app.status()
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn the_picker_rows_are_click_targets_on_both_steps() {
+    // The picker is opened from `Ctrl-T` or from clicking `+ New session`, so
+    // the operator arrives with a hand on the mouse — and it used to swallow the
+    // pointer wholesale, which reads as a frozen screen rather than as a
+    // keyboard-only step. A click is Enter on the row it lands on.
+    let root = tempfile::tempdir().unwrap();
+    let alpha = root.path().join("project-alpha");
+    std::fs::create_dir(&alpha).unwrap();
+    let sessions = PtyManager::new();
+    let mut app = app_with_workspace(sessions.clone(), root.path().to_str().unwrap());
+    app.loaded.config.harness.recent_workspaces = vec![alpha.to_string_lossy().into_owned()];
+
+    let _ = app.on_event(ctrl('t'));
+    let lines = render_lines(&mut app, 140, 44);
+    let (column, row) = label_at(&lines, "Codex");
+
+    let _ = app.on_event(click(column, row));
+
+    let lines = render_lines(&mut app, 140, 44);
+    assert!(
+        lines.join("\n").contains("Choose workspace"),
+        "clicking a provider advances exactly as Enter does: {}",
+        lines.join("\n")
+    );
+    assert!(
+        sessions.rows().is_empty(),
+        "the harness step is a navigation, so nothing has started yet"
+    );
+
+    // The second step's click has to carry the row's own index, not the
+    // highlighted one. `project-alpha` is the recent workspace and starts
+    // selected, so clicking the `default` row below it proves the pointer picked
+    // what it landed on rather than confirming wherever the cursor happened to
+    // be.
+    let (column, row) = label_at(&lines, "default");
+    let _ = app.on_event(click(column, row));
+
+    wait_for("the harness to open in the clicked folder", || {
+        sessions.rows().len() == 1
+    });
+    assert_eq!(
+        sessions.rows().remove(0).cwd,
+        root.path().to_string_lossy().into_owned(),
+        "the click must start in the row it landed on, not the highlighted one"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn the_wheel_walks_the_picker_and_a_click_off_a_row_starts_nothing() {
+    // The wheel is the other half of making the modal usable with a pointer: the
+    // harness list windows when it is long, so without it there is no way to
+    // reach the rows below the fold without reaching for the keyboard.
+    let root = tempfile::tempdir().unwrap();
+    let alpha = root.path().join("project-alpha");
+    std::fs::create_dir(&alpha).unwrap();
+    let sessions = PtyManager::new();
+    let mut app = app_with_workspace(sessions.clone(), root.path().to_str().unwrap());
+    app.loaded.config.harness.recent_workspaces = vec![alpha.to_string_lossy().into_owned()];
+
+    let _ = app.on_event(ctrl('t'));
+    let _ = app.on_event(key(KeyCode::Enter));
+    let lines = render_lines(&mut app, 140, 44);
+    let (_, first) = label_at(&lines, "project-alpha");
+    let (column, _) = label_at(&lines, "Choose workspace");
+
+    // A notch down moves the highlight, exactly as ↓ does.
+    let _ = app.on_event(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: column + 4,
+        row: first,
+        modifiers: KeyModifiers::NONE,
+    }));
+    let lines = render_lines(&mut app, 140, 44);
+    let marked = lines
+        .iter()
+        .find(|line| line.contains("❯ /"))
+        .expect("a highlighted workspace row");
+    assert!(
+        marked.contains("default"),
+        "the wheel must move off the recent workspace onto the row below: {marked}"
+    );
+
+    // A click inside the box but not on a row is swallowed and decides nothing —
+    // the title bar is not an answer, and it must not reach the rail behind.
+    let (column, row) = label_at(&lines, "Choose workspace");
+    let _ = app.on_event(click(column, row));
+    assert!(
+        app.harness_picker_open_for_test(),
+        "a click off a row leaves the picker up: {}",
+        app.status()
+    );
+    assert!(
+        sessions.rows().is_empty(),
+        "and starts nothing: {}",
         app.status()
     );
 

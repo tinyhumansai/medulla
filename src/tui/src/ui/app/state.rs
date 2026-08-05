@@ -158,6 +158,7 @@ impl App {
             handback_prompt: None,
             harness_pointer_grab: None,
             hit_handback: Vec::new(),
+            hit_harness_picker: None,
             help_scroll: 0,
             handback_policy,
             harness_taken: std::collections::HashMap::new(),
@@ -354,6 +355,16 @@ impl App {
     /// one rather than counting rows it does not control.
     pub fn harness_pane_session_for_test(&self) -> Option<&str> {
         self.harness_pane_session.as_deref()
+    }
+
+    /// Whether the "start a harness" picker is on screen.
+    ///
+    /// Inspection seam for the pointer rules: several of them are about a click
+    /// the picker must *absorb* — one off a row, one outside its box — and
+    /// "nothing happened" is only distinguishable from "the modal closed" by
+    /// being able to ask.
+    pub fn harness_picker_open_for_test(&self) -> bool {
+        self.harness_picker.is_some()
     }
 
     /// The harness session currently receiving the operator's keystrokes.

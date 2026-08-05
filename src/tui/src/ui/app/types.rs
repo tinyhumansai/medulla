@@ -1133,6 +1133,12 @@ pub struct App {
     // two would drift, and the direction they would drift in is a pointer that
     // hands a harness back when the operator meant to keep it.
     pub(super) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
+    // The "start a harness" picker's outer box, and where each offered row was
+    // drawn with the index it stands for in that step's list. Recorded during
+    // the draw for the same reason the hand-back answers are: the harness step
+    // windows a long list, so screen position and list index are not the same
+    // number, and only the draw knows which window it used.
+    pub(super) hit_harness_picker: Option<(Rect, Vec<(Rect, usize)>)>,
     // The harness selected on the Agents rail, retained while another tab is
     // visible. Unlike `harness_pane_session`, this is navigation state rather
     // than a keyboard-routing capability: Changes uses it to keep following

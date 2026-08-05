@@ -78,6 +78,14 @@ impl App {
             }
             // Everything else the question is over is still swallowed, below.
         }
+        // The picker's rows are click targets too, and its list takes the wheel.
+        // Same reasoning as the question above: it is opened from a rail row the
+        // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive
+        // with a hand on the mouse — and a modal that then refuses the pointer
+        // entirely reads as a frozen screen rather than as a keyboard-only step.
+        if self.harness_picker.is_some() && self.route_harness_picker_pointer(&m) {
+            return None;
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // Pickers and the hand-back question are modal: a click that navigated
         // the rail behind one would leave an overlay describing a row nobody
@@ -149,6 +157,70 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    /// Route a pointer event that belongs to the open "start a harness" picker.
+    ///
+    /// Returns `true` when the event was consumed. Everything else over the
+    /// picker falls through to the blanket modal swallow — including a click
+    /// outside its box, which deliberately does *not* cancel: the workspace step
+    /// holds a query the operator has typed, and losing it to a stray click a
+    /// few cells wide of the border is worse than a click that does nothing.
+    ///
+    /// Both gestures replay the keystroke they stand for rather than editing the
+    /// picker themselves. A click is Enter on the row it lands on and a notch is
+    /// an arrow, so the pointer cannot come to disagree with the keyboard about
+    /// what selecting a row does — and the workspace step's Enter *starts a
+    /// harness*, which is exactly the divergence worth designing out.
+    fn route_harness_picker_pointer(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let Some((area, rows)) = self.hit_harness_picker.clone() else {
+            return false;
+        };
+        let at = (m.column, m.row).into();
+        if !area.contains(at) {
+            return false;
+        }
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        match m.kind {
+            MouseEventKind::ScrollUp => {
+                self.handle_harness_picker_key(key(KeyCode::Up));
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_harness_picker_key(key(KeyCode::Down));
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some(index) = rows
+                    .iter()
+                    .find(|(rect, _)| rect.contains(at))
+                    .map(|(_, index)| *index)
+                else {
+                    // Inside the box but not on a row — a title, a hint, the
+                    // search line. Consumed so it cannot reach the rail behind,
+                    // but it selects nothing.
+                    return true;
+                };
+                let Some(picker) = self.harness_picker.as_mut() else {
+                    return true;
+                };
+                match picker.step {
+                    super::super::types::HarnessPickerStep::Harness => picker.index = index,
+                    super::super::types::HarnessPickerStep::Workspace => {
+                        picker.workspace_index = index;
+                        // The click *is* the operator choosing this completion
+                        // over whatever they had typed, which is precisely what
+                        // this flag records for `selected_harness_workspace`.
+                        picker.workspace_picked = true;
+                    }
+                }
+                self.handle_harness_picker_key(key(KeyCode::Enter));
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The harness session named by the rail row under `(x, y)`, if any.

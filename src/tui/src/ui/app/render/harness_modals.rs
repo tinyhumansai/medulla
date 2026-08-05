@@ -51,6 +51,29 @@ impl App {
         f.render_widget(Clear, area);
         f.render_widget(block, area);
 
+        // Where each offered row lands, and which entry of the step's own list
+        // it stands for. Recorded here rather than recomputed at click time
+        // because the harness step *windows* a long list: the third row on
+        // screen is not the third provider, and a pointer that assumed it was
+        // would start the wrong CLI in the operator's workspace.
+        let mut hits: Vec<(Rect, usize)> = Vec::new();
+        // Rows are full-width, so aiming anywhere on the line works — a target
+        // clipped to the label would make the short names hard to hit and leave
+        // dead gaps between them.
+        let row_hit = |index: usize, line: usize, hits: &mut Vec<(Rect, usize)>| {
+            let y = inner.y + line as u16;
+            if y < inner.bottom() {
+                hits.push((
+                    Rect {
+                        x: inner.x,
+                        y,
+                        width: inner.width,
+                        height: 1,
+                    },
+                    index,
+                ));
+            }
+        };
         let mut lines =
             match picker.step {
                 HarnessPickerStep::Harness => {
@@ -61,6 +84,7 @@ impl App {
                         .enumerate()
                         .map(|(offset, choice)| {
                             let index = range.start + offset;
+                            row_hit(index, offset, &mut hits);
                             let marker = if index == picker.index { "❯ " } else { "  " };
                             let style = if index == picker.index {
                                 self.theme.selection()
@@ -97,8 +121,14 @@ impl App {
                             Style::default().add_modifier(Modifier::DIM),
                         )));
                     }
+                    // The completions begin below the header lines already
+                    // pushed, so the offset is taken from the vector rather
+                    // than written as a constant that the next edit here would
+                    // silently make wrong.
+                    let first = lines.len();
                     lines.extend(picker.workspace_choices.iter().enumerate().map(
                         |(index, choice)| {
+                            row_hit(index, first + index, &mut hits);
                             let marker = if index == picker.workspace_index {
                                 "❯ "
                             } else {
@@ -127,6 +157,8 @@ impl App {
                     lines
                 }
             };
+        self.hit_harness_picker = Some((area, hits));
+        let picker = self.harness_picker.as_ref().expect("picker is present");
         if picker.step == HarnessPickerStep::Harness {
             lines.push(TLine::from(""));
             lines.push(TLine::from(Span::styled(

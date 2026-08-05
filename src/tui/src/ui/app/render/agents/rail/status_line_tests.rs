@@ -41,7 +41,8 @@ fn a_renamed_thread_is_shown_on_its_own_default_line() {
         lines[0].to_string(),
         "● codex · unmanaged · main · /workspace/medulla"
     );
-    assert_eq!(lines[1].to_string(), "  Ship the sidebar");
+    // The harness advertises a sentence; the rail shows its slug.
+    assert_eq!(lines[1].to_string(), "  ship-sidebar");
 }
 
 #[test]

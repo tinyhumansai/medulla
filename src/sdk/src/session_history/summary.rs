@@ -1,6 +1,6 @@
 //! Reading a session file's head window and distilling it into a
-//! [`SessionSummary`]: the session id, recorded cwd, and a display label taken
-//! from the first human prompt.
+//! [`SessionSummary`]: the session id, recorded cwd, and a display label
+//! slugged from the first human prompt.
 //!
 //! Only the first [`HEAD_BYTES`] of each file are read and parsed, which bounds
 //! the cost of scanning many transcripts. Claude and Codex use different record
@@ -11,11 +11,10 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::types::{SessionAgentKind, SessionSummary};
+use crate::ui::util::slug;
 
 /// Bytes read from the head of each transcript when extracting its summary.
 pub(super) const HEAD_BYTES: usize = 64 * 1024;
-/// Maximum display width (in chars) of a session label before truncation.
-pub(super) const LABEL_MAX: usize = 72;
 
 /// Read the head window of `path` and parse it into a [`SessionSummary`],
 /// dispatching on the owning agent's record shape. `None` when no session id is
@@ -111,7 +110,8 @@ pub(super) fn first_prompt_text(content: Option<Value>) -> Option<String> {
     if trimmed.is_empty() || trimmed.starts_with('<') {
         return None;
     }
-    Some(truncate_label(trimmed))
+    let label = slug_label(trimmed);
+    (!label.is_empty()).then_some(label)
 }
 
 /// Pull the plain text out of a message `content`, whether it is a bare string
@@ -148,27 +148,18 @@ pub(super) fn as_message_content(message: Option<&Value>) -> Option<Value> {
     object.get("content").cloned()
 }
 
-/// Sanitize and shorten a prompt into a single-line label: strip control bytes,
-/// collapse whitespace, and truncate to [`LABEL_MAX`] chars with an ellipsis.
-pub(super) fn truncate_label(text: &str) -> String {
-    // Strip C0/DEL/C1 control bytes to a space so a pasted escape sequence can't
-    // move the cursor or recolor a pane, then collapse whitespace.
-    let cleaned: String = text
-        .chars()
-        .map(|c| {
-            if (c as u32) <= 0x1F || (0x7F..=0x9F).contains(&(c as u32)) {
-                ' '
-            } else {
-                c
-            }
-        })
-        .collect();
-    let single = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    if single.chars().count() <= LABEL_MAX {
-        return single;
-    }
-    let prefix: String = single.chars().take(LABEL_MAX - 1).collect();
-    format!("{}…", prefix.trim_end())
+/// Shorten a prompt into a session slug — at most three lowercase words joined
+/// by hyphens, e.g. `fix-session-handoff`.
+///
+/// A whole prompt is far too wide for the row it lands in, and the words that
+/// identify the session are almost always its first few. Slugging also handles
+/// the safety half: [`slug`] treats every non-alphanumeric byte as a word
+/// break, so a pasted escape sequence cannot move the cursor or recolor a pane.
+///
+/// Returns an empty string for a prompt with no usable word; callers supply
+/// their own placeholder.
+pub(super) fn slug_label(text: &str) -> String {
+    slug(text)
 }
 
 /// Read the first [`HEAD_BYTES`] of `path` as UTF-8 (lossy) and split into

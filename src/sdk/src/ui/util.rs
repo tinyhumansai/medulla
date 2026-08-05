@@ -191,6 +191,72 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// Words a session slug carries at most.
+///
+/// A session name is scanned in a rail or a list, never read: the fourth word
+/// is always the one that pushes the identifying words off the end of a narrow
+/// row, so the shape stops at three.
+pub const SLUG_MAX_WORDS: usize = 3;
+/// Hard character ceiling on a slug, so one very long word cannot widen a row.
+pub const SLUG_MAX_CHARS: usize = 48;
+
+/// Filler a slug is better off without.
+///
+/// Prompts open with conversational scaffolding ("okay so can you please…"),
+/// and taking the first three words verbatim would spend the whole slug on it.
+/// Only words that never identify a session on their own are listed.
+const FILLER_WORDS: &[&str] = &[
+    "a", "about", "an", "and", "are", "as", "at", "be", "but", "by", "can", "could", "do", "does",
+    "for", "from", "hey", "hi", "how", "i", "if", "in", "into", "is", "it", "its", "just", "let",
+    "lets", "like", "me", "my", "of", "ok", "okay", "on", "or", "our", "please", "so", "thanks",
+    "that", "the", "their", "then", "there", "these", "they", "this", "to", "uh", "um", "us",
+    "was", "we", "well", "what", "when", "which", "will", "with", "would", "you", "your",
+];
+
+/// Reduce any text to a session slug: at most [`SLUG_MAX_WORDS`] lowercase
+/// words joined by hyphens, e.g. `fix-session-handoff`.
+///
+/// Everything that is not alphanumeric is a word break, which is also what
+/// makes this safe for untrusted text: control bytes, escape sequences, and
+/// newlines cannot survive into a rendered row.
+///
+/// Returns an empty string when no word survives — callers decide what an
+/// unnameable session shows instead.
+pub fn slug(text: &str) -> String {
+    let words: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| word.to_lowercase())
+        .collect();
+    let meaningful: Vec<&String> = words
+        .iter()
+        .filter(|word| !FILLER_WORDS.contains(&word.as_str()))
+        .collect();
+    // All-filler input ("can you please") still gets a name, badly-but-stably,
+    // rather than rendering as nothing at all.
+    let source: Vec<&String> = if meaningful.is_empty() {
+        words.iter().collect()
+    } else {
+        meaningful
+    };
+
+    let mut slug = String::new();
+    for word in source.into_iter().take(SLUG_MAX_WORDS) {
+        let separator = usize::from(!slug.is_empty());
+        let room = SLUG_MAX_CHARS.saturating_sub(slug.chars().count() + separator);
+        if room == 0 {
+            break;
+        }
+        if !slug.is_empty() {
+            slug.push('-');
+        }
+        // A single word longer than the ceiling is truncated rather than
+        // dropped: dropping it can empty an otherwise usable slug.
+        slug.extend(word.chars().take(room));
+    }
+    slug
+}
+
 /// Braille spinner frames shared by the app, login, and onboarding screens.
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

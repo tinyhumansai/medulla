@@ -103,14 +103,22 @@ fn the_newest_running_harness_title_identifies_an_agent_lane() {
 }
 
 #[test]
-fn session_titles_are_flattened_and_bounded_before_rail_wrapping() {
+fn session_titles_are_slugged_and_bounded_before_rail_wrapping() {
     let title = format!("first line\n{}", "wide title ".repeat(20));
 
     let displayed = display_session_title(&title);
 
+    assert_eq!(displayed, "first-line-wide");
     assert!(UnicodeWidthStr::width(displayed.as_str()) <= 48);
     assert!(!displayed.contains('\n'));
-    assert!(displayed.ends_with('…'));
+}
+
+#[test]
+fn session_titles_keep_three_words_of_a_harness_sentence() {
+    assert_eq!(
+        display_session_title("Fix session handoff flow and pointer"),
+        "fix-session-handoff"
+    );
 }
 
 #[test]

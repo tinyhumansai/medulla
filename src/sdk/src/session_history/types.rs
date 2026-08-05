@@ -41,7 +41,8 @@ pub struct RecentSession {
     /// Working directory the session ran in, when recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// First human prompt, single-lined + truncated; drives the resume label.
+    /// First human prompt slugged to at most three hyphenated words
+    /// (`fix-session-handoff`); drives the resume label.
     pub label: String,
     /// Last-activity epoch ms (session-file mtime).
     pub last_active: i64,
@@ -65,7 +66,7 @@ pub(super) struct SessionSummary {
     pub(super) id: String,
     /// Working directory recorded in the head window, when present.
     pub(super) cwd: Option<String>,
-    /// Display label derived from the first human prompt.
+    /// Display label slugged from the first human prompt.
     pub(super) label: String,
 }
 

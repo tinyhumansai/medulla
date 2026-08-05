@@ -26,6 +26,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line as TLine, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::ui::util::slug;
 use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
 
 use super::super::wrap::{short_home, wrap_path};
@@ -205,7 +206,14 @@ fn layout_line(
             Field::State => fit(&state_glyph.to_string(), room),
             Field::Harness => fit(&harness_text(row, cfg.harness_style), room),
             Field::Control => fit(&control_text(row.control, cfg.control_style), room),
-            Field::Thread => row.thread_name.as_deref().and_then(|name| fit(name, room)),
+            // The harness advertises a sentence; the status line, like the
+            // lane rows, shows its slug so one row cannot eat the rail.
+            Field::Thread => row
+                .thread_name
+                .as_deref()
+                .map(slug)
+                .filter(|name| !name.is_empty())
+                .and_then(|name| fit(&name, room)),
             Field::Branch => branch_text(row, room, path_shares_line),
             Field::Path => path_text(row, home, cfg.path_style, room),
         };

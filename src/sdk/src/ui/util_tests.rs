@@ -106,3 +106,50 @@ fn shortening_trims_surrounding_whitespace() {
         "7xKX…gAsU"
     );
 }
+
+#[test]
+fn slug_keeps_three_lowercase_words() {
+    assert_eq!(
+        slug("Fix session handoff flow and pointer"),
+        "fix-session-handoff"
+    );
+    assert_eq!(slug("Launch Plan"), "launch-plan");
+}
+
+#[test]
+fn slug_drops_leading_filler() {
+    assert_eq!(
+        slug("okay so can you please fix the session handoff"),
+        "fix-session-handoff"
+    );
+}
+
+#[test]
+fn slug_falls_back_to_filler_when_that_is_all_there_is() {
+    assert_eq!(slug("can you please"), "can-you-please");
+}
+
+#[test]
+fn slug_treats_punctuation_and_control_bytes_as_word_breaks() {
+    assert_eq!(
+        slug("**Debugging deploys:** retry"),
+        "debugging-deploys-retry"
+    );
+    assert_eq!(slug("hello\u{1b}[31m world\nagain"), "hello-31m-world");
+}
+
+#[test]
+fn slug_bounds_total_length() {
+    let long = format!("{} {} {}", "a".repeat(30), "b".repeat(30), "c".repeat(30));
+    let out = slug(&long);
+    assert!(out.chars().count() <= SLUG_MAX_CHARS);
+    // A word that does not fit whole is truncated, never dropped.
+    assert!(out.starts_with(&"a".repeat(30)));
+}
+
+#[test]
+fn slug_is_empty_without_a_word() {
+    assert_eq!(slug(""), "");
+    assert_eq!(slug("   \n\t  "), "");
+    assert_eq!(slug("///"), "");
+}

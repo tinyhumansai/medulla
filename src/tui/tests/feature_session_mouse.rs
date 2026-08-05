@@ -216,6 +216,15 @@ fn attach_to_first_harness(app: &mut App) -> String {
         .pane_session_for_test()
         .expect("the rail cursor to reach a harness row")
         .to_string();
+    // Put it under the orchestrator for the instant before the chord, so that
+    // attaching *takes* it. That is what makes leaving it again a question worth
+    // asking, and these tests are all about how the pointer behaves while that
+    // question is up. A harness the operator started is released without one —
+    // covered in `feature_session_control`.
+    app.local_sessions()
+        .expect("sessions")
+        .clone()
+        .set_control(&session, SessionControl::Orchestrator);
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char(']'),
         KeyModifiers::CONTROL,
@@ -449,6 +458,55 @@ fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
         harnesses.control(&attached),
         Some(SessionControl::User),
         "and must not change who holds the harness"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn clicking_into_an_orchestrator_held_pane_asks_exactly_as_enter_does() {
+    // The pointer and the keyboard must not disagree about who ends up holding
+    // a harness. Enter on the rail row asked before taking one off dispatch,
+    // while a click straight into the same pane took it silently — and clicking
+    // into a terminal is the gesture an operator reaches for first, so the
+    // question existed and was routinely bypassed.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = mouse_reporting_session(&sessions);
+    let harnesses = app.local_sessions().expect("sessions").clone();
+    wait_for("the child to paint", || {
+        screen(&harnesses, &id).contains("READY")
+    });
+    harnesses.set_control(&id, SessionControl::Orchestrator);
+
+    // Walk the rail onto the harness without attaching, so the draw records the
+    // pane rect the click needs.
+    render(&mut app);
+    let _ = app.on_event(key(KeyCode::Esc));
+    render(&mut app);
+    for _ in 0..16 {
+        if app.pane_session_for_test().is_some() {
+            break;
+        }
+        let _ = app.on_event(key(KeyCode::Down));
+        render(&mut app);
+    }
+    let (pane, _) = app
+        .harness_pane_rect_for_test()
+        .expect("the draw to record the pane");
+
+    let _ = app.on_event(press(pane.x + 2, pane.y + 2));
+
+    let out = render(&mut app).join("\n");
+    assert!(
+        out.contains("Take control of this session"),
+        "the click must raise the same question Enter does: {out}"
+    );
+    assert_eq!(app.attached_session(), None, "asking is not taking");
+    assert_eq!(
+        harnesses.control(&id),
+        Some(SessionControl::Orchestrator),
+        "control must not move until the question is answered"
     );
 
     sessions.shutdown();

@@ -28,7 +28,6 @@ impl App {
                 picker.choices.len(),
                 "Choose a harness type — ↑/↓ · Enter workspace · Esc cancel",
             ),
-            AgentPickerStep::Decision => (2, "Choose control — ↑/↓ · Enter confirm · Esc back"),
             AgentPickerStep::Workspace => (
                 picker.workspace_choices.len(),
                 "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
@@ -52,6 +51,29 @@ impl App {
         f.render_widget(Clear, area);
         f.render_widget(block, area);
 
+        // Where each offered row lands, and which entry of the step's own list
+        // it stands for. Recorded here rather than recomputed at click time
+        // because the harness step *windows* a long list: the third row on
+        // screen is not the third provider, and a pointer that assumed it was
+        // would start the wrong CLI in the operator's workspace.
+        let mut hits: Vec<(Rect, usize)> = Vec::new();
+        // Rows are full-width, so aiming anywhere on the line works — a target
+        // clipped to the label would make the short names hard to hit and leave
+        // dead gaps between them.
+        let row_hit = |index: usize, line: usize, hits: &mut Vec<(Rect, usize)>| {
+            let y = inner.y + line as u16;
+            if y < inner.bottom() {
+                hits.push((
+                    Rect {
+                        x: inner.x,
+                        y,
+                        width: inner.width,
+                        height: 1,
+                    },
+                    index,
+                ));
+            }
+        };
         let mut lines =
             match picker.step {
                 AgentPickerStep::Harness => {
@@ -62,6 +84,7 @@ impl App {
                         .enumerate()
                         .map(|(offset, choice)| {
                             let index = range.start + offset;
+                            row_hit(index, offset, &mut hits);
                             let marker = if index == picker.index { "❯ " } else { "  " };
                             let style = if index == picker.index {
                                 self.theme.selection()
@@ -74,65 +97,6 @@ impl App {
                             ))
                         })
                         .collect()
-                }
-                AgentPickerStep::Decision => {
-                    let selected = picker
-                        .choices
-                        .get(picker.index)
-                        .map(|choice| choice.display_name())
-                        .unwrap_or("harness");
-                    let managed = picker.managed;
-                    // The workspace was chosen on the previous step, so name it
-                    // here: this is the last screen before the harness starts,
-                    // and "in which directory" is the fact the operator has to
-                    // be sure of before answering.
-                    let ws_display = picker
-                        .workspace_choices
-                        .get(picker.workspace_index)
-                        .map(|choice| choice.path.as_str())
-                        .unwrap_or("(none)");
-                    vec![
-                        TLine::from(Span::styled(
-                            format!("  {selected}"),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )),
-                        TLine::from(Span::styled(
-                            // Clipped from the left like the workspace list
-                            // itself: the leaf directory is what identifies a
-                            // path, and it is the end that a plain truncation
-                            // throws away.
-                            format!("  in {}", medulla::ui::util::clip_left(ws_display, 52)),
-                            Style::default().add_modifier(Modifier::DIM),
-                        )),
-                        TLine::from(""),
-                        TLine::from(Span::styled(
-                            format!(
-                                "{}Managed · orchestrator can dispatch into it",
-                                if managed { "❯ " } else { "  " }
-                            ),
-                            if managed {
-                                self.theme.selection()
-                            } else {
-                                Style::default()
-                            },
-                        )),
-                        TLine::from(Span::styled(
-                            format!(
-                                "{}Unmanaged · you hold it, orchestrator won't dispatch",
-                                if !managed { "❯ " } else { "  " }
-                            ),
-                            if !managed {
-                                self.theme.selection()
-                            } else {
-                                Style::default()
-                            },
-                        )),
-                        TLine::from(""),
-                        TLine::from(Span::styled(
-                            "  Enter confirm · Esc back",
-                            Style::default().add_modifier(Modifier::DIM),
-                        )),
-                    ]
                 }
                 AgentPickerStep::Workspace => {
                     let selected_session = picker
@@ -157,8 +121,14 @@ impl App {
                             Style::default().add_modifier(Modifier::DIM),
                         )));
                     }
+                    // The completions begin below the header lines already
+                    // pushed, so the offset is taken from the vector rather
+                    // than written as a constant that the next edit here would
+                    // silently make wrong.
+                    let first = lines.len();
                     lines.extend(picker.workspace_choices.iter().enumerate().map(
                         |(index, choice)| {
+                            row_hit(index, first + index, &mut hits);
                             let marker = if index == picker.workspace_index {
                                 "❯ "
                             } else {
@@ -187,6 +157,8 @@ impl App {
                     lines
                 }
             };
+        self.hit_agent_picker = Some((area, hits));
+        let picker = self.agent_picker.as_ref().expect("picker is present");
         if picker.step == AgentPickerStep::Harness {
             lines.push(TLine::from(""));
             lines.push(TLine::from(Span::styled(
@@ -195,14 +167,13 @@ impl App {
             )));
         }
         // Said here as well as in the status line, because it is the one fact
-        // that makes this different from every other way to start a harness.
-        // Skip on the Decision step — it already shows both options inline.
-        if picker.step != AgentPickerStep::Decision {
-            lines.push(TLine::from(Span::styled(
-                "  unmanaged · the orchestrator will not dispatch into it",
-                Style::default().add_modifier(Modifier::DIM),
-            )));
-        }
+        // that makes this different from every other way to start a session —
+        // and it is now a statement rather than a question, so it is said on
+        // both steps and never asked.
+        lines.push(TLine::from(Span::styled(
+            "  unmanaged · the orchestrator will not dispatch into it",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 

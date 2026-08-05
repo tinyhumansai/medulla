@@ -107,7 +107,6 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         workspace_choices: Vec::new(),
         workspace_index: 0,
         workspace_picked: false,
-        managed: true,
     });
     app
 }

@@ -78,6 +78,14 @@ impl App {
             }
             // Everything else the question is over is still swallowed, below.
         }
+        // The picker's rows are click targets too, and its list takes the wheel.
+        // Same reasoning as the question above: it is opened from a rail row the
+        // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive
+        // with a hand on the mouse — and a modal that then refuses the pointer
+        // entirely reads as a frozen screen rather than as a keyboard-only step.
+        if self.agent_picker.is_some() && self.route_agent_picker_pointer(&m) {
+            return None;
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // Pickers and the hand-back question are modal: a click that navigated
         // the rail behind one would leave an overlay describing a row nobody
@@ -149,6 +157,70 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    /// Route a pointer event that belongs to the open "start a session" picker.
+    ///
+    /// Returns `true` when the event was consumed. Everything else over the
+    /// picker falls through to the blanket modal swallow — including a click
+    /// outside its box, which deliberately does *not* cancel: the workspace step
+    /// holds a query the operator has typed, and losing it to a stray click a
+    /// few cells wide of the border is worse than a click that does nothing.
+    ///
+    /// Both gestures replay the keystroke they stand for rather than editing the
+    /// picker themselves. A click is Enter on the row it lands on and a notch is
+    /// an arrow, so the pointer cannot come to disagree with the keyboard about
+    /// what selecting a row does — and the workspace step's Enter *starts a
+    /// session*, which is exactly the divergence worth designing out.
+    fn route_agent_picker_pointer(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let Some((area, rows)) = self.hit_agent_picker.clone() else {
+            return false;
+        };
+        let at = (m.column, m.row).into();
+        if !area.contains(at) {
+            return false;
+        }
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        match m.kind {
+            MouseEventKind::ScrollUp => {
+                self.handle_agent_picker_key(key(KeyCode::Up));
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_agent_picker_key(key(KeyCode::Down));
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some(index) = rows
+                    .iter()
+                    .find(|(rect, _)| rect.contains(at))
+                    .map(|(_, index)| *index)
+                else {
+                    // Inside the box but not on a row — a title, a hint, the
+                    // search line. Consumed so it cannot reach the rail behind,
+                    // but it selects nothing.
+                    return true;
+                };
+                let Some(picker) = self.agent_picker.as_mut() else {
+                    return true;
+                };
+                match picker.step {
+                    super::super::types::AgentPickerStep::Harness => picker.index = index,
+                    super::super::types::AgentPickerStep::Workspace => {
+                        picker.workspace_index = index;
+                        // The click *is* the operator choosing this completion
+                        // over whatever they had typed, which is precisely what
+                        // this flag records for `selected_picker_workspace`.
+                        picker.workspace_picked = true;
+                    }
+                }
+                self.handle_agent_picker_key(key(KeyCode::Enter));
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The harness session named by the rail row under `(x, y)`, if any.
@@ -544,14 +616,22 @@ impl App {
                 }
             }
             // A click inside the embedded terminal means "type here", the same
-            // as `Ctrl-]`. Checked after the rail so a click that changes rows
-            // is a navigation, not an attach to whatever the last frame showed.
+            // as Enter on its rail row. Checked after the rail so a click that
+            // changes rows is a navigation, not an attach to whatever the last
+            // frame showed.
+            //
+            // Routed through the same entry point Enter uses rather than
+            // attaching outright, because the pointer and the keyboard must not
+            // disagree about who ends up holding a session. Clicking straight
+            // into an orchestrator-held pane used to take it silently — the very
+            // thing the Enter question exists to prevent, reachable by the
+            // gesture an operator is most likely to make first.
             if let Some((rect, session)) = self.hit_session.clone() {
                 if rect.contains((x, y).into())
                     && self.pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.attach_to_pane_session();
+                    self.open_session_enter_prompt();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

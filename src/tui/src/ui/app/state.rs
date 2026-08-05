@@ -159,9 +159,11 @@ impl App {
             handback_prompt: None,
             pointer_grab: None,
             hit_handback: Vec::new(),
+            hit_agent_picker: None,
             help_scroll: 0,
             handback_policy,
-            took_control_by_attach: false,
+            sessions_taken: std::collections::HashMap::new(),
+            orchestrator_claimed: std::collections::HashSet::new(),
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
@@ -380,6 +382,26 @@ impl App {
     /// one rather than counting rows it does not control.
     pub fn pane_session_for_test(&self) -> Option<&str> {
         self.pane_session.as_deref()
+    }
+
+    /// Stand a remote session under the rail cursor, as a draw against a linked
+    /// host would.
+    ///
+    /// Injection seam: reaching this state honestly needs a second machine, and
+    /// what reads it is a *refusal* — so a test that cannot set it cannot tell
+    /// the refusal apart from the silent wrong handover it exists to prevent.
+    pub fn set_pane_remote_session_for_test(&mut self, agent: Option<String>) {
+        self.pane_remote_session = agent;
+    }
+
+    /// Whether the "start a session" picker is on screen.
+    ///
+    /// Inspection seam for the pointer rules: several of them are about a click
+    /// the picker must *absorb* — one off a row, one outside its box — and
+    /// "nothing happened" is only distinguishable from "the modal closed" by
+    /// being able to ask.
+    pub fn agent_picker_open_for_test(&self) -> bool {
+        self.agent_picker.is_some()
     }
 
     /// The session currently receiving the operator's keystrokes.

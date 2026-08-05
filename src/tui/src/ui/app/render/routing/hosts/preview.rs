@@ -32,7 +32,20 @@ impl App {
             return;
         };
         let title = match row.agent.and_then(|at| host.agents.get(at)) {
-            Some(agent) => format!("Agent · {}", inline_text(&agent.agent_id)),
+            Some(agent) => {
+                // Named agents lead with the name; the id stays beside it,
+                // because that is what a dispatch and every status line use.
+                let label = agent.label.trim();
+                if label.is_empty() || label == agent.agent_id.trim() {
+                    format!("Agent · {}", inline_text(&agent.agent_id))
+                } else {
+                    format!(
+                        "Agent · {} · {}",
+                        inline_text(label),
+                        inline_text(&agent.agent_id)
+                    )
+                }
+            }
             None => format!("Host · {}", inline_text(&host.label)),
         };
         let block = self.panel(title);

@@ -712,3 +712,22 @@ fn adopting_seeds_does_not_rewrite_the_agents_already_declared() {
         "and kept the name the projection does not carry"
     );
 }
+
+#[test]
+fn a_named_agent_is_listed_by_its_name_without_losing_its_id() {
+    // The declare flow ends in a name prompt, and the name reached the config —
+    // but the row rendered the agent id, so naming one looked like it had done
+    // nothing. The id has to stay: it is what a dispatch targets and what every
+    // status line about this agent says.
+    let mut named = AgentDeclaration::new("medulla-claude", "this-device", "claude", "/w/medulla");
+    named.name = Some("build box".into());
+    let (app, _dir) = app_with(vec![worker("medulla-claude", "this-device")], vec![named]);
+
+    let tree = app.host_tree();
+    let agent = &tree[0].agents[0];
+    assert_eq!(agent.label, "build box", "the projection carries the name");
+    assert_eq!(
+        agent.agent_id, "medulla-claude",
+        "and the id it is dispatched by"
+    );
+}

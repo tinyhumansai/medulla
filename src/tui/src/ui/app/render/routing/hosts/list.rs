@@ -109,6 +109,21 @@ fn host_line(host: &HostRow) -> String {
     )
 }
 
+/// What an agent row leads with: the name the operator gave it, else its id.
+///
+/// The name prompt at declaration time wrote to
+/// [`AgentDeclaration::name`](medulla::runtime::AgentDeclaration), and the
+/// projection carries it as [`HostAgentRow::label`] — but the row rendered the
+/// id, so naming an agent looked like it had done nothing.
+fn row_name(agent: &HostAgentRow) -> &str {
+    let label = agent.label.trim();
+    if label.is_empty() {
+        agent.agent_id.trim()
+    } else {
+        label
+    }
+}
+
 /// The width of each aligned column in the agent rows.
 ///
 /// Measured across the *whole* tree rather than per host, which is the point:
@@ -139,7 +154,7 @@ impl Columns {
         let agents = || tree.iter().flat_map(|host| host.agents.iter());
         Columns {
             id: agents()
-                .map(|agent| inline_text(&agent.agent_id).width())
+                .map(|agent| inline_text(row_name(agent)).width())
                 .max()
                 .unwrap_or(0)
                 .min(MAX_ID),
@@ -251,9 +266,17 @@ fn agent_line(agent: &HostAgentRow, last: bool, columns: &Columns) -> String {
         true => String::new(),
         false => format!(" · {}", tail.join(" · ")),
     };
+    // The id follows the name rather than replacing it: the name is what the
+    // operator typed and recognises the row by, and the id is what a dispatch
+    // targets — dropping either one loses a question the page is asked.
+    let id = if row_name(agent) == agent.agent_id.trim() {
+        String::new()
+    } else {
+        format!(" · {}", inline_text(&agent.agent_id))
+    };
     format!(
-        "  {branch} {mark} {} {} {}{tail}",
-        cell(&inline_text(&agent.agent_id), columns.id),
+        "  {branch} {mark} {} {} {}{id}{tail}",
+        cell(&inline_text(row_name(agent)), columns.id),
         cell(&harness, columns.harness),
         path_cell(&workspace, columns.workspace),
     )

@@ -41,7 +41,13 @@ fn hosts() -> &'static Mutex<Hosts> {
     HOSTS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// The host serving `thread`, starting one if this is its first turn.
+/// The host serving `thread`, and whether it had to be started.
+///
+/// The flag is what the caller needs to decide whether to carry a recap into
+/// the brief: a host that was already cached holds a harness session that
+/// remembers this thread's earlier turns, and restating them to it would have
+/// the agent read its own last reply as new instruction. A host started here
+/// remembers nothing, so a saved transcript is the only continuity there is.
 ///
 /// `options` is only called when a host actually has to be started, so a
 /// continuing conversation costs a lookup rather than rebuilding the daemon
@@ -64,12 +70,12 @@ fn hosts() -> &'static Mutex<Hosts> {
 pub(super) fn host_for(
     thread: &str,
     options: impl FnOnce() -> EmbeddedDaemonOptions,
-) -> Result<Arc<LocalWorkflowHost>, String> {
+) -> Result<(Arc<LocalWorkflowHost>, bool), String> {
     if let Some(host) = touch(
         &mut hosts().lock().expect("copilot host cache lock"),
         thread,
     ) {
-        return Ok(host);
+        return Ok((host, false));
     }
 
     let host = Arc::new(LocalWorkflowHost::start(options())?);
@@ -78,7 +84,7 @@ pub(super) fn host_for(
         thread,
         host.clone(),
     );
-    Ok(host)
+    Ok((host, true))
 }
 
 /// Move a thread's host onto a new key.

@@ -180,6 +180,10 @@ pub(crate) async fn run(
                         // daemon and its harness processes alive for it.
                         if removed {
                             cmd_dispatch::close_copilot_host(&workflow);
+                            // And the saved conversation with it: kept, it
+                            // would be handed wholesale to the next workflow
+                            // that reused the id.
+                            app.forget_copilot(&workflow);
                         }
                         // A queued follow-up comes back as a command to run:
                         // the drain happens after the catalogue refresh, so it

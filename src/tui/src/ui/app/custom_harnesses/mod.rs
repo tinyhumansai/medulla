@@ -85,6 +85,12 @@ impl App {
             harness.api_key_env = previous.api_key_env.clone();
             harness.base_url = previous.base_url.clone();
             harness.context_window = previous.context_window;
+            // The compact editor line has no room for the Codex knobs (see
+            // `CustomHarnessConfig::from_editor_line`), so `harness` always
+            // comes back with them reset. Restore them here or an edit through
+            // the TUI silently turns codexOverrides back off.
+            harness.codex_overrides = previous.codex_overrides;
+            harness.reasoning_effort = previous.reasoning_effort.clone();
             self.custom_harnesses[index] = harness;
             self.custom_harness_index = index;
         } else {

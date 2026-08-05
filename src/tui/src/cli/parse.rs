@@ -281,6 +281,9 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
         Some("evolve") | Some("review") => {
             operand.map_or(WorkflowAction::List, WorkflowAction::Evolve)
         }
+        // The operand is genuinely optional here: with an id the turn revises
+        // that workflow, without one it creates a new one.
+        Some("author") | Some("ask") => WorkflowAction::Author(operand),
         Some("proposals") => operand.map_or(WorkflowAction::List, WorkflowAction::Proposals),
         Some("accept") => operand.map_or(WorkflowAction::List, WorkflowAction::Accept),
         Some("reject") => operand.map_or(WorkflowAction::List, WorkflowAction::Reject),

@@ -546,6 +546,14 @@ impl PtySessionExecutor {
             }
             extra_args.extend(injection.args);
         }
+        // Codex needs more than an endpoint before a routed model will answer:
+        // a provider block, an API-key auth preference, and a catalog entry it
+        // is willing to describe. Read from `env`, which now holds both the
+        // preset's opt-in knobs and the endpoint the routing above wrote.
+        extra_args.extend(
+            medulla::codex_overrides::launch_args(options.provider, options.model.as_deref(), &env)
+                .map_err(|error| error.to_string())?,
+        );
         Ok((env, extra_args))
     }
 

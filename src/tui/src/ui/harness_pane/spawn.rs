@@ -202,6 +202,18 @@ impl LocalSessions {
         if let Some(preset) = &choice.preset {
             env.extend(preset.harness_env());
         }
+        // Codex needs more than an endpoint before a routed model will answer: a
+        // provider block, an API-key auth preference, and a catalog entry it is
+        // willing to describe. Applied after the preset's environment, which is
+        // where its opt-in and its knobs come from.
+        extra_args.extend(
+            medulla::codex_overrides::launch_args(
+                choice.provider,
+                choice.preset.as_ref().map(|preset| preset.model.as_str()),
+                &env,
+            )
+            .map_err(|error| error.to_string())?,
+        );
         Ok((env, extra_args))
     }
 }

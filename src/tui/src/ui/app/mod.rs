@@ -58,3 +58,8 @@ mod tests;
 
 pub use crate::ui::util::SPINNER;
 pub use types::{App, Cmd, SETTINGS_SUBPAGES, TABS};
+// The pane keys its threads by workflow id with one sentinel for the workflow
+// that does not exist yet; the dispatch that runs a turn needs the same mapping
+// to find that thread's saved transcript.
+#[cfg(feature = "workflows")]
+pub use workflows::copilot_thread_of;

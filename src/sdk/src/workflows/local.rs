@@ -212,6 +212,90 @@ pub async fn run_here(
     crate::workflows::run_workflow(context, id, &run_id, run_input.trigger, run_input.inputs).await
 }
 
+/// Run one copilot authoring turn on this machine, with no TUI involved.
+///
+/// The headless counterpart to the Workflows pane. It exists for two reasons
+/// beyond convenience: a copilot turn was previously reachable *only* through
+/// the pane, so nothing outside a running terminal could prove the harness
+/// actually receives its `workflow_*` tools — and when it does not, the failure
+/// is a confident reply and an unchanged graph, which reads as success. This is
+/// what the live test in `src/sdk/tests/live_copilot.rs` drives, and what an
+/// operator runs to find out whether authoring works on their machine at all.
+///
+/// `target` names the workflow to revise; `None` is a create turn. `status`
+/// receives the harness's progress frames — the same ones the pane draws — and
+/// may be dropped to ignore them.
+///
+/// Forces ACP and preflights the MCP server for the same reason the pane does:
+/// the legacy provider transport cannot attach an MCP server, so a turn that
+/// silently fell back to it would produce an agent that can only discuss the
+/// graph.
+///
+/// # Errors
+///
+/// Fails when workflows are disabled on this host, when the MCP preflight
+/// fails, when the embedded host cannot start (no coding-agent CLI on `PATH`),
+/// or when the turn itself does. A refused *edit* is not an error: the tool
+/// told the agent why, and it says so in the reply.
+pub async fn author_here(
+    store: Arc<dyn crate::workflows::WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    cwd: &std::path::Path,
+    target: Option<&str>,
+    instruction: &str,
+    status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<crate::workflows::CopilotOutcome, crate::workflows::WorkflowError> {
+    use crate::workflows::CopilotSession;
+
+    if !config.enabled {
+        return Err(crate::workflows::WorkflowError::Engine(
+            "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+        ));
+    }
+    // Checked before the host starts, for the same reason `run_here` checks
+    // `enabled`: standing up an embedded daemon needs a coding-agent CLI on
+    // `PATH`, and revising a workflow that does not exist should not cost that.
+    if let Some(id) = target {
+        crate::workflows::store::require(store.as_ref(), id)?;
+    }
+
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    env.insert(
+        crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+
+    let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+        workspace: cwd.to_string_lossy().to_string(),
+        default_provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        env,
+        ..Default::default()
+    })
+    .map_err(crate::workflows::WorkflowError::Engine)?;
+
+    let session = CopilotSession {
+        store,
+        dispatch: host.dispatch(),
+        worker_address: LOCAL_WORKER_ADDRESS.to_string(),
+        provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        // One-shot: a CLI invocation has no pane to be continuous with, and a
+        // shared key would have each invocation inherit the last one's context
+        // whether or not that is wanted.
+        conversation: format!("author-{}", uuid::Uuid::new_v4()),
+        // A one-shot invocation is not resuming a pane's thread. Passing a
+        // recap here would mean deciding *which* pane's, and there is no
+        // answer to that from a command line.
+        recap: None,
+    };
+    match target {
+        Some(id) => session.turn(id, instruction, status).await,
+        None => session.create(instruction, status).await,
+    }
+}
+
 /// Review a workflow against its own history, on this machine.
 ///
 /// The evolution counterpart to [`run_here`], and it starts the same embedded

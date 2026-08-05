@@ -190,13 +190,16 @@ impl App {
             ));
             return;
         }
-        match crate::ui::app::TABS.iter().position(|tab| *tab == "Agents") {
-            Some(index) => {
-                self.tab_index = index;
-                self.set_status(format!("New agent on {} · pick a harness type", host.label));
-            }
-            None => self.set_status("Declare a new agent from the Agents tab"),
-        }
+        // Declared here rather than by sending the operator to the Agents tab.
+        // Roles are assigned on *this* page and nowhere else, so a flow that
+        // ended on another tab meant declaring an agent and then navigating back
+        // to say what it is for — with the new row's place in the tree, and the
+        // toggles beside it, both out of sight at the moment the operator had
+        // just decided them.
+        //
+        // The picker is an overlay rather than a page (`visible_overlays`), so
+        // it draws and takes keys over whatever is behind it.
+        self.open_new_agent_picker();
     }
 
     /// Remove what the cursor is on: one agent, or the whole host it sits under.

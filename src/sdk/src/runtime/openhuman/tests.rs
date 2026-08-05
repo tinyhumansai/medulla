@@ -310,6 +310,159 @@ fn a_batch_with_no_liveness_answer_leaves_the_flag_alone() {
     assert_eq!(cell.snapshot().events.len(), 2, "it is still recorded");
 }
 
+// ── locally echoed turns ─────────────────────────────────────────────────────
+
+/// The backend's own copy of a turn, as the replay would deliver it.
+fn confirmed_user(seq: u64, body: &str) -> crate::ui::events::EventEnvelope {
+    fold::events(vec![core_event(Some(seq), "user", body)])
+        .pop()
+        .expect("one envelope")
+}
+
+#[test]
+fn a_submitted_turn_is_visible_before_the_backend_confirms_it() {
+    // The whole point: the transcript must not wait on a round trip plus a
+    // poll interval before showing what the operator just typed.
+    let cell = SnapshotCell::new();
+    cell.echo_user("hello");
+    let snap = cell.snapshot();
+    assert_eq!(snap.chat_events.len(), 1, "the turn is drawn immediately");
+    assert!(snap.running, "and reads as in flight");
+}
+
+#[test]
+fn the_confirmed_copy_retires_the_echo_rather_than_doubling_it() {
+    // The replay carries the same turn back. Two rows would read as the
+    // operator having said it twice.
+    let cell = SnapshotCell::new();
+    cell.echo_user("hello");
+    cell.append_events(
+        vec![cycle_event(4, "cycle_start"), confirmed_user(5, "hello")],
+        Some(true),
+    );
+    let snap = cell.snapshot();
+    assert_eq!(snap.chat_events.len(), 1, "one turn, not two");
+    assert_eq!(snap.chat_events[0].seq, 5, "and it is the confirmed copy");
+}
+
+#[test]
+fn retiring_an_echo_spares_a_real_event_sharing_its_guessed_seq() {
+    // The provisional `seq` is a guess at what the backend will assign, not a
+    // reservation, and a batch that carries no turn can land a real event on
+    // it. Retiring the echo by `seq` alone takes that event down with it —
+    // and a lost `cycle_start` costs the view both its liveness and its turn
+    // count.
+    let cell = SnapshotCell::new();
+    // On an empty cell the guessed `seq` is 1.
+    cell.echo_user("hello");
+    // Nothing to reconcile in this batch, so the boundary is appended and ends
+    // up sharing seq 1 with the provisional row.
+    cell.append_events(vec![cycle_event(1, "cycle_start")], Some(true));
+    // The confirmation only arrives in the next batch, at its real seq.
+    cell.append_events(vec![confirmed_user(2, "hello")], Some(true));
+
+    let snap = cell.snapshot();
+    assert!(
+        snap.events
+            .iter()
+            .any(|e| matches!(e.event, crate::ui::events::TuiEvent::CycleStart { .. })),
+        "the cycle boundary is not collateral damage"
+    );
+    assert_eq!(snap.chat_events.len(), 1, "one turn, not two");
+    assert_eq!(snap.chat_events[0].seq, 2, "and it is the confirmed copy");
+}
+
+#[test]
+fn a_confirmed_turn_nobody_echoed_is_kept() {
+    // A turn submitted from another client is not this host's echo, and
+    // dropping it would hide half the conversation.
+    let cell = SnapshotCell::new();
+    cell.append_events(vec![confirmed_user(1, "from elsewhere")], Some(true));
+    assert_eq!(cell.snapshot().chat_events.len(), 1);
+}
+
+#[test]
+fn two_echoes_retire_one_confirmation_at_a_time() {
+    // Submitting the same text twice is ordinary. Matching by body alone must
+    // still leave one provisional row standing after the first confirmation.
+    let cell = SnapshotCell::new();
+    cell.echo_user("again");
+    cell.echo_user("again");
+    cell.append_events(vec![confirmed_user(9, "again")], Some(true));
+    assert_eq!(
+        cell.snapshot().chat_events.len(),
+        2,
+        "one confirmed, one still awaited"
+    );
+}
+
+#[test]
+fn an_echo_the_backend_never_took_settles_the_turn_but_keeps_the_text() {
+    // The send failed. Nothing is running, so nothing should say it is — but
+    // the operator wrote that line and it must not vanish with the error.
+    let cell = SnapshotCell::new();
+    let seq = cell.echo_user("undeliverable");
+    cell.abandon_echo(seq);
+    let snap = cell.snapshot();
+    assert!(!snap.running, "the spinner stops");
+    assert_eq!(
+        snap.chat_events.len(),
+        1,
+        "the turn stays in the transcript"
+    );
+}
+
+#[test]
+fn silence_past_the_deadline_settles_the_turn_but_keeps_the_text() {
+    // The backend accepted the turn and then said nothing at all. Spinning on
+    // claims work is in flight that this host has no evidence of.
+    let cell = SnapshotCell::new();
+    cell.echo_user("accepted then silence");
+    assert!(cell.expire_stalled_echo(std::time::Duration::ZERO));
+    let snap = cell.snapshot();
+    assert!(!snap.running, "the spinner stops");
+    assert_eq!(
+        snap.chat_events.len(),
+        1,
+        "the turn stays in the transcript"
+    );
+}
+
+#[test]
+fn the_watchdog_is_disarmed_by_the_first_batch_to_arrive() {
+    // Once the backend is talking, liveness is the batch's to report — a
+    // watchdog still armed would settle a turn that is genuinely producing.
+    let cell = SnapshotCell::new();
+    cell.echo_user("working");
+    cell.append_events(vec![cycle_event(1, "cycle_start")], Some(true));
+    assert!(!cell.expire_stalled_echo(std::time::Duration::ZERO));
+    assert!(cell.snapshot().running, "a live turn keeps its spinner");
+}
+
+#[test]
+fn the_watchdog_fires_once_rather_than_every_tick() {
+    // It runs on the poll loop, which wakes far more often than the deadline.
+    let cell = SnapshotCell::new();
+    cell.echo_user("quiet");
+    assert!(cell.expire_stalled_echo(std::time::Duration::ZERO));
+    assert!(!cell.expire_stalled_echo(std::time::Duration::ZERO));
+}
+
+#[test]
+fn an_unconfirmed_echo_does_not_outlive_its_thread() {
+    // Left pending, it would match the incoming thread's replay by body and
+    // retire a row this host never drew.
+    let cell = SnapshotCell::new();
+    cell.echo_user("shared text");
+    cell.switch_thread("other".into());
+    cell.append_events(vec![confirmed_user(1, "shared text")], Some(true));
+    assert_eq!(
+        cell.snapshot().chat_events.len(),
+        1,
+        "the other thread's turn survives"
+    );
+}
+
 // ── liveness from cycle boundaries ───────────────────────────────────────────
 
 fn cycle_event(seq: u64, kind: &str) -> crate::ui::events::EventEnvelope {

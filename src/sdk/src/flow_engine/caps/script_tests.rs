@@ -379,11 +379,32 @@ fn an_unconfigured_host_keeps_the_default_shell() {
 
 #[test]
 fn the_user_sentinel_follows_the_login_shell() {
-    let chosen =
-        Interpreter::resolve(USER_SHELL, &["-l".to_string()], Some("/bin/zsh")).expect("valid");
+    // The fixture has to be absolute *on this platform*: a `$SHELL` of
+    // `/bin/zsh` is rooted but drive-less on Windows, which is exactly the
+    // relative-path shape `validated` refuses.
+    let login = absolute_interpreter();
 
-    assert_eq!(chosen.program, "/bin/zsh");
+    let chosen = Interpreter::resolve(USER_SHELL, &["-l".to_string()], Some(login)).expect("valid");
+
+    assert_eq!(chosen.program, login);
     assert_eq!(chosen.args, vec!["-l".to_string()]);
+}
+
+#[test]
+fn a_login_shell_the_platform_cannot_use_is_refused_rather_than_spawned() {
+    // The other half of the case above: `$SHELL` is ordinary environment data,
+    // so a value this platform would treat as relative has to be refused with
+    // the rest, not waved through because it came from the environment.
+    #[cfg(windows)]
+    {
+        let err = Interpreter::resolve(USER_SHELL, &[], Some("/bin/zsh")).expect_err("drive-less");
+        assert!(err.to_string().contains("relative path"), "{err}");
+    }
+    #[cfg(not(windows))]
+    {
+        let err = Interpreter::resolve(USER_SHELL, &[], Some("bin/zsh")).expect_err("relative");
+        assert!(err.to_string().contains("relative path"), "{err}");
+    }
 }
 
 #[test]

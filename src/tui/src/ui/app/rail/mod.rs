@@ -44,7 +44,7 @@ pub(in crate::ui::app) mod resolve;
 pub(in crate::ui::app) mod tests;
 mod types;
 
-pub use types::{AgentRailRow, HostRailRow, RailRow, SessionRailRow};
+pub use types::{AgentRailRow, HostRailRow, RailRow, SessionRailRow, WorkflowRunRailRow};
 
 /// The label on the rail's "declare an agent" row.
 ///
@@ -286,13 +286,16 @@ impl App {
                 let offers_session = declared
                     .iter()
                     .any(|agent_id| agent_id.trim() == group.row.agent_id.trim());
-                push_group(&mut rows, group, offers_session);
+                push_group(&mut rows, group, offers_session, &self.harness_runs);
             }
         }
-        rows.extend(orphans.into_iter().map(|mut session| {
+        for mut session in orphans {
             session.last = true;
-            RailRow::Session(Box::new(session))
-        }));
+            let session = Box::new(session);
+            let runs = run_rows_under(&session, &self.harness_runs);
+            rows.push(RailRow::Session(session));
+            rows.extend(runs);
+        }
         rows
     }
 
@@ -442,6 +445,37 @@ fn unplaced_host(hosts: &[HostGroup], host_id: &str) -> Option<usize> {
         .position(|host| !host_id.is_empty() && host.row.host_id.trim() == host_id)
         .or_else(|| hosts.iter().position(|host| host.row.local))
 }
+/// The workflow-run rows that belong under one session, oldest first.
+///
+/// Keyed by the grant session recorded on the PTY row at launch — the same key
+/// the MCP subprocess reports under — so a session Medulla did not spawn, or
+/// one whose harness was never granted the workflow tools, simply has none.
+fn run_rows_under(
+    session: &SessionRailRow,
+    runs: &medulla::control_socket::HarnessRunRegistry,
+) -> Vec<RailRow> {
+    let Some(local) = &session.local else {
+        return Vec::new();
+    };
+    let Some(grant) = local.mcp_grant_session.as_deref() else {
+        return Vec::new();
+    };
+    let reported = runs.for_session(grant);
+    let last_index = reported.len().saturating_sub(1);
+    reported
+        .into_iter()
+        .enumerate()
+        .map(|(index, run)| {
+            RailRow::WorkflowRun(WorkflowRunRailRow {
+                session_id: local.id.clone(),
+                run,
+                // The session's own last-leaf glyph is decided before its runs
+                // exist, so the group's real last row is the last run under it.
+                last: index == last_index && session.last,
+            })
+        })
+        .collect()
+}
 
 /// Push one agent row and the sessions under it, tree-marked.
 ///
@@ -456,7 +490,12 @@ fn unplaced_host(hosts: &[HostGroup], host_id: &str) -> Option<usize> {
 /// is re-emitted under the group and stays selectable, which is what makes
 /// `Enter` on it page the lane open — and, once the lane is fully revealed, fold
 /// it back.
-fn push_group(rows: &mut Vec<RailRow>, group: &mut AgentGroup, offers_session: bool) {
+fn push_group(
+    rows: &mut Vec<RailRow>,
+    group: &mut AgentGroup,
+    offers_session: bool,
+    runs: &medulla::control_socket::HarnessRunRegistry,
+) {
     rows.push(RailRow::Agent(group.row.clone()));
     let shown = group.sessions.len();
     for (index, session) in group.sessions.iter_mut().enumerate() {
@@ -464,7 +503,10 @@ fn push_group(rows: &mut Vec<RailRow>, group: &mut AgentGroup, offers_session: b
         // session is only the tree's last leaf when neither it nor the overflow
         // row follows.
         session.last = !offers_session && !group.overflow && index + 1 == shown;
-        rows.push(RailRow::Session(Box::new(session.clone())));
+        let session = Box::new(session.clone());
+        let run_rows = run_rows_under(&session, runs);
+        rows.push(RailRow::Session(session));
+        rows.extend(run_rows);
     }
     if group.overflow {
         rows.push(RailRow::Lane(AgentRow::More {

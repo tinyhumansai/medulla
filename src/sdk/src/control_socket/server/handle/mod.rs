@@ -13,6 +13,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::super::grants::{Grant, GrantRegistry};
+use super::super::runs::{HarnessRunRegistry, RunReport};
 use super::super::types::{ControlFailure, ErrorKind, FleetOps, Hello, PROTOCOL_VERSION};
 use super::types::{SessionState, TaskRegistry};
 
@@ -43,6 +44,7 @@ pub async fn handle_control(
     ops: &Arc<dyn FleetOps>,
     grants: &GrantRegistry,
     registry: &TaskRegistry,
+    runs: &HarnessRunRegistry,
     session: &mut SessionState,
     request: &Value,
 ) -> Value {
@@ -87,6 +89,7 @@ pub async fn handle_control(
             .map(tasks::task_json)
             .collect::<Vec<_>>() })),
         "task.abort" => tasks::task_abort(ops, registry, &token, &params),
+        "run.report" => run_report(runs, &grant, &params),
         other => Err(ControlFailure::new(
             ErrorKind::BadRequest,
             format!("unknown op: {other}"),
@@ -97,6 +100,51 @@ pub async fn handle_control(
         Ok(result) => ok(&id, result),
         Err(failure) => fail(&id, failure.kind, failure.message),
     }
+}
+
+/// Record what a granted process's workflow run is doing.
+///
+/// Keyed by the grant's *session* rather than by the token, so a child grant
+/// minted for a nested session reports under the harness an operator can see —
+/// the depth-1 session is an implementation detail of the run, not a second row
+/// in the rail.
+///
+/// Always accepted while the grant is valid: this is a view of work already
+/// happening elsewhere, and refusing a report would not stop the run, only hide
+/// it.
+fn run_report(
+    runs: &HarnessRunRegistry,
+    grant: &Grant,
+    params: &Value,
+) -> Result<Value, ControlFailure> {
+    let run_id = required_str(params, "runId")?;
+    let workflow_id = required_str(params, "workflowId")?;
+    let status = crate::control_socket::runs::HarnessRunStatus::from_wire(
+        params.get("status").and_then(Value::as_str).unwrap_or(""),
+    );
+    let detail = params
+        .get("detail")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|detail| !detail.is_empty())
+        .map(crate::logging::preview);
+    let node = params
+        .get("node")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|node| !node.is_empty())
+        .map(str::to_string);
+    runs.report(
+        &grant.session,
+        RunReport {
+            run_id,
+            workflow_id,
+            status,
+            detail,
+            node,
+        },
+    );
+    Ok(json!({ "recorded": true }))
 }
 
 /// Mint a child capability whose authority can only narrow with depth.

@@ -44,6 +44,30 @@ pub(super) enum AppMsg {
     FeedbackItemUpdated(medulla::client::FeedbackItem),
     /// A feedback action finished; reload the board and report `status`.
     FeedbackChanged(String),
+    /// A run started from this TUI began executing.
+    #[cfg(feature = "workflows")]
+    WorkflowRunStarted {
+        /// The workflow being run.
+        workflow: String,
+        /// The engine run id, which the live output is keyed by.
+        run_id: String,
+    },
+    /// One progress frame from a harness a running workflow dispatched.
+    #[cfg(feature = "workflows")]
+    WorkflowRunOutput {
+        /// The run it belongs to.
+        run_id: String,
+        /// The graph node whose harness emitted it.
+        node: String,
+        /// The frame, in the vocabulary `medulla::daemon::status_detail` writes.
+        line: String,
+    },
+    /// A run started from this TUI settled.
+    #[cfg(feature = "workflows")]
+    WorkflowRunFinished {
+        /// The run that settled.
+        run_id: String,
+    },
     /// A progress line from a running copilot turn.
     #[cfg(feature = "workflows")]
     CopilotStatus {
@@ -143,4 +167,8 @@ pub(crate) struct SessionWiring {
     /// or to the transcript. Shared with the host's executor — the sessions it
     /// opens are the ones rendered here.
     pub local_sessions: Option<medulla_tui::ui::harness_pane::LocalSessions>,
+    /// Workflow runs reported by harnesses this device spawned, as the control
+    /// plane records them. Empty when no control socket was bound — a build
+    /// without workflows, or a host with fleet tools switched off.
+    pub harness_runs: medulla::control_socket::HarnessRunRegistry,
 }

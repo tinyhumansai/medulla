@@ -11,6 +11,7 @@
 //! selection changes, when `r` is pressed, and after anything that could have
 //! written to the store (a run, a copilot turn).
 //!
+//! - [`live`] — what a run in flight is doing, per node, while it runs.
 //! - [`rail`] — the catalogue cursor, and the runs nested under it.
 //! - [`canvas`] — the graph cache and the node cursor over it.
 //! - [`copilot`] — the per-workflow conversation and its turns.
@@ -18,9 +19,11 @@
 mod canvas;
 pub(super) use canvas::node_label;
 mod copilot;
+mod live;
 pub use copilot::thread_of as copilot_thread_of;
 mod rail;
 
+pub(in crate::ui::app) use live::LiveRun;
 pub(in crate::ui::app) use rail::{WorkflowRailRow, NEW_LABEL};
 
 #[cfg(test)]

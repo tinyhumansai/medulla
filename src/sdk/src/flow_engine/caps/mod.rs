@@ -27,6 +27,7 @@ use tinyflows::caps::{Capabilities, WorkflowResolver};
 use tinyflows::engine::{Checkpointer, FileCheckpointer};
 
 use crate::flow_engine::agent_evidence::AgentEvidence;
+use crate::flow_engine::observability::NodeProgressSink;
 use crate::flow_engine::settings::CapabilitySettings;
 
 use self::agent::{HarnessAgentRunner, HarnessLlm};
@@ -48,6 +49,34 @@ pub struct HostServices {
     pub resolver: Arc<dyn WorkflowResolver>,
     /// HTTP credentials, keyed by the name a `connection_ref` uses.
     pub http_credentials: HashMap<String, HttpCredential>,
+    /// Where a dispatched harness's live progress goes, when anyone is
+    /// watching. `None` costs the run nothing: with no sink the dispatch asks
+    /// for no status channel at all, so a headless run does not pay to
+    /// assemble frames nobody reads.
+    pub node_progress: Option<NodeProgressSink>,
+}
+
+impl HostServices {
+    /// The services a run needs with nothing watching its harnesses.
+    pub fn new(
+        dispatch: Arc<dyn HarnessDispatch>,
+        resolver: Arc<dyn WorkflowResolver>,
+        http_credentials: HashMap<String, HttpCredential>,
+    ) -> Self {
+        Self {
+            dispatch,
+            resolver,
+            http_credentials,
+            node_progress: None,
+        }
+    }
+
+    /// Stream every `agent` node's harness progress into `sink`.
+    #[must_use]
+    pub fn watching(mut self, sink: NodeProgressSink) -> Self {
+        self.node_progress = Some(sink);
+        self
+    }
 }
 
 /// Build the capability bundle for one run.
@@ -98,6 +127,7 @@ fn build_capabilities_inner(
         settings.max_parallel_agents.max(1),
     ));
 
+    let progress = services.node_progress.clone();
     let llm: Arc<dyn tinyflows::caps::LlmProvider> = match &evidence {
         Some(evidence) => Arc::new(
             HarnessLlm::recording(
@@ -106,21 +136,25 @@ fn build_capabilities_inner(
                 run_id,
                 evidence.clone(),
             )
-            .with_limiter(slots.clone()),
+            .with_limiter(slots.clone())
+            .streaming_to(progress.clone()),
         ),
         None => Arc::new(
             HarnessLlm::new(services.dispatch.clone(), settings.clone(), run_id)
-                .with_limiter(slots.clone()),
+                .with_limiter(slots.clone())
+                .streaming_to(progress.clone()),
         ),
     };
     let agent: Arc<dyn tinyflows::caps::AgentRunner> = match evidence {
         Some(evidence) => Arc::new(
             HarnessAgentRunner::recording(services.dispatch, settings.clone(), run_id, evidence)
-                .with_limiter(slots),
+                .with_limiter(slots)
+                .streaming_to(progress),
         ),
         None => Arc::new(
             HarnessAgentRunner::new(services.dispatch, settings.clone(), run_id)
-                .with_limiter(slots),
+                .with_limiter(slots)
+                .streaming_to(progress),
         ),
     };
 

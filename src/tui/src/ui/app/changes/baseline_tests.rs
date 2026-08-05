@@ -270,6 +270,7 @@ fn row(
 ) -> crate::worker::pty::SessionRow {
     use crate::worker::pty::{PtyState, SessionControl, SessionRow};
     SessionRow {
+        mcp_grant_session: None,
         id: id.to_owned(),
         label: label.to_owned(),
         provider: medulla::protocol::HarnessProvider::Codex,

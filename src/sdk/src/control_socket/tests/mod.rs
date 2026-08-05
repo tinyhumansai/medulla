@@ -4,7 +4,8 @@
 //! branches, [`grants`] covers the capability model that makes this surface
 //! exclusive, [`paths`] covers socket resolution and bind safety, and
 //! [`roundtrip`] drives a real listener with a real client. The focused
-//! [`workflow_dispatch`] module pins workflow identity to the selected worker.
+//! [`workflow_dispatch`] module pins workflow identity to the selected worker,
+//! and [`runs`] covers the run-reporting registry a granted harness writes to.
 
 #[cfg(unix)]
 mod grants;
@@ -13,6 +14,7 @@ mod paths;
 mod protocol;
 #[cfg(unix)]
 mod roundtrip;
+mod runs;
 #[cfg(unix)]
 mod workflow_dispatch;
 

@@ -93,6 +93,7 @@ pub(crate) async fn start(
             medulla::control_socket::install(medulla::control_socket::ActiveControlPlane {
                 socket: server.path().to_path_buf(),
                 grants: server.grants().clone(),
+                runs: server.runs().clone(),
                 max_depth: config.mcp.max_depth,
                 max_in_flight: config
                     .mcp

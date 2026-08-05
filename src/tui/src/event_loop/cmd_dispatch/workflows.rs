@@ -38,7 +38,7 @@ pub(super) fn spawn_run(
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses).await;
+        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses, &tx).await;
         let (status, failed) = match outcome {
             Ok((summary, failed)) => (summary, failed),
             Err(err) => (format!("workflow '{id}' failed: {err}"), None),
@@ -68,6 +68,7 @@ async fn run(
     inputs: serde_json::Map<String, serde_json::Value>,
     workflows_config: &medulla::config::WorkflowsConfig,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
+    tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) -> anyhow::Result<(String, Option<String>)> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -101,18 +102,46 @@ async fn run(
     let (sink, _fold) = folding_sink();
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     let max_loop_iterations = settings.max_loop_iterations;
+    // Announced before the first step, because the point of the live view is
+    // that the pane stops being blank the moment the run starts rather than
+    // when the first agent node happens to say something.
+    let _ = tx.send(AppMsg::WorkflowRunStarted {
+        workflow: id.to_string(),
+        run_id: run_id.clone(),
+    });
+    // Every `agent` node's harness reports through here as it works. Forwarded
+    // rather than folded: the App owns the buffer, and a render pass must not
+    // reach into a run's internals to read it.
+    let progress: medulla::flow_engine::NodeProgressSink = {
+        let tx = tx.clone();
+        let run_id = run_id.clone();
+        Arc::new(move |node: &str, line: &str| {
+            let _ = tx.send(AppMsg::WorkflowRunOutput {
+                run_id: run_id.clone(),
+                node: node.to_string(),
+                line: line.to_string(),
+            });
+        })
+    };
     let context = RunContext {
         store: store.clone(),
         settings: Arc::new(settings),
-        services: HostServices {
-            dispatch: host.dispatch(),
-            resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
-            http_credentials: HashMap::new(),
-        },
+        services: HostServices::new(
+            host.dispatch(),
+            Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
+            HashMap::new(),
+        )
+        .watching(progress),
         sink,
     };
 
-    let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await?;
+    let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await;
+    // Settled before the result is unwrapped: a run that failed still stops
+    // being live, and a `?` here would leave the row spinning forever.
+    let _ = tx.send(AppMsg::WorkflowRunFinished {
+        run_id: run_id.clone(),
+    });
+    let record = record?;
     let summary = format!(
         "{id}: {} · {} step{}",
         medulla::ui::workflows::status_label(record.status),

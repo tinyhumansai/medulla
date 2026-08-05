@@ -131,6 +131,23 @@ impl SessionRailRow {
     }
 }
 
+/// One workflow run a session started over MCP, listed under that session.
+///
+/// The run itself executes in the MCP subprocess the harness talks to (see
+/// [`medulla::control_socket::runs`]), so this row is the only place an
+/// operator can see it while it happens — the Workflows page reads the run
+/// store, and a record does not land there until the run ends.
+#[derive(Debug, Clone)]
+pub struct WorkflowRunRailRow {
+    /// The PTY session that started it, so the row can be drawn under it and
+    /// selection can stay with the harness it belongs to.
+    pub session_id: String,
+    /// What the reporting process last said about the run.
+    pub run: medulla::control_socket::HarnessRun,
+    /// Whether this is the last row of its session's group, for the tree glyph.
+    pub last: bool,
+}
+
 /// One row of the Agents rail.
 #[derive(Debug, Clone)]
 pub enum RailRow {
@@ -175,6 +192,12 @@ pub enum RailRow {
         /// The agent whose harness and workspace the session inherits.
         agent_id: String,
     },
+    /// A workflow run one of the sessions above started over MCP.
+    ///
+    /// Directly beneath the session that triggered it, because that is the
+    /// context that makes it legible: the same workflow run means something
+    /// different started from a review session than from a release one.
+    WorkflowRun(WorkflowRunRailRow),
     /// A fold row that is not an agent: the orchestrator's own conversation, the
     /// `── functions ──` divider, a function lane, or a `+N more` counter.
     ///
@@ -195,6 +218,10 @@ impl RailRow {
             // A label, not a row: the cursor skips it like a host header.
             RailRow::AgentsHeader => false,
             RailRow::NewSession { .. } => true,
+            // Selectable so `Enter` can open the workflow it belongs to; the
+            // rail is where the operator finds out a run exists, and a row they
+            // cannot act on would make them go looking for it by name.
+            RailRow::WorkflowRun(_) => true,
             RailRow::Lane(row) => row.selectable(),
         }
     }
@@ -203,6 +230,17 @@ impl RailRow {
     pub fn session_id(&self) -> Option<&str> {
         match self {
             RailRow::Session(row) => row.session_id(),
+            // A run row names the session it hangs under: the harness is what
+            // the operator is looking at, and a run is something it did.
+            RailRow::WorkflowRun(row) => Some(row.session_id.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The workflow run this row is about, when it is about one.
+    pub fn workflow_run(&self) -> Option<&WorkflowRunRailRow> {
+        match self {
+            RailRow::WorkflowRun(row) => Some(row),
             _ => None,
         }
     }
@@ -224,7 +262,8 @@ impl RailRow {
             RailRow::Host(_)
             | RailRow::NewAgent
             | RailRow::AgentsHeader
-            | RailRow::NewSession { .. } => None,
+            | RailRow::NewSession { .. }
+            | RailRow::WorkflowRun(_) => None,
         }
     }
 

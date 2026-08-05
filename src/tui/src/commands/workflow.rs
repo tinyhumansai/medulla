@@ -258,14 +258,14 @@ fn local_context(
         RunContext {
             store: store.clone(),
             settings: Arc::new(settings),
-            services: HostServices {
+            services: HostServices::new(
                 dispatch,
-                resolver: Arc::new(StoreWorkflowResolver::new(
+                Arc::new(StoreWorkflowResolver::new(
                     store.clone(),
                     max_loop_iterations,
                 )),
-                http_credentials: HashMap::new(),
-            },
+                HashMap::new(),
+            ),
             sink,
         },
         run_id,

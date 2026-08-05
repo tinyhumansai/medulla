@@ -79,6 +79,7 @@ static INSTALL: Once = Once::new();
 fn ensure_control_plane() {
     INSTALL.call_once(|| {
         medulla::control_socket::install(ActiveControlPlane {
+            runs: Default::default(),
             socket: PathBuf::from("/run/medulla-test.sock"),
             grants: GrantRegistry::new(),
             max_depth: 2,

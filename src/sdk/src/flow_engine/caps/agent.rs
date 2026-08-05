@@ -37,6 +37,7 @@ use tinyflows::error::{EngineError, Result};
 
 use crate::flow_engine::agent_evidence::AgentEvidence;
 use crate::flow_engine::harness_choice::{HarnessChoice, HarnessPreference};
+use crate::flow_engine::observability::NodeProgressSink;
 use crate::flow_engine::settings::CapabilitySettings;
 use crate::hub::{RunError, TaskRequest};
 
@@ -80,6 +81,18 @@ pub fn instruction_of(request: &Value) -> Result<String> {
     Err(EngineError::Capability(
         "agent node: no prompt — set `prompt` in the node config".to_string(),
     ))
+}
+
+/// The graph node a resolved request came from, when the run tagged it.
+///
+/// The tag is Medulla's own, added to an in-memory clone of the graph rather
+/// than to the authored document — see
+/// [`crate::flow_engine::agent_evidence::instrumented`].
+fn node_id_of(request: &Value) -> Option<String> {
+    request
+        .get(crate::flow_engine::agent_evidence::NODE_ID_FIELD)
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// Shape a harness reply into the value the `agent` node expects.
@@ -129,6 +142,8 @@ pub struct HarnessAgentRunner {
     slots: Arc<Semaphore>,
     /// Resolved prompts captured for the durable run inspector.
     evidence: Option<Arc<AgentEvidence>>,
+    /// Where this node's harness progress is streamed, when anyone watches.
+    progress: Option<NodeProgressSink>,
 }
 
 impl HarnessAgentRunner {
@@ -147,6 +162,7 @@ impl HarnessAgentRunner {
             sequence: AtomicU64::new(0),
             slots,
             evidence: None,
+            progress: None,
         }
     }
 
@@ -165,6 +181,7 @@ impl HarnessAgentRunner {
             sequence: AtomicU64::new(0),
             slots: Arc::new(Semaphore::new(settings_max_parallel)),
             evidence: Some(evidence),
+            progress: None,
         }
     }
 
@@ -178,6 +195,17 @@ impl HarnessAgentRunner {
     #[must_use]
     pub(crate) fn with_limiter(mut self, slots: Arc<Semaphore>) -> Self {
         self.slots = slots;
+        self
+    }
+
+    /// Stream every dispatched harness's progress into `sink`.
+    ///
+    /// Takes an `Option` so the caller can pass whatever the run was given
+    /// without branching; `None` leaves the dispatch asking for no status
+    /// channel, which is what a headless run wants.
+    #[must_use]
+    pub(crate) fn streaming_to(mut self, sink: Option<NodeProgressSink>) -> Self {
+        self.progress = sink;
         self
     }
 
@@ -262,12 +290,40 @@ impl HarnessAgentRunner {
         ]))
     }
 
+    /// The status channel this dispatch should report on, if anyone is watching.
+    ///
+    /// Frames are forwarded on a spawned task rather than awaited inline: the
+    /// dispatch owns the sending half for the length of the harness session,
+    /// and draining it in step with the sink is what keeps a slow reader from
+    /// stalling the harness rather than itself.
+    fn stream_for(
+        &self,
+        node_id: Option<String>,
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<String>> {
+        let sink = self.progress.clone()?;
+        let node_id = node_id?;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Some(frame) = rx.recv().await {
+                sink(&node_id, &frame);
+            }
+        });
+        Some(tx)
+    }
+
     /// Dispatch `instruction` along `route` and shape the reply.
+    ///
+    /// `node_id` is the graph node this dispatch belongs to, when the run
+    /// tagged one (see [`crate::flow_engine::agent_evidence`]). It is what a
+    /// streamed progress frame is attributed to — an untagged dispatch (a
+    /// repair pass, a bare completion) simply streams nothing, because there is
+    /// no step on the operator's graph for it to appear under.
     async fn run_on_harness(
         &self,
         route: AgentRoute,
         instruction: String,
         choice: HarnessChoice,
+        node_id: Option<String>,
     ) -> Result<Value> {
         let request = self.request(&route, instruction, choice);
         if request.worker_address.trim().is_empty() {
@@ -285,9 +341,10 @@ impl HarnessAgentRunner {
             EngineError::Capability("agent node: run concurrency limiter closed".to_string())
         })?;
         let worker = request.worker_address.clone();
+        let status = self.stream_for(node_id);
         let outcome = self
             .dispatch
-            .dispatch(request)
+            .dispatch_with_status(request, status)
             .await
             .map_err(|err| dispatch_error("agent node", err))?;
         Ok(reply_to_value(&outcome.reply, &worker))
@@ -305,8 +362,13 @@ impl AgentRunner for HarnessAgentRunner {
         let instruction = instruction_of(&request)?;
         self.record_prompt(&request, &instruction);
         let choice = self.choice_for("agent node", &request)?;
-        self.run_on_harness(route_for_agent_ref(Some(agent_ref)), instruction, choice)
-            .await
+        self.run_on_harness(
+            route_for_agent_ref(Some(agent_ref)),
+            instruction,
+            choice,
+            node_id_of(&request),
+        )
+        .await
     }
 }
 
@@ -352,6 +414,13 @@ impl HarnessLlm {
         self.inner = self.inner.with_limiter(slots);
         self
     }
+
+    /// Stream harness progress — see [`HarnessAgentRunner::streaming_to`].
+    #[must_use]
+    pub(crate) fn streaming_to(mut self, sink: Option<NodeProgressSink>) -> Self {
+        self.inner = self.inner.streaming_to(sink);
+        self
+    }
 }
 
 #[async_trait]
@@ -361,7 +430,12 @@ impl LlmProvider for HarnessLlm {
         self.inner.record_prompt(&request, &instruction);
         let choice = self.inner.choice_for("agent node", &request)?;
         self.inner
-            .run_on_harness(AgentRoute::Default, instruction, choice)
+            .run_on_harness(
+                AgentRoute::Default,
+                instruction,
+                choice,
+                node_id_of(&request),
+            )
             .await
     }
 }

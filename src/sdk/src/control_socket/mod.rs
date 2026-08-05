@@ -29,6 +29,7 @@
 //! * [`types`] — wire types and the [`FleetOps`] seam the handler is written to.
 //! * [`path`] — where the socket lives, and whether it can be bound.
 //! * [`grants`] — minting and redeeming capabilities.
+//! * [`runs`] — workflow runs a granted harness reported starting.
 //! * [`server`] — the listener, the pure request handler, and the task registry.
 //! * [`client`] — what the MCP shim uses to reach all of the above.
 //!
@@ -38,6 +39,7 @@
 pub mod active;
 pub mod grants;
 pub mod path;
+pub mod runs;
 pub mod types;
 
 #[cfg(unix)]
@@ -51,6 +53,7 @@ mod tests;
 pub use active::{active, install, ActiveControlPlane};
 pub use grants::{Grant, GrantRegistry};
 pub use path::{control_socket_path, ControlSocketError, CONTROL_SOCKET_ENV};
+pub use runs::{HarnessRun, HarnessRunFrame, HarnessRunRegistry, HarnessRunStatus, RunReport};
 pub use types::{
     depth_from_env, grant_from_env, ControlError, ControlFailure, ErrorKind, FleetOps, FleetWorker,
     Hello, ToolFamilies, FLEET_DEPTH_ENV, MCP_GRANT_ENV, MCP_SOCKET_ENV, PROTOCOL_VERSION,

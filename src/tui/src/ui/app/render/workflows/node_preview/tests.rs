@@ -259,6 +259,86 @@ fn concatenated_agent_prompt_is_unescaped_and_names_its_dynamic_input() {
 }
 
 #[test]
+fn a_piped_prompt_operand_is_named_by_the_value_it_renders() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Apply fixes for these findings: \" + (.item.json.json.findings | tostring)"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(
+        preview.contains("Apply fixes for these findings:"),
+        "{preview}"
+    );
+    assert!(preview.contains("${findings}"), "{preview}");
+    assert!(
+        preview.contains("dynamic input  previous step → findings"),
+        "{preview}"
+    );
+    // The jq machinery is what this decoding exists to remove; leaving it in
+    // the prose is the regression.
+    assert!(!preview.contains("tostring"), "{preview}");
+}
+
+#[test]
+fn a_conditional_prompt_operand_is_named_by_the_value_it_tests() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Review the repository \" + .inputs.repo + \". \" + (if .inputs.include_tests then \"Read the test suite too.\" else \"Skip the test suite.\" end)"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(
+        preview.contains("Review the repository ${inputs.repo}"),
+        "{preview}"
+    );
+    assert!(preview.contains("${if include_tests}"), "{preview}");
+    assert!(
+        preview.contains("inputs.include_tests → one of two texts"),
+        "{preview}"
+    );
+    assert!(preview.contains("workflow input → repo"), "{preview}");
+    assert!(!preview.contains("then \"Read"), "{preview}");
+}
+
+#[test]
+fn an_alternative_prompt_operand_is_named_by_its_preferred_value() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Pull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring)))"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(preview.contains("${assess.url}"), "{preview}");
+    assert!(preview.contains("assess → url"), "{preview}");
+    assert!(!preview.contains("//"), "{preview}");
+}
+
+#[test]
+fn an_undecodable_prompt_operand_is_reported_rather_than_hidden() {
+    let preview = text(kind_lines(
+        "agent",
+        &json!({ "prompt": "=\"Files: \" + ([.nodes.survey.item.files[].path] | join(\", \"))" }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(preview.contains("Files: ${value}"), "{preview}");
+    // Nothing this module could not explain may vanish: the line that names it
+    // is the operator's only route back to what fills the placeholder.
+    assert!(preview.contains("join("), "{preview}");
+}
+
+#[test]
 fn agent_run_detail_shows_the_resolved_prompt_and_plain_reply() {
     let run = RunRecord {
         id: "run-1".into(),

@@ -118,6 +118,7 @@ impl Harness {
             store: self.store.clone(),
             settings: self.settings.clone(),
             services: HostServices {
+                node_progress: None,
                 dispatch,
                 resolver: Arc::new(StoreWorkflowResolver::new(
                     self.store.clone(),

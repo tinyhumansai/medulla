@@ -58,6 +58,14 @@ impl App {
             .is_some_and(|row| row.is_new_agent())
     }
 
+    /// The workflow run the rail cursor sits on, when it sits on one.
+    pub(in crate::ui::app) fn on_workflow_run_row(&self) -> Option<(String, String)> {
+        let rows = self.rail_rows();
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .and_then(|row| row.workflow_run())
+            .map(|row| (row.run.workflow_id.clone(), row.run.run_id.clone()))
+    }
+
     /// The agent whose `+ new session` action row the cursor sits on, if it does.
     pub(in crate::ui::app) fn on_new_session_row(&self) -> Option<String> {
         let rows = self.rail_rows();
@@ -121,6 +129,11 @@ impl App {
             KeyCode::Enter => {
                 if self.on_new_agent_row() {
                     self.open_new_agent_picker();
+                } else if let Some((workflow, run)) = self.on_workflow_run_row() {
+                    // A run row exists to be followed: the rail is where the
+                    // operator learns the session started one, and the graph is
+                    // where they find out what it is doing.
+                    self.open_workflow_run(&workflow, &run);
                 } else if let Some(agent_id) = self.on_new_session_row() {
                     // The same flow `Ctrl-T` opens on an agent row: the name
                     // prompt, then a session in that agent's declared harness

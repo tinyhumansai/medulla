@@ -197,19 +197,47 @@ pub async fn run_here(
 
     let (sink, _fold) = folding_sink();
     let max_loop_iterations = settings.max_loop_iterations;
+    let run_id = format!("run-{}", uuid::Uuid::new_v4());
+    // A tool call reaching here came from a harness Medulla spawned, so the
+    // grant in `env` names the session that asked for this run. Reporting
+    // through it is what puts the run under that session in the operator's
+    // rail instead of leaving it invisible until the record hits disk.
+    let reporter = crate::workflows::RunReporter::start(env, id, &run_id);
+    let mut services = HostServices::new(
+        host.dispatch(),
+        Arc::new(StoreWorkflowResolver::new(
+            store.clone(),
+            max_loop_iterations,
+        )),
+        std::collections::HashMap::new(),
+    );
+    if let Some(reporter) = &reporter {
+        services = services.watching(reporter.progress_sink());
+    }
     let context = RunContext {
-        store: store.clone(),
+        store,
         settings: Arc::new(settings),
-        services: HostServices {
-            dispatch: host.dispatch(),
-            resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
-            http_credentials: std::collections::HashMap::new(),
-        },
+        services,
         sink,
     };
 
-    let run_id = format!("run-{}", uuid::Uuid::new_v4());
-    crate::workflows::run_workflow(context, id, &run_id, run_input.trigger, run_input.inputs).await
+    let outcome =
+        crate::workflows::run_workflow(context, id, &run_id, run_input.trigger, run_input.inputs)
+            .await;
+    if let Some(reporter) = &reporter {
+        // Reported from the outcome rather than from the record's own status
+        // word, so a run that failed before it produced a record still settles
+        // the row rather than leaving it running forever.
+        let (status, detail) = match &outcome {
+            Ok(record) => (
+                crate::workflows::report::wire_status(record.status),
+                record.summary.clone(),
+            ),
+            Err(error) => ("failed", Some(error.to_string())),
+        };
+        reporter.settled(status, detail);
+    }
+    outcome
 }
 
 /// Run one copilot authoring turn on this machine, with no TUI involved.

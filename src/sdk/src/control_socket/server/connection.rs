@@ -10,6 +10,7 @@ use serde_json::Value;
 use super::handle::handle_control;
 use super::types::{SessionState, TaskRegistry};
 use crate::control_socket::grants::GrantRegistry;
+use crate::control_socket::runs::HarnessRunRegistry;
 use crate::control_socket::types::FleetOps;
 
 /// The largest frame the server will read.
@@ -32,6 +33,7 @@ pub(super) async fn serve_connection(
     ops: Arc<dyn FleetOps>,
     grants: GrantRegistry,
     registry: TaskRegistry,
+    runs: HarnessRunRegistry,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
     serve_connection_with_handshake_timeout(
@@ -39,6 +41,7 @@ pub(super) async fn serve_connection(
         ops,
         grants,
         registry,
+        runs,
         shutdown,
         HANDSHAKE_TIMEOUT,
     )
@@ -55,6 +58,7 @@ pub(super) async fn serve_connection_with_handshake_timeout(
     ops: Arc<dyn FleetOps>,
     grants: GrantRegistry,
     registry: TaskRegistry,
+    runs: HarnessRunRegistry,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     handshake_timeout: std::time::Duration,
 ) -> std::io::Result<()> {
@@ -92,7 +96,9 @@ pub(super) async fn serve_connection_with_handshake_timeout(
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_control(&ops, &grants, &registry, &mut session, &request).await,
+            Ok(request) => {
+                handle_control(&ops, &grants, &registry, &runs, &mut session, &request).await
+            }
             Err(err) => serde_json::json!({
                 "v": crate::control_socket::types::PROTOCOL_VERSION,
                 "id": Value::Null,

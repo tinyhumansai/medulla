@@ -61,6 +61,7 @@ async fn run_once(store: &Arc<dyn WorkflowStore>, home: &std::path::Path, id: &s
         store: store.clone(),
         settings: Arc::new(settings),
         services: HostServices {
+            node_progress: None,
             dispatch: Arc::new(NoHarness),
             resolver: Arc::new(StoreWorkflowResolver::new(
                 store.clone(),

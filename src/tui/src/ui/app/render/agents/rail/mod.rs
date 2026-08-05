@@ -350,6 +350,7 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             )),
             RailRow::NewSession { .. } => self.new_session_line(active),
+            RailRow::WorkflowRun(run) => self.workflow_run_line(run, active),
             RailRow::Session(session) => match (&session.task, &session.local) {
                 (Some(task), _) => self.agent_row_line(
                     &crate::ui::agents::AgentRow::Sub {
@@ -372,6 +373,52 @@ impl App {
                 (None, None) => TLine::from(""),
             },
         }
+    }
+
+    /// Format a workflow run started by the session above it.
+    ///
+    /// Deliberately shaped like a task sublane — the same branch glyph and
+    /// `· status` suffix — because that is what it is from the operator's side:
+    /// work this session set going, nested under it. The workflow's name leads,
+    /// since the run id means nothing until you go looking for it, and the
+    /// latest thing the run reported follows as a dim tail so a long-running
+    /// step still shows movement.
+    fn workflow_run_line(
+        &self,
+        row: &super::super::super::rail::WorkflowRunRailRow,
+        active: bool,
+    ) -> TLine<'static> {
+        let branch = if row.last { "└" } else { "├" };
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        let status_style = if active {
+            style
+        } else {
+            Style::default().fg(color(row.run.status.color()))
+        };
+        let detail = row
+            .run
+            .detail
+            .as_deref()
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+            .map(|detail| format!(" · {detail}"))
+            .unwrap_or_default();
+        TLine::from(vec![
+            Span::styled(format!("   {branch} ⚙ {} · ", row.run.workflow_id), style),
+            Span::styled(row.run.status.label().to_string(), status_style),
+            Span::styled(
+                detail,
+                if active {
+                    style
+                } else {
+                    style.add_modifier(Modifier::DIM)
+                },
+            ),
+        ])
     }
 
     /// Format an agent row.

@@ -153,6 +153,7 @@ impl App {
 /// one whose path is long enough to show what the layout costs it.
 fn sample_selected() -> SessionRow {
     SessionRow {
+        mcp_grant_session: None,
         id: "preview".into(),
         label: "preview".into(),
         provider: HarnessProvider::Claude,

@@ -77,6 +77,7 @@ mod tests {
 
     fn session(provider: HarnessProvider, cwd: &str) -> SessionRow {
         SessionRow {
+            mcp_grant_session: None,
             id: "w_1".into(),
             label: "local".into(),
             provider,

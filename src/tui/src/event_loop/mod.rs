@@ -53,6 +53,7 @@ pub(crate) async fn run(
         link_obs,
         host,
         local_sessions,
+        harness_runs,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
@@ -67,6 +68,7 @@ pub(crate) async fn run(
     if let Some(sessions) = local_sessions {
         app.set_local_sessions(sessions);
     }
+    app.set_harness_runs(harness_runs);
     if let Some(status) = startup_status {
         app.set_status(status);
     }
@@ -151,6 +153,18 @@ pub(crate) async fn run(
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotStarted { workflow, instruction } => {
                         app.copilot_started(&workflow, &instruction);
+                    }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowRunStarted { workflow, run_id } => {
+                        app.workflow_run_started(&workflow, &run_id);
+                    }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowRunOutput { run_id, node, line } => {
+                        app.workflow_run_output(&run_id, &node, line);
+                    }
+                    #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowRunFinished { run_id } => {
+                        app.workflow_run_finished(&run_id);
                     }
                     #[cfg(feature = "workflows")]
                     AppMsg::CopilotStatus { workflow, line } => {

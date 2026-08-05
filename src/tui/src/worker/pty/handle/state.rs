@@ -146,6 +146,7 @@ impl SessionHandle {
             origin: self.meta.origin,
             name: cold.name.clone(),
             attention: lock(&self.attention).cue.clone(),
+            mcp_grant_session: self.meta.mcp_grant_session.clone(),
         }
     }
 }

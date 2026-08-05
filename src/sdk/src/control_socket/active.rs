@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use super::grants::GrantRegistry;
+use super::runs::HarnessRunRegistry;
 
 /// Where spawned harnesses reach this process, and what they may do there.
 #[derive(Clone)]
@@ -23,6 +24,12 @@ pub struct ActiveControlPlane {
     pub socket: PathBuf,
     /// Where this process's grants are minted and redeemed.
     pub grants: GrantRegistry,
+    /// Workflow runs the harnesses holding those grants reported.
+    ///
+    /// Here rather than only on the server so a session's rows can be dropped
+    /// when its grant is revoked — the two have exactly the same lifetime, and
+    /// a row under a harness that has exited describes nothing.
+    pub runs: HarnessRunRegistry,
     /// How deep a dispatch tree may go before dispatching is withheld.
     pub max_depth: u8,
     /// The most concurrent dispatches one grant may hold.

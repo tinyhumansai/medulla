@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use super::grants::GrantRegistry;
 use super::path::{prepare_bind, restrict_socket, ControlSocketError};
+use super::runs::HarnessRunRegistry;
 use super::types::FleetOps;
 use connection::serve_connection;
 #[cfg(test)]
@@ -56,6 +57,8 @@ impl ControlServer {
         let identity = socket_identity(path);
 
         let registry = TaskRegistry::new();
+        let runs = HarnessRunRegistry::new();
+        let accept_runs = runs.clone();
         let accept_grants = grants.clone();
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let connection_shutdown = shutdown.clone();
@@ -72,9 +75,10 @@ impl ControlServer {
                 let ops = ops.clone();
                 let grants = accept_grants.clone();
                 let registry = registry.clone();
+                let runs = accept_runs.clone();
                 let shutdown = connection_shutdown.subscribe();
                 tokio::spawn(async move {
-                    let _ = serve_connection(stream, ops, grants, registry, shutdown).await;
+                    let _ = serve_connection(stream, ops, grants, registry, runs, shutdown).await;
                 });
             }
         });
@@ -84,6 +88,7 @@ impl ControlServer {
             identity,
             accept,
             grants,
+            runs,
             shutdown,
         })
     }
@@ -98,6 +103,14 @@ impl ControlServer {
     /// Handed to whatever spawns harnesses, so it can mint a grant for each one.
     pub fn grants(&self) -> &GrantRegistry {
         &self.grants
+    }
+
+    /// The workflow runs granted harnesses have reported here.
+    ///
+    /// Handed to the UI, which draws each session's runs beneath the session
+    /// that started them.
+    pub fn runs(&self) -> &HarnessRunRegistry {
+        &self.runs
     }
 }
 

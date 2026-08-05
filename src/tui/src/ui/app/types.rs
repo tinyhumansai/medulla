@@ -1102,6 +1102,16 @@ pub struct App {
     // does not host, in which case the Agents tab has no local screen to show
     // and falls back to a remote worker's streamed one, or to the transcript.
     pub(super) local_sessions: Option<crate::ui::harness_pane::LocalSessions>,
+    // Workflow runs the harnesses on this device started over MCP, keyed by the
+    // grant session the launcher recorded on each PTY row. Read at render so a
+    // run reported a moment ago is on screen at the next frame, and empty on a
+    // build or a host with no control plane bound.
+    pub(super) harness_runs: medulla::control_socket::HarnessRunRegistry,
+    // Live per-node harness output for runs this TUI started, keyed by run id.
+    // Only ever a handful: a settled run keeps its frames until the next run of
+    // the same workflow replaces it.
+    #[cfg(feature = "workflows")]
+    pub(super) live_runs: std::collections::HashMap<String, super::workflows::LiveRun>,
     // Which of the TUI and the selected session owns the keyboard. Reset to
     // `Chrome` whenever the attached session stops being the selected one, so
     // the operator's keys can never land in a session they are not looking at.

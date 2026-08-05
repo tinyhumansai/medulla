@@ -489,6 +489,10 @@ pub fn local_fleet_grant(
 pub fn revoke_session(session: &str) {
     if let Some(plane) = crate::control_socket::active() {
         plane.grants.revoke(session);
+        // The rows belong to the harness that just ended. Kept any longer they
+        // would be a growing table of sessions that no longer exist, under rows
+        // the rail no longer draws.
+        plane.runs.forget(session);
     }
     // `None` for a session that failed `is_safe_session_component`: it never
     // reached a file (`write_config_file` refuses the same key), so there is

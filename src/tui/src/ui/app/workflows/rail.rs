@@ -198,6 +198,38 @@ impl App {
         self.sync_workflow_overlay();
     }
 
+    /// Open the Workflows tab on `workflow`, overlaid with `run` if it is known.
+    ///
+    /// Reached from the Agents rail, where a run started over MCP is listed
+    /// under the session that started it. The run may not be in the history yet
+    /// — it is still executing, and the record is written when it settles — so a
+    /// missing one selects the workflow and leaves the overlay for the run rows
+    /// to catch up with, rather than refusing the jump.
+    pub(in crate::ui::app) fn open_workflow_run(&mut self, workflow: &str, run: &str) {
+        self.tab_index = super::super::types::tab_pos("Workflows");
+        let Some(index) = self
+            .workflows
+            .iter()
+            .position(|summary| summary.id == workflow)
+        else {
+            self.set_status(format!("Workflow '{workflow}' is not in this catalogue"));
+            return;
+        };
+        self.select_workflow(index);
+        if let Some(position) = self
+            .workflow_runs()
+            .iter()
+            .position(|record| record.id == run)
+        {
+            self.wf.run_index = Some(position);
+            self.wf.overlay = Some(run.to_string());
+        } else {
+            // The graph still overlays the live run: the node preview reads its
+            // streamed output by run id, and that arrives before the record.
+            self.wf.overlay = Some(run.to_string());
+        }
+    }
+
     /// Select workflow `index`, reloading everything that hangs off it.
     ///
     /// Leaves the New row, since a workflow and "no workflow yet" cannot both

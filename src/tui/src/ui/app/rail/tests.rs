@@ -382,6 +382,13 @@ fn a_row_answers_for_the_agent_and_the_lane_behind_it() {
                 assert_eq!(row.session_id(), None);
                 assert!(row.task().is_none());
             }
+            // A run row is about the session that started it, not about an
+            // agent or a lane of its own.
+            RailRow::WorkflowRun(run) => {
+                assert_eq!(row.session_id(), Some(run.session_id.as_str()));
+                assert_eq!(row.agent_id(), None);
+                assert_eq!(row.lane_index(), None);
+            }
             RailRow::Lane(lane) => assert_eq!(row.lane_index(), lane.lane_index()),
         }
     }
@@ -405,7 +412,8 @@ fn only_the_rows_that_name_something_take_the_cursor() {
             RailRow::Agent(_)
             | RailRow::Session(_)
             | RailRow::NewAgent
-            | RailRow::NewSession { .. } => {
+            | RailRow::NewSession { .. }
+            | RailRow::WorkflowRun(_) => {
                 assert!(row.selectable())
             }
             RailRow::Lane(_) => {}

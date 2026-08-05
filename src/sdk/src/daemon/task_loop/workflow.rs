@@ -277,6 +277,7 @@ impl DaemonRuntime {
             settings,
             services: HostServices {
                 dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.clone())),
+                node_progress: None,
                 resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
                 http_credentials: Default::default(),
             },

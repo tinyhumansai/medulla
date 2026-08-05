@@ -35,6 +35,7 @@ async fn blank_frames_do_not_renew_the_handshake_deadline() {
         Arc::new(super::super::tests::FakeFleet::new()),
         crate::control_socket::GrantRegistry::default(),
         super::TaskRegistry::new(),
+        crate::control_socket::HarnessRunRegistry::new(),
         shutdown,
         Duration::from_millis(50),
     );

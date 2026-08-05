@@ -30,6 +30,7 @@ fn scratch_home() -> tempfile::TempDir {
 fn sweeping_this_instance_never_touches_a_sibling_sockets_directory() {
     let _home = scratch_home();
     medulla::control_socket::install(ActiveControlPlane {
+        runs: Default::default(),
         socket: PathBuf::from("/run/medulla-instance-a.sock"),
         grants: GrantRegistry::new(),
         max_depth: 2,

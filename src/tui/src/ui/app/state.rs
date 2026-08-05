@@ -148,6 +148,9 @@ impl App {
             link_obs: None,
             host_obs: None,
             local_sessions: None,
+            harness_runs: Default::default(),
+            #[cfg(feature = "workflows")]
+            live_runs: Default::default(),
             harness_focus: crate::ui::harness_pane::HarnessFocus::default(),
             pane_session: None,
             pane_remote_session: None,
@@ -345,6 +348,15 @@ impl App {
     /// The live sessions this device is running, if it hosts.
     pub fn local_sessions(&self) -> Option<&crate::ui::harness_pane::LocalSessions> {
         self.local_sessions.as_ref()
+    }
+
+    /// Read workflow runs reported by spawned harnesses from `registry`.
+    ///
+    /// Shared with the control plane rather than copied: a run reported between
+    /// two frames must be on screen at the next one, and a snapshot taken at
+    /// startup would be permanently empty.
+    pub fn set_harness_runs(&mut self, registry: medulla::control_socket::HarnessRunRegistry) {
+        self.harness_runs = registry;
     }
 
     /// The session the last draw resolved for the rail cursor.

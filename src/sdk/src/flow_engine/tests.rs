@@ -123,6 +123,7 @@ async fn an_agent_node_becomes_a_task_frame_dispatched_to_a_harness() {
     let caps = build_capabilities(
         settings(root.path()),
         HostServices {
+            node_progress: None,
             dispatch: dispatch.clone(),
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),
@@ -168,6 +169,7 @@ async fn a_node_without_an_agent_ref_runs_on_the_configured_default_worker() {
     let caps = build_capabilities(
         settings(root.path()),
         HostServices {
+            node_progress: None,
             dispatch: dispatch.clone(),
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),
@@ -192,6 +194,7 @@ async fn a_worker_failure_surfaces_as_a_capability_error_naming_the_cause() {
     let caps = build_capabilities(
         settings(root.path()),
         HostServices {
+            node_progress: None,
             dispatch,
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),
@@ -220,6 +223,7 @@ async fn dispatching_with_no_worker_configured_explains_what_to_set() {
     let caps = build_capabilities(
         Arc::new(bare),
         HostServices {
+            node_progress: None,
             dispatch: RecordingDispatch::replying("unused"),
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),
@@ -564,6 +568,7 @@ async fn two_nodes_on_one_worker_get_distinct_wire_ids() {
     let caps = build_capabilities(
         settings(root.path()),
         HostServices {
+            node_progress: None,
             dispatch: dispatch.clone(),
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),

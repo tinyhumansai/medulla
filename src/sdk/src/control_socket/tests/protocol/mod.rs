@@ -11,6 +11,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::super::grants::{Grant, GrantRegistry};
+use super::super::runs::HarnessRunRegistry;
 use super::super::server::{handle_control, SessionState, TaskRegistry};
 use super::super::types::{FleetOps, ToolFamilies, PROTOCOL_VERSION};
 use super::{FakeFleet, FakeOutcome};
@@ -23,6 +24,9 @@ pub(super) struct Harness {
     pub(super) fake: Arc<FakeFleet>,
     grants: GrantRegistry,
     registry: TaskRegistry,
+    /// Runs reported by the grant under test, readable by the cases that
+    /// exercise `run.report`.
+    pub(super) runs: HarnessRunRegistry,
     session: SessionState,
     token: String,
 }
@@ -38,6 +42,7 @@ impl Harness {
             fake,
             grants,
             registry: TaskRegistry::new(),
+            runs: HarnessRunRegistry::new(),
             session: SessionState::default(),
             token,
         }
@@ -55,6 +60,7 @@ impl Harness {
             &self.ops,
             &self.grants,
             &self.registry,
+            &self.runs,
             &mut self.session,
             &request,
         )

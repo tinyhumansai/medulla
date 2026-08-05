@@ -8,6 +8,7 @@ use crate::worker::pty::{PtyState, SessionControl, SessionOrigin, SessionRow};
 /// A row for a session that is not running anywhere — only its fields matter.
 fn row(provider: HarnessProvider, preset: Option<&str>) -> SessionRow {
     SessionRow {
+        mcp_grant_session: None,
         id: "w_1".into(),
         label: "local".into(),
         provider,

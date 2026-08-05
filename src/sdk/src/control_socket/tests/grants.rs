@@ -28,9 +28,10 @@ async fn call(
         "v": PROTOCOL_VERSION, "id": 1, "op": "hello",
         "params": { "protocol": PROTOCOL_VERSION, "token": token },
     });
-    handle_control(ops, grants, registry, &mut session, &hello).await;
+    let runs = crate::control_socket::runs::HarnessRunRegistry::new();
+    handle_control(ops, grants, registry, &runs, &mut session, &hello).await;
     let request = json!({ "v": PROTOCOL_VERSION, "id": 2, "op": op, "params": params });
-    handle_control(ops, grants, registry, &mut session, &request).await
+    handle_control(ops, grants, registry, &runs, &mut session, &request).await
 }
 
 #[test]

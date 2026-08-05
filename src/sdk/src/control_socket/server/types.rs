@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 
 use super::super::grants::{Grant, GrantRegistry};
+use super::super::runs::HarnessRunRegistry;
 use crate::hub::{HubHandle, TaskOutcome};
 
 /// The shared slot the hub fills once it connects.
@@ -142,6 +143,8 @@ pub struct ControlServer {
     pub(super) accept: tokio::task::JoinHandle<()>,
     /// Capabilities minted for harnesses spawned by this server.
     pub(super) grants: GrantRegistry,
+    /// Workflow runs those harnesses reported starting.
+    pub(super) runs: HarnessRunRegistry,
     /// Flipped on drop; watched by the accept loop and every connection.
     pub(super) shutdown: tokio::sync::watch::Sender<bool>,
 }

@@ -95,6 +95,37 @@ impl ControlClient {
             .await
     }
 
+    /// Tell the server how a workflow run this process is executing is going.
+    ///
+    /// Best-effort by construction: the caller is executing the run either way,
+    /// and a control plane that has gone away is a lost *view* of the work
+    /// rather than a lost run. Callers therefore drop the error.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`call`](Self::call) reports — a dropped connection, or a
+    /// refusal from a server whose grant has since been revoked.
+    pub async fn report_run(
+        &mut self,
+        run_id: &str,
+        workflow_id: &str,
+        status: &str,
+        detail: Option<&str>,
+        node: Option<&str>,
+    ) -> Result<Value, ControlError> {
+        self.call(
+            "run.report",
+            json!({
+                "runId": run_id,
+                "workflowId": workflow_id,
+                "status": status,
+                "detail": detail,
+                "node": node,
+            }),
+        )
+        .await
+    }
+
     /// Issue one op, refusing to wait past the caller's deadline.
     ///
     /// Fleet polling supplies a deadline derived from its requested wait;

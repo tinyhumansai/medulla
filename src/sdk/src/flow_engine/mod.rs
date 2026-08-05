@@ -41,7 +41,9 @@ pub(crate) use caps::build_capabilities_with_agent_evidence;
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};
 pub use execute::{Compiled, Outcome};
 pub use harness_choice::{HarnessChoice, HarnessPreference, HarnessSelector};
-pub use observability::{folding_sink, null_sink, WorkEventSink, WorkflowRunObserver};
+pub use observability::{
+    folding_sink, null_sink, NodeProgressSink, WorkEventSink, WorkflowRunObserver,
+};
 pub use settings::{
     CapabilitySettings, DEFAULT_MAX_LOOP_ITERATIONS, DEFAULT_MAX_PARALLEL_AGENTS,
     DEFAULT_RUN_TIMEOUT_SECS,

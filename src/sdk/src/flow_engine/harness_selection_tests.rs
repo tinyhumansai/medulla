@@ -30,6 +30,7 @@ async fn frame_for(
     let caps = build_capabilities(
         settings,
         HostServices {
+            node_progress: None,
             dispatch: dispatch.clone(),
             resolver: empty_resolver(root),
             http_credentials: HashMap::new(),
@@ -158,6 +159,7 @@ async fn an_unusable_harness_fails_the_node_rather_than_running_elsewhere() {
     let caps = build_capabilities(
         claude_host(root.path()),
         HostServices {
+            node_progress: None,
             dispatch: RecordingDispatch::replying("unused"),
             resolver: empty_resolver(root.path()),
             http_credentials: HashMap::new(),

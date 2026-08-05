@@ -262,6 +262,14 @@ pub struct SessionRow {
     ///
     /// `None` is the ordinary state: working, idle at a composer, or exited.
     pub attention: Option<HarnessAttention>,
+    /// The key this session's fleet grant was minted under, when it was given
+    /// one — see [`LaunchSpec::mcp_grant_session`].
+    ///
+    /// Carried onto the row because it is what a workflow run this session
+    /// started over MCP is reported under
+    /// ([`medulla::control_socket::runs`]), and the rail has only the row to
+    /// match those against.
+    pub mcp_grant_session: Option<String>,
 }
 
 impl SessionRow {

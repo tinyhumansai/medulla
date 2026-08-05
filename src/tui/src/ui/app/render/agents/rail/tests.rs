@@ -152,6 +152,7 @@ fn the_overflow_row_highlights_under_the_cursor() {
 
 pub(super) fn harness_row(cwd: &str) -> SessionRow {
     SessionRow {
+        mcp_grant_session: None,
         id: "w_1".into(),
         label: "local".into(),
         provider: medulla::protocol::HarnessProvider::Codex,
@@ -528,4 +529,64 @@ fn an_unknown_home_leaves_the_path_alone() {
     // inventing a `~` for a directory we cannot place would be a lie.
     assert_eq!(short_home("/srv/repos/auth", None), "/srv/repos/auth");
     assert_eq!(short_home("/srv/repos/auth", Some("")), "/srv/repos/auth");
+}
+
+/// A reported run, as the control plane hands one to the rail.
+fn reported_run(
+    status: medulla::control_socket::HarnessRunStatus,
+) -> medulla::control_socket::HarnessRun {
+    medulla::control_socket::HarnessRun {
+        run_id: "run-1".into(),
+        workflow_id: "review-and-fix".into(),
+        status,
+        started_at: 1,
+        updated_at: 2,
+        detail: Some("review · running the test suite".into()),
+        frames: Vec::new(),
+    }
+}
+
+#[test]
+fn a_workflow_run_row_names_its_workflow_status_and_latest_line() {
+    let app = app();
+    let row =
+        crate::ui::app::rail::RailRow::WorkflowRun(crate::ui::app::rail::WorkflowRunRailRow {
+            session_id: "w_1".into(),
+            run: reported_run(medulla::control_socket::HarnessRunStatus::Running),
+            last: true,
+        });
+
+    let line = app.rail_row_line(&row, &[lane()], false, &none_waiting(), NOW);
+    let text: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+
+    assert!(text.contains("review-and-fix"), "{text}");
+    assert!(text.contains("running"), "{text}");
+    // The latest thing the run said is what makes a long step look alive.
+    assert!(text.contains("running the test suite"), "{text}");
+    // Nested under the session, like a task sublane.
+    assert!(text.starts_with("   └"), "{text}");
+}
+
+#[test]
+fn a_failed_run_row_is_coloured_by_its_status_rather_than_by_the_row() {
+    let app = app();
+    let row =
+        crate::ui::app::rail::RailRow::WorkflowRun(crate::ui::app::rail::WorkflowRunRailRow {
+            session_id: "w_1".into(),
+            run: reported_run(medulla::control_socket::HarnessRunStatus::Failed),
+            last: false,
+        });
+
+    let line = app.rail_row_line(&row, &[lane()], false, &none_waiting(), NOW);
+    let status = line
+        .spans
+        .iter()
+        .find(|span| span.content.contains("failed"))
+        .expect("a status span");
+
+    assert_eq!(status.style.fg, Some(super::super::super::color("red")));
 }

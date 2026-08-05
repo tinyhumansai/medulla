@@ -343,6 +343,12 @@ impl App {
                 self.declared_agent_line(agent, lanes, active, waiting_sessions)
             }
             RailRow::NewAgent => self.new_agent_line(active),
+            // Same shape as the lane list's `── functions ──`, so the two
+            // headings on one rail read as the same kind of thing.
+            RailRow::AgentsHeader => TLine::from(Span::styled(
+                "── agents ──",
+                Style::default().add_modifier(Modifier::DIM),
+            )),
             RailRow::NewSession { .. } => self.new_session_line(active),
             RailRow::Session(session) => match (&session.task, &session.local) {
                 (Some(task), _) => self.agent_row_line(
@@ -390,10 +396,17 @@ impl App {
                 waiting_sessions,
             );
         }
-        let style = if active {
-            self.theme.selection()
+        // The name carries the row; the harness and directory qualify it. Both
+        // were dim, which left an idle agent with nothing to read it by — the
+        // whole row receded, including the one word that identifies it. Only the
+        // qualifier recedes now.
+        let (name_style, detail_style) = if active {
+            (self.theme.selection(), self.theme.selection())
         } else {
-            Style::default().add_modifier(Modifier::DIM)
+            (
+                Style::default().fg(color("cyan")),
+                Style::default().add_modifier(Modifier::DIM),
+            )
         };
         let detail = match (agent.harness(), agent.workspace()) {
             (Some(harness), Some(workspace)) => format!(
@@ -403,7 +416,10 @@ impl App {
             (Some(harness), None) => format!(" · {harness}"),
             _ => String::new(),
         };
-        TLine::from(Span::styled(format!("○ {}{detail}", agent.label()), style))
+        TLine::from(vec![
+            Span::styled(format!("○ {}", agent.label()), name_style),
+            Span::styled(detail, detail_style),
+        ])
     }
 
     /// Format the `+ New agent` action row.

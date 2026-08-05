@@ -257,6 +257,12 @@ impl App {
         if hosting {
             rows.push(RailRow::NewAgent);
         }
+        // Only over a tree that exists — see [`RailRow::AgentsHeader`]. Counted
+        // from the groups rather than from `rows`, because the host rows that
+        // wrap them have not been pushed yet.
+        if hosts.iter().any(|host| !host.agents.is_empty()) {
+            rows.push(RailRow::AgentsHeader);
+        }
         // Which agents this machine may open a session under: a session is
         // started by the host that owns the agent, so only the agents declared
         // here get the action. Collected once rather than re-scanned per group.

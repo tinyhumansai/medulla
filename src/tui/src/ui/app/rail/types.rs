@@ -145,6 +145,16 @@ pub enum RailRow {
     /// other variant — and a rail is a `Vec<RailRow>` rebuilt each frame, so the
     /// widest variant is what every row costs.
     Session(Box<SessionRailRow>),
+    /// The heading over the agent tree.
+    ///
+    /// Sits under the create action, so the rail reads as "here is the button,
+    /// and here is what it has made". Without it the first agent row followed
+    /// the button directly and the two read as one block — a list whose first
+    /// entry happened to be green.
+    ///
+    /// Emitted only when there is a tree to head: a heading over nothing
+    /// announces a section the operator cannot see.
+    AgentsHeader,
     /// The action row that declares a new agent on this machine.
     ///
     /// Sits directly above the tree it produces, because a machine with no
@@ -182,6 +192,8 @@ impl RailRow {
             RailRow::Agent(_) => true,
             RailRow::Session(_) => true,
             RailRow::NewAgent => true,
+            // A label, not a row: the cursor skips it like a host header.
+            RailRow::AgentsHeader => false,
             RailRow::NewSession { .. } => true,
             RailRow::Lane(row) => row.selectable(),
         }
@@ -209,7 +221,10 @@ impl RailRow {
             RailRow::Agent(row) => row.lane_index,
             RailRow::Session(row) => row.lane_index,
             RailRow::Lane(row) => row.lane_index(),
-            RailRow::Host(_) | RailRow::NewAgent | RailRow::NewSession { .. } => None,
+            RailRow::Host(_)
+            | RailRow::NewAgent
+            | RailRow::AgentsHeader
+            | RailRow::NewSession { .. } => None,
         }
     }
 

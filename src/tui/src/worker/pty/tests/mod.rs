@@ -2,9 +2,10 @@
 //! 500-line ceiling: [`session`] covers allocation, the reader thread, emulator
 //! parsing, resize, input and reaping; [`identity`] which harnesses get a minted
 //! session id and how one is learned back; [`attention`] a live screen becoming
-//! the flag that makes a row blink.
+//! the flag that makes a row blink; [`types`] the row model on its own, which
+//! needs no child at all.
 //!
-//! These drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
+//! The rest drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
 //! agent, so they stay fast, offline, and deterministic while still exercising
 //! the parts that actually break. The launch spec and the polling helpers are
 //! here because both submodules use them.
@@ -16,7 +17,7 @@ use std::time::{Duration, Instant};
 use medulla::protocol::HarnessProvider;
 
 use super::manager::PtyManager;
-use super::types::{HarnessControl, LaunchSpec, PtyState};
+use super::types::{LaunchSpec, PtyState, SessionControl};
 
 mod attention;
 mod checkout;
@@ -24,6 +25,7 @@ mod control;
 mod identity;
 mod scrollback;
 mod session;
+mod types;
 
 #[test]
 fn child_repository_override_is_retained_for_transcript_mapping() {
@@ -49,6 +51,7 @@ fn sh(script: &str) -> LaunchSpec {
         // `/bin/sh` would reject as an unknown option. Codex takes no preset id,
         // so its interactive argv is empty and the script is the whole command.
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,
@@ -57,7 +60,7 @@ fn sh(script: &str) -> LaunchSpec {
         label: "test".to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,

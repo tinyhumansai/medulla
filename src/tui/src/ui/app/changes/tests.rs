@@ -399,7 +399,7 @@ fn following_a_harness_uses_its_launch_commit_until_operator_selects_another() {
         .0;
 
     let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
-    state.follow_harness(directory.path(), &launch, &identity);
+    state.follow_session(directory.path(), &launch, &identity);
     state.refresh();
 
     assert_eq!(state.root.as_deref(), Some(expected_root.as_path()));

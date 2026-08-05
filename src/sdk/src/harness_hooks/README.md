@@ -10,7 +10,9 @@ CLI it spawns.
   point, and [`launch_args`], which merges hooks with commit attribution because
   Claude Code carries both through one `--settings` flag.
 - [`types.rs`](./types.rs) — The canonical event vocabulary, one declared hook,
-  and the injection a translator produces.
+  and the injection a translator produces. Events deserialize from both their
+  canonical `PascalCase` name and its `camelCase` spelling, since the latter is
+  what every other config key teaches; see [`HookEvent`]'s own docs.
 - [`native.rs`](./native.rs) — The hook document both Claude Code and Codex
   accept, plus the inline-TOML encoder Codex's `-c` override needs.
 - [`claude.rs`](./claude.rs) — Claude Code delivery via `--settings`.
@@ -28,6 +30,13 @@ Claude Code 2.1.221 and Codex 0.146 converged on the same event names, the same
 `matcher` + `hooks[]` grouping, and the same `{"type":"command","command":…}`
 handler, so the shared document is built once and only its *delivery* differs.
 `Notification` is the sole vocabulary divergence (Claude Code only).
+
+## The operator's side
+
+`config.example.toml`'s `[[hooks]]` section is the reference an operator reads,
+and `src/sdk/tests/feature_hooks_config.rs` pins it: the example blocks printed
+there are parsed and asserted to reach the harness argv, so the documentation
+cannot drift from what actually loads.
 
 ## Verification
 

@@ -37,8 +37,8 @@ impl App {
     /// replaces an operator-selected commit or manual baseline: `d` means the
     /// immutable launch diff for the harness under the cursor.
     pub(super) fn open_selected_harness_changes(&mut self) -> Option<Cmd> {
-        let session = self.harness_pane_session.clone()?;
-        self.selected_harness_session = Some(session);
+        let session = self.pane_session.clone()?;
+        self.rail_session = Some(session);
         self.tab_index = TABS
             .iter()
             .position(|tab| *tab == "Changes")
@@ -61,16 +61,16 @@ impl App {
     /// Reload Changes, optionally overriding an operator-selected baseline.
     fn refresh_changes_with_harness(&mut self, activate_harness: bool) {
         let preferred_id = self
-            .attached_harness()
+            .attached_session()
             .map(str::to_owned)
-            .or_else(|| self.selected_harness_session.clone());
-        let selected = self.harnesses.as_ref().map(|harnesses| {
+            .or_else(|| self.rail_session.clone());
+        let selected = self.local_sessions.as_ref().map(|harnesses| {
             select_harness_baseline(harnesses.sessions.rows(), preferred_id.as_deref())
         });
         match selected {
             Some(Ok(Some((row, commit)))) => {
                 let root = row.launch_root.as_deref().unwrap_or(&row.cwd);
-                self.changes.follow_harness(
+                self.changes.follow_session(
                     Path::new(root),
                     &commit,
                     row.launch_checkout_identity
@@ -78,7 +78,7 @@ impl App {
                         .expect("validated harness identity"),
                 );
                 if activate_harness {
-                    if let Err(error) = self.changes.choose_harness_baseline() {
+                    if let Err(error) = self.changes.choose_session_baseline() {
                         self.set_status(error);
                     } else {
                         self.set_status(self.changes.status_message());

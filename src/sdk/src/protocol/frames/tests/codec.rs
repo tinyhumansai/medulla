@@ -449,3 +449,97 @@ fn custom_harness_adverts_round_trip_without_execution_or_credential_details() {
         caps
     );
 }
+
+/// A response says which session served the task. Reported, never requested:
+/// this is the only path by which a session id travels back to a caller, which
+/// otherwise has no way to name where its work happened.
+#[test]
+fn a_response_reports_the_session_that_served_the_task() {
+    let body = crate::protocol::encode_task_frame_with_attachments(
+        reply_input(),
+        crate::protocol::FrameAttachments {
+            session_id: Some("sess-42".to_string()),
+            ..Default::default()
+        },
+    );
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(value["sessionId"], "sess-42");
+
+    let decoded = decode_task_frame(&body).expect("a valid frame");
+    assert_eq!(decoded.session_id.as_deref(), Some("sess-42"));
+}
+
+/// Blank is not a session, in either direction: an encoder that always writes
+/// the key must not claim `""`, and a peer that sends one must not have it
+/// recorded as a session id nothing can resume.
+#[test]
+fn a_blank_session_id_is_absent_rather_than_empty() {
+    let body = crate::protocol::encode_task_frame_with_attachments(
+        reply_input(),
+        crate::protocol::FrameAttachments {
+            session_id: Some("   ".to_string()),
+            ..Default::default()
+        },
+    );
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(value.get("sessionId").is_none());
+
+    let sent_blank = json!({
+        "proto": MEDULLA_TASK_PROTO,
+        "kind": "reply",
+        "taskId": "cycle-1",
+        "text": "done",
+        "ts": "2026-07-18T00:00:00.000Z",
+        "sessionId": "  ",
+    })
+    .to_string();
+    assert_eq!(decode_task_frame(&sent_blank).unwrap().session_id, None);
+}
+
+/// An ordinary outbound task never claims a session. Session *targeting* is a
+/// separate feature with a separate trust story — one caller must not be able to
+/// run inside a session opened for another — so the key stays off the request
+/// side entirely.
+#[test]
+fn a_dispatched_task_names_no_session() {
+    let body = encode_task_frame(EncodeFrameInput {
+        kind: TaskFrameKind::Task,
+        task_id: "cycle-1".to_string(),
+        text: "do the thing".to_string(),
+        ts: "2026-07-18T00:00:00.000Z".to_string(),
+        correlation_id: None,
+        harness: None,
+        provider: None,
+        custom_harness: None,
+        model: None,
+        tool_mode: None,
+        workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
+        conversation: None,
+        fleet_depth: 0,
+    });
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(value.get("sessionId").is_none());
+}
+
+/// A `reply` frame's inputs, for the session-reporting cases.
+fn reply_input() -> EncodeFrameInput {
+    EncodeFrameInput {
+        kind: TaskFrameKind::Reply,
+        task_id: "cycle-1".to_string(),
+        text: "done".to_string(),
+        ts: "2026-07-18T00:00:00.000Z".to_string(),
+        correlation_id: None,
+        harness: None,
+        provider: None,
+        custom_harness: None,
+        model: None,
+        tool_mode: None,
+        workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
+        conversation: None,
+        fleet_depth: 0,
+    }
+}

@@ -406,6 +406,25 @@ pub struct TaskFrame {
     /// Reported on `reply` frames when the child harness surfaced token counts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TokenUsage>,
+    /// **Response-only**: the harness session that served this task.
+    ///
+    /// A worker opens (or resumes) exactly one session per task, and it is the
+    /// only party that knows which. Reporting it lets the caller record *where*
+    /// a piece of work happened — the hub forwards it to the backend as
+    /// `task_result.sessionId`, which is the slot a manager's task ledger keeps
+    /// for it.
+    ///
+    /// Deliberately **not** honoured inbound. Naming a session to run *in* is a
+    /// different feature with a different trust story (one caller must not be
+    /// able to resume a session opened for another), and a task frame's
+    /// continuity request is [`conversation`](Self::conversation), which the
+    /// worker scopes to the authenticated sender. A frame that carries this key
+    /// inbound is ignored, not obeyed.
+    ///
+    /// Additive and optional in both directions: a peer that predates it omits
+    /// the key, and a peer that does not understand it drops it.
+    #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none", default)]
+    pub session_id: Option<String>,
     /// What the child harness is working on, as of this frame.
     ///
     /// Carried on `status` and `reply` frames so an orchestrator sees the
@@ -426,6 +445,24 @@ impl TaskFrame {
     pub fn encode(&self) -> String {
         serde_json::to_string(self).expect("TaskFrame always serializes")
     }
+}
+
+/// What a response frame carries besides its text: the numbers, the picture, and
+/// the session it came from.
+///
+/// A struct rather than three trailing `Option` parameters, because they are all
+/// optional and all attached at the same one call site — a positional list of
+/// three would be a place where two of them get silently transposed. `Default`
+/// is the frame kinds that attach nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameAttachments {
+    /// Token counts the child harness reported, on reply frames.
+    pub usage: Option<TokenUsage>,
+    /// What the child harness is working on as of this frame.
+    pub work: Option<crate::harness_work::WorkSnapshot>,
+    /// The harness session that served the task — see
+    /// [`TaskFrame::session_id`].
+    pub session_id: Option<String>,
 }
 
 /// Fields needed to build and serialize a task frame. `ts` is supplied by the

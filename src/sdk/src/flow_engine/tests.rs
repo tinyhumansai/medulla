@@ -78,6 +78,7 @@ impl HarnessDispatch for RecordingDispatch {
                     output_tokens: 0,
                 },
                 harness: None,
+                session_id: None,
             }),
         }
     }

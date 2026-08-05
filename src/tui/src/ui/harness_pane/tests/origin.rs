@@ -12,13 +12,13 @@ use std::collections::HashMap;
 
 use medulla::protocol::HarnessProvider;
 
-use crate::worker::pty::{HarnessControl, PtyManager};
+use crate::worker::pty::{PtyManager, SessionControl};
 
 use super::session::harnesses;
 
-/// A [`LocalHarnesses`](super::super::LocalHarnesses) whose "codex" is
+/// A [`LocalSessions`](super::super::LocalSessions) whose "codex" is
 /// `/bin/sh`, so opening one starts a real pty client and nothing else.
-fn shell_harnesses(sessions: PtyManager) -> super::super::LocalHarnesses {
+fn shell_harnesses(sessions: PtyManager) -> super::super::LocalSessions {
     let mut harnesses = harnesses(sessions);
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {
@@ -31,7 +31,7 @@ fn shell_harnesses(sessions: PtyManager) -> super::super::LocalHarnesses {
 }
 
 /// The picker's codex entry.
-fn codex(harnesses: &super::super::LocalHarnesses) -> super::super::HarnessChoice {
+fn codex(harnesses: &super::super::LocalSessions) -> super::super::HarnessChoice {
     harnesses
         .choices()
         .into_iter()
@@ -51,7 +51,7 @@ fn a_session_the_operator_opens_is_user_originated() {
 
     let row = sessions.row(&id).expect("the session exists");
     assert!(row.origin.is_user(), "a person asked for this one");
-    assert_eq!(row.control, HarnessControl::User, "and holds it");
+    assert_eq!(row.control, SessionControl::User, "and holds it");
     assert_eq!(row.name, None, "the picker has no name prompt yet");
 
     sessions.close(&id);

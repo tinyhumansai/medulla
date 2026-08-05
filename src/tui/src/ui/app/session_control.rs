@@ -1,8 +1,8 @@
-//! Starting harnesses the operator owns, and moving control between them and
+//! Starting sessions the operator owns, and moving control between them and
 //! the orchestrator.
 //!
-//! Two features that turn out to be one. "Unmanaged" is not a kind of harness —
-//! it is a harness the operator holds, and dispatch skips anything the operator
+//! Two features that turn out to be one. "Unmanaged" is not a kind of session —
+//! it is a session the operator holds, and dispatch skips anything the operator
 //! holds. So spawning one, taking one over, and handing one back are three
 //! spellings of the same state change, and they live together here.
 //!
@@ -14,35 +14,35 @@
 //! [`Cmd`](super::types::Cmd) and travels off-thread. Control flips locally
 //! first and the brief follows: a handback gated on a socket round-trip would
 //! fail whenever the uplink is down, which is exactly when an operator most
-//! wants to let go of a harness.
+//! wants to let go of a session.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::protocol::HarnessProvider;
 
 use crate::ui::composer::Draft;
 use crate::ui::harness_pane::HarnessChoice;
-use crate::worker::pty::HarnessControl;
+use crate::worker::pty::SessionControl;
 
 use super::types::{
-    tab_pos, App, Cmd, HandbackPolicy, HandbackPrompt, HarnessPicker, HarnessPickerStep,
+    tab_pos, AgentPicker, AgentPickerStep, App, Cmd, HandbackPolicy, HandbackPrompt, PickerPurpose,
 };
 
 impl App {
-    /// Open the "start a harness" picker, or spawn directly when the command
-    /// already named a provider.
+    /// Open the "start a session" picker, or spawn directly when the command
+    /// already named a harness type.
     ///
-    /// `/harness` with no provider opens the picker rather than guessing:
+    /// `/session` with no harness type opens the picker rather than guessing:
     /// starting the wrong CLI in the operator's workspace is not something they
     /// find out about until it has already done something.
-    pub(super) fn start_harness_command(&mut self, provider: Option<&str>, path: Option<&str>) {
-        let Some(harnesses) = self.harnesses.clone() else {
-            self.set_status("This device is not hosting, so it has no harnesses to start");
+    pub(super) fn start_session_command(&mut self, provider: Option<&str>, path: Option<&str>) {
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.set_status("This device is not hosting, so it has no sessions to start");
             return;
         };
         match provider.and_then(HarnessProvider::from_wire) {
             Some(provider) => {
                 let cwd = path.unwrap_or("").to_string();
-                self.spawn_harness(HarnessChoice::native(provider), &cwd, false);
+                self.spawn_session(HarnessChoice::native(provider), &cwd, false);
             }
             None => {
                 let choices = harnesses.choices();
@@ -50,10 +50,11 @@ impl App {
                     self.set_status("No harness CLIs found on this device");
                     return;
                 }
-                self.harness_picker = Some(HarnessPicker {
+                self.agent_picker = Some(AgentPicker {
+                    purpose: PickerPurpose::Spawn,
                     choices,
                     index: 0,
-                    step: HarnessPickerStep::Harness,
+                    step: AgentPickerStep::Harness,
                     cwd: path
                         .map(str::to_string)
                         .unwrap_or_else(|| harnesses.workspace.clone()),
@@ -68,18 +69,18 @@ impl App {
     }
 
     /// Open the picker from the keyboard shortcut.
-    pub(crate) fn open_harness_picker(&mut self) {
-        self.start_harness_command(None, None);
+    pub(crate) fn open_session_picker(&mut self) {
+        self.start_session_command(None, None);
     }
 
-    /// Start a harness the operator owns and move the cursor onto it.
+    /// Start a session the operator owns and move the cursor onto it.
     ///
-    /// Selecting the new row matters more than it sounds: a harness that
+    /// Selecting the new row matters more than it sounds: a session that
     /// appears somewhere below the fold, with the pane still showing whatever
     /// was selected before, reads as "nothing happened".
-    pub(super) fn spawn_harness(&mut self, choice: HarnessChoice, cwd: &str, managed: bool) {
-        let Some(harnesses) = self.harnesses.clone() else {
-            self.set_status("This device is not hosting, so it has no harnesses to start");
+    pub(super) fn spawn_session(&mut self, choice: HarnessChoice, cwd: &str, managed: bool) {
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.set_status("This device is not hosting, so it has no sessions to start");
             return;
         };
         let skip = self.harness_skip_permissions;
@@ -87,7 +88,7 @@ impl App {
         match harnesses.open_unmanaged(&choice, &workspace, skip) {
             Ok(id) => {
                 self.tab_index = tab_pos("Agents");
-                self.select_harness_row(&id);
+                self.select_session_row(&id);
                 let label = if managed { "managed" } else { "unmanaged" };
                 let mut status = format!(
                     "Started {} · {label}, the orchestrator will{} use it",
@@ -99,13 +100,17 @@ impl App {
                 }
                 // Hand back first, then say what happened. `hand_back_session`
                 // sets its own status, so setting ours before it would show the
-                // operator "Handed back …" for a harness they just started —
+                // operator "Handed back …" for a session they just started —
                 // losing the name, the managed/unmanaged confirmation, and any
                 // workspace-remember error this message carries.
                 if managed {
                     self.hand_back_session(&id, None);
                 }
                 self.set_status(status);
+                // The quick path always leaves a declared agent behind if the
+                // operator wants one: a session in a directory nothing declares
+                // is a real thing running that the rail can only list loose.
+                self.offer_agent_declaration(choice.id(), &workspace);
             }
             // Surfaced, never swallowed: a spawn that fails silently leaves the
             // operator waiting for a pane that is never coming.
@@ -115,74 +120,63 @@ impl App {
         }
     }
 
-    /// Put the rail cursor on the row for `session_id`, if it has one.
-    fn select_harness_row(&mut self, session_id: &str) {
-        if let Some(index) = self
-            .rail_rows()
-            .iter()
-            .position(|row| row.session_id() == Some(session_id))
-        {
-            self.agent_index = index;
-        }
-    }
-
-    /// Take the selected harness from the orchestrator.
-    pub(crate) fn take_harness_control(&mut self) {
-        let Some((harnesses, session)) = self.selected_harness() else {
+    /// Take the selected session from the orchestrator.
+    pub(crate) fn take_session_control(&mut self) {
+        let Some((harnesses, session)) = self.selected_session() else {
             return;
         };
-        if harnesses.control(&session) == Some(HarnessControl::User) {
-            self.set_status("You already have this harness");
+        if harnesses.control(&session) == Some(SessionControl::User) {
+            self.set_status("You already have this session");
             return;
         }
-        harnesses.set_control(&session, HarnessControl::User);
+        harnesses.set_control(&session, SessionControl::User);
         if let Some(cwd) = harnesses.sessions.row(&session).map(|row| row.cwd) {
-            self.pending_cmds.push_back(Cmd::HoldHarness {
+            self.pending_cmds.push_back(Cmd::HoldSession {
                 workspace: cwd,
                 reason: None,
             });
         }
-        self.set_status("You have this harness · the orchestrator will not dispatch into it");
+        self.set_status("You have this session · the orchestrator will not dispatch into it");
     }
 
-    /// Give the selected harness back to the orchestrator, with an optional note.
-    pub(crate) fn hand_harness_back(&mut self, note: Option<String>) {
+    /// Give the selected session back to the orchestrator, with an optional note.
+    pub(crate) fn hand_session_back(&mut self, note: Option<String>) {
         let Some((harnesses, session)) = self.handoff_target() else {
             return;
         };
-        if harnesses.control(&session) == Some(HarnessControl::Orchestrator) {
-            self.set_status("The orchestrator already has this harness");
+        if harnesses.control(&session) == Some(SessionControl::Orchestrator) {
+            self.set_status("The orchestrator already has this session");
             return;
         }
         self.hand_back_session(&session, note);
     }
 
-    /// Toggle who holds the selected harness — the `Ctrl-G` shortcut.
+    /// Toggle who holds the selected session — the `Ctrl-G` shortcut.
     ///
     /// One key for both directions because the rail row and the pane title both
     /// say which way it will go, so a single "grab or give" is less to remember
     /// than two chords that each do nothing half the time.
-    pub(crate) fn toggle_harness_control(&mut self) {
-        let Some((harnesses, session)) = self.selected_harness() else {
+    pub(crate) fn toggle_session_control(&mut self) {
+        let Some((harnesses, session)) = self.selected_session() else {
             return;
         };
         match harnesses.control(&session) {
-            Some(HarnessControl::User) => self.hand_back_session(&session, None),
-            Some(HarnessControl::Orchestrator) => self.take_harness_control(),
-            None => self.set_status("That harness is gone"),
+            Some(SessionControl::User) => self.hand_back_session(&session, None),
+            Some(SessionControl::Orchestrator) => self.take_session_control(),
+            None => self.set_status("That session is gone"),
         }
     }
 
-    /// Open the take-control or hand-back prompt depending on who holds the harness.
+    /// Open the take-control or hand-back prompt depending on who holds the session.
     ///
-    /// Enter on a harness row used to attach immediately, which is a control
+    /// Enter on a session row used to attach immediately, which is a control
     /// change made by a navigation key: an operator walking the rail with the
-    /// arrows and pressing Enter to "look closer" took the harness out from
+    /// arrows and pressing Enter to "look closer" took the session out from
     /// under the orchestrator without being asked. The question is the same one
     /// either way — which side of the handover is this? — so it reuses the
     /// hand-back prompt with the sentence turned around.
-    pub(crate) fn open_harness_enter_prompt(&mut self) {
-        let Some((harnesses, session)) = self.selected_harness() else {
+    pub(crate) fn open_session_enter_prompt(&mut self) {
+        let Some((harnesses, session)) = self.selected_session() else {
             return;
         };
         match harnesses.control(&session) {
@@ -190,19 +184,19 @@ impl App {
             // whether to give it back. `took_control` is read, not assumed:
             // a hold can begin implicitly (focusing in under a `Never` handback
             // policy), and hardcoding `false` would claim an explicit decision
-            // the operator never made — the same field `begin_harness_release`
+            // the operator never made — the same field `begin_session_release`
             // resolves the same way.
-            Some(HarnessControl::User) => {
+            Some(SessionControl::User) => {
                 self.handback_prompt = Some(HandbackPrompt {
                     session,
-                    took_control: self.harness_took_control,
+                    took_control: self.took_control_by_attach,
                     note: Draft::default(),
                     editing_note: false,
                     is_takeover: false,
                 });
             }
             // The orchestrator holds it: typing into it means taking it first.
-            Some(HarnessControl::Orchestrator) => {
+            Some(SessionControl::Orchestrator) => {
                 self.handback_prompt = Some(HandbackPrompt {
                     session,
                     took_control: false,
@@ -212,69 +206,87 @@ impl App {
                 });
             }
             None => {
-                self.set_status("That harness is gone");
+                self.set_status("That session is gone");
             }
         }
     }
 
-    /// The harness `/handoff` means, without depending on a render having run.
+    /// The session `/handoff` means, without depending on a render having run.
     ///
-    /// [`selected_harness`](Self::selected_harness) reads `harness_pane_session`,
+    /// [`selected_session`](Self::selected_session) reads `pane_session`,
     /// which is written inside the Agents pane's draw and cleared at the top of
-    /// every frame. So `/handoff` typed from any other tab reported "no harness
+    /// every frame. So `/handoff` typed from any other tab reported "no session
     /// on this row" while the operator was demonstrably holding one — and with a
     /// note argument that is worse, because they have just typed a sentence that
     /// is then thrown away.
     ///
     /// In order: the attached session (unambiguous — the keyboard is in it), the
-    /// harness the last frame resolved, then the single running harness the
+    /// session the last frame resolved, then the single running session the
     /// operator holds. Ambiguity is reported, never guessed: handing back the
-    /// wrong harness puts an agent into a workspace somebody is still using.
-    fn handoff_target(&mut self) -> Option<(crate::ui::harness_pane::LocalHarnesses, String)> {
-        let Some(harnesses) = self.harnesses.clone() else {
-            self.set_status("This device is not hosting, so it has no harnesses");
+    /// wrong session puts an agent into a workspace somebody is still using.
+    fn handoff_target(&mut self) -> Option<(crate::ui::harness_pane::LocalSessions, String)> {
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.set_status("This device is not hosting, so it has no sessions");
             return None;
         };
         if let Some(session) = self.harness_focus.attached_to() {
             return Some((harnesses, session.to_string()));
         }
-        if let Some(session) = self.harness_pane_session.clone() {
+        if let Some(session) = self.pane_session.clone() {
             return Some((harnesses, session));
         }
         let held: Vec<String> = harnesses
             .sessions
             .rows()
             .into_iter()
-            .filter(|row| row.control == HarnessControl::User && row.state.is_running())
+            .filter(|row| row.control == SessionControl::User && row.state.is_running())
             .map(|row| row.id)
             .collect();
         match held.len() {
             0 => {
-                self.set_status("You are not holding any harness");
+                self.set_status("You are not holding any session");
                 None
             }
             1 => Some((harnesses, held[0].clone())),
             n => {
                 self.set_status(format!(
-                    "You hold {n} harnesses — select one in Agents and press Ctrl-G"
+                    "You hold {n} sessions — select one in Agents and press Ctrl-G"
                 ));
                 None
             }
         }
     }
 
-    /// The harness the cursor is on, with the handle needed to act on it.
+    /// The session the cursor is on, with the handle needed to act on it.
     ///
     /// Refuses with a reason rather than silently doing nothing, for the same
     /// reason the attach chord does: an operator who pressed a key and saw no
     /// change cannot tell "wrong row" from "broken feature".
-    fn selected_harness(&mut self) -> Option<(crate::ui::harness_pane::LocalHarnesses, String)> {
-        let Some(harnesses) = self.harnesses.clone() else {
-            self.set_status("This device is not hosting, so it has no harnesses");
+    fn selected_session(&mut self) -> Option<(crate::ui::harness_pane::LocalSessions, String)> {
+        // A session on another host is a real session the cursor is really on —
+        // it is just not one this machine can take (§E7). The hub resolves a
+        // hold by local workspace path, so there is nothing here to flip, and
+        // the honest answer names the machine rather than pretending the row is
+        // empty. Watching it is unaffected: the screen mirror is read-only by
+        // design either way.
+        //
+        // Asked before "is this device hosting", because it is the more specific
+        // answer and the two are not exclusive: a laptop that hosts nothing can
+        // still be looking at a remote host's session, and "this device is not
+        // hosting" would be a true sentence about the wrong machine.
+        if let Some(agent) = self.pane_remote_session.clone() {
+            self.set_status(format!(
+                "{agent} runs on another host — you can watch this session, but \
+                 taking control is local-only for now"
+            ));
+            return None;
+        }
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.set_status("This device is not hosting, so it has no sessions");
             return None;
         };
-        let Some(session) = self.harness_pane_session.clone() else {
-            self.set_status("No harness on this row — select one to hand it over");
+        let Some(session) = self.pane_session.clone() else {
+            self.set_status("No session on this row — select one to hand it over");
             return None;
         };
         Some((harnesses, session))
@@ -286,12 +298,12 @@ impl App {
     /// `false` means a prompt is now open and the operator is still attached —
     /// releasing before they answer would move the keyboard out from under the
     /// question being asked about it.
-    pub(crate) fn begin_harness_release(&mut self, session: &str) -> bool {
+    pub(crate) fn begin_session_release(&mut self, session: &str) -> bool {
         let held = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .and_then(|harnesses| harnesses.control(session))
-            == Some(HarnessControl::User);
+            == Some(SessionControl::User);
         if !held {
             return true;
         }
@@ -302,14 +314,14 @@ impl App {
             }
             HandbackPolicy::Never => {
                 self.set_status(
-                    "Released · you still hold this harness (/handoff to give it back)",
+                    "Released · you still hold this session (/handoff to give it back)",
                 );
                 true
             }
             HandbackPolicy::Ask => {
                 self.handback_prompt = Some(HandbackPrompt {
                     session: session.to_string(),
-                    took_control: self.harness_took_control,
+                    took_control: self.took_control_by_attach,
                     note: Draft::default(),
                     editing_note: false,
                     is_takeover: false,
@@ -354,13 +366,13 @@ impl App {
     ///
     /// The question itself owns the keyboard and holds no field — `y`, `n` and
     /// `E` are answers, not text — so a paste made while it is up belongs to
-    /// neither the harness behind it nor the composer, and is dropped. After `E`
+    /// neither the session behind it nor the composer, and is dropped. After `E`
     /// the note *is* a text input, and pasting what you were doing into the
     /// brief the orchestrator receives is exactly what the note is for.
     ///
     /// Flattened to one line and inserted at the caret, matching
     /// [`edit_handback_note`](Self::edit_handback_note): the note is drawn as a
-    /// single row, and `Enter` there hands the harness back rather than breaking
+    /// single row, and `Enter` there hands the session back rather than breaking
     /// the line.
     pub(super) fn paste_into_handback_note(&mut self, text: &str) {
         let Some(prompt) = self.handback_prompt.as_mut() else {
@@ -379,37 +391,37 @@ impl App {
 
     /// Hand `session` back and queue its brief. Every handback path ends here.
     ///
-    /// The order matters. The transcript is read while the harness is still
+    /// The order matters. The transcript is read while the session is still
     /// ours; control flips next, so the operator gets an answer on the same
     /// keystroke; the brief is queued last and travels asynchronously.
     ///
-    /// That ordering means the orchestrator can dispatch into the harness before
+    /// That ordering means the orchestrator can dispatch into the session before
     /// it has read the brief, and that is the right trade. The brief is
     /// *context*, not permission — gating the flip on a socket round-trip would
-    /// make handing a harness back fail whenever the uplink is down, which is
+    /// make handing a session back fail whenever the uplink is down, which is
     /// exactly when an operator most wants to let go of one.
     pub(super) fn hand_back_session(&mut self, session: &str, note: Option<String>) {
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             return;
         };
         // Read the row first: a session that has already gone is not handed
-        // back, and flipping control on a corpse would advertise a harness that
+        // back, and flipping control on a corpse would advertise a session that
         // does not exist.
         let Some(row) = harnesses.sessions.row(session) else {
-            self.set_status("That harness is gone");
+            self.set_status("That session is gone");
             return;
         };
         let lines = harnesses
             .sessions
             .tail_lines(session, medulla::hub::handoff::TRANSCRIPT_LINES);
 
-        harnesses.set_control(session, HarnessControl::Orchestrator);
-        self.harness_took_control = false;
+        harnesses.set_control(session, SessionControl::Orchestrator);
+        self.took_control_by_attach = false;
 
         let brief = medulla::hub::handoff::normalize(
             medulla::hub::HarnessHandoff {
                 // Per handback *event*, not per session: a second handback of the
-                // same harness is new work, and reusing the id would have the
+                // same session is new work, and reusing the id would have the
                 // orchestrator ignore it as something it already picked up.
                 id: format!("{}-{}", row.id, medulla::clock::now_millis()),
                 at: medulla::clock::now_millis(),
@@ -427,44 +439,44 @@ impl App {
             &lines,
         );
         self.pending_cmds
-            .push_back(Cmd::HandOffHarness(Box::new(brief)));
+            .push_back(Cmd::HandOffSession(Box::new(brief)));
         self.set_status("Handed back · sending the orchestrator your brief");
     }
 }
 
 impl App {
-    /// Route a key while the "start a harness" picker is open.
+    /// Route a key while the "start a session" picker is open.
     ///
-    /// The first step chooses a registered harness. The second step owns text
+    /// The first step chooses a registered harness type. The second step owns text
     /// input directly so filtering and filesystem completion update as the
     /// operator types.
-    pub(super) fn handle_harness_picker_key(&mut self, event: KeyEvent) {
+    pub(super) fn handle_agent_picker_key(&mut self, event: KeyEvent) {
         let code = event.code;
         let step = self
-            .harness_picker
+            .agent_picker
             .as_ref()
             .map(|picker| picker.step)
-            .unwrap_or(HarnessPickerStep::Harness);
-        if step == HarnessPickerStep::Decision {
+            .unwrap_or(AgentPickerStep::Harness);
+        if step == AgentPickerStep::Decision {
             self.handle_harness_decision_key(event);
             return;
         }
-        if step == HarnessPickerStep::Workspace {
+        if step == AgentPickerStep::Workspace {
             self.handle_harness_workspace_key(event);
             return;
         }
         match code {
             KeyCode::Esc => {
-                self.harness_picker = None;
+                self.agent_picker = None;
                 self.set_status("Cancelled");
             }
             KeyCode::Up => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.index = picker.index.saturating_sub(1);
                 }
             }
             KeyCode::Down => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.index = (picker.index + 1).min(picker.choices.len().saturating_sub(1));
                 }
             }
@@ -483,7 +495,7 @@ impl App {
     fn handle_harness_decision_key(&mut self, event: KeyEvent) {
         match event.code {
             // One step back, not two. Decision is reached *after* the workspace
-            // is chosen, so returning to the harness list would discard a
+            // is chosen, so returning to the harness-type list would discard a
             // workspace the operator never changed and make them reselect both.
             // Reuses the forward entry point so the hint text and the completion
             // list are the same ones the step normally opens with.
@@ -491,30 +503,30 @@ impl App {
                 self.open_harness_workspace_step(false);
             }
             KeyCode::Up | KeyCode::Down => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.managed = !picker.managed;
                 }
             }
             KeyCode::Enter => {
-                let Some(workspace) = self.selected_harness_workspace() else {
+                let Some(workspace) = self.selected_picker_workspace() else {
                     self.set_status("Choose a workspace first");
                     return;
                 };
                 let choice = self
-                    .harness_picker
+                    .agent_picker
                     .as_ref()
                     .and_then(|picker| picker.choices.get(picker.index).cloned());
                 let managed = self
-                    .harness_picker
+                    .agent_picker
                     .as_ref()
                     .map(|p| p.managed)
                     .unwrap_or(false);
                 let Some(choice) = choice else {
-                    self.set_status("Choose a harness first");
+                    self.set_status("Choose a harness type first");
                     return;
                 };
-                self.harness_picker = None;
-                self.spawn_harness(choice, &workspace, managed);
+                self.agent_picker = None;
+                self.spawn_session(choice, &workspace, managed);
             }
             _ => {}
         }
@@ -524,21 +536,21 @@ impl App {
     fn handle_harness_workspace_key(&mut self, event: KeyEvent) {
         match event.code {
             KeyCode::Esc | KeyCode::BackTab => {
-                if let Some(picker) = &mut self.harness_picker {
-                    picker.step = HarnessPickerStep::Harness;
+                if let Some(picker) = &mut self.agent_picker {
+                    picker.step = AgentPickerStep::Harness;
                 }
-                self.set_status("Pick a harness · Enter workspace · Esc cancel");
+                self.set_status("Pick a harness type · Enter workspace · Esc cancel");
             }
             // Moving the cursor is the operator choosing a completion over
             // whatever they entered, however few rows there are to move across.
             KeyCode::Up => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.workspace_index = picker.workspace_index.saturating_sub(1);
                     picker.workspace_picked = !picker.workspace_choices.is_empty();
                 }
             }
             KeyCode::Down => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.workspace_index = (picker.workspace_index + 1)
                         .min(picker.workspace_choices.len().saturating_sub(1));
                     picker.workspace_picked = !picker.workspace_choices.is_empty();
@@ -546,7 +558,7 @@ impl App {
             }
             KeyCode::Tab => self.complete_harness_workspace(),
             KeyCode::Backspace => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.workspace_query.pop();
                     picker.workspace_index = 0;
                     picker.workspace_picked = false;
@@ -554,7 +566,7 @@ impl App {
                 self.refresh_harness_workspace_choices();
             }
             KeyCode::Char(character) if is_text_input(event.modifiers) => {
-                if let Some(picker) = &mut self.harness_picker {
+                if let Some(picker) = &mut self.agent_picker {
                     picker.workspace_query.push(character);
                     picker.workspace_index = 0;
                     picker.workspace_picked = false;
@@ -562,12 +574,33 @@ impl App {
                 self.refresh_harness_workspace_choices();
             }
             KeyCode::Enter => {
-                if self.selected_harness_workspace().is_none() {
+                let Some(workspace) = self.selected_picker_workspace() else {
                     self.set_status("Choose an existing directory");
                     return;
+                };
+                let purpose = self
+                    .agent_picker
+                    .as_ref()
+                    .map(|picker| picker.purpose.clone())
+                    .unwrap_or(PickerPurpose::Spawn);
+                // Declaring is finished by naming, not by choosing an owner:
+                // nothing starts, so there is nobody to own it yet.
+                if purpose == PickerPurpose::DeclareAgent {
+                    let harness = self
+                        .agent_picker
+                        .as_ref()
+                        .and_then(|picker| picker.choices.get(picker.index))
+                        .map(|choice| choice.id().to_string());
+                    let Some(harness) = harness else {
+                        self.set_status("Choose a harness type first");
+                        return;
+                    };
+                    self.agent_picker = None;
+                    self.prompt_agent_name(&harness, &workspace);
+                    return;
                 }
-                if let Some(picker) = &mut self.harness_picker {
-                    picker.step = HarnessPickerStep::Decision;
+                if let Some(picker) = &mut self.agent_picker {
+                    picker.step = AgentPickerStep::Decision;
                     picker.managed = true;
                 }
             }
@@ -577,7 +610,7 @@ impl App {
 
     /// Route a key while the hand-back question is open.
     ///
-    /// Enter means yes, because handing back is the safe answer: a harness left
+    /// Enter means yes, because handing back is the safe answer: a session left
     /// under a user who has walked away is one the orchestrator can never use,
     /// and that failure is silent.
     pub(super) fn handle_handback_key(&mut self, code: KeyCode) {
@@ -585,14 +618,14 @@ impl App {
             return;
         };
         // The takeover direction has no note and nothing to release: the
-        // operator is not holding the harness yet, so the only two answers are
+        // operator is not holding the session yet, so the only two answers are
         // "take it and start typing" and "leave it alone".
         if prompt.is_takeover {
             match code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.handback_prompt = None;
-                    self.take_harness_control();
-                    self.attach_to_pane_harness();
+                    self.take_session_control();
+                    self.attach_to_pane_session();
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.handback_prompt = None;
@@ -612,7 +645,7 @@ impl App {
                     let note = self.handback_note();
                     self.handback_prompt = None;
                     self.hand_back_session(&session, note);
-                    self.release_harness();
+                    self.release_session();
                 }
                 // Back to the question, keeping what was typed: an operator who
                 // pressed Escape meant "stop typing", not "discard my sentence".
@@ -635,20 +668,20 @@ impl App {
                 let note = self.handback_note();
                 self.handback_prompt = None;
                 self.hand_back_session(&session, note);
-                self.release_harness();
+                self.release_session();
             }
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 self.handback_prompt = None;
-                self.release_harness();
+                self.release_session();
                 self.set_status(
-                    "Released · you still hold this harness (/handoff to give it back)",
+                    "Released · you still hold this session (/handoff to give it back)",
                 );
             }
             // Esc is "I did not mean to leave", so it puts the operator back
             // where they were rather than picking one of the answers for them.
             KeyCode::Esc => {
                 self.handback_prompt = None;
-                self.set_status("Still typing into the harness");
+                self.set_status("Still typing into the session");
             }
             _ => {}
         }

@@ -1,4 +1,4 @@
-//! End-to-end for the orchestrator's embedded harness pane: a task dispatched
+//! End-to-end for the orchestrator's embedded session pane: a task dispatched
 //! into a host, served by a real child on a real pseudo-terminal, and resolved
 //! back out by the pane the way the Agents tab resolves it.
 //!
@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 
 use medulla::daemon::{DaemonConfig, DaemonRuntime};
 use medulla::protocol::{HarnessProvider, TaskFrameKind};
-use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// How long to allow for a child to paint and a record to appear.
 ///
@@ -47,6 +47,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     LaunchSpec {
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,
@@ -55,7 +56,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,
@@ -145,7 +146,7 @@ async fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
 }
 
 /// The whole screen as one string.
-fn text(harnesses: &LocalHarnesses, id: &str) -> String {
+fn text(harnesses: &LocalSessions, id: &str) -> String {
     harnesses
         .screen(id)
         .map(|snapshot| {
@@ -173,7 +174,7 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         sessions.clone(),
         "printf 'HARNESS-IS-PAINTING\\n'; sleep 30",
     );
-    let harnesses = LocalHarnesses {
+    let harnesses = LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions: sessions.clone(),
@@ -224,7 +225,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         sessions.clone(),
         "read line; printf 'typed:%s\\n' \"$line\"; sleep 30",
     );
-    let harnesses = LocalHarnesses {
+    let harnesses = LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions: sessions.clone(),
@@ -263,7 +264,7 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
 async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses() {
     let sessions = PtyManager::new();
     let runtime = runtime_over(sessions.clone(), "sleep 30");
-    let harnesses = LocalHarnesses {
+    let harnesses = LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions: sessions.clone(),

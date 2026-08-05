@@ -86,6 +86,8 @@ fn config_becomes_settings_with_every_field_carried_across() {
         default_provider: None,
         default_model: "some-model".into(),
         allow_code: true,
+        shell: "zsh".into(),
+        shell_args: vec!["-l".into()],
         tool_allowlist: vec!["github.create_issue".into()],
         http_allowlist: vec!["api.github.com".into()],
         run_timeout_secs: 30,
@@ -207,5 +209,46 @@ fn a_mid_sized_run_timeout_still_gets_the_thirty_second_floor() {
     assert_eq!(
         settings.script_timeout(),
         std::time::Duration::from_secs(30)
+    );
+}
+
+#[test]
+fn the_configured_shell_and_its_arguments_reach_the_settings() {
+    let config = WorkflowsConfig {
+        shell: "zsh".into(),
+        shell_args: vec!["-l".into()],
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
+
+    assert_eq!(settings.shell.program, "zsh");
+    assert_eq!(settings.shell.args, vec!["-l".to_string()]);
+}
+
+#[test]
+fn an_unconfigured_host_gets_the_default_shell() {
+    let settings = CapabilitySettings::from_config(&WorkflowsConfig::default(), "/home/.medulla");
+
+    assert_eq!(
+        settings.shell,
+        crate::flow_engine::caps::script::Interpreter::default_shell()
+    );
+}
+
+#[test]
+fn an_unusable_shell_setting_falls_back_rather_than_breaking_every_script() {
+    // A configuration mistake here must not take out `code` nodes too, none of
+    // which use this shell — so it degrades to the default and warns.
+    let config = WorkflowsConfig {
+        shell: "./not-absolute".into(),
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
+
+    assert_eq!(
+        settings.shell,
+        crate::flow_engine::caps::script::Interpreter::default_shell()
     );
 }

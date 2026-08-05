@@ -75,7 +75,7 @@ impl fmt::Display for SessionClass {
 /// # Origin is not ownership
 ///
 /// This is deliberately **not** "who may drive it now". That is *control*
-/// (`HarnessControl` in the app crate, `owner` in the spec), it moves at runtime,
+/// (`SessionControl` in the app crate, `owner` in the spec), it moves at runtime,
 /// and the two answer different questions:
 ///
 /// | | Origin | Control / owner |

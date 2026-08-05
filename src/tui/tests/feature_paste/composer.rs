@@ -79,10 +79,7 @@ fn an_open_prompt_overlay_takes_the_paste_flattened_to_one_line() {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
     app.tab_index = tab_index("Hosts");
     app.focus_routing_subpage("Add Host");
-    // Local leads the kind picker, so a remote add is Down then two confirms:
-    // the second opens the address prompt, which is the single-line field here.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Char('a')));
+    // One confirm opens the address prompt, which is the single-line field here.
     let _ = app.on_event(key(KeyCode::Char('a')));
     assert!(app.prompt_state().is_some(), "the address prompt is open");
 

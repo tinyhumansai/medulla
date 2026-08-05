@@ -41,8 +41,11 @@ impl App {
     /// cursor, so the rows just revealed are the ones on screen.
     pub(in crate::ui::app) fn page_subtasks(&mut self) -> bool {
         let rows = self.rail_rows();
-        let Some(RailRow::Agent(AgentRow::More { lane_index, hidden })) =
-            rows.get(self.agent_index)
+        // The overflow row is a fold row, not an agent row: under the
+        // `Host → Agent → Session` taxonomy an agent's own row is the declared
+        // identity, and everything the fold still owns — the orchestrator lane,
+        // the `── functions ──` divider, this counter — arrives as `Lane`.
+        let Some(RailRow::Lane(AgentRow::More { lane_index, hidden })) = rows.get(self.agent_index)
         else {
             return false;
         };
@@ -97,12 +100,11 @@ impl App {
         let found = rows
             .iter()
             .position(|row| {
-                matches!(row, RailRow::Agent(AgentRow::More { lane_index: l, .. }) if *l == lane_index)
+                matches!(row, RailRow::Lane(AgentRow::More { lane_index: l, .. }) if *l == lane_index)
             })
             .or_else(|| {
-                rows.iter().position(|row| {
-                    matches!(row, RailRow::Agent(AgentRow::Lane { lane_index: l }) if *l == lane_index)
-                })
+                rows.iter()
+                    .position(|row| matches!(row, RailRow::Agent(agent) if agent.lane_index == Some(lane_index)))
             });
         self.agent_index =
             found.unwrap_or_else(|| self.agent_index.min(rows.len().saturating_sub(1)));
@@ -240,14 +242,12 @@ impl App {
         }
         let rows = self.rail_rows();
         let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
-        let RailRow::Agent(AgentRow::Sub {
-            task, lane_index, ..
-        }) = row
-        else {
+        let RailRow::Session(session) = row else {
             return None;
         };
+        let task = session.task.as_ref()?;
         let lanes = self.lanes();
-        let lane = lanes.get(*lane_index)?;
+        let lane = lanes.get(session.lane_index?)?;
         // `Agent` is main's name for a roster agent / delegated task / peer
         // session — the tiers above it (orchestrator, reasoning, compress) run
         // no watchable harness.
@@ -272,9 +272,7 @@ impl App {
     pub(in crate::ui::app) fn kill_target(&self) -> Option<(String, String)> {
         let rows = self.rail_rows();
         let row = rows.get(self.agent_index.min(rows.len().saturating_sub(1)))?;
-        let RailRow::Agent(AgentRow::Sub { task, .. }) = row else {
-            return None;
-        };
+        let task = row.task()?;
         (task.status == TaskStatus::Running)
             .then(|| self.watch_target())
             .flatten()

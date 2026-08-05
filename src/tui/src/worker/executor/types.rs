@@ -34,7 +34,39 @@ pub(super) enum SessionPlan {
     /// An idle session for this conversation, already claimed.
     Reuse(OpenedSession),
     /// Nothing reusable: start a harness with this spec.
-    Launch(LaunchSpec),
+    ///
+    /// Boxed because a `LaunchSpec` is much the larger of the two — it carries
+    /// the child's whole environment — and every `Reuse` would otherwise pay
+    /// for a launch it is not doing.
+    Launch(Box<LaunchSpec>),
+    /// Nothing reusable *and* a person is working in this checkout: wait for
+    /// them, then plan again.
+    ///
+    /// Not a failure and not a fresh harness beside theirs. Under
+    /// `strategy: checkout` an agent's sessions share one working tree, so
+    /// "create a session" cannot mean "start a second writer in it" — it means
+    /// queue behind the writer that is there. The workspace path is carried
+    /// because the wait is on the *directory*, not on any one session: the
+    /// operator may close theirs and open another.
+    Queue(String),
+}
+
+/// Everything one turn needs to know about itself, past the session it runs in.
+///
+/// A record rather than five parameters, and it earned that when the hand-back
+/// turn added the fifth: the polling loop needs the task's own instruction now,
+/// because an operator may take the session mid-flight and what they hand back
+/// has to be finished against the work that was asked for.
+pub(super) struct TurnSpec {
+    /// Which harness is running, for the fold's dialect and every message.
+    pub(super) provider: medulla::protocol::HarnessProvider,
+    /// Whether the child's environment selects a GitHub repository, which the
+    /// fold uses to resolve pull-request context.
+    pub(super) gh_repo_is_set: bool,
+    /// The caller's idle ceiling in ms (`[host].taskTimeoutMs`); `0` is none.
+    pub(super) timeout_ms: u64,
+    /// The task's own instruction, as the peer sent it.
+    pub(super) instruction: String,
 }
 
 /// Runs delegated tasks inside live harness sessions.

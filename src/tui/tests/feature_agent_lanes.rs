@@ -168,14 +168,19 @@ fn a_registered_worker_prefers_its_label_and_is_not_listed_twice() {
     ]);
     let out = render(&mut app, 140, 40);
     assert!(out.contains("build box"), "the label names the lane: {out}");
-    // Once. This used to be twice — the lane, plus the same peer again as a
-    // host in the fleet half below the divider — which is exactly the
-    // duplication the rail no longer carries. Its host and harness are the
-    // Routing tab's Harnesses page now.
+    // One agent row. This used to be two — the lane, plus the same peer again as
+    // a host in the fleet half below the divider — which is exactly the
+    // duplication the rail no longer carries.
     assert_eq!(
-        out.matches("build box").count(),
+        out.matches("[CLAUDE] build box").count(),
         1,
         "one peer, one lane: {out}"
+    );
+    // The machine it runs on is a row of its own, because a second host now
+    // exists: the same `Host → Agent` tree the Hosts tab draws, one level up.
+    assert!(
+        out.contains("▸ build box"),
+        "the peer's machine heads its agents: {out}"
     );
 }
 

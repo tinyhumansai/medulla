@@ -287,7 +287,7 @@ impl DaemonRuntime {
         harness: Option<HarnessProvider>,
         attachments: FrameAttachments,
     ) {
-        let body = crate::protocol::encode_task_frame_with_work(
+        let body = crate::protocol::encode_task_frame_with_attachments(
             EncodeFrameInput {
                 kind,
                 task_id: task_id.to_string(),
@@ -308,8 +308,7 @@ impl DaemonRuntime {
                 conversation: None,
                 fleet_depth: 0,
             },
-            attachments.usage,
-            attachments.work,
+            attachments,
         );
         // Narrate the terminal frames only. Status and ack are throttled chatter
         // whose whole point is that nobody reads them one by one; a reply or an

@@ -158,6 +158,7 @@ impl HubHandle {
             address: wiring.address,
             relay: wiring.relay,
             catalog: wiring.catalog,
+            local_hosts: wiring.local_hosts,
             runner: wiring.runner,
             system_info: Arc::new(Mutex::new(HashMap::new())),
             log: wiring.log,
@@ -446,7 +447,13 @@ impl HubHandle {
     async fn reregister(&self) -> anyhow::Result<()> {
         let workers = self.list();
         let online = self.relay.presence(&addresses_of(&workers)).await;
-        let payload = register_payload(&workers, &online, &self.catalog);
+        // Read here rather than captured at build time: a host started since
+        // this handle was made must register as `local`, not as a remote host
+        // the hub happens to front.
+        let payload = {
+            let local_hosts = self.local_hosts.lock().expect("local hosts lock");
+            register_payload(&workers, &online, &self.catalog, &local_hosts)
+        };
         self.socket
             .emit("medulla:register_agents", payload)
             .await

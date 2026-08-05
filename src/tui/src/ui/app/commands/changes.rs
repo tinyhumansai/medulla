@@ -18,7 +18,7 @@ impl App {
     pub(crate) fn apply_change_baseline_selection(&mut self) {
         let index = self.changes.baseline_index;
         if index == 0 {
-            match self.changes.choose_harness_baseline() {
+            match self.changes.choose_session_baseline() {
                 Ok(()) => self.set_status(self.changes.status_message()),
                 Err(error) => self.set_status(error),
             }

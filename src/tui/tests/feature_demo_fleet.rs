@@ -24,7 +24,7 @@ fn the_stand_in_fleet_renders_when_the_runtime_declares_nothing() {
     std::env::set_var(medulla::runtime::DEMO_FLEET_ENV, "1");
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
-    app.focus_routing_subpage("Harnesses");
+    app.focus_routing_subpage("Harness Types");
 
     let mut terminal = Terminal::new(TestBackend::new(160, 44)).unwrap();
     terminal.draw(|f| app.draw(f)).unwrap();

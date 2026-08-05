@@ -14,8 +14,20 @@ use super::super::types::{DaemonRuntime, LogFn};
 /// local bus is an in-memory queue: there is no relay to be polite to, and this
 /// interval is the floor on how quickly a locally-dispatched task starts.
 pub const DEFAULT_LOCAL_POLL: Duration = Duration::from_millis(150);
-/// Default concurrent task executions for an embedded host.
-pub const DEFAULT_CONCURRENCY: usize = 2;
+/// Default concurrent task executions for an embedded host — effectively
+/// unlimited.
+///
+/// A host-wide cap predates declared agents: it made sense when a machine was
+/// one worker with one implicit session. It is the wrong grain now, and it
+/// queued invisibly — a third concurrent task waited for a slot even when it
+/// targeted a different agent in a different workspace, where nothing could
+/// collide. The limits that own the real hazard live where the hazard is:
+/// per-agent `max_sessions` from the workspace strategy, and the checkout
+/// serialization that keeps a second writer out of a tree someone is in.
+///
+/// The semaphore stays as the accounting mechanism behind `active_count`, and
+/// an operator can still set `concurrency` to impose a real cap.
+pub const DEFAULT_CONCURRENCY: usize = 1024;
 /// Default per-task execution timeout, in ms.
 pub const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
 

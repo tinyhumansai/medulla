@@ -252,9 +252,23 @@ fn saving_over_a_config_leaves_its_other_sections_alone() {
     assert!(text.contains("addr"), "got: {text}");
 }
 
-/// The shared device-local address list the sink reads at save time.
-fn shared(addresses: Vec<String>) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
-    std::sync::Arc::new(std::sync::Mutex::new(addresses))
+/// The shared declared-host list the sink reads at save time, from bare bus
+/// addresses — the only field either the save filter or the `hosts[]` advert
+/// keys on.
+fn shared(addresses: Vec<String>) -> medulla::hub::SharedLocalHosts {
+    std::sync::Arc::new(std::sync::Mutex::new(
+        addresses.into_iter().map(local_host).collect(),
+    ))
+}
+
+/// One declared local host at `address`, named after it.
+fn local_host(address: String) -> medulla::config::LocalHostRef {
+    medulla::config::LocalHostRef {
+        name: address.clone(),
+        id: address,
+        workspace: String::new(),
+        primary: false,
+    }
 }
 
 #[test]
@@ -316,7 +330,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
         Some(super::LocalDispatch {
             network: medulla::bridge::LocalBridgeNetwork::new(),
             hub_address: "medulla-orchestrator".to_string(),
-            host_addresses: shared(vec!["this-device".to_string()]),
+            local_hosts: shared(vec!["this-device".to_string()]),
             // Hosting is off: nothing is bound at `this-device` this run.
             hosts: Vec::new(),
         }),
@@ -341,8 +355,8 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
 #[test]
 fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
     // The sink filters at *save* time, so a launch-time snapshot of the local
-    // addresses did not know about a host started mid-session through
-    // `LocalHostSpawner`. Its device-local entry was written into the saved
+    // addresses did not know about a host that joined the local list after that
+    // snapshot was taken. Its device-local entry was written into the saved
     // roster and would be advertised on a later run at an address nothing binds.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
@@ -350,11 +364,11 @@ fn a_host_added_after_launch_is_not_remembered_as_a_remote_peer() {
     let addresses = shared(vec!["this-device".to_string()]);
     let sink = super::roster_sink(home, medulla::hub::stderr_log(), addresses.clone());
 
-    // The spawner binds a second host and appends its address.
+    // The spawner binds a second host and appends it.
     addresses
         .lock()
-        .expect("host addresses")
-        .push("local-backend".to_string());
+        .expect("local hosts")
+        .push(local_host("local-backend".to_string()));
 
     sink(&[
         worker("this-device", "this-device", false),

@@ -1,22 +1,81 @@
-//! Hosts subpage coverage: roster rendering (capacity, probe readiness and
-//! budget lines, missing-detail fallbacks, pagination), the add/edit/remove
-//! selection shortcuts, and the Harnesses credential/runtime view.
+//! Hosts subpage coverage: the `Host → Agents` tree (capacity, probe readiness
+//! and budget lines, missing-detail fallbacks, pagination), the local/remote
+//! capability split, the add/edit/remove selection shortcuts, and the Harnesses
+//! credential/runtime view. Role assignment lives in the sibling `roles` module.
 
 use crate::helpers::*;
 
 #[test]
-fn hosts_tab_lists_registered_machines() {
+fn hosts_tab_lists_hosts_with_their_agents() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Hosts · 3"), "host count in title");
-    assert!(out.contains("@w1"));
-    assert!(out.contains("CODEX"));
+    // Four hosts: this device (always present) and the three peers, carrying
+    // three agents between them.
+    assert!(out.contains("Hosts · 4 · agents · 3"), "tree counts: {out}");
+    assert!(
+        out.contains("this device · this-device · local"),
+        "the local host leads, running or not: {out}"
+    );
+    assert!(
+        out.contains("w1 label · w1.example:9000 · remote · read-only"),
+        "a peer is a host, and says it is not editable here: {out}"
+    );
+    assert!(out.contains("CODEX"), "the agent row carries its harness");
+    assert!(out.contains("a add host · r refresh"));
+
+    // Capacity belongs to the machine, so it is the *host* row's preview.
+    down(&mut app, 1);
+    let out = render(&mut app, 120, 40);
     assert!(out.contains("IP 10.0.0.1"));
     assert!(out.contains("CPU 8 cores"));
     assert!(out.contains("RAM 18.0 GiB available / 32.0 GiB total"));
-    assert!(out.contains("a add · Enter/s select"));
+}
+
+#[test]
+fn the_local_host_offers_agent_creation_and_a_remote_does_not() {
+    // The v1 capability split, made visible: an agent is declared on the machine
+    // that owns it. Dispatch to a remote agent is unaffected — this is only
+    // about what the operator can change from this terminal.
+    let mut app = app_with_roster(vec![worker("w1", true)], None);
+    app.focus_routing_subpage("Hosts");
+
+    let out = render(&mut app, 130, 40);
+    assert!(
+        out.contains("none declared here · n declares one"),
+        "the local host invites a new agent: {out}"
+    );
+    assert!(app.selected_host_is_local());
+
+    down(&mut app, 1); // the remote host header
+    let out = render(&mut app, 130, 40);
+    assert!(!app.selected_host_is_local());
+    assert!(
+        out.contains("declared on that machine"),
+        "the remote host says where its agents come from: {out}"
+    );
+    assert!(
+        out.contains("this hub lists what its roster reaches"),
+        "and is honest that it cannot see that machine's declarations: {out}"
+    );
+
+    // `n` refuses on a remote host rather than being silently inert.
+    assert!(app.on_event(key(KeyCode::Char('n'))).is_none());
+    assert!(
+        app.status().contains("read-only"),
+        "status: {}",
+        app.status()
+    );
+
+    // On the local host it points at the flow that declares one.
+    let _ = app.on_event(key(KeyCode::Up));
+    assert!(app.on_event(key(KeyCode::Char('n'))).is_none());
+    assert!(
+        app.status().contains("New agent"),
+        "status: {}",
+        app.status()
+    );
 }
 
 #[test]
@@ -62,6 +121,8 @@ fn host_row_shows_probe_readiness_and_budget_lines() {
 
     let mut app = app_with_roster(vec![w], None);
     app.focus_routing_subpage("Hosts");
+    // Readiness and budgets describe the machine, so they are the host row's.
+    down(&mut app, 1);
     // Wide enough that the folded readiness + budget segments are not clipped.
     let out = render(&mut app, 200, 40);
 
@@ -112,6 +173,7 @@ fn host_row_sanitizes_probe_text_and_keeps_fractional_budget() {
 
     let mut app = app_with_roster(vec![w], None);
     app.focus_routing_subpage("Hosts");
+    down(&mut app, 1);
     let out = render(&mut app, 200, 40);
 
     // The escape/OSC bytes are gone; only the printable tail survives.
@@ -132,7 +194,9 @@ fn hosts_r_refreshes_selected_machine_details() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
-    let _ = app.on_event(key(KeyCode::Down));
+    // Row 0 is this device, 1–2 are w1's host and agent, 3 is w2's host: a
+    // refresh reads the probe of the machine the cursor is on either way.
+    down(&mut app, 3);
     let cmd = app.on_event(key(KeyCode::Char('r')));
     match cmd {
         Some(Cmd::WorkerOp(op)) => {
@@ -148,12 +212,10 @@ fn hosts_r_refreshes_selected_machine_details() {
 fn add_host_page_renders_guidance_and_opens_the_prompt() {
     let mut app = app_with_workers(None);
     app.focus_routing_subpage("Add Host");
-    // Local leads the picker; choosing Remote lights up the pairing guidance.
-    let _ = app.on_event(key(KeyCode::Down));
-    let _ = app.on_event(key(KeyCode::Enter));
+    // The page is the pairing guidance — there is no kind to choose first.
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Add a host for the orchestrator to delegate to."));
+    assert!(out.contains("Connect another machine for the orchestrator to delegate to."));
     assert!(out.contains("Example: 7Kx…9fQ"));
     assert!(!out.contains("@build-box"));
 
@@ -161,6 +223,29 @@ fn add_host_page_renders_guidance_and_opens_the_prompt() {
     let (title, draft) = app.prompt_state().expect("add prompt");
     assert!(title.starts_with("Add host"));
     assert!(draft.is_empty());
+}
+
+#[test]
+fn adding_a_remote_host_still_lands_on_the_tree() {
+    // Read the pairing instructions, Enter for the address prompt, type it, and
+    // the add op is emitted while the page returns to the list the add is about.
+    let mut app = app_with_roster(Vec::new(), None);
+    app.focus_routing_subpage("Add Host");
+    let _ = app.on_event(key(KeyCode::Enter)); // open the address prompt
+    assert!(app.prompt_state().is_some(), "the address prompt opened");
+    for ch in "@build-box".chars() {
+        let _ = app.on_event(key(KeyCode::Char(ch)));
+    }
+
+    match app.on_event(key(KeyCode::Enter)) {
+        Some(Cmd::WorkerOp(op)) => {
+            let debug = format!("{op:?}");
+            assert!(debug.contains("Add"), "{debug}");
+            assert!(debug.contains("build-box"), "{debug}");
+        }
+        other => panic!("expected an Add op, got {other:?}"),
+    }
+    assert_eq!(app.routing_subpage(), "Hosts");
 }
 
 #[test]
@@ -174,12 +259,18 @@ fn host_list_add_shortcut_opens_the_shared_prompt() {
 }
 
 #[test]
-fn empty_host_list_explains_the_state_and_roster_actions_are_noops() {
+fn an_empty_roster_still_shows_this_device_and_roster_actions_are_noops() {
+    // "The local host is always present" is what the page is for: with nothing
+    // registered the operator must still see the machine they are sitting at,
+    // and that it has declared no agents — not an empty list that reads as a
+    // fleet with no members.
     let mut app = app_with_roster(Vec::new(), None);
     app.focus_routing_subpage("Hosts");
 
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("No hosts registered"));
+    assert!(out.contains("this device · this-device · local · no agents"));
+    assert!(out.contains("Hosts · 1 · agents · 0"));
+    // Every roster mutation needs an entry to act on, and there is none.
     for code in [
         KeyCode::Enter,
         KeyCode::Char('d'),
@@ -210,10 +301,11 @@ fn host_list_formats_missing_details_and_megabytes() {
 
     // Capacity is the preview's job now, so each host's line is read where the
     // cursor is — which is the point of the split: one host's detail at a time.
+    down(&mut app, 1);
     let out = render(&mut app, 120, 40);
     assert!(out.contains("details not captured"));
 
-    let _ = app.on_event(key(KeyCode::Down));
+    down(&mut app, 2); // past w1's agent, onto w2's host row
     let out = render(&mut app, 120, 40);
     assert!(out.contains("512 MiB available / 768 MiB total"));
 }
@@ -225,9 +317,9 @@ fn host_list_paginates_by_single_line_rows() {
         .collect();
     let mut app = app_with_roster(workers, None);
     app.focus_routing_subpage("Hosts");
-    for _ in 1..12 {
-        let _ = app.on_event(key(KeyCode::Down));
-    }
+    // This device, then a header and an agent per peer: the last row is the
+    // twenty-fourth below the top.
+    down(&mut app, 24);
 
     let out = render(&mut app, 120, 24);
     assert!(out.contains("w12"), "selected worker should remain visible");
@@ -247,10 +339,11 @@ fn the_preview_follows_the_cursor_rather_than_repeating_every_host() {
     let mut app = app_with_roster(vec![first, second], None);
     app.focus_routing_subpage("Hosts");
 
+    down(&mut app, 1);
     let out = render(&mut app, 120, 40);
     assert!(
-        out.contains("Host · w1"),
-        "preview titles the selected host"
+        out.contains("Host · w1 label"),
+        "preview titles the selected host: {out}"
     );
     assert!(out.contains("IP 10.0.0.1"));
     assert!(
@@ -258,86 +351,17 @@ fn the_preview_follows_the_cursor_rather_than_repeating_every_host() {
         "an unselected host's capacity must not be drawn: {out}"
     );
 
-    let _ = app.on_event(key(KeyCode::Down));
+    down(&mut app, 2);
     let out = render(&mut app, 120, 40);
-    assert!(out.contains("Host · w2"));
+    assert!(out.contains("Host · w2 label"));
     assert!(out.contains("IP 10.0.0.2"));
     assert!(!out.contains("IP 10.0.0.1"));
 }
 
 #[test]
-fn space_on_a_role_offers_the_selected_host_for_it_and_takes_it_back() {
-    let mut app = app_with_roster(vec![worker("w1", true)], None);
-    app.focus_routing_subpage("Hosts");
-
-    // Roles come from the agent-template catalog, which ships built-in coding
-    // roles even with nothing declared — so there is always something to toggle.
-    let out = render(&mut app, 120, 44);
-    assert!(
-        out.contains("none assigned · offered for any role"),
-        "an unassigned host reads as general, not excluded: {out}"
-    );
-
-    let _ = app.on_event(key(KeyCode::Right));
-    let out = render(&mut app, 120, 44);
-    assert!(out.contains("[ ]"), "the toggle list is drawn: {out}");
-
-    let cmd = app.on_event(key(KeyCode::Char(' ')));
-    let assigned = match cmd {
-        Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
-            assert_eq!(id, "w1");
-            assert_eq!(roles.len(), 1, "exactly the toggled role");
-            roles
-        }
-        other => panic!("expected a SetRoles op, got {other:?}"),
-    };
-
-    // And back off again. The op is a whole-list replacement, so removing the
-    // only role must send an *empty* list — not omit the field, which would
-    // read as "leave the roles alone" and make the toggle one-way.
-    let mut held = app_with_roster(
-        vec![{
-            let mut w = worker("w1", true);
-            w.roles = assigned;
-            w
-        }],
-        None,
-    );
-    held.focus_routing_subpage("Hosts");
-    let _ = held.on_event(key(KeyCode::Right));
-    match held.on_event(key(KeyCode::Char(' '))) {
-        Some(Cmd::WorkerOp(WorkerOp::SetRoles { id, roles })) => {
-            assert_eq!(id, "w1");
-            assert!(
-                roles.is_empty(),
-                "removal sends an empty list, got {roles:?}"
-            );
-        }
-        other => panic!("expected a SetRoles op, got {other:?}"),
-    }
-}
-
-#[test]
-fn leaving_the_role_list_hands_the_arrows_back_to_the_host_roster() {
-    let mut app = app_with_roster(vec![worker("w1", true), worker("w2", false)], None);
-    app.focus_routing_subpage("Hosts");
-
-    let _ = app.on_event(key(KeyCode::Right));
-    // Down now walks roles, so the selected host must not have changed.
-    let _ = app.on_event(key(KeyCode::Down));
-    let out = render(&mut app, 120, 44);
-    assert!(out.contains("Host · w1"), "still previewing w1: {out}");
-
-    let _ = app.on_event(key(KeyCode::Left));
-    let _ = app.on_event(key(KeyCode::Down));
-    let out = render(&mut app, 120, 44);
-    assert!(out.contains("Host · w2"), "back on the roster: {out}");
-}
-
-#[test]
 fn harnesses_page_names_credentials_per_runtime_without_values() {
     let mut app = app_with_workers(None);
-    app.focus_routing_subpage("Harnesses");
+    app.focus_routing_subpage("Harness Types");
     let out = render(&mut app, 120, 40);
     // Credentials read per harness kind, because that is what spends them.
     assert!(out.contains("Claude Code"));
@@ -356,24 +380,33 @@ fn harnesses_page_names_credentials_per_runtime_without_values() {
         app.on_event(key(KeyCode::Char('r'))),
         Some(Cmd::RefreshFleet)
     ));
-    assert_eq!(app.status(), "Harnesses refreshed");
+    assert_eq!(app.status(), "Harness types refreshed");
 }
 
 #[test]
-fn hosts_up_down_moves_selection() {
+fn hosts_up_down_walks_hosts_and_their_agents() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
+    // This device, then a header and an agent for each of the three peers.
+    assert_eq!(app.hosts_row_count(), 7);
     assert_eq!(app.host_index(), 0);
-    let _ = app.on_event(key(KeyCode::Down));
+    assert!(app.hosts_cursor_on_host(), "row 0 is this device");
+    down(&mut app, 1);
     assert_eq!(app.host_index(), 1);
-    let _ = app.on_event(key(KeyCode::Down));
+    assert!(app.hosts_cursor_on_host(), "row 1 is w1's host header");
+    down(&mut app, 1);
     assert_eq!(app.host_index(), 2);
-    // Clamp at the last worker.
-    let _ = app.on_event(key(KeyCode::Down));
-    assert_eq!(app.host_index(), 2);
+    assert_eq!(
+        app.selected_host_agent().map(|agent| agent.agent_id),
+        Some("w1".to_string()),
+        "row 2 is the agent under it"
+    );
+    // Clamp at the last row.
+    down(&mut app, 10);
+    assert_eq!(app.host_index(), 6);
     let _ = app.on_event(key(KeyCode::Up));
-    assert_eq!(app.host_index(), 1);
+    assert_eq!(app.host_index(), 5);
 }
 
 #[test]
@@ -381,7 +414,7 @@ fn hosts_enter_selects_and_d_removes() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
-    let _ = app.on_event(key(KeyCode::Down)); // select w2
+    down(&mut app, 2); // w1's agent row
     let cmd = app.on_event(key(KeyCode::Enter));
     match cmd {
         Some(Cmd::WorkerOp(op)) => assert!(format!("{op:?}").contains("Select")),
@@ -399,6 +432,7 @@ fn hosts_s_and_x_are_select_and_remove_aliases() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
+    down(&mut app, 2); // w1's agent row
     let cmd = app.on_event(key(KeyCode::Char('s')));
     assert!(matches!(cmd, Some(Cmd::WorkerOp(_))));
     let cmd = app.on_event(key(KeyCode::Char('x')));
@@ -410,6 +444,7 @@ fn hosts_e_opens_edit_label_prompt_prefilled() {
     let mut app = app_with_workers(None);
     tab(&mut app, "Hosts");
     app.focus_routing_subpage("Hosts");
+    down(&mut app, 2); // w1's agent row
     let _ = app.on_event(key(KeyCode::Char('e')));
     let (title, draft) = app.prompt_state().expect("edit prompt open");
     assert!(title.starts_with("Edit label"));
@@ -426,87 +461,4 @@ fn hosts_e_opens_edit_label_prompt_prefilled() {
         }
         other => panic!("expected Update, got {other:?}"),
     }
-}
-
-#[test]
-fn an_assigned_role_is_summarised_and_checked() {
-    let mut w = worker("w1", true);
-    w.roles = vec!["code-reviewer".into()];
-
-    let mut app = app_with_roster(vec![w], None);
-    app.focus_routing_subpage("Hosts");
-    let out = render(&mut app, 130, 44);
-
-    // The summary leads the block, so what a host is offered for is readable
-    // without counting checkboxes.
-    assert!(
-        out.contains("roles      code-reviewer"),
-        "assigned roles summarised: {out}"
-    );
-    assert!(out.contains("[x] code-reviewer"), "and checked: {out}");
-    assert!(out.contains("[ ] implementer"), "others unchecked: {out}");
-    // And the roster row carries the count, so the list still says which hosts
-    // have been given roles at all.
-    assert!(out.contains("· 1 role"), "count on the roster row: {out}");
-}
-
-#[test]
-fn a_role_below_the_fold_stays_visible_when_selected() {
-    // The preview is capped at half the page, so on a short terminal the role
-    // list must scroll — a role that can be selected but not seen is a toggle
-    // the operator flips blind.
-    let mut app = app_with_roster(vec![worker("w1", true)], None);
-    app.focus_routing_subpage("Hosts");
-    let _ = app.on_event(key(KeyCode::Right));
-
-    let out = render(&mut app, 130, 26);
-    let last = "repo-orchestrator";
-    assert!(!out.contains(last), "the tail starts off-screen: {out}");
-
-    for _ in 0..12 {
-        let _ = app.on_event(key(KeyCode::Down));
-    }
-    let out = render(&mut app, 130, 26);
-    assert!(
-        out.contains(&format!("▸ [ ] {last}")),
-        "the window follows the cursor to the last role: {out}"
-    );
-}
-
-#[test]
-fn a_local_host_that_could_not_be_saved_can_be_retried() {
-    // The entry used to be pushed into the in-process config before the write,
-    // so a failed save left a host that was never written and never started —
-    // and the duplicate check then refused every retry for that directory,
-    // which the operator could not clear without restarting.
-    let mut app = app_with_roster(Vec::new(), None);
-    let workspace = std::env::temp_dir().to_string_lossy().into_owned();
-
-    // Drive the wizard: Local is first, one Enter settles the harness step, the
-    // next opens the directory prompt. No config path is set on this app, so
-    // the save cannot succeed.
-    let add = |app: &mut App, workspace: &str| {
-        app.focus_routing_subpage("Add Host");
-        let _ = app.on_event(key(KeyCode::Enter));
-        let _ = app.on_event(key(KeyCode::Enter));
-        assert!(app.prompt_state().is_some(), "the directory prompt opened");
-        for ch in workspace.chars() {
-            let _ = app.on_event(key(KeyCode::Char(ch)));
-        }
-        app.on_event(key(KeyCode::Enter))
-    };
-
-    assert!(
-        add(&mut app, &workspace).is_none(),
-        "nothing starts when nothing was saved"
-    );
-    assert!(app.status().contains("No config file"), "{}", app.status());
-
-    // The second attempt must reach the same failure, not "Already hosted".
-    assert!(add(&mut app, &workspace).is_none());
-    assert!(
-        !app.status().contains("Already hosted"),
-        "a failed save must not block the retry: {}",
-        app.status()
-    );
 }

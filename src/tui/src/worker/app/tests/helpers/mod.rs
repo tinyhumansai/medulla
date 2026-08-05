@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use medulla::contacts::{AdmissionPolicy, ContactDesk, ContactRelay, IncomingRequest};
 use medulla::protocol::HarnessProvider;
 
-use super::super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
+use super::super::super::pty::{LaunchSpec, PtyManager, SessionControl};
 use super::super::state::WorkerWiring;
 use super::super::types::WorkerApp;
 
@@ -49,6 +49,7 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         // Codex takes no preset session id, so its interactive argv is empty
         // and `/bin/sh` receives only the script.
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,
@@ -57,7 +58,7 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,

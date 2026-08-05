@@ -121,7 +121,7 @@ async fn an_aborted_task_stops_waiting_and_says_so() {
     );
     assert!(
         sessions.rows().iter().any(|row| {
-            row.attention.is_some() && row.control == super::super::pty::HarnessControl::User
+            row.attention.is_some() && row.control == super::super::pty::SessionControl::User
         }),
         "the failed prompt must be handed to the operator before its task binding disappears"
     );
@@ -236,7 +236,7 @@ async fn a_session_opened_to_serve_a_task_is_orchestrator_originated() {
     assert_eq!(rows[0].name, None, "a dispatch never names a session");
 
     let id = rows[0].id.clone();
-    sessions.set_control(&id, super::super::pty::HarnessControl::User);
+    sessions.set_control(&id, super::super::pty::SessionControl::User);
     assert!(
         sessions.row(&id).unwrap().origin.is_orchestrator(),
         "taking it over is a control change, not a change of provenance"

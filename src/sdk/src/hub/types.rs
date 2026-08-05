@@ -114,6 +114,19 @@ pub struct TaskOutcome {
     pub usage: TokenUsage,
     /// The provider that actually ran the task, when the worker reported it.
     pub harness: Option<HarnessProvider>,
+    /// The harness session that served the task, when the worker reported one.
+    ///
+    /// Reported, never requested: the worker opens or resumes exactly one
+    /// session per task and is the only party that knows which, so this is the
+    /// sole path by which a session id travels back up. The hub forwards it to
+    /// the backend as `task_result.sessionId`, which is where a manager's task
+    /// ledger records *where* a piece of work happened.
+    ///
+    /// `None` for a worker that predates the key, for a failed dispatch (no
+    /// outcome to attach it to), and for a workflow run — a graph is not one
+    /// session, and claiming one of its nodes' sessions would name the wrong
+    /// place.
+    pub session_id: Option<String>,
 }
 
 /// Why a dispatch failed.

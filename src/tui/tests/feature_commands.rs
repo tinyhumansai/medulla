@@ -169,7 +169,7 @@ fn help_lists_every_command_from_the_catalog() {
 }
 
 #[test]
-fn help_explains_how_to_kill_a_harness_and_inspect_git_changes() {
+fn help_explains_how_to_kill_a_session_and_inspect_git_changes() {
     let mut app = agents_app();
     type_str(&mut app, "/help");
     let _ = app.on_event(key(KeyCode::Enter));
@@ -177,11 +177,11 @@ fn help_explains_how_to_kill_a_harness_and_inspect_git_changes() {
     let out = render(&mut app, 160, 90);
     assert!(
         out.contains("K then y kills it"),
-        "help must explain the confirmed harness-kill binding: {out}"
+        "help must explain the confirmed session-kill binding: {out}"
     );
     assert!(
         out.contains("empty composer Esc focuses the rail")
-            && out.contains("from a harness Ctrl-] releases to it"),
+            && out.contains("from a session Ctrl-] releases to it"),
         "help must explain how each input mode reaches the task rail: {out}"
     );
     assert!(

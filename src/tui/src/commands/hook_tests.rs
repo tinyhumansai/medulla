@@ -67,3 +67,65 @@ fn a_session_start_names_its_source_when_the_harness_gives_one() {
         "session started"
     );
 }
+
+/// The P2 Codex found on this branch: the declared timeout has to match
+/// `harness_hooks::builtin`'s own per-event value, or the shim's single
+/// deadline (see [`run_hook_cmd`]'s docs) would be built from the wrong
+/// number and the whole point of deriving both budgets from one deadline is
+/// lost.
+#[test]
+fn declared_timeout_matches_the_builtins_per_event_value() {
+    assert_eq!(
+        declared_timeout(HookEvent::SessionEnd),
+        Duration::from_secs(3),
+        "must match builtin::SESSION_END_TIMEOUT_SECS"
+    );
+    for event in HookEvent::ALL {
+        if event != HookEvent::SessionEnd {
+            assert_eq!(declared_timeout(event), Duration::from_secs(5));
+        }
+    }
+}
+
+/// The whole reason for one deadline: the stdin read and the report used to
+/// draw from separate budgets (500ms + 3s), so a slow read alone could push
+/// the shim's total past `SessionEnd`'s 3-second declared timeout before the
+/// report even started. Deriving both from one deadline structurally rules
+/// that out — the read's own budget shrinks to fit whatever is left, so the
+/// two together can never exceed what was declared, minus headroom.
+#[test]
+fn the_read_and_report_budgets_can_never_together_exceed_the_declared_timeout() {
+    for event in HookEvent::ALL {
+        let deadline = Instant::now() + declared_timeout(event).saturating_sub(HEADROOM);
+        // What `read_payload` would spend at most, computed the same way it
+        // does internally.
+        let read_budget = READ_BUDGET.min(deadline.saturating_duration_since(Instant::now()));
+        assert!(
+            read_budget <= declared_timeout(event),
+            "{}: the read budget alone must never exceed the declared timeout",
+            event.as_str()
+        );
+        // Whatever is left over for the report, after the read spent its
+        // whole (worst-case) budget, must still leave the shim's total run —
+        // read + report + the headroom already reserved — under the
+        // harness's declared timeout.
+        let remaining_for_report = deadline.saturating_duration_since(Instant::now() + read_budget);
+        let worst_case_total = read_budget + remaining_for_report + HEADROOM;
+        assert!(
+            worst_case_total <= declared_timeout(event),
+            "{}: read ({read_budget:?}) + report ({remaining_for_report:?}) + headroom \
+             ({HEADROOM:?}) = {worst_case_total:?}, over the declared {:?}",
+            event.as_str(),
+            declared_timeout(event)
+        );
+    }
+}
+
+/// Once the shim's deadline has already passed — an unlikely but possible
+/// case if, say, process startup itself ran long — the read must give up on
+/// the very next poll rather than still trying for `READ_BUDGET`.
+#[test]
+fn read_payload_gives_up_immediately_once_the_deadline_has_already_passed() {
+    let deadline = Instant::now() - Duration::from_millis(1);
+    assert_eq!(read_payload(deadline), serde_json::Value::Null);
+}

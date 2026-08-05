@@ -29,20 +29,39 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use medulla::control_socket::hook_grant_from_env;
 use medulla::harness_hooks::HookEvent;
 
-/// The whole shim's budget, from process start to exit.
-///
-/// Deliberately under the five-second timeout the built-in hook declares, so
-/// Medulla gives up before the harness has to.
-const BUDGET: Duration = Duration::from_secs(3);
+/// `medulla::harness_hooks::builtin`'s declared timeout for `event`'s
+/// built-in (its private `timeout_for`, mirrored here since the two crates
+/// cannot share it directly), so the shim's own deadline can never exceed
+/// what the harness will actually wait before it gives up on this process
+/// outright — a hard kill, not the quiet, no-report exit the module docs
+/// promise. `SessionEnd` is 3 seconds (Codex's own hook config refuses a
+/// longer one, and Medulla installs the same declared timeout on both
+/// harnesses for that event — that crate's private `SESSION_END_TIMEOUT_SECS`);
+/// every other event is 5.
+fn declared_timeout(event: HookEvent) -> Duration {
+    match event {
+        HookEvent::SessionEnd => Duration::from_secs(3),
+        _ => Duration::from_secs(5),
+    }
+}
 
-/// How long to spend reading the payload the harness is piping in.
+/// Subtracted from [`declared_timeout`] before anything runs, so the shim's
+/// own deadline always falls short of the harness's kill: a shim the harness
+/// had to kill looks to Claude Code or Codex like a hook that hung, which is
+/// exactly the failure mode "give up quickly" exists to avoid.
+const HEADROOM: Duration = Duration::from_millis(300);
+
+/// How long [`read_payload`] may spend at most, before whatever is left of
+/// the shim's own deadline narrows it further. Keeps a harness that opens the
+/// pipe and writes nothing from spending the *whole* deadline just reading,
+/// with nothing left to file the report.
 const READ_BUDGET: Duration = Duration::from_millis(500);
 
 /// Run the shim for the event named in `args`.
@@ -50,11 +69,20 @@ const READ_BUDGET: Duration = Duration::from_millis(500);
 /// Never returns an error: see the module docs. `args` is everything after the
 /// `hook` subcommand, of which only the first entry — the canonical event name —
 /// is read.
+///
+/// One deadline covers the whole run, from here to the report: previously the
+/// stdin read and the report each had their own separate budget
+/// (500ms + 3s = 3.5s worst case) against `SessionEnd`'s declared 3-second
+/// timeout, so a slow read alone could run the shim past the point Codex kills
+/// it rather than let it give up quietly (chatgpt-codex-connector P2 on PR
+/// #192). Deriving both from one deadline means the total can never exceed
+/// what was declared, whichever event this is.
 pub(crate) async fn run_hook_cmd(args: &[String], env: &HashMap<String, String>) {
     let Some(event) = args.first().and_then(|name| HookEvent::from_wire(name)) else {
         return;
     };
-    let payload = read_payload();
+    let deadline = Instant::now() + declared_timeout(event).saturating_sub(HEADROOM);
+    let payload = read_payload(deadline);
     // Both are set together by the spawn that minted this session's hook-only
     // grant (see `medulla::mcp::attach::attach_mcp`'s doc comment for why this
     // is a plain environment variable, unlike the fleet grant the `medulla
@@ -66,7 +94,10 @@ pub(crate) async fn run_hook_cmd(args: &[String], env: &HashMap<String, String>)
     };
 
     #[cfg(unix)]
-    let _ = tokio::time::timeout(BUDGET, report(&socket, &token, event, &payload)).await;
+    {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let _ = tokio::time::timeout(remaining, report(&socket, &token, event, &payload)).await;
+    }
     // The control socket is a unix socket; elsewhere there is nothing to report
     // to, and the shim is a no-op rather than a build error.
     #[cfg(not(unix))]
@@ -101,11 +132,16 @@ async fn report(
 /// Bounded in both time and size: a harness that opens the pipe and writes
 /// nothing must not park this process for the whole budget, and a payload
 /// carrying a large tool result must not be held in memory to be summarized in
-/// one line.
-fn read_payload() -> Value {
+/// one line. The time bound is the smaller of [`READ_BUDGET`] and whatever is
+/// left of `deadline` — the shim's one deadline for the whole run (see
+/// [`run_hook_cmd`]) — so a read that is allowed to run right up to
+/// `READ_BUDGET` can never by itself leave the report with no time left
+/// against a shorter declared timeout such as `SessionEnd`'s.
+fn read_payload(deadline: Instant) -> Value {
     /// Enough for the fields summarized below and the JSON around them.
     const MAX_PAYLOAD: u64 = 256 * 1024;
 
+    let budget = READ_BUDGET.min(deadline.saturating_duration_since(Instant::now()));
     let (tx, rx) = std::sync::mpsc::channel();
     // Detached on purpose: if stdin never closes, this thread parks forever and
     // the process exits out from under it rather than waiting.
@@ -117,7 +153,7 @@ fn read_payload() -> Value {
             .read_to_string(&mut text);
         let _ = tx.send(if read.is_ok() { text } else { String::new() });
     });
-    rx.recv_timeout(READ_BUDGET)
+    rx.recv_timeout(budget)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or(Value::Null)

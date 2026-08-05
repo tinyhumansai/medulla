@@ -181,6 +181,21 @@ pub fn build_resumed_run_args(
                 args.push(resume.to_string());
             }
             args.push("--json".to_string());
+            // Codex defaults to `workspace-write`: writable root is the cwd and
+            // the network is off. A daemon task cannot live inside that. The
+            // git directory of a linked worktree is *outside* the worktree -
+            // for a submodule checkout it is several levels up, under the
+            // superproject's `.git/modules/<name>/worktrees/<id>` - so `git
+            // commit` cannot write its refs, and with no DNS `git push` and
+            // `gh` fail outright. A task that can edit and verify but never
+            // land the result is worse than one that refuses to start.
+            //
+            // Gated on the same operator setting that gives Claude
+            // `--dangerously-skip-permissions` above: one consent flag, honoured
+            // by every harness, rather than a per-provider surprise.
+            if skip_permissions {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+            }
             if let Some(model) = model {
                 args.push("-m".to_string());
                 args.push(model.to_string());

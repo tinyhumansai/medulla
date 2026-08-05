@@ -102,6 +102,18 @@ fn build_run_args_per_provider() {
         ),
         vec!["exec", "--json", "-m", "gpt-5", "do"]
     );
+    // Skip-permissions reaches codex as a sandbox bypass: its default
+    // `workspace-write` policy has no network and only the cwd writable, which
+    // a worktree task cannot commit or push from.
+    assert_eq!(
+        build_run_args(HarnessProvider::Codex, "do", None, None, &[], true),
+        vec![
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "do"
+        ]
+    );
     assert_eq!(
         build_run_args(
             HarnessProvider::Opencode,

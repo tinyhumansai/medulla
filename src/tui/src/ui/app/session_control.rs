@@ -346,26 +346,48 @@ impl App {
                 );
                 true
             }
-            // Ask about what you took, not about what was always yours. A
-            // session the operator started is theirs by construction, so
-            // stepping out of it is just stepping out of it — offering to hand
-            // it to an orchestrator that never had it turns every `Ctrl-]` into
-            // a question with an obvious answer, and questions with obvious
-            // answers get dismissed without being read. `/handoff` is still
-            // there for the operator who does want to give one away.
-            HandbackPolicy::Ask => match self.sessions_taken.get(session).copied() {
-                Some(origin) => {
-                    self.handback_prompt = Some(HandbackPrompt {
-                        session: session.to_string(),
-                        took_control: origin == TakeOrigin::Focus,
-                        note: Draft::default(),
-                        editing_note: false,
-                        is_takeover: false,
-                    });
-                    false
+            // Ask about sessions the orchestrator has a claim on, not about
+            // ones that were always yours. A session the operator started is
+            // theirs by construction, so stepping out of it is just stepping
+            // out of it — offering to hand it to an orchestrator that never had
+            // it turns every `Ctrl-]` into a question with an obvious answer,
+            // and questions with obvious answers get dismissed without being
+            // read. `/handoff` is still there for the operator who does want to
+            // give one away.
+            //
+            // The claim is read from two places, because either alone is wrong:
+            //
+            // - [`SessionOrigin`] is the durable fact and the primary test.
+            //   Dispatch created the session, so walking away still user-held
+            //   locks dispatch out of it. Crucially this does not depend on
+            //   *how* the operator came to hold it: the executor hands a failed
+            //   reusable turn straight to the operator
+            //   (`worker::executor::run`) without passing through
+            //   [`take_session`](Self::take_session), and keying on the map
+            //   alone let exactly that session be released in silence.
+            // - `sessions_taken` still decides the *wording*, and catches the
+            //   other direction: a user-originated session handed to the
+            //   orchestrator and later taken back is owed the question too,
+            //   even though its origin says "user".
+            HandbackPolicy::Ask => {
+                let taken = self.sessions_taken.get(session).copied();
+                let orchestrator_originated = self
+                    .local_sessions
+                    .as_ref()
+                    .and_then(|sessions| sessions.sessions.row(session))
+                    .is_some_and(|row| row.origin.is_orchestrator());
+                if taken.is_none() && !orchestrator_originated {
+                    return true;
                 }
-                None => true,
-            },
+                self.handback_prompt = Some(HandbackPrompt {
+                    session: session.to_string(),
+                    took_control: taken == Some(TakeOrigin::Focus),
+                    note: Draft::default(),
+                    editing_note: false,
+                    is_takeover: false,
+                });
+                false
+            }
         }
     }
 

@@ -223,6 +223,11 @@ impl WorkflowBridge for StoreWorkflowBridge {
                 Some(id) => format!("cloud-copilot:{id}"),
                 None => "cloud-copilot:new".to_string(),
             },
+            // The saved transcripts belong to the operator's own panes. A
+            // request arriving over the socket is a different conversation
+            // with a different party, and replaying one into the other would
+            // hand the orchestrator a context nobody on this end offered it.
+            recap: None,
         };
         let outcome = match workflow_id {
             Some(id) => session.turn(id, instruction, None).await,

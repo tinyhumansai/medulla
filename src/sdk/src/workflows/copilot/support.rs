@@ -200,5 +200,6 @@ pub(super) fn session(
         provider: None,
         model: None,
         conversation: "pane-1".into(),
+        recap: None,
     }
 }

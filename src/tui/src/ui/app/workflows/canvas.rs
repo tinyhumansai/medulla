@@ -35,6 +35,10 @@ impl App {
             self.wf.graph = None;
             self.wf.defaults = Default::default();
             self.wf.layout = GraphLayout::default();
+            // Still seeded: the cursor may be on the New row, whose thread is
+            // the conversation that will build a workflow and is the only thing
+            // to talk to on a host that has none yet.
+            self.ensure_copilot_thread();
             return;
         };
         match self.workflow_store().get(&id) {
@@ -53,6 +57,12 @@ impl App {
             .wf
             .node_index
             .min(self.wf.layout.nodes.len().saturating_sub(1));
+        // The conversation is part of what this workflow *is* to the operator,
+        // so it is read here with the graph rather than on the first
+        // instruction. Restoring it lazily would mean a pane that shows an
+        // empty transcript until you type into it, and then suddenly has a
+        // history — which reads as the history having just been invented.
+        self.ensure_copilot_thread();
     }
 
     /// The laid-out graph currently on the canvas.

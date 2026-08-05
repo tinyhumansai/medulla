@@ -315,15 +315,30 @@ async fn copilot_turn(
     // graph, which is the one failure mode that looks like success.
     medulla::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
 
-    let host = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
+    // The daemon takes ownership of its environment; the transcript lookup
+    // below still needs one to resolve the Medulla home from.
+    let host_env = env.clone();
+    let (host, fresh) = super::copilot_hosts::host_for(thread, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())
             .then(|| workflows_config.default_model.clone()),
-        env,
+        env: host_env,
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;
+
+    // Only for a session that was just started. A continuing one remembers its
+    // own turns, and handing it a recap of them would have it read its last
+    // reply as a fresh instruction. This is the whole of "resume the
+    // conversation after a restart" from the harness's side.
+    let recap = fresh
+        .then(|| {
+            medulla::workflows::copilot::Transcripts::discover(&env, &cwd)
+                .load(medulla_tui::ui::app::copilot_thread_of(thread))
+                .recap()
+        })
+        .flatten();
 
     let session = medulla::workflows::CopilotSession {
         store,
@@ -336,6 +351,7 @@ async fn copilot_turn(
         // are two threads and therefore two conversations, which is what the
         // operator means by having them open separately.
         conversation: thread.to_string(),
+        recap,
     };
     Ok(match turn {
         Turn::Edit(workflow) => session.turn(workflow, instruction, Some(status)).await?,
@@ -494,7 +510,9 @@ async fn evolve_turn(
     );
     medulla::mcp::preflight(&env, &cwd).map_err(anyhow::Error::msg)?;
     let store = medulla::workflows::discover_store(&env, &cwd);
-    let host = super::copilot_hosts::host_for(workflow, || EmbeddedDaemonOptions {
+    // A review is grounded in the journal and the run history rather than in
+    // what a pane said, so whether the host is fresh makes no difference here.
+    let (host, _fresh) = super::copilot_hosts::host_for(workflow, || EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: workflows_config.default_provider,
         model: (!workflows_config.default_model.is_empty())

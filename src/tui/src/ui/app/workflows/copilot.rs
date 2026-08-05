@@ -7,8 +7,22 @@
 //! loop, so everything here is bookkeeping around that.
 
 use medulla::ui::workflows::CopilotState;
+use medulla::workflows::copilot::{Thread, Transcripts};
 
 use super::super::types::{App, Cmd};
+
+/// The saved-transcript thread a pane key addresses.
+///
+/// [`NEW_THREAD`] is this crate's in-memory sentinel for "the workflow being
+/// built has no id yet"; on disk that is a namespace of its own rather than a
+/// key, so the two cannot collide with a workflow an operator actually named.
+pub fn thread_of(key: &str) -> Thread<'_> {
+    if key == NEW_THREAD {
+        Thread::Pending
+    } else {
+        Thread::Workflow(key)
+    }
+}
 
 /// The key the not-yet-a-workflow thread is filed under.
 ///
@@ -29,12 +43,42 @@ impl App {
     /// produce it.
     pub(in crate::ui::app) fn copilot_mut(&mut self) -> Option<&mut CopilotState> {
         let id = self.copilot_key()?;
-        Some(
-            self.wf
-                .copilots
-                .entry(id.clone())
-                .or_insert_with(|| CopilotState::new(id)),
-        )
+        let restored = self.restored_thread(&id);
+        Some(self.wf.copilots.entry(id).or_insert(restored))
+    }
+
+    /// Seed the selected thread from disk if this session has not touched it.
+    ///
+    /// Cheap after the first call per thread — the entry is already in the map
+    /// — so the selection can move freely without re-reading anything.
+    pub(in crate::ui::app) fn ensure_copilot_thread(&mut self) {
+        let _ = self.copilot_mut();
+    }
+
+    /// The saved conversations for this workspace, or `None` on an app whose
+    /// Medulla home was never set.
+    ///
+    /// Derived from the home the app resolved at startup rather than
+    /// rediscovered from the process environment, so a `--home` the operator
+    /// passed is honoured — and so a test fixture's conversations land in its
+    /// own temporary directory instead of the developer's state.
+    fn transcripts(&self) -> Option<Transcripts> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Some(Transcripts::under(self.medulla_home.as_deref()?, &cwd))
+    }
+
+    /// A thread seeded with whatever was saved for `key`.
+    ///
+    /// This is the whole of "the conversation survived a restart" from the
+    /// pane's side: the first time a thread is touched in a session it is read
+    /// off disk rather than started empty, so opening a workflow shows what was
+    /// last said about it instead of a blank pane.
+    fn restored_thread(&self, key: &str) -> CopilotState {
+        let mut state = CopilotState::new(key.to_string());
+        if let Some(transcripts) = self.transcripts() {
+            state.turns = transcripts.load(thread_of(key)).turns;
+        }
+        state
     }
 
     /// The thread the rail cursor is on, if it has one yet.
@@ -57,10 +101,11 @@ impl App {
 
     /// Seed the transcript for a review started automatically after failure.
     pub fn copilot_started(&mut self, workflow: &str, instruction: &str) {
+        let restored = self.restored_thread(workflow);
         self.wf
             .copilots
             .entry(workflow.to_string())
-            .or_insert_with(|| CopilotState::new(workflow.to_string()))
+            .or_insert(restored)
             .ask(instruction);
     }
 
@@ -235,6 +280,10 @@ impl App {
             thread.changed(changes);
             thread.reply(reply);
         }
+        // Saved before the thread can be moved or the catalogue reloaded, so a
+        // crash between here and the next turn still costs nothing: what the
+        // operator asked and what the agent answered are already on disk.
+        self.persist_copilot(workflow);
         // `adopt_new_workflow` can move this thread — queued instruction and
         // all — from `NEW_THREAD` to the workflow's real id, so the queue must
         // be drained under whatever key the thread lives at *after* that move.
@@ -313,6 +362,12 @@ impl App {
             thread.workflow_id = id.to_string();
             self.wf.copilots.insert(id.to_string(), thread);
         }
+        // The saved copy moves with it. Left behind, the next session would
+        // open the new workflow and find no history, while the conversation
+        // that built it sat under a thread nobody opens.
+        if let Some(transcripts) = self.transcripts() {
+            transcripts.rename(Thread::Pending, Thread::Workflow(id));
+        }
         // Clears `creating`, so the rail cursor lands on the new workflow and
         // the content pane draws its graph.
         self.select_workflow(index);
@@ -325,6 +380,33 @@ impl App {
     /// Keeps the instruction that failed so `r` can send it again. Anything
     /// queued behind it is dropped: the operator's follow-up assumed the turn
     /// that just failed had happened.
+    /// Write `workflow`'s thread to disk, so a restart comes back to it.
+    ///
+    /// Best effort and deliberately quiet: a transcript that could not be saved
+    /// is history lost, not work lost, and interrupting an operator mid-turn to
+    /// say so would cost more than it is worth. The turn itself already
+    /// reported what it did.
+    pub(in crate::ui::app) fn persist_copilot(&self, workflow: &str) {
+        let (Some(thread), Some(transcripts)) =
+            (self.wf.copilots.get(workflow), self.transcripts())
+        else {
+            return;
+        };
+        let _ = transcripts.save(thread_of(workflow), &thread.turns);
+    }
+
+    /// Drop a deleted workflow's saved conversation.
+    ///
+    /// Called when a turn removed the workflow it was scoped to. Kept, the file
+    /// would be history for a graph that no longer exists — and would be
+    /// resurrected wholesale by the next workflow to reuse the id.
+    pub fn forget_copilot(&mut self, workflow: &str) {
+        self.wf.copilots.remove(workflow);
+        if let Some(transcripts) = self.transcripts() {
+            transcripts.forget(thread_of(workflow));
+        }
+    }
+
     pub fn copilot_failed(&mut self, workflow: &str, instruction: String, error: String) {
         if let Some(thread) = self.wf.copilots.get_mut(workflow) {
             thread.failed_with(error.clone(), Some(instruction));
@@ -335,6 +417,10 @@ impl App {
                 thread.take_queued();
             }
         }
+        // A failure is part of the record too: an operator coming back to this
+        // thread should see that the last turn timed out rather than an
+        // instruction that appears to have gone unanswered.
+        self.persist_copilot(workflow);
         self.set_status(format!("Copilot failed: {error} · r to retry"));
     }
 }

@@ -171,6 +171,19 @@ pub fn build_resumed_run_args(
                 args.push(model.to_string());
             }
             args.extend(extra_args.iter().cloned());
+            // End option parsing before the prompt. Claude Code has variadic
+            // options - `--add-dir <directories...>` is one, and it is what
+            // `workflows::skills::spawn_args` appends so a session can see its
+            // managed skills - and a variadic sitting last in `extra_args`
+            // swallows the prompt as one more value. The harness then exits 1
+            // with "Input must be provided either through stdin or as a prompt
+            // argument", which reads like a Medulla bug in building the prompt
+            // rather than one in where it was placed.
+            //
+            // `--` is the fix rather than an ordering rule, because ordering
+            // only holds while the last extra arg happens to be bounded: the
+            // next variadic option added anywhere reintroduces this silently.
+            args.push("--".to_string());
             args.push(prompt);
         }
         HarnessProvider::Codex => {

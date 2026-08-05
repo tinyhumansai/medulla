@@ -53,13 +53,14 @@
         "args": {
           "language": "shell",
           "cwd": "=inputs.cwd",
+          "shell": "user",
           "shell_args": ["-l"],
           "env": {
             "PR": "=inputs.pr",
             "REPO": "=inputs.repo",
             "FEEDBACK_COMMAND": "=inputs.feedback_command"
           },
-          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# `gh pr checks` exits non-zero when checks are failing or pending, which is\n# exactly the case this node exists to report — so its status is ignored and\n# only its output is read.\nchecks=$(gh pr checks \"$PR\" $repo_arg --json name,state,link 2>/dev/null || true)\n[ -n \"$checks\" ] || checks='[]'\n\npr=$(gh pr view \"$PR\" $repo_arg --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName 2>/dev/null || true)\n[ -n \"$pr\" ] || pr='{}'\n\nif [ -n \"${FEEDBACK_COMMAND:-}\" ]; then\n  # `shell_args: [\"-l\"]` above made this a login shell, so the operator's own\n  # PATH and helper scripts (`pr-comments` and friends) are already on hand.\n  feedback=$(eval \"$FEEDBACK_COMMAND\" 2>/dev/null || true)\nelse\n  feedback=$(gh pr view \"$PR\" $repo_arg --json reviewDecision,reviews,comments -q '{unresolvedThreads: 0, changesRequested: (if .reviewDecision == \"CHANGES_REQUESTED\" then 1 else 0 end), detail: .}' 2>/dev/null || true)\nfi\n[ -n \"$feedback\" ] || feedback='{}'\n\nprintf '{\"checks\":%s,\"pr\":%s,\"feedback\":%s}\\n' \"$checks\" \"$pr\" \"$feedback\"\n"
+          "script": "set -u\nrepo_arg=\"\"\n[ -n \"${REPO:-}\" ] && repo_arg=\"--repo ${REPO}\"\n\n# Reading the pull request is the one thing this step cannot fail quietly at:\n# a missing `gh`, a stale token, or the wrong repo would otherwise yield an\n# empty document that `assess` reads as \"nothing to do\" and reports green. So\n# this one is fatal, and says which pull request it could not read.\nif ! pr=$(gh pr view \"$PR\" $repo_arg --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName 2>&1); then\n  printf 'cannot read pull request %s: %s\\n' \"$PR\" \"$pr\" >&2\n  exit 1\nfi\n\n# `gh pr checks` exits non-zero when checks are failing or pending, which is\n# exactly the case this node exists to report — so its status is ignored and\n# only its output is read. `bucket` is what collapses GitHub's dozen states\n# into pass/fail/pending/skipping/cancel; classifying on raw `state` misses\n# ACTION_REQUIRED and EXPECTED, which block a merge while looking like\n# neither a failure nor a pending run.\nchecks=$(gh pr checks \"$PR\" $repo_arg --json name,state,bucket,link 2>/dev/null || true)\n[ -n \"$checks\" ] || checks='[]'\n\nif [ -n \"${FEEDBACK_COMMAND:-}\" ]; then\n  # `shell: \"user\"` with `shell_args: [\"-l\"]` above made this the operator's\n  # own login shell, so their PATH and helper scripts (`pr-comments` and\n  # friends) are already on hand.\n  feedback=$(eval \"$FEEDBACK_COMMAND\" 2>/dev/null || true)\nelse\n  feedback=$(gh pr view \"$PR\" $repo_arg --json reviewDecision,reviews,comments -q '{unresolvedThreads: 0, changesRequested: (if .reviewDecision == \"CHANGES_REQUESTED\" then 1 else 0 end), detail: .}' 2>/dev/null || true)\nfi\n[ -n \"$feedback\" ] || feedback='{}'\n\nprintf '{\"checks\":%s,\"pr\":%s,\"feedback\":%s}\\n' \"$checks\" \"$pr\" \"$feedback\"\n"
         }
       }
     },
@@ -69,12 +70,12 @@
       "name": "What is left to do",
       "config": {
         "set": {
-          "failing": "=[.item.json.output.checks[]? | select(.state == \"FAIL\" or .state == \"FAILURE\" or .state == \"ERROR\" or .state == \"CANCELLED\" or .state == \"TIMED_OUT\")]",
-          "pending": "=[.item.json.output.checks[]? | select(.state == \"PENDING\" or .state == \"QUEUED\" or .state == \"IN_PROGRESS\")] | length",
+          "failing": "=[.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")]",
+          "pending": "=[.item.json.output.checks[]? | select(.bucket == \"pending\")] | length",
           "blocking_feedback": "=((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0))",
           "feedback": "=.item.json.output.feedback",
           "pr": "=.item.json.output.pr",
-          "actionable": "=([.item.json.output.checks[]? | select(.state == \"FAIL\" or .state == \"FAILURE\" or .state == \"ERROR\" or .state == \"CANCELLED\" or .state == \"TIMED_OUT\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0"
+          "actionable": "=([.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0"
         }
       }
     },
@@ -138,7 +139,9 @@
           "rounds": "=.nodes.watch.iteration",
           "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0)",
           "failing": "=.nodes.assess.item.failing",
-          "blocking_feedback": "=.nodes.assess.item.blocking_feedback"
+          "blocking_feedback": "=.nodes.assess.item.blocking_feedback",
+          "merge_state": "=.nodes.assess.item.pr.mergeStateStatus",
+          "mergeable": "=.nodes.assess.item.pr.mergeable"
         }
       }
     }

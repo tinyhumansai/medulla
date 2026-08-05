@@ -39,16 +39,28 @@ pub struct WorkspaceContext {
 /// Who a session belongs to and what it is called — the identity half of a
 /// session, kept apart from its positional state ([`WorkspaceContext`]).
 ///
-/// Both fields are set once, by the path that created the session:
+/// Both halves are set once, by the path that created the session:
 /// [`SessionOrigin::User`] with the name the person typed, or
 /// [`SessionOrigin::Orchestrator`] with no name at all. Nothing later in the
 /// session's life rewrites the origin — control moves instead, and control is a
 /// different field on a different type.
+///
+/// The origin is **private**, and that is what makes the sentence above true
+/// rather than aspirational: a public field is a public mutation, and a caller
+/// who could flip a bound session between `Orchestrator` and `User` could move
+/// somebody's session into the dispatch pool (or take a dispatched one out of
+/// it) after the fact. Build one through
+/// [`orchestrator`](Self::orchestrator)/[`user`](Self::user), read it through
+/// [`origin`](Self::origin), and rename it through
+/// [`rename`](Self::rename) — the display name is the only mutable half.
+/// [`SessionRegistry::record_identity`](super::SessionRegistry::record_identity)
+/// enforces the same rule on the stored copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionIdentity {
     /// Who started the session. Immutable for its whole life.
-    pub origin: SessionOrigin,
-    /// The name a person gave it, when a person started it.
+    pub(super) origin: SessionOrigin,
+    /// The name a person gave it, when a person started it. Mutable: renaming a
+    /// session changes what it is called, never whose it is.
     pub name: Option<String>,
 }
 
@@ -78,6 +90,25 @@ impl SessionIdentity {
             name,
         }
     }
+
+    /// The identity a session created by `origin` starts with.
+    ///
+    /// The one constructor that takes an origin as a value, for the caller that
+    /// has a [`SessionRecord`](crate::sessions::SessionRecord) in hand and is
+    /// copying its provenance onto the binding rather than deciding it.
+    pub fn new(origin: SessionOrigin, name: Option<String>) -> Self {
+        SessionIdentity { origin, name }
+    }
+
+    /// Who started this session.
+    pub fn origin(&self) -> SessionOrigin {
+        self.origin
+    }
+
+    /// Rename the session, leaving its origin alone.
+    pub fn rename(&mut self, name: Option<String>) {
+        self.name = name;
+    }
 }
 
 /// A resumable harness session, the workspace state accumulated within it, and
@@ -86,7 +117,13 @@ impl SessionIdentity {
 pub(super) struct SessionBinding {
     pub(super) session_id: String,
     pub(super) workspace_context: WorkspaceContext,
-    pub(super) identity: SessionIdentity,
+    /// `None` until the creating path records one. The distinction is what
+    /// lets [`SessionRegistry::record_identity`](super::SessionRegistry::record_identity)
+    /// *establish* an origin exactly once and refuse every later rewrite: with
+    /// a bare [`SessionIdentity`] the freshly-bound orchestrator default would
+    /// be indistinguishable from a deliberate one, and preserving it would
+    /// clamp every user session to the orchestrator.
+    pub(super) identity: Option<SessionIdentity>,
 }
 /// Insertion-ordered bindings plus the per-key turn chains.
 #[derive(Default)]

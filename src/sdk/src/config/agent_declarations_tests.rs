@@ -34,6 +34,32 @@ fn a_declared_agent_round_trips_through_the_config_file() {
     assert_eq!(reloaded[0].max_sessions(), 1, "checkout is serial");
 }
 
+/// The same round-trip through a JSON config. Both halves of the store branch
+/// on the file's extension — [`load_agent_declarations`] parses anything that is
+/// not `.toml` as JSON, and the writer has its own JSON merge path — so a
+/// TOML-only suite covers neither, and an operator on `medulla.tui.json` would
+/// be the one to find out that their declarations reload as an empty list.
+#[test]
+fn a_declared_agent_round_trips_through_a_json_config() {
+    let (_dir, path) = scratch("medulla.tui.json");
+    let mut declared = declaration_for("api-codex", "codex", "/srv/api");
+    declared.name = Some("API".to_string());
+    declared.roles = vec!["reviewer".to_string()];
+
+    let written = declare_agent(&path, &[], declared.clone()).expect("the config is writable");
+    assert_eq!(written, vec![declared.clone()]);
+
+    let text = std::fs::read_to_string(&path).expect("the config was written");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&text).is_ok(),
+        "a .json config must stay JSON on disk: {text}"
+    );
+
+    let reloaded = load_agent_declarations(&path);
+    assert_eq!(reloaded, vec![declared]);
+    assert_eq!(reloaded[0].max_sessions(), 1, "checkout is serial");
+}
+
 /// Declarations live beside every other section, so writing one must not cost
 /// the operator their `[host]` block.
 #[test]

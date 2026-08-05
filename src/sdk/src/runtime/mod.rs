@@ -348,7 +348,6 @@ pub use fleet::{
     AgentTemplateHarnessOverride, CapacitySnapshot, HarnessBudget, HarnessDescriptor,
     HostDescriptor, HostResources, WorkspaceDescriptor, WorkspaceProfile, WorkspaceRef,
     WorkspaceStrategy, DEMO_FLEET_ENV, SELECTABLE_STRATEGIES, WORKSPACE_TYPE_CHECKOUT,
-    WORKTREE_MAX_SESSIONS,
 };
 pub use types::AgentDescriptor;
 pub use types::AgentPresence;

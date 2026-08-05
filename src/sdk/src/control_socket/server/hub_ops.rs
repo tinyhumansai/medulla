@@ -111,15 +111,20 @@ impl FleetOps for HubFleetOps {
                     // set when a *person* does — the orchestrator holding it is
                     // the unmarked common case.
                     let held = worker.control.is_operator();
+                    // The path only: this surface renders a directory, and the
+                    // workspace type has no reader here. Read through
+                    // `workspace_path` rather than off the field, so a blank or
+                    // space-padded declaration is *absent* here exactly as it is
+                    // in the advert — the alternative is one surface calling an
+                    // agent unplaced while another renders it working in "  ".
+                    let workspace = worker.workspace_path().map(str::to_owned);
                     FleetWorker {
                         id: worker.id,
                         address: worker.address,
                         harness: worker.harness,
                         label: worker.label,
                         roles: worker.roles,
-                        // The path only: this surface renders a directory, and
-                        // the workspace type has no reader here.
-                        workspace: worker.workspace.map(|workspace| workspace.path),
+                        workspace,
                         selected: worker.selected,
                         held,
                         held_reason: worker.control_reason,

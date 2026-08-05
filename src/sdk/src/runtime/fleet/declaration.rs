@@ -27,14 +27,6 @@ use serde::{Deserialize, Serialize};
 /// `checkout` · `worktree` · `scratch` · `container`.
 pub const WORKSPACE_TYPE_CHECKOUT: &str = "checkout";
 
-/// Sessions a `worktree`-strategy agent may run at once.
-///
-/// A placeholder, not a measurement: worktree provisioning is not implemented
-/// (see [`WorkspaceStrategy::selectable`]), so nothing derives this number from
-/// real per-session worktrees yet. It exists so the strategy → capacity
-/// derivation is total, and the provisioning follow-up owns replacing it.
-pub const WORKTREE_MAX_SESSIONS: u32 = 4;
-
 /// Where an agent's sessions do their work.
 ///
 /// `path` is absolute as the declaring machine sees it; `kind` is the free-form
@@ -105,20 +97,32 @@ pub enum WorkspaceStrategy {
     /// Each session gets a carved per-session git worktree, so sessions run
     /// genuinely in parallel.
     ///
-    /// **Not selectable in v1**: the variant, its wire value and its capacity
-    /// derivation exist so the model is complete and a config that names it
-    /// still parses, but nothing provisions a worktree yet. Offering it in a
-    /// picker would declare parallel sessions that all land in one directory.
-    /// See [`selectable`](Self::selectable).
+    /// **Not selectable in v1**: the variant and its wire value exist so the
+    /// model is complete and a config that names it still parses, but nothing
+    /// provisions a worktree yet. Offering it in a picker would declare
+    /// parallel sessions that all land in one directory. See
+    /// [`selectable`](Self::selectable).
     Worktree,
 }
 
 impl WorkspaceStrategy {
-    /// Sessions this strategy permits at once. `Checkout` ⇒ 1 (serial).
+    /// Sessions this strategy permits at once — one, for every strategy there
+    /// is today.
+    ///
+    /// `Checkout` is serial by definition: every session shares the one
+    /// directory. `Worktree` is serial *by provisioning*, which is a different
+    /// reason for the same number and the one that matters here. The capacity
+    /// this returns is advertised as `maxSessions` and the orchestrator
+    /// schedules against it, so reporting the parallelism a carved worktree
+    /// *would* allow — while nothing carves one — would schedule concurrent
+    /// sessions into a single checkout: exactly the collision the strategy
+    /// exists to prevent, arrived at by declaring the fix.
+    ///
+    /// Raising this is the provisioning follow-up's job, and it is only safe in
+    /// the same change that makes a per-session worktree actually exist.
     pub fn max_sessions(self) -> u32 {
         match self {
-            Self::Checkout => 1,
-            Self::Worktree => WORKTREE_MAX_SESSIONS,
+            Self::Checkout | Self::Worktree => 1,
         }
     }
 

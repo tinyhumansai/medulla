@@ -3,14 +3,32 @@
 
 use super::declaration::*;
 
+/// Capacity is what the orchestrator schedules against, so it may never exceed
+/// what this build can actually provision. `Worktree` parses (a config from a
+/// later version must not fail the whole load) but nothing carves a per-session
+/// worktree yet, so advertising its eventual parallelism would put four
+/// concurrent sessions in one checkout — the collision the strategy exists to
+/// prevent.
 #[test]
-fn checkout_derives_one_session_and_worktree_more_than_one() {
+fn no_strategy_advertises_more_capacity_than_this_build_provisions() {
     assert_eq!(WorkspaceStrategy::Checkout.max_sessions(), 1);
-    assert!(WorkspaceStrategy::Worktree.max_sessions() > 1);
+    assert_eq!(
+        WorkspaceStrategy::Worktree.max_sessions(),
+        1,
+        "worktree provisioning is unimplemented, so its capacity stays serial"
+    );
     assert_eq!(
         AgentDeclaration::new("a", "this-device", "claude", "/repo").max_sessions(),
         1,
         "the v1 default is serial"
+    );
+
+    let mut worktree = AgentDeclaration::new("b", "this-device", "claude", "/repo");
+    worktree.strategy = WorkspaceStrategy::Worktree;
+    assert_eq!(
+        worktree.max_sessions(),
+        1,
+        "a hand-written worktree declaration is still scheduled serially"
     );
 }
 

@@ -31,7 +31,7 @@ mod declaration_tests;
 mod demo;
 pub use declaration::{
     seed_declarations, suggest_agent_id, AgentDeclaration, WorkspaceRef, WorkspaceStrategy,
-    SELECTABLE_STRATEGIES, WORKSPACE_TYPE_CHECKOUT, WORKTREE_MAX_SESSIONS,
+    SELECTABLE_STRATEGIES, WORKSPACE_TYPE_CHECKOUT,
 };
 pub use demo::{
     demo_agents, demo_capacity, demo_fleet_requested, demo_requested_from, DEMO_FLEET_ENV,

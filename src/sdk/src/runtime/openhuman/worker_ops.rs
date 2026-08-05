@@ -27,15 +27,19 @@ pub(super) fn hub_worker_to_info(
             )
         })
         .unwrap_or_default();
+    // The path only: the UI row has always been a path, and the workspace
+    // *type* has no renderer yet. Read through `workspace_path` rather than off
+    // the field, so a blank or space-padded declaration is *absent* here exactly
+    // as it is in the advert — the roster omits it, and a row that instead
+    // rendered "  " would show the agent working somewhere.
+    let workspace = worker.workspace_path().map(str::to_owned);
     crate::runtime::WorkerInfo {
         handle: worker
             .address
             .starts_with('@')
             .then(|| worker.address.clone()),
         id: worker.id,
-        // The path only: the UI row has always been a path, and the workspace
-        // *type* has no renderer yet.
-        workspace: worker.workspace.map(|workspace| workspace.path),
+        workspace,
         address: worker.address,
         label: worker.label,
         harness: Some(worker.harness),

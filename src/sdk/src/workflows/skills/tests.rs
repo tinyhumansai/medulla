@@ -116,6 +116,11 @@ fn an_indented_marker_is_not_one_we_wrote() {
     let indented = "---\n  # medulla:managed workflow=babysit rev=abc\nname: theirs\n---\nbody\n";
     assert_eq!(parse_marker(indented), None);
 
+    // The opener is held to the same rule: an indented `  ---` opens nothing,
+    // so what follows it cannot be a marker of ours either.
+    let opener = "  ---\n# medulla:managed workflow=babysit rev=abc\nname: theirs\n---\nbody\n";
+    assert_eq!(parse_marker(opener), None);
+
     // Trailing whitespace, by contrast, is what an editor does to a line we
     // did write, so it stays tolerated.
     let trailing = "---\n# medulla:managed workflow=babysit rev=abc \nname: ours\n---   \nbody\n";

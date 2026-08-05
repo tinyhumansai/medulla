@@ -263,11 +263,15 @@ fn decode_marker_id(field: &str) -> Option<String> {
 /// were written before this rule existed.
 pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     let mut lines = file.lines();
-    let first = lines.next()?.trim();
-    if let Some(rest) = first.strip_prefix("<!-- medulla:managed ") {
+    let first = lines.next()?;
+    if let Some(rest) = first.trim().strip_prefix("<!-- medulla:managed ") {
         return parse_marker_fields(rest.strip_suffix("-->")?.trim());
     }
-    if first != "---" {
+    // The opener is held to the same column-zero rule as the marker below it,
+    // and for the same reason: an indented `  ---` is not frontmatter any
+    // parser opens, so a file starting with one is not a skill of ours however
+    // its second line reads.
+    if first.trim_end() != "---" {
         return None;
     }
     // Trailing whitespace only: an editor may strip or add it at end of line,

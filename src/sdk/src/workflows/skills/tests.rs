@@ -15,6 +15,7 @@ use tempfile::TempDir;
 
 use crate::workflows::{InputType, WorkflowInput, WorkflowSummary};
 
+use super::render::parse_marker;
 use super::*;
 
 /// A listing view with the fields skill rendering actually reads.
@@ -54,9 +55,17 @@ fn zero_input_skill_states_an_empty_inputs_object() {
     let skill = render(&summary("babysit", "Watch a pull request.", vec![]));
 
     assert_eq!(skill.slug, "medulla-babysit");
-    assert!(skill
-        .body
-        .starts_with("<!-- medulla:managed workflow=babysit rev="));
+    // The frontmatter opens the file and the marker is the first thing inside
+    // it. A harness only parses frontmatter that starts on line 1: with the
+    // marker above it, the description — the one field a request is matched
+    // against — is not read at all.
+    assert!(
+        skill
+            .body
+            .starts_with("---\n# medulla:managed workflow=babysit rev="),
+        "{}",
+        skill.body
+    );
     assert!(skill.body.contains("name: medulla-babysit"));
     assert!(skill.body.contains("This workflow takes no inputs"));
     assert!(skill.body.contains("mcp__medulla__workflow_run"));
@@ -136,7 +145,12 @@ fn required_inputs_are_marked_and_placeheld() {
     let command = render_command(&skill, &summary("babysit", "Watch a PR.", inputs));
     assert!(command.contains("argument-hint: \"<pr> <payload>\""));
     assert!(command.contains("$ARGUMENTS"));
-    assert!(command.starts_with("<!-- medulla:managed workflow=babysit rev="));
+    // A command file is frontmatter-led too, so its marker sits in the same
+    // place for the same reason.
+    assert!(
+        command.starts_with("---\n# medulla:managed workflow=babysit rev="),
+        "{command}"
+    );
 }
 
 #[test]
@@ -149,11 +163,57 @@ fn rev_changes_only_when_the_body_does() {
     assert_eq!(first.body, same.body);
     assert_ne!(first.rev, changed.rev);
 
-    // The rev fingerprints the content below the marker, so it survives being
-    // read back off the file it was written to.
-    let below = first.body.split_once('\n').expect("marker line").1;
+    // The rev fingerprints the generated content, and appears only on the
+    // marker line itself — so reading it back off the file cannot pick up a
+    // hash the content happens to quote.
     assert!(first.body.contains(&format!("rev={}", first.rev)));
-    assert!(!below.contains(&first.rev));
+    let elsewhere: String = first
+        .body
+        .lines()
+        .filter(|line| !line.starts_with("# medulla:managed "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!elsewhere.contains(&first.rev));
+}
+
+/// A file the previous release installed carries its marker as an HTML comment
+/// above the frontmatter. It is still ours: it must be recognised, must be
+/// rewritten into the readable layout, and must never be reported as a
+/// collision against the very skill that wrote it.
+#[test]
+fn a_skill_the_old_layout_installed_is_adopted_and_rewritten() {
+    let home = TempDir::new().unwrap();
+    let summary = summary("babysit", "Watch a PR.", Vec::new());
+    let skill = render(&summary);
+    let path = skill_path(
+        SkillTarget::Claude,
+        home.path(),
+        &crate::workflows::skills::slug_for("babysit"),
+    );
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // The old file: the same rendered content, marker on line one.
+    let content = skill.body.replacen(
+        &format!("# medulla:managed workflow=babysit rev={}\n", skill.rev),
+        "",
+        1,
+    );
+    std::fs::write(
+        &path,
+        format!("<!-- medulla:managed workflow=babysit rev=deadbeef -->\n{content}"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        parse_marker(&std::fs::read_to_string(&path).unwrap()).map(|(id, _)| id),
+        Some("babysit".to_string()),
+        "the legacy marker must still identify the file as ours"
+    );
+
+    let report = install(&[summary], &opts(home.path(), vec![SkillTarget::Claude])).unwrap();
+
+    assert_eq!(report.files[0].action, FileAction::Updated);
+    assert!(!report.has_collisions());
+    assert!(std::fs::read_to_string(&path).unwrap().starts_with("---\n"));
 }
 
 #[test]

@@ -389,6 +389,9 @@ impl PtySessionExecutor {
             &mut extra_args,
             self.log.as_ref(),
         );
+        // The managed skills that name the workflows those tools can start,
+        // on the same terms the headless executor already hands them over.
+        super::super::pty::launch::attach_skills(options.provider, &env, &mut extra_args);
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
             bin,

@@ -318,6 +318,95 @@ fn an_operator_started_claude_is_handed_medullas_own_tools() {
     );
 }
 
+/// The other half of what a spawned harness needs: the tools arrive on the argv
+/// above, but a session that does not know `babysit` exists never reaches for
+/// them. `--scope managed` is documented as covering "the harnesses Medulla
+/// spawns", and the pty doors — the Workers pane and the task frames opened on
+/// this device — were not among them: only the headless executor added the
+/// `--add-dir` that makes Claude load the managed skills.
+///
+/// Against the real spawn for the same reason the test above is.
+#[cfg(all(unix, feature = "workflows"))]
+#[test]
+fn an_operator_started_claude_is_pointed_at_the_managed_skills() {
+    use medulla::workflows::skills::{
+        install, managed_dir, managed_root, InstallOptions, SkillScope, SkillTarget,
+    };
+    use medulla::workflows::WorkflowSummary;
+
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let argv = dir.path().join("argv");
+    let bin = dir.path().join("fake-claude");
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nsleep 30\n",
+            argv.display()
+        ),
+    )
+    .expect("the stand-in harness is writable");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in harness is executable");
+    }
+
+    // A Medulla home of our own, so the test reads its own managed skills
+    // rather than whatever the developer running it has installed.
+    let home = dir.path().join("medulla-home");
+    let mut env = HashMap::new();
+    env.insert("MEDULLA_HOME".to_string(), home.display().to_string());
+    install(
+        &[WorkflowSummary {
+            id: "babysit".to_string(),
+            name: "babysit".to_string(),
+            description: "Watch a PR until it is green.".to_string(),
+            enabled: true,
+            node_count: 3,
+            trigger_kind: Some("manual".to_string()),
+            inputs: Vec::new(),
+        }],
+        &InstallOptions {
+            targets: vec![SkillTarget::Claude],
+            scope: SkillScope::Managed,
+            root: managed_root(&env),
+            with_commands: false,
+            dry_run: false,
+        },
+    )
+    .expect("the managed skill is installable");
+    let expected = managed_dir(SkillTarget::Claude, &env).display().to_string();
+
+    let sessions = PtyManager::new();
+    let mut harnesses = harnesses(sessions.clone());
+    harnesses.workspace = dir.path().to_string_lossy().into_owned();
+    harnesses.env.insert(
+        "TINYVERSE_CLAUDE_BIN".to_string(),
+        bin.to_string_lossy().into_owned(),
+    );
+    harnesses
+        .env
+        .insert("MEDULLA_HOME".to_string(), home.display().to_string());
+
+    let id = harnesses
+        .open_unmanaged(&HarnessChoice::native(HarnessProvider::Claude), "", false)
+        .expect("the stand-in harness starts");
+    wait_for("the child to record its argv", || argv.exists());
+    let recorded = std::fs::read_to_string(&argv).expect("the argv was recorded");
+    sessions.close(&id);
+
+    let mut lines = recorded.lines();
+    let added = lines
+        .find(|line| *line == "--add-dir")
+        .and_then(|_| lines.next());
+    assert_eq!(
+        added,
+        Some(expected.as_str()),
+        "claude loads .claude/skills from an --add-dir directory; without the flag \
+         the managed skills are invisible to the session: {recorded}"
+    );
+}
+
 /// Spin until `check` passes or the deadline expires.
 ///
 /// The budget is far larger than these conditions actually need: real children

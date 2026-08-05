@@ -63,11 +63,11 @@ pub fn slug_for(workflow_id: &str) -> String {
 
 /// Renders the `SKILL.md` for one workflow.
 ///
-/// The returned [`RenderedSkill::body`] is the complete file: managed marker
-/// first line, then frontmatter, then the instructions. `rev` fingerprints
-/// everything below the marker, so it changes if and only if the generated
-/// content does — which is what makes an install idempotent across releases
-/// that do not touch the template.
+/// The returned [`RenderedSkill::body`] is the complete file: frontmatter whose
+/// first entry is the managed marker, then the instructions. `rev` fingerprints
+/// the generated content, so it changes if and only if that content does —
+/// which is what makes an install idempotent across releases that do not touch
+/// the template.
 pub fn render(summary: &WorkflowSummary) -> super::RenderedSkill {
     let slug = slug_for(&summary.id);
     let description = description_for(summary);
@@ -125,19 +125,48 @@ pub fn render_command(skill: &super::RenderedSkill, summary: &WorkflowSummary) -
     seal(&summary.id, &out).0
 }
 
+/// The marker layout a `rev` is computed for.
+///
+/// Mixed into the hash so that moving the marker — as release 0.8 moved it from
+/// a line above the frontmatter to a comment inside it — changes every `rev`
+/// even where the rendered text is byte-identical. Without it an install would
+/// find its own matching `rev` on a file laid out the old way, report
+/// `unchanged`, and leave the operator with skills no harness can read.
+const MARKER_FORMAT: &str = "medulla-skill-marker/2";
+
 /// Wraps rendered content in its managed marker and returns `(file, rev)`.
 ///
 /// The marker is what every write path checks before touching a file, so it is
-/// produced in exactly one place. The id is percent-encoded, because the store
-/// accepts any id that is a single path component — spaces, newlines, quotes
-/// and non-ASCII included — and the marker is a whitespace-separated,
-/// single-line field list. An id written raw would either come back as a
-/// different id or split the marker across lines, and both make Medulla
-/// disown a file it wrote itself.
+/// produced in exactly one place. It goes *inside* the frontmatter, as a YAML
+/// comment on its first line, because a harness only recognises frontmatter
+/// that opens on line 1: with the marker above it, Claude Code read the whole
+/// document as body text and showed the marker itself where the description
+/// belongs — which is the one field the model matches a request against, so the
+/// skill was installed, listed, and untriggerable. YAML drops `#` comments
+/// before anything else sees the document, so the marker stays invisible to the
+/// harness and legible to us.
+///
+/// The id is percent-encoded, because the store accepts any id that is a single
+/// path component — spaces, newlines, quotes and non-ASCII included — and the
+/// marker is a whitespace-separated, single-line field list. An id written raw
+/// would either come back as a different id or split the marker across lines,
+/// and both make Medulla disown a file it wrote itself.
+///
+/// Content that does not open with frontmatter falls back to the marker on its
+/// own first line. Nothing here generates such content, but a marker that is
+/// silently dropped would make the file unrecognisable — and therefore neither
+/// updatable nor removable.
 fn seal(workflow_id: &str, content: &str) -> (String, String) {
-    let rev = format!("{:x}", Sha256::digest(content.as_bytes()));
+    let rev = format!(
+        "{:x}",
+        Sha256::digest(format!("{MARKER_FORMAT}\n{content}").as_bytes())
+    );
     let id = encode_marker_id(workflow_id);
-    let file = format!("<!-- medulla:managed workflow={id} rev={rev} -->\n{content}");
+    let marker = format!("medulla:managed workflow={id} rev={rev}");
+    let file = match content.strip_prefix("---\n") {
+        Some(rest) => format!("---\n# {marker}\n{rest}"),
+        None => format!("<!-- {marker} -->\n{content}"),
+    };
     (file, rev)
 }
 
@@ -200,17 +229,46 @@ fn decode_marker_id(field: &str) -> Option<String> {
     Some(decoded)
 }
 
-/// Reads the marker off a file's first line.
+/// Reads the marker out of a file's head.
 ///
-/// Returns the `(workflow id, rev)` it names, or `None` when the file is not
-/// ours — which the install path treats as "leave it alone", never as "assume
-/// it is stale". A marker whose fields are duplicated, unparseable, or missing
-/// counts as not ours for the same reason: the only safe reading of a line we
-/// cannot fully account for is that someone else wrote it.
+/// Two spellings are accepted, and both must stay: the current one is a YAML
+/// comment inside the leading frontmatter, and the legacy one is an HTML
+/// comment on line 1, above it. A release that stopped recognising the legacy
+/// form would disown every file the previous release installed — reporting a
+/// collision against its own skill on reinstall, and refusing to remove it on
+/// `sync --prune` or `uninstall`.
+///
+/// Returns the `(workflow id, rev)` the marker names, or `None` when the file
+/// is not ours — which the install path treats as "leave it alone", never as
+/// "assume it is stale". A marker whose fields are duplicated, unparseable, or
+/// missing counts as not ours for the same reason: the only safe reading of a
+/// line we cannot fully account for is that someone else wrote it.
+///
+/// The search stops at the end of the frontmatter block. A `# medulla:managed`
+/// line in the prose below is a document *about* these files, not one of them.
 pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
-    let first = file.lines().next()?.trim();
-    let rest = first.strip_prefix("<!-- medulla:managed ")?;
-    let rest = rest.strip_suffix("-->")?.trim();
+    let mut lines = file.lines();
+    let first = lines.next()?.trim();
+    if let Some(rest) = first.strip_prefix("<!-- medulla:managed ") {
+        return parse_marker_fields(rest.strip_suffix("-->")?.trim());
+    }
+    if first != "---" {
+        return None;
+    }
+    for line in lines {
+        let line = line.trim();
+        if line == "---" {
+            return None;
+        }
+        if let Some(rest) = line.strip_prefix("# medulla:managed ") {
+            return parse_marker_fields(rest.trim());
+        }
+    }
+    None
+}
+
+/// Parses the marker's `key=value` field list, whatever comment wrapped it.
+fn parse_marker_fields(rest: &str) -> Option<(String, String)> {
     let mut workflow = None;
     let mut rev = None;
     for field in rest.split_whitespace() {

@@ -68,6 +68,47 @@ pub fn attach_mcp(
     None
 }
 
+/// Point a harness about to be launched here at Medulla's managed skills.
+///
+/// The tools arrive on their own (see [`attach_mcp`]), but nothing in a fresh
+/// session knows *which* workflows exist or that `workflow_run` is how to start
+/// one. That knowledge is a skill file, and `medulla skills install --scope
+/// managed` writes it under `<medulla home>/<harness>-skills/` — a root Medulla
+/// owns, so the operator's own `~/.claude` is left alone. All that remains is
+/// telling the child to read it, which for Claude Code is `--add-dir`.
+///
+/// Called at both pty doors for the same reason [`attach_mcp`] is: the headless
+/// executor already does this in `medulla::daemon::providers`, and a harness
+/// started on a pty is no less Medulla-spawned than one started headless. Until
+/// this existed, `--scope managed` was documented as covering "the harnesses
+/// Medulla spawns" while the two doors an operator actually watches — the
+/// Workers pane's sessions and the task frames opened on this device — silently
+/// got nothing.
+///
+/// `env` is the child's environment, not the parent's: it is what resolves
+/// `MEDULLA_HOME`/`HOME`, so a scratch-home session reads that home's skills.
+/// Appends nothing for a provider with no such flag (everything but Claude
+/// Code) or when the managed root holds no skills for it, so an install nobody
+/// ran changes no argv.
+#[cfg(feature = "workflows")]
+pub fn attach_skills(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+    extra_args: &mut Vec<String>,
+) {
+    extra_args.extend(medulla::workflows::skills::spawn_args(provider, env));
+}
+
+/// Without the engine compiled in there are no workflows to have skills for.
+#[cfg(not(feature = "workflows"))]
+pub fn attach_skills(
+    provider: HarnessProvider,
+    env: &HashMap<String, String>,
+    extra_args: &mut Vec<String>,
+) {
+    let _ = (provider, env, extra_args);
+}
+
 /// The argv for an interactive (screen-painting) run of `provider`.
 ///
 /// Deliberately minimal. Every flag the headless path adds — `-p`,

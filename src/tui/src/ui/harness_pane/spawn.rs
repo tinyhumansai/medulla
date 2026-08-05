@@ -82,6 +82,10 @@ impl LocalHarnesses {
             &mut extra_args,
             self.log.as_ref(),
         );
+        // And the knowledge to use them: the tools alone leave the session
+        // reaching for a `workflow_run` it has no reason to call and no idea
+        // what to pass. Appends nothing unless managed skills are installed.
+        crate::worker::pty::launch::attach_skills(provider, &env, &mut extra_args);
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
         self.sessions.open(LaunchSpec {

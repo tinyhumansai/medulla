@@ -78,11 +78,25 @@ fn document(id: &str) -> String {
 fn every_id_the_store_accepts_round_trips_through_its_marker() {
     for id in AWKWARD_IDS {
         let skill = render(&summary(id));
-        let marker = skill.body.lines().next().expect("a marker line");
+        let mut lines = skill.body.lines();
 
-        // The whole marker stays on line one, whatever the id contains.
-        assert!(marker.ends_with("-->"), "{id:?} broke the marker: {marker}");
-        assert!(!marker["<!-- medulla:managed ".len()..].contains(['\n', '\r']));
+        // The frontmatter still opens the file, and the marker is still one
+        // line inside it, whatever the id contains — an id with a newline in it
+        // would otherwise push `rev` onto a line of its own and, worse, break
+        // the frontmatter the harness parses.
+        assert_eq!(
+            lines.next(),
+            Some("---"),
+            "{id:?} displaced the frontmatter"
+        );
+        let marker = lines.next().expect("a marker line");
+        assert!(
+            marker.starts_with("# medulla:managed "),
+            "{id:?} broke the marker: {marker}"
+        );
+        assert!(!marker.contains(['\n', '\r']));
+        // Still a YAML comment, so the harness's frontmatter parser drops it.
+        assert!(lines.any(|line| line.starts_with("name: ")));
 
         let (decoded, rev) = parse_marker(&skill.body).expect("our own marker parses");
         assert_eq!(decoded, id, "id did not survive the marker");

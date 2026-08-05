@@ -476,6 +476,58 @@ fn keeping_a_harness_releases_the_keyboard_but_not_control() {
     sessions.shutdown();
 }
 
+// Unix-only: stands a real session up on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of.
+#[cfg(unix)]
+#[test]
+fn a_second_attachment_does_not_inherit_the_first_ones_takeover() {
+    // "I took this by focusing in" is what a write failure reads to decide
+    // whether to give the session back. Nothing clears it on release, so a
+    // `true` left by an earlier attachment used to survive into the next one —
+    // and the next one might be a session the operator was already holding
+    // before they focused in, which the failure would then hand to the
+    // orchestrator behind their back.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+    sessions.set_control(&id, SessionControl::Orchestrator);
+
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+
+    // First attachment: this one really did take it.
+    let _ = app.on_event(focus_chord());
+    assert_eq!(sessions.row(&id).unwrap().control, SessionControl::User);
+    // Release the keyboard but keep the session, so the operator holds it while
+    // nothing is attached.
+    let _ = app.on_event(focus_chord());
+    let _ = app.on_event(key(KeyCode::Char('n')));
+    assert_eq!(app.attached_session(), None);
+    assert_eq!(sessions.row(&id).unwrap().control, SessionControl::User);
+
+    // Second attachment: nothing to take, because it is already theirs.
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+    let _ = app.on_event(focus_chord());
+    assert_eq!(app.attached_session(), Some(id.as_str()));
+
+    // The child goes away, so the next keystroke fails on a dead pty.
+    sessions.shutdown();
+    wait_for("the session to stop accepting writes", || {
+        sessions.write(&id, b"x").is_err()
+    });
+    type_str(&mut app, "x");
+
+    assert_eq!(app.attached_session(), None, "a dead pane is detached");
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        SessionControl::User,
+        "the session was theirs before this attachment and stays theirs: {}",
+        app.status()
+    );
+}
+
 #[test]
 fn escape_from_the_question_stays_attached() {
     let sessions = PtyManager::new();

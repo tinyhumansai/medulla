@@ -54,7 +54,7 @@ A machine, local or remote — the environment the agents declared on it run in.
 host is declared (not probed) and carries resource metadata (CPU, memory). It is
 the top of the containment chain:
 
-```
+```text
 Host → Agent → Session
 ```
 

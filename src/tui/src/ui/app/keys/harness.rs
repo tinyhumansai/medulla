@@ -143,8 +143,15 @@ impl App {
             if let Some(harnesses) = self.local_sessions.clone() {
                 harnesses.set_control(&session, SessionControl::User);
             }
-            self.took_control_by_attach = true;
         }
+        // Set from `took` on *every* attachment, not only the ones that took
+        // something. The flag is about the session now being attached, and
+        // nothing else clears it — `release_session` leaves the keyboard without
+        // touching who holds what — so a `true` left by an earlier attachment
+        // survived into the next one. A write failure then read it and handed
+        // back a session the operator had already been holding before they
+        // focused in.
+        self.took_control_by_attach = took;
         // Attaching answers whatever the harness was blinking about: the
         // operator is now looking at the screen that was asking. A named prompt
         // that is still up returns on the next refresh, so nothing is lost by

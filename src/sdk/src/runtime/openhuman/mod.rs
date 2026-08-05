@@ -55,6 +55,16 @@ const POLL_ACTIVE: std::time::Duration = std::time::Duration::from_millis(120);
 
 /// Ceiling the poll delay backs off to once a session goes quiet.
 const POLL_IDLE: std::time::Duration = std::time::Duration::from_millis(1_000);
+
+/// How long an accepted turn may produce nothing at all before the running
+/// indicator settles.
+///
+/// The backend records the turn inside the request that accepts it, so its own
+/// echo is readable by the next poll — one [`POLL_IDLE`] plus a round trip.
+/// Silence an order of magnitude past that is not a slow cycle, it is a turn
+/// nothing is working on, and the spinner should stop claiming otherwise. The
+/// transcript keeps the turn either way.
+const ECHO_STALL_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
 use super::Runtime;
 use crate::ui::chat_store::MainChatSummary;
 
@@ -78,7 +88,9 @@ pub const NOT_YET_WIRED: &str =
 /// A [`Runtime`] driving an in-process OpenHuman core.
 pub struct OpenHumanRuntime {
     core: Arc<Core>,
-    cell: SnapshotCell,
+    /// Shared so a submit that failed can settle the turn it drew from inside
+    /// the spawned future, which outlives the `&self` that started it.
+    cell: Arc<SnapshotCell>,
     /// The session `submit`/`abort` act on.
     ///
     /// Minted lazily on first submit rather than at construction: booting must
@@ -144,7 +156,7 @@ impl OpenHumanRuntime {
     pub fn with_hub(core: Arc<Core>, hub: HubSlot) -> Self {
         Self {
             core,
-            cell: SnapshotCell::new(),
+            cell: Arc::new(SnapshotCell::new()),
             session: SessionSlot::default(),
             cursor: Arc::new(tokio::sync::Mutex::new(None)),
             poll_failures: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -320,6 +332,18 @@ impl OpenHumanRuntime {
                 delay = if rt.poll_events().await > 0 {
                     POLL_ACTIVE
                 } else {
+                    // Nothing came back. If a turn this host drew locally has
+                    // been waiting on the backend since before the deadline,
+                    // stop reporting it as running — checked here rather than
+                    // on its own timer because this loop already wakes at least
+                    // once per `POLL_IDLE`, which is finer than the deadline.
+                    if rt.cell.expire_stalled_echo(ECHO_STALL_AFTER) {
+                        tracing::debug!(
+                            "[openhuman_runtime] no events {}s after a submitted turn; \
+                             settling the running indicator",
+                            ECHO_STALL_AFTER.as_secs()
+                        );
+                    }
                     // Ease back rather than snapping to idle: a turn often has
                     // gaps between batches, and snapping would add the full
                     // idle delay to the very next token.
@@ -351,12 +375,27 @@ impl Runtime for OpenHumanRuntime {
     fn submit(&self, input: String) -> BoxFuture<'static, anyhow::Result<()>> {
         let core = Arc::clone(&self.core);
         let session = self.session_handle();
+        let cell = Arc::clone(&self.cell);
+        // Draw the turn before anything is dialled. Everything below this line
+        // is at least one round trip away — on the first turn of a session, two
+        // — and the replay that would otherwise be the turn's first appearance
+        // is a further poll interval behind that.
+        let echo = cell.echo_user(&input);
         Box::pin(async move {
-            let id = Self::session_for(&core, &session).await?;
             // Non-blocking: the reply arrives over the event stream, so the UI
             // can render progress instead of freezing until the turn finishes.
-            core.medulla().send_message(&id, &input, false).await?;
-            Ok(())
+            let sent: anyhow::Result<()> = async {
+                let id = Self::session_for(&core, &session).await?;
+                core.medulla().send_message(&id, &input, false).await?;
+                Ok(())
+            }
+            .await;
+            if sent.is_err() {
+                // Nothing accepted the turn, so no confirmation is coming and
+                // the spinner would turn forever waiting for one.
+                cell.abandon_echo(echo);
+            }
+            sent
         })
     }
 

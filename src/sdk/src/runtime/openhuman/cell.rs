@@ -7,11 +7,36 @@
 //! this piece core-free is what makes the contract unit-testable at all.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 
 use crate::runtime::types::{AgentDescriptor, RuntimeSnapshot, ThreadSummary};
-use crate::ui::events::EventEnvelope;
+use crate::ui::events::{EventEnvelope, TuiEvent};
+
+/// A turn shown to the operator before the backend has confirmed it.
+///
+/// Held apart from the snapshot so reconciliation can find the provisional row
+/// again without the render layer ever having to know a row was provisional.
+struct PendingEcho {
+    /// The sentinel `seq` the provisional envelope was filed under.
+    seq: u64,
+    /// The turn's text, matched against the backend's own copy.
+    body: String,
+}
+
+/// Bookkeeping for turns echoed locally and not yet confirmed.
+#[derive(Default)]
+struct EchoState {
+    /// Provisional turns, oldest first — the order the backend confirms them in.
+    pending: Vec<PendingEcho>,
+    /// When the oldest unconfirmed echo was placed, for the stall watchdog.
+    ///
+    /// Re-armed only while nothing has come back at all: the watchdog answers
+    /// "did the backend say anything about this turn", not "is the cycle slow",
+    /// which is [`StreamState`](crate::runtime::types::StreamState)'s question.
+    armed_at: Option<Instant>,
+}
 
 /// Holds the folded view and notifies readers when it changes.
 pub struct SnapshotCell {
@@ -19,6 +44,13 @@ pub struct SnapshotCell {
     /// so the lock is never held across an await and there is no partial state
     /// for a reader to observe.
     state: Mutex<RuntimeSnapshot>,
+    /// Provisional turns awaiting the backend's confirmation.
+    ///
+    /// **Lock order: `state` before `echoes`, always.** The two are separate
+    /// mutexes so a reader calling [`snapshot`](Self::snapshot) never contends
+    /// on echo bookkeeping, which makes a consistent acquisition order the only
+    /// thing standing between this and a deadlock.
+    echoes: Mutex<EchoState>,
     /// Payload-free ping. The contract is "something moved, re-read the
     /// snapshot", which keeps a slow reader from having to replay a backlog and
     /// makes a lagging receiver harmless.
@@ -31,6 +63,7 @@ impl SnapshotCell {
         let (tx, _rx) = broadcast::channel(16);
         Self {
             state: Mutex::new(RuntimeSnapshot::default()),
+            echoes: Mutex::new(EchoState::default()),
             tx,
         }
     }
@@ -86,6 +119,32 @@ impl SnapshotCell {
             state.running = running;
         } else {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());
+            // A batch arrived, so the backend is talking about this turn: the
+            // stall watchdog has nothing left to answer.
+            echoes.armed_at = None;
+            for env in &events {
+                let TuiEvent::User { body } = &env.event else {
+                    continue;
+                };
+                // The backend's own copy of a turn this host already drew.
+                // Retire the provisional row rather than rendering the turn
+                // twice; the confirmed envelope carries the real `seq`, and is
+                // appended below in the batch's own order.
+                //
+                // Matched by body against the oldest pending echo. Safe within
+                // a thread because the cursor only moves forward, so a turn is
+                // never re-delivered — and `switch_thread`, the one place that
+                // does replay from the start, drops the pending list with the
+                // transcript it belonged to.
+                let Some(index) = echoes.pending.iter().position(|p| &p.body == body) else {
+                    continue;
+                };
+                let retired = echoes.pending.remove(index);
+                state.events.retain(|e| e.seq != retired.seq);
+                state.chat_events.retain(|e| e.seq != retired.seq);
+            }
+            drop(echoes);
             state.events.extend(events.iter().cloned());
             // The chat view wants only conversational rows; everything else is
             // trace. Splitting here keeps the render layer from re-filtering
@@ -98,6 +157,95 @@ impl SnapshotCell {
             }
         }
         let _ = self.tx.send(());
+    }
+
+    /// Draw the operator's own turn immediately, before the backend has echoed
+    /// it, and mark the turn running.
+    ///
+    /// The alternative — waiting for the turn to come back over the replay —
+    /// costs a full poll interval plus two round trips before a submitted line
+    /// appears anywhere, which reads as dropped input rather than as latency.
+    ///
+    /// The provisional envelope is filed one past the highest `seq` on record,
+    /// which is both where the transcript wants it and, in the ordinary case,
+    /// the `seq` the backend is about to assign. It is retired by
+    /// [`append_events`](Self::append_events) when the confirmed copy arrives,
+    /// so nothing downstream ever sees a row that is provisional *and* stale.
+    ///
+    /// Returns the sentinel `seq`, for [`abandon_echo`](Self::abandon_echo).
+    pub fn echo_user(&self, body: &str) -> u64 {
+        let seq = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let seq = state.events.last().map_or(1, |e| e.seq.saturating_add(1));
+            let envelope = EventEnvelope {
+                seq,
+                at: crate::clock::now_millis(),
+                event: TuiEvent::User {
+                    body: body.to_string(),
+                },
+            };
+            state.events.push(envelope.clone());
+            state.chat_events.push(envelope);
+            state.running = true;
+
+            let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());
+            echoes.pending.push(PendingEcho {
+                seq,
+                body: body.to_string(),
+            });
+            echoes.armed_at.get_or_insert_with(Instant::now);
+            seq
+        };
+        let _ = self.tx.send(());
+        seq
+    }
+
+    /// Give up on a turn the backend never accepted, keeping its row.
+    ///
+    /// The send failed, so no confirmation is ever coming and leaving the echo
+    /// pending would let it swallow the next identical turn. The row itself
+    /// stays: the operator wrote it, and a line that vanishes on a failed send
+    /// takes the text with it. The spinner settles, because nothing is running.
+    pub fn abandon_echo(&self, seq: u64) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());
+            echoes.pending.retain(|p| p.seq != seq);
+            if echoes.pending.is_empty() {
+                echoes.armed_at = None;
+                state.running = false;
+            }
+        }
+        let _ = self.tx.send(());
+    }
+
+    /// Settle the spinner when an accepted turn has produced nothing at all.
+    ///
+    /// The backend took the message — the POST was accepted — and then said
+    /// nothing for `timeout`: no echo, no cycle boundary, no output. Spinning
+    /// on indefinitely claims work is in flight that this host has no evidence
+    /// of, so the indicator stops while the turn stays in the transcript.
+    ///
+    /// Disarmed rather than repeating: the next batch to arrive re-establishes
+    /// liveness the ordinary way, and a re-armed watchdog would fight it.
+    /// Returns whether it fired, so the caller can say so.
+    pub fn expire_stalled_echo(&self, timeout: Duration) -> bool {
+        let fired = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());
+            match echoes.armed_at {
+                Some(at) if at.elapsed() >= timeout => {
+                    echoes.armed_at = None;
+                    state.running = false;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if fired {
+            let _ = self.tx.send(());
+        }
+        fired
     }
 
     /// The thread currently selected, or empty when none has been.
@@ -129,6 +277,12 @@ impl SnapshotCell {
             state.events.clear();
             state.chat_events.clear();
             state.running = false;
+            // Provisional rows belong to the transcript being dropped. Kept,
+            // they would match the incoming thread's replay by body alone and
+            // retire rows this host never drew.
+            let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());
+            echoes.pending.clear();
+            echoes.armed_at = None;
         }
         let _ = self.tx.send(());
     }
@@ -147,7 +301,6 @@ impl Default for SnapshotCell {
 /// not to the transcript, where it would read as something the user or the
 /// assistant said.
 fn is_chat_row(env: &EventEnvelope) -> bool {
-    use crate::ui::events::TuiEvent;
     matches!(
         env.event,
         TuiEvent::User { .. } | TuiEvent::Assistant { .. } | TuiEvent::AssistantDelta { .. }

@@ -138,6 +138,10 @@ impl App {
     /// process started with.
     pub(super) fn toggle_builtin_hooks(&mut self) {
         let enabled = !self.loaded.config.hook_defaults.enabled;
+        // `[hookDefaults] enabled` is a plain switch, not the operator's own
+        // `[[hooks]]` list — `load_config` only strips the latter from a
+        // project-local layer — so the general `config_path` is the right
+        // target here, unlike `persist_hooks` below.
         let Some(path) = &self.config_path else {
             self.set_status("No config path is writable — Medulla's hooks are unchanged");
             return;
@@ -166,8 +170,15 @@ impl App {
     }
 
     /// Write the operator's hooks and adopt `hooks` for this session.
+    ///
+    /// Targets [`super::types::App::hooks_config_path`], not the general
+    /// `config_path`: a project-local config (`.medulla/config.toml` /
+    /// `medulla.toml`) is exactly the layer `load_config` strips `[[hooks]]`
+    /// from on the next non-explicit load, so writing there would show "Hook
+    /// saved" while leaving a file the running Medulla ignores after restart
+    /// (chatgpt-codex-connector P2 on PR #192).
     fn persist_hooks(&mut self, hooks: HooksConfig, success: &str) {
-        let Some(path) = &self.config_path else {
+        let Some(path) = &self.hooks_config_path else {
             self.set_status("Hook changed for this session; no config path is writable");
             self.loaded.config.hooks = hooks;
             return;
@@ -177,9 +188,18 @@ impl App {
         match medulla::config::persist_hooks(path, &hooks.operator_hooks()) {
             Ok(()) => {
                 self.loaded.config.hooks = hooks;
-                self.set_status(format!(
-                    "{success} · applies to harnesses started from now on"
-                ))
+                // Tell the operator when this landed somewhere other than the
+                // path other settings save to, so a hook that "saved" but is
+                // not in the project's own config is not a mystery.
+                let note = if self.config_path.as_deref() == Some(path.as_path()) {
+                    format!("{success} · applies to harnesses started from now on")
+                } else {
+                    format!(
+                        "{success} in {} · project config cannot authorize hooks",
+                        path.display()
+                    )
+                };
+                self.set_status(note)
             }
             Err(error) => self.set_status(format!("Cannot save hooks: {error}")),
         }

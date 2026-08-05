@@ -46,6 +46,7 @@ pub(crate) async fn run(
         local_hosts,
         startup_status,
         config_path,
+        hooks_config_path,
         medulla_home,
         account,
         mut sharing,
@@ -57,6 +58,7 @@ pub(crate) async fn run(
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
+    app.set_hooks_config_path(hooks_config_path);
     app.set_medulla_home(medulla_home);
     app.set_account(account);
     if let Some(obs) = link_obs {

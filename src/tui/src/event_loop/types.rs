@@ -115,6 +115,12 @@ pub(crate) struct SessionWiring {
     /// The tiny.place presence observation, when that service is running.
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
+    /// Where hook edits are persisted — see `App::hooks_config_path` (in
+    /// `medulla_tui::ui::app`) for why this can differ from
+    /// [`Self::config_path`]: a project-local config is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from, so a hook saved
+    /// against it would be silently ignored on the next launch.
+    pub hooks_config_path: std::path::PathBuf,
     /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
     /// The account the embedded core is signed in as, when it is.

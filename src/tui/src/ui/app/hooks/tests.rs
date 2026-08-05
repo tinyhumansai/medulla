@@ -122,3 +122,47 @@ fn turning_medullas_own_hooks_off_withdraws_them_here_and_on_disk() {
     assert!(app.loaded.config.hook_defaults.enabled);
     assert_eq!(app.hook_rows().len(), with_builtins);
 }
+
+/// The P2 Codex found on this branch: `config_path` can resolve to a
+/// project-local file (`.medulla/config.toml` / `medulla.toml`), and
+/// `medulla::config::load_config` strips `[[hooks]]` from exactly that layer
+/// on every non-explicit load. A hook saved there would show "Hook saved" and
+/// vanish on the next launch, so `persist_hooks` must target a separate,
+/// always-honored path instead — see `App::hooks_config_path`.
+#[test]
+fn a_hook_saved_while_a_project_local_config_is_active_still_lands_where_the_next_load_reads_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let project_path = dir.path().join("medulla.toml");
+    std::fs::write(&project_path, "[theme]\naccent = \"blue\"\n").expect("seed project config");
+    let global_path = dir.path().join("global-config.toml");
+    std::fs::write(&global_path, "[theme]\naccent = \"red\"\n").expect("seed global config");
+
+    let loaded = medulla::config::LoadedConfig::defaults(project_path.display().to_string());
+    let mut app = App::new(Arc::new(MockRuntime::demo()), loaded);
+    // `set_config_path` is what other settings (appearance, routing, …) save
+    // through, and it is the project-local file here — exactly the case
+    // `app_loop::run_tui` hits when `loaded.sources.last()` is a project-local
+    // layer. `set_hooks_config_path` is the production seam that redirects
+    // hooks alone to the file `load_config` will not strip them from.
+    app.set_config_path(project_path.clone());
+    app.set_hooks_config_path(global_path.clone());
+
+    app.save_hook(None, "Stop |  |  |  | notify-send done");
+
+    let project_saved = std::fs::read_to_string(&project_path).expect("project config");
+    assert!(
+        !project_saved.contains("notify-send done"),
+        "a hook must never be written to the layer load_config strips it from: {project_saved}"
+    );
+    let global_saved = std::fs::read_to_string(&global_path).expect("global config");
+    assert!(
+        global_saved.contains("notify-send done"),
+        "the hook must land in the file the next load actually reads: {global_saved}"
+    );
+    assert!(
+        app.status()
+            .contains("project config cannot authorize hooks"),
+        "the operator must be told the save landed elsewhere: {}",
+        app.status()
+    );
+}

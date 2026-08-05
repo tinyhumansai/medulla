@@ -398,6 +398,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .or_else(|| loaded.sources.last().map(std::path::PathBuf::from))
         .unwrap_or_else(|| home_config_path.clone());
+    // Hooks cannot follow `active_config_path` to a project-local layer:
+    // `load_config` strips `[[hooks]]` from every layer but an explicit
+    // `--config` file and the user-global config, so a hook saved to the
+    // project-local file would show "saved" and vanish on the next launch.
+    // An explicit `--config` is fully trusted (discovery, and the strip, never
+    // run), so it is honored here exactly as `active_config_path` honors it;
+    // otherwise hooks always target the user-global file, whatever layer other
+    // settings resolved to.
+    let hooks_config_path = args
+        .config
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home_config_path.clone());
 
     // Optional background host-link service (observational only): keep per-peer
     // liveness current and surface it into the Overview panel and Agents lanes.
@@ -665,6 +678,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 startup_status: status.take(),
                 link_obs: link_obs.clone(),
                 config_path: active_config_path.clone(),
+                hooks_config_path: hooks_config_path.clone(),
                 medulla_home: home.clone(),
                 account: account.clone(),
                 sharing: sharing.take(),

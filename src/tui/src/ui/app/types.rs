@@ -1026,6 +1026,19 @@ pub struct App {
     /// Injectable so feature tests never touch the real home. `None` disables
     /// persistence (changes still apply live).
     pub(super) config_path: Option<std::path::PathBuf>,
+    /// Where hook edits are persisted — deliberately not always [`Self::config_path`].
+    ///
+    /// `config_path` may resolve to a project-local file
+    /// (`.medulla/config.toml`/`medulla.toml`), which is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from on every load that
+    /// is not an explicit `--config` (project configuration must not authorize
+    /// shell commands in the operator's environment). Saving a hook there would
+    /// show "Hook saved" and apply for the rest of this session while writing
+    /// to a file the next launch ignores. Defaulted to [`Self::config_path`] by
+    /// [`Self::set_config_path`] and overridden by
+    /// [`Self::set_hooks_config_path`] whenever the caller knows the two must
+    /// differ — see `app_loop::run_tui` in the `medulla-tui` crate.
+    pub(super) hooks_config_path: Option<std::path::PathBuf>,
     pub(super) resume_picker: Option<ResumePicker>,
     /// Whether the event loop should exit after this tick.
     pub should_quit: bool,

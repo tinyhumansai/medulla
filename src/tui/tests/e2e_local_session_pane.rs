@@ -58,6 +58,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         control: SessionControl::Orchestrator,
         origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
         name: None,
+        mcp_grant_session: None,
     }
 }
 
@@ -69,6 +70,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// record is the only thing that lets the pane resolve a screen at all.
 fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
     let config = DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/tmp".into(),
@@ -172,6 +174,8 @@ async fn a_dispatched_task_resolves_to_the_terminal_its_harness_is_painting() {
         "printf 'HARNESS-IS-PAINTING\\n'; sleep 30",
     );
     let harnesses = LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -221,6 +225,8 @@ async fn an_attached_pane_types_into_the_harness_serving_the_task() {
         "read line; printf 'typed:%s\\n' \"$line\"; sleep 30",
     );
     let harnesses = LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),
@@ -258,6 +264,8 @@ async fn a_task_that_names_no_session_shows_no_screen_rather_than_someone_elses(
     let sessions = PtyManager::new();
     let runtime = runtime_over(sessions.clone(), "sleep 30");
     let harnesses = LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: sessions.clone(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![runtime.clone()])),
         hub_address: HUB.to_string(),

@@ -45,6 +45,7 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
             control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
+            mcp_grant_session: None,
         })
         .expect("the shell opens on a pty")
 }
@@ -54,6 +55,8 @@ fn shell_session(sessions: &PtyManager, script: &str) -> String {
 fn attached_app(sessions: PtyManager, id: &str) -> App {
     let mut app = agents_app();
     app.set_local_sessions(LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),

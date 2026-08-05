@@ -98,14 +98,17 @@ impl LocalSessions {
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - it did not, so our emulator's own retained lines move instead. Not as
-    ///   good, but a wheel that does something beats one that does nothing, and
-    ///   forwarding to a child that never opted in would type escape bytes into
+    /// - the harness enables alternate scrolling without mouse reporting (Codex),
+    ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
+    ///   specifies;
+    /// - otherwise our emulator's own retained lines move instead. Not as good,
+    ///   but a wheel that does something beats one that does nothing, and
+    ///   forwarding to a child on its main screen would type escape bytes into
     ///   its composer.
     ///
-    /// `rows` is how far to move our own history when that is the path taken;
-    /// the forwarded path sends one notch and lets the harness decide what a
-    /// notch means.
+    /// `rows` is how many cursor presses to synthesize or how far to move our
+    /// own history. A mouse-reporting harness receives one notch and decides
+    /// what that notch means itself.
     pub fn scroll(&self, session_id: &str, col: u16, row: u16, up: bool, rows: usize) {
         if let Some((mode, encoding)) = self.sessions.mouse_protocol(session_id) {
             if let Some(bytes) = mouse::wheel(mode, encoding, col, row, up) {
@@ -114,6 +117,15 @@ impl LocalSessions {
                 let _ = self.sessions.write(session_id, &bytes);
                 return;
             }
+        }
+        if self.sessions.alternate_scroll(session_id) == Some(true) {
+            let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };
+            let mut bytes = Vec::with_capacity(arrow.len() * rows);
+            for _ in 0..rows {
+                bytes.extend_from_slice(arrow);
+            }
+            let _ = self.sessions.write(session_id, &bytes);
+            return;
         }
         self.sessions.scroll_history(session_id, rows, up);
     }

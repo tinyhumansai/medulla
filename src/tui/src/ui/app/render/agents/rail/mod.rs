@@ -429,7 +429,9 @@ impl App {
     ///
     /// Drawn as the group's last leaf — the same `└` the last session would have
     /// carried — so it reads as part of that agent rather than as a second
-    /// machine-level button beside `+ New agent`.
+    /// machine-level button beside `+ New agent`. It carries the `^T` hint the
+    /// machine-level button used to, because `Ctrl-T` on a row belonging to an
+    /// agent opens exactly this flow.
     fn new_session_line(&self, active: bool) -> TLine<'static> {
         let style = if active {
             self.theme.selection()
@@ -438,7 +440,7 @@ impl App {
         };
         TLine::from(vec![
             Span::styled(format!("   └ {NEW_SESSION_LABEL}"), style),
-            Span::styled(" ⏎", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
         ])
     }
 }

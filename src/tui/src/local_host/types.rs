@@ -62,3 +62,18 @@ impl LocalHost {
         self.daemon.runtime().clone()
     }
 }
+
+/// What Medulla imposes on every harness a host launches: commit attribution and
+/// the operator's lifecycle hooks.
+///
+/// The two always travel together — both come from the same loaded config, and
+/// on Claude Code they are delivered through the same `--settings` flag — so they
+/// cross the host-options boundary as one value rather than as two positional
+/// arguments that could be passed in the wrong order.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LaunchPolicy {
+    /// Whether commits carry the `Co-authored-by: Medulla` trailer.
+    pub(crate) attribution: bool,
+    /// The resolved `[[hooks]]` config section.
+    pub(crate) hooks: medulla::harness_hooks::HooksConfig,
+}

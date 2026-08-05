@@ -85,6 +85,8 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         loaded,
     );
     app.set_local_sessions(crate::ui::harness_pane::LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions: crate::worker::pty::PtyManager::new(),
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         hub_address: "medulla-orchestrator".to_string(),

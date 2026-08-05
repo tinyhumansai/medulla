@@ -90,6 +90,13 @@ impl App {
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
         match k.code {
+            // A harness row has an immutable launch snapshot. Jump straight to
+            // its diff rather than making the operator tab across and rely on
+            // the Changes view to remember which of several harnesses they had
+            // selected. When no harness is shown, `d` remains ordinary typing.
+            KeyCode::Char('d') if !ctrl && !alt && self.pane_session.is_some() => {
+                AgentsKey::Handled(self.open_selected_harness_changes())
+            }
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
@@ -107,8 +114,10 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the action row, where it is the action. A visible harness consumes
-            // it earlier and takes the keyboard instead.
+            // the rows that are themselves an action: `+ New agent`, an agent's
+            // `+ new session`, and a lane's `+N more`, where it pages the hidden
+            // sessions into view. A visible session pane consumes it earlier and
+            // takes the keyboard instead.
             KeyCode::Enter => {
                 if self.on_new_agent_row() {
                     self.open_new_agent_picker();
@@ -118,7 +127,7 @@ impl App {
                     // and directory. Enter is how a row that *is* an action is
                     // taken, so the two doors lead to one place.
                     self.open_new_session(&agent_id);
-                } else {
+                } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }
                 AgentsKey::Handled(None)

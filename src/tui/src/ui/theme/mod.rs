@@ -1,5 +1,5 @@
 //! The TUI color theme: a small set of roles that drive selection highlighting,
-//! panel chrome, and accents. Defaults to the established medulla blue (Cyan).
+//! panel chrome, and accents. Defaults to the terminal's primary red.
 //!
 //! Colors come from the optional `[theme]` config section (named ratatui colors
 //! or `#rrggbb` hex), with per-field fallback to the defaults. The Appearance
@@ -21,10 +21,11 @@ pub const THEME_ROLES: [&str; 5] = [
     "Attention",
 ];
 
-/// A curated palette the Appearance editor cycles through. Named colors keep the
-/// persisted config readable; a `#rrggbb` custom value from config is folded in
-/// as an extra step at runtime.
+/// A curated palette the Appearance editor cycles through. The default color
+/// comes first so a first edit can be reversed; named colors keep the persisted
+/// values readable.
 pub const PALETTE: [Color; 10] = [
+    Color::Red,
     Color::Cyan,
     Color::LightCyan,
     Color::Blue,
@@ -32,7 +33,6 @@ pub const PALETTE: [Color; 10] = [
     Color::Magenta,
     Color::Green,
     Color::Yellow,
-    Color::Red,
     Color::White,
     Color::DarkGray,
 ];
@@ -40,9 +40,9 @@ pub const PALETTE: [Color; 10] = [
 impl Default for Theme {
     fn default() -> Self {
         Theme {
-            primary: Color::Cyan,
+            primary: Color::Red,
             accent: Color::Magenta,
-            selection_fg: Color::Black,
+            selection_fg: Color::White,
             dim_border: Color::DarkGray,
             attention: Color::Yellow,
             attention_blink: true,

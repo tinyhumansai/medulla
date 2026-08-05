@@ -67,6 +67,7 @@ impl App {
             contexts: Vec::new(),
             context_index: 0,
             agent_index: 0,
+            subtask_pages: std::collections::HashMap::new(),
             watching: None,
             kill_armed: None,
             agents_focus: super::types::AgentsFocus::default(),
@@ -550,7 +551,7 @@ impl App {
     /// shows an agent's own turns and answers its questions.
     ///
     /// Reads the *rail's* rows, not the lane list's: `agent_index` walks the
-    /// rail, which carries the `+ New harness` action and the operator's own
+    /// rail, which carries the `+ New session` action and the operator's own
     /// harness rows as well as the lanes. Indexing the shorter list with it
     /// reported a lane for rows that name none, and the composer's visibility
     /// hangs off this answer — so a session row claimed a text box that was

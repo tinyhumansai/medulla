@@ -66,13 +66,18 @@ pub async fn run_wrapper(
     // Commit attribution is config-driven (`attribution.commit`, on by default).
     // A config that fails to load must not silently drop attribution, so fall
     // back to the same default the config type carries.
-    let attribution = crate::config::load_config(
+    // Attribution and hooks are both config-driven and both ride the same
+    // `--settings` flag on Claude Code, so they are resolved together from one
+    // load. A config that fails to load must not silently drop attribution, so
+    // fall back to the same default the config type carries; hooks fall back to
+    // none, since an unreadable config declares none.
+    let (attribution, hooks) = crate::config::load_config(
         crate::config::explicit_config_from_env(&env),
         &env,
         std::path::Path::new(&cwd),
     )
-    .map(|loaded| loaded.config.attribution.commit)
-    .unwrap_or(true);
+    .map(|loaded| (loaded.config.attribution.commit, loaded.config.hooks))
+    .unwrap_or((true, crate::harness_hooks::HooksConfig::default()));
 
     run_wrapper_with(WrapperConfig {
         provider,
@@ -83,6 +88,7 @@ pub async fn run_wrapper(
         session_id: None,
         pty_spawner,
         attribution,
+        hooks,
     })
     .await
 }
@@ -112,12 +118,28 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
 
     // Extra args from `TINYPLACE_<P>_ARGS` are prepended to the child argv.
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
+    if config.provider == crate::protocol::HarnessProvider::Claude
+        && config
+            .child_args
+            .iter()
+            .chain(child_args.iter())
+            .any(|arg| arg == "--settings" || arg.starts_with("--settings="))
+    {
+        anyhow::bail!(
+            "Claude --settings cannot be combined with Medulla attribution/hooks; move those settings into the normal Claude configuration"
+        );
+    }
     // Attribute commits made through this session to Medulla. Injected per-spawn,
     // so the operator's own `settings.json` is never touched.
-    child_args.extend(crate::attribution::attribution_args(
-        config.provider,
-        config.attribution,
-    ));
+    // Commit attribution and the operator's Medulla hooks share Claude Code's
+    // single `--settings` flag, so they are built together rather than appended
+    // independently — see `harness_hooks::launch_args`.
+    let (launch_args, hook_notes) =
+        crate::harness_hooks::launch_args(config.provider, config.attribution, &config.hooks);
+    child_args.extend(launch_args);
+    for note in &hook_notes {
+        tracing::warn!(provider = config.provider.as_str(), "{note}");
+    }
     // Every provider gets the prepare-commit-msg hook env vars; see the
     // attribution module docs for why the CLI flag alone is not enough.
     merge_attribution_env_into_config(&mut config);

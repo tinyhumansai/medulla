@@ -42,6 +42,7 @@ fn router_options(
 ) -> RunTaskOptions {
     let _ = bin;
     RunTaskOptions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,

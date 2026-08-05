@@ -295,6 +295,11 @@ pub async fn run_daemon(
         .as_ref()
         .map(|loaded| loaded.config.attribution.commit)
         .unwrap_or(true);
+    // A config that failed to load declares no hooks.
+    let hooks = loaded_config
+        .as_ref()
+        .map(|loaded| loaded.config.hooks.clone())
+        .unwrap_or_default();
     let custom_harnesses = loaded_config
         .as_ref()
         .map(|loaded| {
@@ -305,6 +310,7 @@ pub async fn run_daemon(
         })
         .unwrap_or_default();
     let config = DaemonConfig {
+        hooks,
         providers: providers.clone(),
         default_provider,
         workspace: workspace.clone(),

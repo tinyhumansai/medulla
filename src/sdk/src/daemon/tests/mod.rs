@@ -77,6 +77,7 @@ pub(super) fn base_config() -> DaemonConfig {
         budget: None,
         router: None,
         attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
         custom_harnesses: Vec::new(),
     }
 }

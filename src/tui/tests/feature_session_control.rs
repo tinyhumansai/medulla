@@ -40,6 +40,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: workspace.to_string(),
@@ -75,6 +76,8 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_sessions(LocalSessions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -163,6 +166,7 @@ fn user_session(sessions: &PtyManager) -> String {
             control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
+            mcp_grant_session: None,
         })
         .expect("open")
 }
@@ -223,6 +227,7 @@ fn an_unmanaged_harness_gets_its_own_rail_row() {
 
     let out = render(&mut app, 140, 44);
     assert!(!out.contains("your harnesses"), "no second group: {out}");
+    assert!(!out.contains("your sessions"), "no second group: {out}");
     assert!(out.contains("unmanaged"), "{out}");
 
     sessions.shutdown();

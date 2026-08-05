@@ -172,6 +172,7 @@ fn spec() -> InteractiveSpec {
         append_system_prompt: None,
         skip_permissions: false,
         extra_args: Vec::new(),
+        hooks: crate::harness_hooks::HooksConfig::default(),
     }
 }
 
@@ -257,6 +258,7 @@ fn fake_harness(dir: &std::path::Path, body: &str) -> InteractiveSpec {
         append_system_prompt: None,
         skip_permissions: false,
         extra_args: Vec::new(),
+        hooks: crate::harness_hooks::HooksConfig::default(),
     }
 }
 

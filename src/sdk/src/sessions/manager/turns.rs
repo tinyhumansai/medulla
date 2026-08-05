@@ -340,6 +340,7 @@ impl SessionManager {
             append_system_prompt: None,
             skip_permissions: self.inner.config.skip_permissions,
             extra_args: self.inner.config.extra_args.clone(),
+            hooks: self.inner.config.hooks.clone(),
         };
         match InteractiveSession::open(&spec).await {
             Ok(live) => {
@@ -390,6 +391,7 @@ impl SessionManager {
             abort: abort.clone(),
             router: self.inner.config.router.clone(),
             attribution: self.inner.config.attribution,
+            hooks: self.inner.config.hooks.clone(),
             on_event: None,
             on_stdin: None,
             on_session: None,

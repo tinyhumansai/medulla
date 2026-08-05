@@ -48,7 +48,7 @@ async fn a_resolved_child_s_defaults_reach_its_agent_nodes() {
         }),
     );
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let graph = resolver.resolve("child").await.expect("resolves");
 
     let agent_node = graph
@@ -79,7 +79,7 @@ async fn a_node_that_names_its_own_harness_is_not_overridden_by_the_child_s_defa
         }),
     );
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let graph = resolver.resolve("child").await.expect("resolves");
 
     let agent_node = graph
@@ -122,7 +122,7 @@ async fn a_child_with_an_unresolved_harness_expression_is_refused() {
         }),
     );
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let err = resolver
         .resolve("child")
         .await
@@ -149,7 +149,7 @@ async fn a_child_with_no_defaults_is_returned_unmodified() {
         }),
     );
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let graph = resolver.resolve("child").await.expect("resolves");
 
     let agent_node = graph
@@ -159,4 +159,43 @@ async fn a_child_with_no_defaults_is_returned_unmodified() {
         .expect("agent node present");
     assert!(agent_node.config.get("harness").is_none());
     assert!(agent_node.config.get("model").is_none());
+}
+
+#[tokio::test]
+async fn a_resolved_child_s_loop_is_clamped_to_the_host_ceiling() {
+    // A `sub_workflow` node's child is compiled straight from what this
+    // resolver returns, entirely outside `run_workflow_inner`'s own clamp of
+    // the root graph — so a child loop that asks for more than the host
+    // allows must be capped here too, not just at the top level.
+    let (_root, store) = store();
+    install(
+        &store,
+        json!({
+            "id": "child",
+            "name": "Child",
+            "nodes": [
+                { "id": "t", "kind": "trigger", "name": "start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "l", "kind": "loop", "name": "Loop",
+                  "config": { "max_iterations": 100 } },
+                { "id": "body", "kind": "transform", "name": "Body",
+                  "config": { "set": {} } }
+            ],
+            "edges": [
+                { "from_node": "t", "to_node": "l" },
+                { "from_node": "l", "to_node": "body", "from_port": "body" },
+                { "from_node": "body", "to_node": "l" }
+            ]
+        }),
+    );
+
+    let resolver = StoreWorkflowResolver::new(store, 2);
+    let graph = resolver.resolve("child").await.expect("resolves");
+
+    let loop_node = graph
+        .nodes
+        .iter()
+        .find(|n| n.id == "l")
+        .expect("loop node present");
+    assert_eq!(loop_node.config["max_iterations"], json!(2));
 }

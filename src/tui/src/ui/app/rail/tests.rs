@@ -51,6 +51,8 @@ pub(in crate::ui::app) fn shell_harnesses(
         custom_harnesses: Vec::new(),
         router: None,
         attribution: true,
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
     }
 }
 

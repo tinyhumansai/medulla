@@ -124,6 +124,7 @@ fn flooding(label: &str) -> LaunchSpec {
         control: SessionControl::Orchestrator,
         origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
         name: None,
+        mcp_grant_session: None,
     }
 }
 

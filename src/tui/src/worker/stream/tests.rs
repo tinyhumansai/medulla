@@ -363,6 +363,7 @@ fn spec(
 fn empty_router() -> ScreenRouter {
     let runtime = medulla::daemon::DaemonRuntime::new(
         medulla::daemon::DaemonConfig {
+            hooks: medulla::harness_hooks::HooksConfig::default(),
             providers: vec![medulla::protocol::HarnessProvider::Claude],
             default_provider: medulla::protocol::HarnessProvider::Claude,
             workspace: "/tmp".into(),

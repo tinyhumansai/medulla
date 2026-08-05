@@ -172,7 +172,8 @@ different host or workspace.
 
 ## Workflow
 
-A saved, multi-step **DAG** (directed acyclic graph) definition. Each step is a
+A saved, multi-step **directed graph** definition, usually acyclic but allowed to
+contain bounded loops (see the `loop` node). Each step is a
 node — triggers, agent dispatches, transforms, code execution, HTTP requests, and
 more. An `agent` node runs as a real **agent session** on the harness type it
 names (Claude Code, Codex, or OpenCode). Workflows are authored as JSON files, stored in layered directories

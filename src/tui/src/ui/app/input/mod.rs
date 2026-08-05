@@ -14,6 +14,8 @@ use super::types::{App, Cmd};
 mod mouse;
 mod nav;
 mod paste;
+#[cfg(test)]
+mod tests;
 
 impl App {
     /// Route a terminal event to the key, mouse, or paste handler, producing any

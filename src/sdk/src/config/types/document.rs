@@ -77,6 +77,11 @@ pub struct TuiConfig {
     /// Medulla. On by default.
     #[serde(default)]
     pub attribution: AttributionConfig,
+    /// Lifecycle hooks Medulla supplies to supported harnesses, declared once
+    /// here rather than once per harness config. Unsupported hooks are dropped
+    /// with a diagnostic. Empty by default.
+    #[serde(default, skip_serializing_if = "HooksConfig::is_empty")]
+    pub hooks: HooksConfig,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -120,6 +125,7 @@ impl Default for TuiConfig {
             hosts: Vec::new(),
             harness: HarnessSection::default(),
             attribution: AttributionConfig::default(),
+            hooks: HooksConfig::default(),
             router: None,
             budget: None,
             routing_strategy: None,

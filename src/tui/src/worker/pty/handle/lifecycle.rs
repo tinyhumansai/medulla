@@ -9,7 +9,8 @@ use portable_pty::{Child, MasterPty};
 use super::super::sync::lock;
 use super::super::types::SessionControl;
 use super::types::{
-    AttentionState, ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING,
+    AttentionState, ColdFields, SessionIo, SessionMeta, TerminalModes, NO_EXIT_CODE, STATE_EXITED,
+    STATE_RUNNING,
 };
 use super::SessionHandle;
 
@@ -69,6 +70,7 @@ impl SessionHandle {
                 checked_at: started_at,
             }),
             screen: Mutex::new(screen),
+            modes: Mutex::new(TerminalModes::default()),
             io: Mutex::new(Some(SessionIo { master, writes })),
             child: Mutex::new(Some(child)),
         }
@@ -123,5 +125,13 @@ impl SessionHandle {
         // The screen is deliberately kept: the operator usually wants to read
         // how a session ended. Only the descriptors go.
         *lock(&self.io) = None;
+        // The session's capability goes with it. A grant left in the registry
+        // after its harness exits is a live token with no live session — and
+        // the MCP server is a *subprocess* of the harness, so one that outlived
+        // its parent would still be able to redeem it.
+        #[cfg(feature = "workflows")]
+        if let Some(session) = &self.meta.mcp_grant_session {
+            medulla::mcp::revoke_session(session);
+        }
     }
 }

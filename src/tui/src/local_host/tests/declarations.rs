@@ -18,7 +18,18 @@ fn advertised(declared: &[AgentDeclaration]) -> Vec<WorkerSpec> {
     let network = LocalBridgeNetwork::new();
     let config = HostSection::default();
     let env = env_with_only_claude();
-    let options = options_from_config(&config, &env, None, None, None, true).expect("valid config");
+    let options = options_from_config(
+        &config,
+        &env,
+        None,
+        None,
+        None,
+        &crate::local_host::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
+    )
+    .expect("valid config");
 
     let host = start(
         &config,

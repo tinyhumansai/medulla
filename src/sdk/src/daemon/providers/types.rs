@@ -159,6 +159,8 @@ pub struct RunTaskOptions {
     /// `attribution.commit` config value (on by default; see
     /// [`crate::config::AttributionConfig`]).
     pub attribution: bool,
+    /// Lifecycle hooks carried to the provider-specific launch adapter.
+    pub hooks: crate::harness_hooks::HooksConfig,
     /// Fired for each parsed semantic event — drives periodic status frames.
     pub on_event: Option<OnEvent>,
     /// Register a stdin channel for `input`-frame forwarding into the child.
@@ -217,5 +219,6 @@ pub(super) struct RunSpec {
     pub(super) abort: Abort,
     pub(super) router: Option<RouterConfig>,
     pub(super) attribution: bool,
+    pub(super) hooks: crate::harness_hooks::HooksConfig,
     pub(super) on_workspace_context: Option<OnWorkspaceContext>,
 }

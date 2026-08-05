@@ -169,6 +169,25 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              nothing dispatches them yet."
                 .to_string(),
         ],
+        "loop" => vec![
+            "A pass through the body costs what the body costs, and on this host an `agent` \
+             node in the body is a whole coding-harness session. A loop of 10 over an agent \
+             node is ten coding sessions and can run for an hour — keep `max_iterations` as \
+             small as the job allows, and prefer a `condition` so the loop stops when the work \
+             is done rather than always running to the cap."
+                .to_string(),
+            "The run's wall clock still applies on top of the cap: a loop that would need more \
+             than `workflows.runTimeoutSecs` (600 by default) is cut off there regardless of \
+             how many iterations remain. Check `workflow_host` for the current value."
+                .to_string(),
+            "Three shapes are refused rather than silently running once or never: a fan-in \
+             `merge` node on the cycle (a single-input `merge` is a passthrough and is fine), \
+             a loop node that is itself a fan-in, and a `body` that does not route back to the \
+             loop head. For the fan-in cases, join the incoming arms with a `merge` placed \
+             *before* the loop node, outside the cycle; for the last, wire `body` to the first \
+             node of the loop body and wire that body's last node back to this loop."
+                .to_string(),
+        ],
         _ => Vec::new(),
     };
 

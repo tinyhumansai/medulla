@@ -65,6 +65,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         router,
         budget,
         attribution,
+        hooks,
     } = config;
     let providers = medulla::daemon::providers::detect_providers(&env, None, None);
     let sessions = PtyManager::new();
@@ -161,6 +162,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         router,
         budget,
         attribution,
+        hooks,
     };
     let result = drive(&mut terminal, &mut app, &start, &mut inbox, &mut runtime).await;
 
@@ -193,6 +195,7 @@ pub(super) fn worker_runtime(
         router,
         budget,
         attribution,
+        hooks,
         ..
     } = start;
     let config = DaemonConfig {
@@ -223,6 +226,7 @@ pub(super) fn worker_runtime(
         // headless daemon uses, so `--tui` and headless route identically.
         router: router.clone(),
         attribution: *attribution,
+        hooks: hooks.clone(),
         // The standalone worker TUI does not yet expose a config editor; named
         // presets are loaded by the orchestrator's embedded host.
         custom_harnesses: Vec::new(),
@@ -239,6 +243,7 @@ pub(super) fn worker_runtime(
         }) as medulla::daemon::providers::RunTaskFn,
         ExecutionMode::Interactive => {
             PtySessionExecutor::new(sessions.clone(), env.clone(), workspace.to_string())
+                .with_log(logs.sink())
                 .into_run_task()
         }
     };

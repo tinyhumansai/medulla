@@ -228,6 +228,33 @@ fn enter_on_a_harness_asks_before_taking_it() {
 }
 
 #[test]
+fn d_on_a_selected_harness_opens_its_changes_tab() {
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    a.focus_agents_rail();
+    a.pane_session = Some("selected-harness".to_owned());
+
+    let cmd = a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+
+    assert!(cmd.is_none());
+    assert_eq!(a.tab(), "Changes");
+    assert_eq!(a.rail_session.as_deref(), Some("selected-harness"));
+    assert_eq!(a.draft.text, "", "the shortcut must not type into chat");
+}
+
+#[test]
+fn d_without_a_selected_harness_remains_composer_input() {
+    let mut a = app();
+    a.tab_index = tab("Agents");
+    a.focus_agents_rail();
+
+    a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+
+    assert_eq!(a.tab(), "Agents");
+    assert_eq!(a.draft.text, "d");
+}
+
+#[test]
 fn clicking_a_context_chunk_selects_it() {
     // Context is a Settings *subpage*, not a top-level tab, so the click router
     // has to match on the subpage — matching on the tab made this branch

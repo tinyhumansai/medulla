@@ -95,6 +95,7 @@ fn operator_session(
             control: SessionControl::User,
             origin: SessionOrigin::User,
             name: None,
+            mcp_grant_session: None,
         })
         .expect("the operator's session must start")
 }

@@ -251,9 +251,9 @@ tokenEnv = "MEDULLA_TOKEN"
 # subpage edits these live and writes them back here.
 # ---------------------------------------------------------------------------
 # [theme]
-# primary = "cyan"        # selection highlight + brand/panel titles/accents
+# primary = "red"         # selection highlight + brand/panel titles/accents
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
-# selectionFg = "black"   # text drawn on top of the primary selection background
+# selectionFg = "white"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
 
 # Legacy harness-row toggles, kept so an older config keeps working. They are

@@ -19,8 +19,18 @@ async fn hosting_switched_off_is_a_choice_not_an_error() {
         enabled: false,
         ..HostSection::default()
     };
-    let options = options_from_config(&config, &env_with_only_claude(), None, None, None, true)
-        .expect("valid config");
+    let options = options_from_config(
+        &config,
+        &env_with_only_claude(),
+        None,
+        None,
+        None,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
+    )
+    .expect("valid config");
 
     let host = start(
         &config,
@@ -42,7 +52,18 @@ async fn a_started_host_advertises_this_machine_to_the_hub() {
     let network = LocalBridgeNetwork::new();
     let config = HostSection::default();
     let env = env_with_only_claude();
-    let options = options_from_config(&config, &env, None, None, None, true).expect("valid config");
+    let options = options_from_config(
+        &config,
+        &env,
+        None,
+        None,
+        None,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
+    )
+    .expect("valid config");
 
     let host = start(
         &config,
@@ -96,7 +117,18 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         &config,
         &HashMap::new(),
         &network,
-        options_from_config(&config, &env, None, None, None, true).expect("valid config"),
+        options_from_config(
+            &config,
+            &env,
+            None,
+            None,
+            None,
+            &super::super::LaunchPolicy {
+                attribution: true,
+                ..Default::default()
+            },
+        )
+        .expect("valid config"),
         PtyManager::new(),
         &[],
     )
@@ -107,7 +139,18 @@ async fn a_second_host_on_one_address_is_refused_rather_than_splitting_the_inbox
         &config,
         &HashMap::new(),
         &network,
-        options_from_config(&config, &env, None, None, None, true).expect("valid config"),
+        options_from_config(
+            &config,
+            &env,
+            None,
+            None,
+            None,
+            &super::super::LaunchPolicy {
+                attribution: true,
+                ..Default::default()
+            },
+        )
+        .expect("valid config"),
         PtyManager::new(),
         &[],
     )

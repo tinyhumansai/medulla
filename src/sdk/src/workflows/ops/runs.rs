@@ -22,7 +22,9 @@ pub async fn dry_run(
     input: Value,
     inputs: Map<String, Value>,
 ) -> Result<Value, WorkflowError> {
-    let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
+    // A dry run never dispatches a real harness session, so a loop iterates
+    // at simulation cost only — nothing here needs the host's ceiling.
+    let resolver = Arc::new(StoreWorkflowResolver::new(store.clone(), u64::MAX));
     let result = crate::workflows::run::dry_run(store.clone(), resolver, id, input, inputs).await?;
 
     // `ok` is about the *diagnosis*, not about whether the engine returned. A

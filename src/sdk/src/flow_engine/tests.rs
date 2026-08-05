@@ -87,9 +87,13 @@ impl HarnessDispatch for RecordingDispatch {
 /// A resolver over an empty store: no test here uses `sub_workflow`, but the
 /// engine requires the capability to be present.
 pub(super) fn empty_resolver(root: &std::path::Path) -> Arc<StoreWorkflowResolver> {
-    Arc::new(StoreWorkflowResolver::new(Arc::new(
-        crate::workflows::FileWorkflowStore::new(vec![root.join("workflows")], root.join("runs")),
-    )))
+    Arc::new(StoreWorkflowResolver::new(
+        Arc::new(crate::workflows::FileWorkflowStore::new(
+            vec![root.join("workflows")],
+            root.join("runs"),
+        )),
+        u64::MAX,
+    ))
 }
 
 pub(super) fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {

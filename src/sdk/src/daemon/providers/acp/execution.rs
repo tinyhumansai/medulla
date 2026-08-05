@@ -46,100 +46,36 @@ pub(super) async fn medulla_mcp_servers(
     }
     #[cfg(feature = "workflows")]
     {
-        use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
+        use crate::mcp::attach;
+        use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
+
         // An operator who turned workflows off should not have harnesses handed
-        // tools that would be refused.
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        // Respects the parent's `--config`, if one was recorded — see
-        // `crate::config::CONFIG_PATH_ENV`. Rediscovering here regardless of
-        // that would let a policy the operator explicitly chose (say,
-        // `allowCode = false`) be silently overridden by whatever config this
-        // subprocess's own `cwd` happens to discover.
-        let workflows_enabled = crate::config::load_config(
-            crate::config::explicit_config_from_env(task_env),
-            task_env,
-            &cwd,
-        )
-        .map(|loaded| loaded.config.workflows.enabled)
-        .unwrap_or(true);
-        let active_plane = crate::control_socket::active();
-        let parent_grant = crate::control_socket::parent_grant_from_env(task_env);
-        // With neither family available there is no server worth attaching.
-        // A host running a fleet still attaches it when workflow authoring is
-        // disabled; the grant below withholds only the workflow family.
-        if !workflows_enabled && active_plane.is_none() && parent_grant.is_none() {
-            return Vec::new();
-        }
-        let Ok(binary) = std::env::current_exe() else {
+        // tools that would be refused. Resolved through the shared policy so
+        // this transport and the CLI one cannot come to disagree about which
+        // sessions get a server at all.
+        let workflows_enabled = attach::workflows_enabled(task_env);
+        // The fleet grant, when this process has a control plane to grant
+        // against. Minted per session — an inherited one would hand a second
+        // harness the first one's capability. A process with no local plane can
+        // still exchange a verified parent handoff for a child grant, which is
+        // the one thing this transport does that the CLI one cannot.
+        let fleet = match attach::local_fleet_grant(session, task_env, tool_mode, workflows_enabled)
+        {
+            Some(local) => Some(local),
+            None => match crate::control_socket::parent_grant_from_env(task_env) {
+                Some((socket, token)) => exchange_parent_grant(socket, token).await,
+                None => None,
+            },
+        };
+        let Some(spec) = attach::server_spec(tool_mode, fleet, workflows_enabled) else {
             return Vec::new();
         };
         // The subprocess inherits this process's environment, which is what
         // carries MEDULLA_HOME — so the harness edits the same workflow store
-        // the operator sees.
-        //
-        // The tool mode is passed *explicitly* rather than inherited, because
-        // it is the one setting that differs per task: this daemon serves
-        // authoring turns and review turns from one process, so an inherited
-        // value could only ever be right for one of them. A review turn that
-        // silently got the full surface could rewrite the graph it was asked
-        // only to review, which is exactly what the mode exists to prevent.
-        let mut server =
-            McpServerStdio::new(crate::mcp::SERVER_NAME, binary).args(vec!["mcp".to_string()]);
-        // The fleet grant, when this process has a control plane to grant
-        // against. Pushed explicitly rather than inherited for the same reason
-        // the tool mode is: it is minted per session, and an inherited one would
-        // hand a second harness the first one's capability.
-        let fleet_grant = if let Some(plane) = active_plane {
-            // The depth this task was dispatched at, written into the harness
-            // environment by the daemon from the task frame. Read here and
-            // recorded in the grant, so every later check consults the grant
-            // rather than an environment the harness itself could rewrite.
-            let grant = session_grant(
-                session,
-                task_env,
-                tool_mode,
-                workflows_enabled,
-                plane.max_depth,
-                plane.max_in_flight,
-            );
-            Some((plane.socket.clone(), plane.grants.mint(grant)))
-        } else if let Some((socket, token)) = parent_grant {
-            exchange_parent_grant(socket, token).await
-        } else {
-            None
-        };
-        if let Some((socket, token)) = fleet_grant {
-            server
-                .env
-                .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                    crate::control_socket::MCP_SOCKET_ENV,
-                    socket.to_string_lossy().as_ref(),
-                ));
-            server
-                .env
-                .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                    crate::control_socket::MCP_GRANT_ENV,
-                    token,
-                ));
-        }
-        if let Some(mode) = tool_mode {
-            let (mode, scope) = mode
-                .split_once(':')
-                .map_or((mode, None), |(mode, scope)| (mode, Some(scope)));
-            server
-                .env
-                .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                    crate::mcp::TOOL_MODE_ENV,
-                    mode,
-                ));
-            if let Some(scope) = scope {
-                server
-                    .env
-                    .push(agent_client_protocol::schema::v1::EnvVariable::new(
-                        crate::mcp::TOOL_SCOPE_ENV,
-                        scope,
-                    ));
-            }
+        // the operator sees. Only what differs per session is pushed here.
+        let mut server = McpServerStdio::new(spec.name, spec.command).args(spec.args.clone());
+        for (key, value) in spec.env.iter().chain(spec.secret_env.iter()) {
+            server.env.push(EnvVariable::new(key.as_str(), value));
         }
         vec![McpServer::Stdio(server)]
     }
@@ -171,31 +107,6 @@ async fn exchange_parent_grant(socket: PathBuf, token: String) -> Option<(PathBu
 #[cfg(all(feature = "workflows", not(unix)))]
 async fn exchange_parent_grant(_socket: PathBuf, _token: String) -> Option<(PathBuf, String)> {
     None
-}
-
-/// Build the capability for one ACP session from that task's own environment.
-///
-/// The daemon process serves tasks at many depths concurrently, so ambient
-/// process variables cannot describe the session being created.
-#[cfg(feature = "workflows")]
-pub(super) fn session_grant(
-    session: &str,
-    task_env: &HashMap<String, String>,
-    tool_mode: Option<&str>,
-    workflows_enabled: bool,
-    max_depth: u8,
-    max_in_flight: usize,
-) -> crate::control_socket::Grant {
-    let depth = crate::control_socket::depth_from_env(task_env);
-    let families = if workflows_enabled {
-        crate::control_socket::ToolFamilies::default()
-    } else {
-        crate::control_socket::ToolFamilies::fleet_only()
-    };
-    crate::control_socket::Grant::new(session, depth, max_depth)
-        .with_families(families)
-        .with_max_in_flight(max_in_flight)
-        .with_tool_mode(tool_mode)
 }
 
 /// Environment switch selecting ACP instead of legacy provider JSONL.

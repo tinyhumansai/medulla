@@ -164,6 +164,12 @@ pub struct LaunchSpec {
     /// picker has no name prompt yet. The field is the seam that lets one
     /// appear without touching this layer again.
     pub name: Option<String>,
+    /// The key this session's MCP fleet grant was minted under, when one was.
+    ///
+    /// Carried so the grant can be handed back when the harness exits: a
+    /// capability that outlives the session it was minted for is a token
+    /// nothing revokes and a leaked subprocess could still redeem.
+    pub mcp_grant_session: Option<String>,
 }
 
 /// The operator-facing projection of one session, for the list pane.

@@ -87,6 +87,32 @@ fn following_a_new_launch_commit_in_the_same_repository_preserves_comments() {
 }
 
 #[test]
+fn choosing_harness_launch_replaces_an_operator_selected_baseline() {
+    let directory = tempdir().expect("repository");
+    init_repo(directory.path());
+    let launch = output(directory.path(), &["rev-parse", "HEAD"]);
+    git(
+        directory.path(),
+        &["commit", "--allow-empty", "-m", "manual baseline"],
+    );
+    let manual = output(directory.path(), &["rev-parse", "HEAD"]);
+    let identity = crate::worker::pty::checkout::capture(directory.path()).expect("identity");
+    let mut state = GitChangesState::default();
+    state.follow_session(directory.path(), &launch, &identity);
+    state
+        .choose_baseline(&manual, BaselineSource::Manual)
+        .expect("manual baseline");
+
+    // Opening a selected harness with `d` uses this explicit activation after
+    // following it; an ordinary refresh deliberately preserves Manual mode.
+    state.follow_session(directory.path(), &launch, &identity);
+    state.choose_session_baseline().expect("harness baseline");
+
+    assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
+    assert_eq!(state.baseline_source, BaselineSource::SessionLaunch);
+}
+
+#[test]
 fn returning_from_a_non_git_harness_preserves_same_repository_comments() {
     let directory = tempdir().expect("repository");
     init_repo(directory.path());

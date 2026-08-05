@@ -130,19 +130,19 @@ fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
 fn appearance_cycling_changes_live_theme() {
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('2')); // Appearance
-    assert_eq!(app.theme_primary(), Color::Cyan);
-    // The primary role is selected first; Right cycles it to the next palette color.
+    assert_eq!(app.theme_primary(), Color::Red);
+    // The primary role is selected first; Right enters the next editor color.
     let _ = key(&mut app, KeyCode::Right);
-    assert_eq!(app.theme_primary(), Color::LightCyan);
+    assert_eq!(app.theme_primary(), Color::Cyan);
     // A selected row is now highlighted with the new primary background.
     let buf = draw(&mut app, 140, 40);
     assert!(
-        any_cell_with_bg(&buf, Color::LightCyan),
+        any_cell_with_bg(&buf, Color::Cyan),
         "selection uses the live primary as background"
     );
     // Left steps back.
     let _ = key(&mut app, KeyCode::Left);
-    assert_eq!(app.theme_primary(), Color::Cyan);
+    assert_eq!(app.theme_primary(), Color::Red);
 }
 
 #[test]
@@ -166,10 +166,7 @@ fn appearance_persists_theme_to_injected_path() {
     let _ = key(&mut app, KeyCode::Right); // cycle primary
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("[theme]"), "theme section written: {text}");
-    assert!(
-        text.contains("primary = \"lightcyan\""),
-        "primary saved: {text}"
-    );
+    assert!(text.contains("primary = \"cyan\""), "primary saved: {text}");
     assert!(
         app.status().contains("saved"),
         "status note: {}",
@@ -338,11 +335,11 @@ fn enabled_process_indicators_render_on_the_status_line() {
 
 #[test]
 fn selection_rows_use_theme_primary_background() {
-    // The Settings nav's selected subpage row is highlighted with primary (Cyan).
+    // The Settings nav's selected subpage row is highlighted with primary red.
     let mut app = settings_app();
     let buf = draw(&mut app, 140, 40);
     assert!(
-        any_cell_with_bg(&buf, Color::Cyan),
+        any_cell_with_bg(&buf, Color::Red),
         "selected nav row uses primary background"
     );
 }

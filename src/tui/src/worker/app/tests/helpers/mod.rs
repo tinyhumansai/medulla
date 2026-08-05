@@ -60,6 +60,7 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
+        mcp_grant_session: None,
     }
 }
 

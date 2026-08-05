@@ -100,12 +100,13 @@ async fn run(
     // loopback endpoints so a second run can bind them again.
     let (sink, _fold) = folding_sink();
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
+    let max_loop_iterations = settings.max_loop_iterations;
     let context = RunContext {
         store: store.clone(),
         settings: Arc::new(settings),
         services: HostServices {
             dispatch: host.dispatch(),
-            resolver: Arc::new(StoreWorkflowResolver::new(store)),
+            resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
             http_credentials: HashMap::new(),
         },
         sink,

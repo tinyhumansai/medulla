@@ -449,14 +449,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             hub_logs.push(format!("custom harnesses: cannot load ({error})"));
             Vec::new()
         });
-    let local_hosts = match crate::local_host::options_from_config_with_custom(
+    let local_hosts = match crate::local_host::options_from_config_with_custom_and_hooks(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
         &custom_harnesses,
-        loaded.config.attribution.commit,
+        &crate::local_host::LaunchPolicy {
+            attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
+        },
     )
     .map(|options| {
         crate::local_host::start_all(
@@ -536,6 +539,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             custom_harnesses,
             router: loaded.config.router.clone(),
             attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
+            log: Some(hub_logs.sink()),
         }
     });
     // Shared with the hub's roster filter and appended to by the spawner, so a
@@ -548,14 +553,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // binding or session manager to hand a new host.
     let local_host_spawner = hosting
         .then(|| {
-            crate::local_host::options_from_config_with_custom(
+            crate::local_host::options_from_config_with_custom_and_hooks(
                 &loaded.config.host,
                 &env,
                 loaded.config.router.clone(),
                 loaded.config.budget.clone(),
                 Some(hub_logs.sink()),
                 &custom_harnesses,
-                loaded.config.attribution.commit,
+                &crate::local_host::LaunchPolicy {
+                    attribution: loaded.config.attribution.commit,
+                    hooks: loaded.config.hooks.clone(),
+                },
             )
             .ok()
             .map(|options| {

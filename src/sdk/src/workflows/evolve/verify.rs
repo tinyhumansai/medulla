@@ -74,7 +74,9 @@ pub async fn verify(
             }
         }
     };
-    let resolver = Arc::new(StoreWorkflowResolver::new(store.clone()));
+    // Verification only ever simulates (see `dry_run_graph` below), so there
+    // is no real harness cost for a loop ceiling to bound here.
+    let resolver = Arc::new(StoreWorkflowResolver::new(store.clone(), u64::MAX));
     let input = serde_json::json!({});
     let baseline = crate::workflows::run::dry_run_graph(
         &current.graph,

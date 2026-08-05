@@ -555,3 +555,26 @@ async fn a_relative_interpreter_path_is_refused_at_the_tool_surface() {
 
     assert!(err.to_string().contains("relative path"), "{err}");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_step_spells_the_login_shell_the_same_way_the_config_does() {
+    // `"user"` is a sentinel, not a program name — a step that writes it must
+    // reach `$SHELL` rather than trying to spawn a binary called `user`, which
+    // is the inconsistency between the two surfaces this pins.
+    let root = tempfile::tempdir().unwrap();
+
+    let result = MedullaToolInvoker::new(scripting_settings(root.path()))
+        .invoke(
+            "medulla:shell",
+            json!({ "script": "echo \"${SHELL_KIND:-unset}\"", "shell": "user" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    // Whatever `$SHELL` names on the runner, the script ran under *a* shell
+    // rather than failing to spawn `user`. Reaching output at all is the
+    // assertion; naming the shell would pin the CI runner's login shell.
+    assert!(result["output"].is_string(), "got {}", result["output"]);
+}

@@ -100,6 +100,9 @@ shell = "user"        # follow $SHELL; or name one: "zsh", "/bin/zsh"
 shellArgs = ["-l"]    # a login shell, so PATH and functions come with it
 ```
 
+`args.shell` takes the same values `workflows.shell` does, `"user"` included —
+a single step can follow the login shell without the host committing to it.
+
 `shell = "user"` is the opt-in that makes scripts run under whatever the
 operator actually uses. It is opt-in on purpose: an existing workflow's scripts
 were written against `bash`, and re-running them under `fish` because that is

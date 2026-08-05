@@ -90,9 +90,11 @@ impl MedullaToolInvoker {
     /// `args.shell` and `args.shell_args` override the interpreter for this one
     /// step — `{"shell": "zsh", "shell_args": ["-l"]}` runs it under a login
     /// zsh, so the operator's `PATH` and shell functions are in scope where the
-    /// default non-login `bash` would see neither. They apply to
-    /// `language: "shell"` only, and are checked by
-    /// [`Interpreter::validated`].
+    /// default non-login `bash` would see neither. `args.shell` takes the same
+    /// values `workflows.shell` does, including
+    /// [`USER_SHELL`](super::script::USER_SHELL) for the operator's login
+    /// shell. They apply to `language: "shell"` only, and go through
+    /// [`Interpreter::resolve`].
     async fn shell(&self, args: Value) -> Result<Value> {
         if !self.settings.allow_code {
             return Err(EngineError::Capability(
@@ -166,9 +168,15 @@ impl MedullaToolInvoker {
             )));
         }
         let chosen = match (language, named) {
-            (ScriptLanguage::Shell, Some(program)) => {
-                Some(Interpreter::validated(program, &shell_args)?)
-            }
+            // `resolve` rather than `validated`, so a step spells the login
+            // shell the same way the operator's config does: `"user"` here
+            // means `$SHELL`, not a program named `user`. Anything else is a
+            // program name, exactly as before.
+            (ScriptLanguage::Shell, Some(program)) => Some(Interpreter::resolve(
+                program,
+                &shell_args,
+                Interpreter::login_shell().as_deref(),
+            )?),
             // Arguments with no program still mean "not the plain default":
             // `shell_args: ["-l"]` alone asks for the host's shell, as a login
             // shell. Dropping them would run the script non-login and look like

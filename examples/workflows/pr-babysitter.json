@@ -78,8 +78,9 @@
           "pr": "=.item.json.output.pr",
           "conflicted": "=((.item.json.output.pr.mergeable == \"CONFLICTING\") or (.item.json.output.pr.mergeStateStatus == \"DIRTY\"))",
           "draft": "=(.item.json.output.pr.isDraft // false)",
-          "actionable": "=([.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0 or (.item.json.output.pr.mergeable == \"CONFLICTING\") or (.item.json.output.pr.mergeStateStatus == \"DIRTY\")",
-          "merge_state": "=(.item.json.output.pr.mergeStateStatus // \"UNKNOWN\")"
+          "actionable": "=(.item.json.output.pr.state == \"OPEN\") and ((([.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")] | length) > 0) or (((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0) or (.item.json.output.pr.mergeable == \"CONFLICTING\") or (.item.json.output.pr.mergeStateStatus == \"DIRTY\"))",
+          "merge_state": "=(.item.json.output.pr.mergeStateStatus // \"UNKNOWN\")",
+          "state": "=(.item.json.output.pr.state // \"UNKNOWN\")"
         }
       }
     },
@@ -145,14 +146,15 @@
         "set": {
           "pr": "=.nodes.assess.item.pr",
           "rounds": "=.nodes.watch.iteration",
-          "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0) and ((.nodes.assess.item.draft) | not)",
+          "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0) and ((.nodes.assess.item.draft) | not) and ((.nodes.assess.item.state == \"OPEN\") or (.nodes.assess.item.state == \"MERGED\"))",
           "failing": "=.nodes.assess.item.failing",
           "blocking_feedback": "=.nodes.assess.item.blocking_feedback",
           "conflicted": "=.nodes.assess.item.conflicted",
           "draft": "=.nodes.assess.item.draft",
           "merge_state": "=.nodes.assess.item.merge_state",
           "mergeable": "=.nodes.assess.item.pr.mergeable",
-          "ready_to_merge": "=((.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0) and ((.nodes.assess.item.draft) | not) and (.nodes.assess.item.merge_state == \"CLEAN\"))"
+          "ready_to_merge": "=(.nodes.assess.item.state == \"OPEN\") and (.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0) and ((.nodes.assess.item.draft) | not) and (.nodes.assess.item.merge_state == \"CLEAN\")",
+          "state": "=.nodes.assess.item.state"
         }
       }
     }

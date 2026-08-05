@@ -172,7 +172,12 @@ impl Interpreter {
                  process"
             )));
         }
-        if program.contains(std::path::MAIN_SEPARATOR) && !Path::new(program).is_absolute() {
+        // `is_separator` rather than `MAIN_SEPARATOR`: Windows accepts `/` as
+        // well as `\`, so matching only the platform's *preferred* separator
+        // would wave `./sh` straight through on the one platform where two
+        // spellings exist. It stays exact on unix, where `\` is an ordinary
+        // filename character.
+        if program.chars().any(std::path::is_separator) && !Path::new(program).is_absolute() {
             return Err(refused(format!(
                 "the interpreter {program:?} is a relative path; name a program on PATH (\"zsh\") \
                  or give an absolute path (\"/bin/zsh\")"

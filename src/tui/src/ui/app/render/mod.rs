@@ -2,7 +2,8 @@
 //! the [`App::draw`] layout, hints/tabs/status line, the shared [`App::panel`] block
 //! builder, and content dispatch — plus the small styling helpers ([`color`],
 //! [`styled_to_tline`], [`event_color`], [`chat_lines`], [`App::event_line`])
-//! reused by the per-tab submodules. Each tab's body lives in a sibling module.
+//! reused by the per-tab submodules. Each tab's body lives in a sibling module,
+//! and [`frame_state`] owns the per-frame reset every draw opens with.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -22,6 +23,7 @@ mod agents;
 mod changes;
 mod decisions;
 mod feedback;
+mod frame_state;
 pub(super) mod graph;
 mod overview;
 mod points;
@@ -288,33 +290,9 @@ impl App {
     /// "which backend am I on, and what is it doing" is a glance-down check.
     pub fn draw(&mut self, f: &mut Frame) {
         self.area = f.area();
-        // The harness pane is resolved during the draw and read by the *next*
-        // key press, so it has to be cleared here rather than left over: a
-        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
-        // tab was showing several frames ago. `draw_agents_pane` fills it back
-        // in when it resolves a session.
-        self.pane_session = None;
-        // Its counterpart, for the same reason: a remembered remote row would
-        // answer the take chord on a tab that is not showing it.
-        self.pane_remote_session = None;
-        // Same reasoning as above: a stale rect would route the wheel into a
-        // terminal that is no longer on screen.
-        self.hit_session = None;
-        self.hit_workflow_preview = None;
-        // Same again for the hand-back question's answers: a click must never
-        // reach a `[Y]` that was on screen two frames ago, least of all when
-        // what it now sits over is the harness the operator went back to.
-        self.hit_handback.clear();
-        // Focus follows the pane, not the other way round. `agents_selection`
-        // (called only while drawing the Agents tab) is what notices the cursor
-        // moving off the attached session; it has nothing to say once the
-        // operator has left the tab entirely. Without this, `harness_focus`
-        // stayed `Attached` after a click elsewhere, and the next keystroke —
-        // meant for whatever tab was now on screen — was typed into a harness
-        // pane the operator could no longer see.
-        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
-            self.release_session();
-        }
+        // Everything the last frame recorded for the next key press, dropped
+        // before this one records its own — see [`frame_state`].
+        self.reset_frame_state();
         // The composer now lives inside the Agents pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.

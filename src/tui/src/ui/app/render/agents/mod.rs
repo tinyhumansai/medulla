@@ -10,7 +10,8 @@
 //! never two jobs.
 //!
 //! Split by responsibility: [`types`] resolves what the cursor is on and where
-//! the panes landed, [`rail`] draws the threads strip and the lane/fleet list,
+//! the panes landed, [`session`] resolves which session that row names and what
+//! it arms, [`rail`] draws the threads strip and the lane/fleet list,
 //! [`transcript`] the pane beside it, [`summary`] what that pane shows for a row
 //! with no transcript of its own, [`started`] the sessions each conversation
 //! turn spawned, [`work`] the panel showing what the selected agent is working
@@ -28,6 +29,7 @@ use super::super::types::App;
 mod composer;
 mod harness;
 mod rail;
+mod session;
 mod started;
 mod summary;
 mod transcript;
@@ -114,30 +116,7 @@ impl App {
             on_orchestrator,
             session: None,
         };
-        selection.session = self.local_session(&selection);
-        // Focus follows the pane, not the other way round. If the cursor moved
-        // off the attached session — or that session ended — the keyboard comes
-        // back to the chrome, because keys landing in a harness the operator is
-        // no longer looking at is the worst failure this feature can have.
-        if let Some(attached) = self.harness_focus.attached_to() {
-            if selection.session.as_deref() != Some(attached) {
-                self.release_session();
-            }
-        }
-        self.pane_session = selection.session.clone();
-        self.rail_session = selection.session.clone();
-        // A session row this device is not running: watchable, but not takeable
-        // (§E7). Recorded here because this is the only place that can tell the
-        // difference — one row down the cursor, both cases are a `None` session.
-        self.pane_remote_session = match (&selection.session, selection.rows.get(selection.active))
-        {
-            (None, Some(RailRow::Session(row))) => Some(
-                row.agent_id
-                    .clone()
-                    .unwrap_or_else(|| "another host".to_string()),
-            ),
-            _ => None,
-        };
+        self.resolve_selected_session(&mut selection);
         selection
     }
 

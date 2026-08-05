@@ -149,16 +149,32 @@ fn local_row<'a>(
         if detail_worker.is_none() && has_probe_details(worker) {
             detail_worker = Some(worker.id.clone());
         }
-        if agents.iter().any(|agent| agent.agent_id == worker.id) {
+        // Trimmed on both sides, because the claim above is: a declaration
+        // whose `agent_id` carries a stray space still matches the roster entry
+        // (`worker.id.trim() == declaration.agent_id.trim()`), so comparing the
+        // raw ids here failed to recognise the very worker that declaration had
+        // just claimed — and appended it a second time as an undeclared row,
+        // which is the duplicate this loop exists to prevent.
+        if agents
+            .iter()
+            .any(|agent| agent.agent_id.trim() == worker.id.trim())
+        {
             continue;
         }
         agents.push(agent_from_worker(worker, true));
     }
     // Claim by agent id rather than by address: a declaration may name an agent
     // whose roster entry is registered under another address, and it must not
-    // then be listed a second time as a remote host of its own.
+    // then be listed a second time as a remote host of its own. Trimmed for the
+    // same reason the two comparisons above are — a padded `agent_id` that
+    // claimed a worker but did not claim it *here* would leave that worker to
+    // the remote pass, which conjures a second host row for a machine already
+    // listed.
     for agent in &agents {
-        if let Some(worker) = workers.iter().find(|worker| worker.id == agent.agent_id) {
+        if let Some(worker) = workers
+            .iter()
+            .find(|worker| worker.id.trim() == agent.agent_id.trim())
+        {
             claimed.push(worker.id.as_str());
         }
     }

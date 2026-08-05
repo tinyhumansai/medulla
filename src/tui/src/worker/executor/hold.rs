@@ -63,7 +63,15 @@ const DEFAULT_QUEUE_BUDGET: Duration = Duration::from_secs(600);
 /// One line, because it is typed into a composer. A line-oriented harness reads
 /// a prompt up to the first newline, so a multi-line brief would arrive as a
 /// prompt plus stray input.
+///
+/// Which is why the task's own instruction is flattened first
+/// ([`one_line`]): it is interpolated *mid-sentence*, and a task brief with a
+/// newline in it — a bulleted list, a pasted stack trace — used to truncate the
+/// prompt at that newline and drop the whole tail, including the "if the work is
+/// already done, do not redo it" guidance that is the entire reason this turn
+/// runs instead of the suspended one.
 pub(super) fn handback_prompt(instruction: &str) -> String {
+    let instruction = one_line(instruction);
     format!(
         "An operator took control of this session and has been working in it; \
          you now have it back. Review this session's history and the current \
@@ -71,6 +79,15 @@ pub(super) fn handback_prompt(instruction: &str) -> String {
          work is already done, do not redo it: report the final result. \
          Otherwise continue from where things now stand and complete it.",
     )
+}
+
+/// `text` with every run of whitespace — newlines included — collapsed to a
+/// single space, and the ends trimmed.
+///
+/// Lossy on purpose: the alternative to losing a brief's line breaks is losing
+/// everything after the first one.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The `status` frame text that announces a hold to the requester.

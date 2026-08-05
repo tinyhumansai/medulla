@@ -276,10 +276,17 @@ impl SessionRow {
     /// The same id a picker choice reports and a declaration records, which is
     /// what makes matching a session to its agent a comparison of like with
     /// like rather than of a preset against the CLI underneath it.
+    ///
+    /// Trimmed here rather than by each caller: this is a *join key* — it is
+    /// compared against a declaration's `harness`, which is trimmed on its own
+    /// side — so a preset id typed with a stray space has to stop being one at
+    /// the source, or every comparison has to remember to trim and one of them
+    /// eventually will not.
     pub fn harness_id(&self) -> &str {
         self.preset
             .as_deref()
-            .filter(|preset| !preset.trim().is_empty())
+            .map(str::trim)
+            .filter(|preset| !preset.is_empty())
             .unwrap_or_else(|| self.provider.as_str())
     }
 }

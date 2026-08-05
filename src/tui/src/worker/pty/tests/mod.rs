@@ -2,9 +2,10 @@
 //! 500-line ceiling: [`session`] covers allocation, the reader thread, emulator
 //! parsing, resize, input and reaping; [`identity`] which harnesses get a minted
 //! session id and how one is learned back; [`attention`] a live screen becoming
-//! the flag that makes a row blink.
+//! the flag that makes a row blink; [`types`] the row model on its own, which
+//! needs no child at all.
 //!
-//! These drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
+//! The rest drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
 //! agent, so they stay fast, offline, and deterministic while still exercising
 //! the parts that actually break. The launch spec and the polling helpers are
 //! here because both submodules use them.
@@ -24,6 +25,7 @@ mod control;
 mod identity;
 mod scrollback;
 mod session;
+mod types;
 
 #[test]
 fn child_repository_override_is_retained_for_transcript_mapping() {

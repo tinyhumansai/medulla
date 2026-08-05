@@ -254,6 +254,26 @@ fn an_agent_named_by_a_declaration_is_never_also_a_remote_host() {
 }
 
 #[test]
+fn a_padded_declared_id_still_claims_its_worker_exactly_once() {
+    // `agent_id` is typed into a config file, and the declaration→roster claim
+    // is trimmed — so a stray space matched the worker there and then failed to
+    // recognise it in the undeclared pass, listing one agent twice: once as the
+    // declaration, once as a roster entry nobody had written down.
+    let declared = AgentDeclaration::new("  padded  ", "this-device", "claude", "/w");
+    let rows = host_rows(
+        &[worker("padded", "this-device")],
+        &[declared],
+        &[this_device()],
+    );
+
+    assert_eq!(rows.len(), 1, "no phantom second host: {rows:?}");
+    assert_eq!(rows[0].agents.len(), 1, "one agent, listed once: {rows:?}");
+    let agent = &rows[0].agents[0];
+    assert!(agent.declared, "the declaration is what describes it");
+    assert!(agent.live, "and the roster entry is folded into it");
+}
+
+#[test]
 fn the_declared_name_and_roles_win_over_the_live_entry() {
     // The declaration is what survives a restart, so it is what the row shows —
     // a live entry whose roles were set but never written down must not read as

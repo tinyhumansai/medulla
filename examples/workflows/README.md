@@ -69,7 +69,8 @@ widens a run without deepening it.
 
 ## Choosing the interpreter
 
-`medulla:shell` picks its program from `args.language`, and the set is fixed:
+`args.language` decides which interpreter a script runs under, and which file
+extension it is staged with:
 
 | `language` | program | invoked as |
 | --- | --- | --- |
@@ -77,26 +78,42 @@ widens a run without deepening it.
 | `python` | `python3` | `python3 <script> <input.json>` |
 | `javascript` | `node` | `node <script> <input.json>` |
 
-There is no `zsh` language and no config key that overrides the binary. The
-script is also run **non-login and non-interactive**, so `~/.zshrc`,
-`~/.bash_profile` and anything they put on `PATH` are not in scope. What *is*
-inherited is the daemon's own environment, plus whatever `args.env` adds.
+For `shell`, the program is a default rather than a constant. It matters
+because a script is run **non-login and non-interactive**: `~/.zshrc`,
+`~/.bash_profile`, and anything they put on `PATH` are not in scope. What *is*
+inherited is the daemon's own environment, plus whatever `args.env` adds. A
+step that needs the operator's own shell — their functions, their `~/bin`,
+their helper scripts — has to say so.
 
-So a step that needs the operator's own shell — their functions, their `~/bin`,
-their helper scripts — invokes it explicitly. `pr-babysitter` does exactly this
-to collect review feedback:
+Per step, with `args.shell` and `args.shell_args`:
 
-```bash
-feedback=$(zsh -lc "$FEEDBACK_COMMAND" 2>/dev/null || true)
+```json
+{ "slug": "medulla:shell",
+  "args": { "script": "pr-comments \"$PR\" --json", "shell": "zsh", "shell_args": ["-l"] } }
 ```
 
-with `FEEDBACK_COMMAND` supplied as a workflow input (`pr-comments "$PR" --json
--R "$REPO"`) and `PR` / `REPO` passed through `args.env`, where the inner shell
-inherits them. Use `-l` for a login shell (PATH and exported functions) and
-`-i` as well if the command is an alias, since aliases are not exported.
+Or host-wide, in `<medulla home>/config.toml`:
 
-Two things to keep in mind: `medulla:shell` needs `workflows.allowCode`, which
-is on by default and runs with the daemon's full privileges, and a script that
-exits non-zero fails the node — so a command whose *failure* is the signal you
-want (`gh pr checks` exits non-zero when checks are red) needs `|| true` and a
-check on its output instead.
+```toml
+[workflows]
+shell = "user"        # follow $SHELL; or name one: "zsh", "/bin/zsh"
+shellArgs = ["-l"]    # a login shell, so PATH and functions come with it
+```
+
+`shell = "user"` is the opt-in that makes scripts run under whatever the
+operator actually uses. It is opt-in on purpose: an existing workflow's scripts
+were written against `bash`, and re-running them under `fish` because that is
+what `$SHELL` says would break them in ways that look like the script's fault.
+Unset keeps `bash`.
+
+Add `-i` alongside `-l` if the command you need is an *alias* — aliases are
+never exported, so a login shell alone will not find one. `pr-babysitter`'s
+inspect step takes `["-l"]` and is the worked example.
+
+Three things to keep in mind. `medulla:shell` needs `workflows.allowCode`,
+which is on by default and runs with the daemon's full privileges. A script
+that exits non-zero fails the node, so a command whose *failure* is the signal
+you want (`gh pr checks` exits non-zero when checks are red) needs `|| true`
+and a check on its output instead. And `shell`/`shell_args` apply to
+`language: "shell"` only — naming one alongside `python` is refused rather than
+silently handing a `.py` file to a shell.

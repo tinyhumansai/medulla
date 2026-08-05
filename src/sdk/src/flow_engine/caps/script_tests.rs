@@ -29,6 +29,7 @@ async fn run(
     let env = BTreeMap::new();
     run_script(ScriptRequest {
         language,
+        interpreter: None,
         source: ScriptSource::Inline(source),
         input,
         timeout,
@@ -347,4 +348,162 @@ async fn shell_is_refused_on_windows_rather_than_emulated() {
     assert!(message.contains("Windows"), "{message}");
     assert!(message.contains("javascript"), "{message}");
     assert!(message.contains("python"), "{message}");
+}
+
+/// Runs `source` under an explicitly chosen interpreter.
+async fn run_under(interpreter: &Interpreter, source: &str) -> Result<ScriptOutput> {
+    let env = BTreeMap::new();
+    let input = json!(null);
+    run_script(ScriptRequest {
+        language: ScriptLanguage::Shell,
+        interpreter: Some(interpreter),
+        source: ScriptSource::Inline(source),
+        input: &input,
+        timeout: TIMEOUT,
+        cwd: None,
+        env: &env,
+    })
+    .await
+}
+
+#[test]
+fn an_unconfigured_host_keeps_the_default_shell() {
+    // The whole point of the empty default: a workflow whose scripts were
+    // written against `bash` must not change interpreter because this field
+    // was added.
+    let chosen = Interpreter::resolve("", &[], Some("/usr/bin/fish")).expect("valid");
+
+    assert_eq!(chosen.program, DEFAULT_SHELL);
+    assert!(chosen.args.is_empty());
+}
+
+#[test]
+fn the_user_sentinel_follows_the_login_shell() {
+    let chosen =
+        Interpreter::resolve(USER_SHELL, &["-l".to_string()], Some("/bin/zsh")).expect("valid");
+
+    assert_eq!(chosen.program, "/bin/zsh");
+    assert_eq!(chosen.args, vec!["-l".to_string()]);
+}
+
+#[test]
+fn the_user_sentinel_falls_back_when_the_environment_names_no_shell() {
+    // A daemon started by systemd has no `$SHELL`, and an empty one is the
+    // same absence spelled differently. Neither may leave the program empty.
+    for absent in [None, Some(""), Some("   ")] {
+        let chosen = Interpreter::resolve(USER_SHELL, &[], absent).expect("valid");
+        assert_eq!(chosen.program, DEFAULT_SHELL, "for {absent:?}");
+    }
+}
+
+#[test]
+fn a_named_interpreter_wins_over_the_login_shell() {
+    let chosen = Interpreter::resolve("zsh", &[], Some("/usr/bin/fish")).expect("valid");
+
+    assert_eq!(chosen.program, "zsh");
+}
+
+#[test]
+fn a_relative_interpreter_path_is_refused() {
+    // The path would resolve against the script's working directory, which the
+    // *workflow author* chooses — so accepting it would let a graph decide
+    // which binary the operator's own configuration named.
+    let err = Interpreter::resolve("./sh", &[], None).expect_err("relative path");
+
+    let message = err.to_string();
+    assert!(message.contains("relative path"), "{message}");
+    assert!(
+        message.contains("/bin/zsh"),
+        "the error must teach the fix: {message}"
+    );
+}
+
+#[test]
+fn an_absolute_interpreter_path_is_accepted() {
+    let chosen = Interpreter::resolve(absolute_interpreter(), &[], None).expect("valid");
+
+    assert_eq!(chosen.program, absolute_interpreter());
+}
+
+/// An absolute path this platform actually considers absolute.
+fn absolute_interpreter() -> &'static str {
+    #[cfg(windows)]
+    {
+        r"C:\Windows\System32\cmd.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "/bin/zsh"
+    }
+}
+
+#[test]
+fn a_blank_configured_shell_reads_as_unconfigured() {
+    // Whitespace is how a half-edited config file spells "I did not set this",
+    // and reading it as an empty program name would break every script.
+    let chosen = Interpreter::resolve("   ", &[], None).expect("valid");
+
+    assert_eq!(chosen.program, DEFAULT_SHELL);
+}
+
+#[test]
+fn an_empty_interpreter_is_refused() {
+    // `resolve` maps blank to the default; `validated` is the direct path, and
+    // there an empty program is a caller's mistake rather than an absence.
+    let err = Interpreter::validated("   ", &[]).expect_err("blank");
+
+    assert!(err.to_string().contains("must not be empty"), "{err}");
+}
+
+#[test]
+fn a_nul_byte_is_refused_in_the_program_and_in_an_argument() {
+    // Neither can be passed to a process; refusing here beats a spawn error
+    // that names nothing an author wrote.
+    let program = Interpreter::resolve("z\0sh", &[], None).expect_err("NUL program");
+    assert!(program.to_string().contains("NUL"), "{program}");
+
+    let argument =
+        Interpreter::resolve("zsh", &["-l\0".to_string()], None).expect_err("NUL argument");
+    assert!(argument.to_string().contains("NUL"), "{argument}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_chosen_interpreter_actually_runs_the_script() {
+    // `sh` rather than `zsh`: every unix host has it, so this pins that the
+    // override reaches the spawn rather than that a particular shell exists.
+    let chosen = Interpreter::validated("sh", &[]).expect("valid");
+
+    let output = run_under(&chosen, "echo chosen").await.expect("runs");
+
+    assert_eq!(output.value, json!("chosen"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn interpreter_arguments_reach_the_command_line() {
+    // `-x` traces to stderr, which is the observable proof the argument landed
+    // *before* the script path rather than being dropped.
+    let chosen = Interpreter::validated("sh", &["-x".to_string()]).expect("valid");
+
+    let output = run_under(&chosen, "echo traced").await.expect("runs");
+
+    assert_eq!(output.value, json!("traced"));
+    assert!(
+        output.stderr.contains("echo traced"),
+        "expected an -x trace, got {:?}",
+        output.stderr
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_missing_interpreter_names_itself() {
+    let chosen = Interpreter::validated("medulla-no-such-shell", &[]).expect("valid");
+
+    let err = run_under(&chosen, "echo hi").await.expect_err("missing");
+
+    let message = err.to_string();
+    assert!(message.contains("medulla-no-such-shell"), "{message}");
+    assert!(message.contains("PATH"), "{message}");
 }

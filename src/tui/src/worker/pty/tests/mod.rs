@@ -2,7 +2,8 @@
 //! 500-line ceiling: [`session`] covers allocation, the reader thread, emulator
 //! parsing, resize, input and reaping; [`identity`] which harnesses get a minted
 //! session id and how one is learned back; [`attention`] a live screen becoming
-//! the flag that makes a row blink.
+//! the flag that makes a row blink; [`clipboard`] a harness's own copy being
+//! carried out of the pane.
 //!
 //! These drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
 //! agent, so they stay fast, offline, and deterministic while still exercising
@@ -20,6 +21,7 @@ use super::types::{HarnessControl, LaunchSpec, PtyState};
 
 mod attention;
 mod checkout;
+mod clipboard;
 mod control;
 mod identity;
 mod scrollback;

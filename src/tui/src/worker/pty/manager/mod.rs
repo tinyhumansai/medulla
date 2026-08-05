@@ -17,8 +17,9 @@
 //!
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
-//! other caller reads, [`screen`] is the emulator surface the UI renders, and
-//! [`attention`] keeps each row's "this harness wants you" flag current.
+//! other caller reads, [`screen`] is the emulator surface the UI renders,
+//! [`attention`] keeps each row's "this harness wants you" flag current, and
+//! [`clipboard`] carries a harness's own copies out to the operator's terminal.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -116,17 +117,41 @@ impl PtyManager {
 
     /// Override the clock (tests).
     pub fn with_now(now: NowFn) -> Self {
+        PtyManager::with_now_and_clipboard(now, clipboard::default_sink())
+    }
+
+    /// Override the clock and where forwarded clipboard writes go (tests).
+    ///
+    /// The default sink writes escape sequences to this process's terminal and
+    /// shells out to `tmux`/`pbcopy`; a test wants neither, and wants to assert
+    /// on what a harness asked to copy.
+    pub fn with_now_and_clipboard(now: NowFn, clipboard: ClipboardSink) -> Self {
         PtyManager {
             inner: Arc::new(Inner {
                 sessions: RwLock::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 now,
+                clipboard,
             }),
         }
     }
 
     fn now(&self) -> i64 {
         (self.inner.now)()
+    }
+
+    /// Hand on whatever `handle`'s child last asked to copy, if anything.
+    ///
+    /// Called by the reader thread after every drain, and on a thread of its own
+    /// because the sink waits on `tmux`/`pbcopy` children — seconds, in the
+    /// pathological case, during which the reader must keep draining or the
+    /// harness blocks on its own output.
+    pub(super) fn forward_clipboard(&self, handle: &SessionHandle) {
+        let Some(text) = handle.take_clipboard() else {
+            return;
+        };
+        let sink = self.inner.clipboard.clone();
+        std::thread::spawn(move || sink(&text));
     }
 
     /// The handle for `id`, if there is one.
@@ -149,6 +174,7 @@ impl PtyManager {
 }
 
 mod attention;
+mod clipboard;
 mod open;
 mod screen;
 mod session;
@@ -159,5 +185,4 @@ pub use screen::{ScreenCell, ScreenSnapshot};
 
 mod types;
 use types::Inner;
-pub use types::NowFn;
-pub use types::PtyManager;
+pub use types::{ClipboardSink, NowFn, PtyManager};

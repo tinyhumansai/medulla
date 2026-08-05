@@ -63,6 +63,15 @@ impl SessionHandle {
         lock(&self.modes).alternate_scroll
     }
 
+    /// Take the clipboard write the child asked for, if it has asked since the
+    /// last call.
+    ///
+    /// Taking rather than reading, so one copy is forwarded once however often
+    /// this is polled — the reader thread calls it after every drain.
+    pub(in super::super) fn take_clipboard(&self) -> Option<String> {
+        lock(&self.modes).clipboard.take()
+    }
+
     /// Feed bytes from the pty into the emulator.
     pub(in super::super) fn process(&self, bytes: &[u8]) {
         {

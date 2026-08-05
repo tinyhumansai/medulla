@@ -1,16 +1,17 @@
-//! Clipboard writers: try a platform binary (pbcopy / clip / wl-copy / xclip /
-//! xsel) then fall back to OSC 52 (hand the text to the terminal). OSC 52 is the
-//! only mechanism that survives SSH, so it backstops rather than replaces the
-//! spawn path.
+//! Clipboard writers: the surrounding tmux's paste buffer, a platform binary
+//! (pbcopy / clip / wl-copy / xclip / xsel), and OSC 52 (hand the text to the
+//! terminal). OSC 52 is the only mechanism that survives SSH, so it backstops
+//! rather than replaces the spawn path — and [`tmux`] is what keeps it working
+//! when the SSH session lands in a multiplexer instead of a terminal.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 use base64::Engine;
 
-/// Sentinel returned when the copy fell through to the OSC 52 backstop. Unlike a
-/// writer exiting 0 this is "handed to the terminal", NOT "copied" — callers must
-/// not report it as a completed copy.
+/// Sentinel naming the terminal hand-off in [`CopyReport::describe`]. Unlike a
+/// writer exiting 0 this is "handed to the terminal", NOT "copied" — callers
+/// must not report it as a completed copy.
 pub const OSC_52: &str = "OSC 52";
 
 /// Clipboard binaries to try, in order. The X11/Wayland set backstops the other
@@ -77,28 +78,44 @@ pub fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
     matches!(child.wait(), Ok(status) if status.success())
 }
 
-/// Copy `text`, returning the mechanism that took it (the writer command, or
-/// [`OSC_52`]). `emit_osc` receives the escape sequence for the fallback path
-/// (write it to the terminal).
-pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, emit_osc: F) -> String {
-    copy_with(writers(platform), text, emit_osc)
+/// Copy `text`, reporting which mechanisms took it. `emit_osc` receives the
+/// escape sequence for the terminal hand-off (write it to the terminal).
+///
+/// Order is local-first: the tmux paste buffer, then a platform writer, then the
+/// escape. This is the path for text an operator copies to use *on this machine*
+/// — a transcript pasted into an editor — and also the path for anything too
+/// large to trust to an escape, since terminals cap what an OSC 52 may carry
+/// while a tmux buffer does not.
+pub fn copy_to_clipboard<F: FnMut(&str)>(text: &str, platform: &str, emit_osc: F) -> CopyReport {
+    copy_with(writers(platform), Tmux::from_env().as_ref(), text, emit_osc)
 }
 
-/// [`copy_to_clipboard`] over an explicit writer list.
+/// [`copy_to_clipboard`] over an explicit writer list and tmux context.
 ///
-/// Split out so the two paths — a writer took it, nothing did — can be tested
-/// without depending on which clipboard binaries the test machine happens to
-/// have. Selecting by platform name cannot do that: `writers("macos")` names
+/// Split out so the paths — tmux took it, a writer took it, nothing did — can be
+/// tested without depending on which clipboard binaries the test machine happens
+/// to have. Selecting by platform name cannot do that: `writers("macos")` names
 /// `pbcopy`, which exists on a developer's Mac and not in Linux CI, so the same
 /// assertion would exercise a different branch in each place.
-fn copy_with<F: FnMut(&str)>(writers: &[Writer], text: &str, mut emit_osc: F) -> String {
-    for w in writers {
-        if pipe_to(w.cmd, w.args, text) {
-            return w.cmd.to_string();
-        }
+fn copy_with<F: FnMut(&str)>(
+    writers: &[Writer],
+    tmux: Option<&Tmux>,
+    text: &str,
+    mut emit_osc: F,
+) -> CopyReport {
+    let mut report = CopyReport {
+        tmux: tmux.is_some_and(|tmux| tmux.load_buffer(text)),
+        writer: writers
+            .iter()
+            .find(|w| pipe_to(w.cmd, w.args, text))
+            .map(|w| w.cmd.to_string()),
+        terminal: false,
+    };
+    if !report.confirmed() {
+        emit_osc(&tmux::operator_sequence(text, tmux));
+        report.terminal = true;
     }
-    emit_osc(&osc52(text));
-    OSC_52.to_string()
+    report
 }
 
 /// Copy `text` to the clipboard of whoever is *looking at* this program, which
@@ -109,30 +126,33 @@ fn copy_with<F: FnMut(&str)>(writers: &[Writer], text: &str, mut emit_osc: F) ->
 /// hands back over SSH: `pbcopy`/`xclip` would succeed on the remote box and
 /// quietly fill a clipboard nobody can paste from, and because they succeeded
 /// the escape would never be emitted. So here the escape goes out *first* and
-/// unconditionally, and a local writer is attempted afterwards only so a
-/// locally-run session still lands in a real clipboard.
-///
-/// Returns the local writer that also took it, if any — the terminal hand-off
-/// cannot be confirmed, so it is never reported as a completed copy.
-pub fn copy_for_operator<F: FnMut(&str)>(
-    text: &str,
-    platform: &str,
-    emit_osc: F,
-) -> Option<String> {
-    copy_for_operator_with(writers(platform), text, emit_osc)
+/// unconditionally — by every route the surrounding tmux leaves open, see
+/// [`tmux`] — and a local writer is attempted afterwards only so a locally-run
+/// session still lands in a real clipboard.
+pub fn copy_for_operator<F: FnMut(&str)>(text: &str, platform: &str, emit_osc: F) -> CopyReport {
+    copy_for_operator_with(writers(platform), Tmux::from_env().as_ref(), text, emit_osc)
 }
 
-/// [`copy_for_operator`] over an explicit writer list; see [`copy_with`].
+/// [`copy_for_operator`] over an explicit writer list and tmux context; see
+/// [`copy_with`].
 fn copy_for_operator_with<F: FnMut(&str)>(
     writers: &[Writer],
+    tmux: Option<&Tmux>,
     text: &str,
     mut emit_osc: F,
-) -> Option<String> {
-    emit_osc(&osc52(text));
-    writers
-        .iter()
-        .find(|w| pipe_to(w.cmd, w.args, text))
-        .map(|w| w.cmd.to_string())
+) -> CopyReport {
+    emit_osc(&tmux::operator_sequence(text, tmux));
+    CopyReport {
+        // The buffer of the tmux we are inside is not the operator's clipboard,
+        // but it is one prefix-`]` away from being pasted, and unlike the escape
+        // it needs no cooperation from any terminal in the chain.
+        tmux: tmux.is_some_and(|tmux| tmux.load_buffer(text)),
+        writer: writers
+            .iter()
+            .find(|w| pipe_to(w.cmd, w.args, text))
+            .map(|w| w.cmd.to_string()),
+        terminal: true,
+    }
 }
 
 /// The current OS name for [`writers`] / [`copy_to_clipboard`].
@@ -143,5 +163,8 @@ pub fn current_platform() -> &'static str {
 #[cfg(test)]
 mod tests;
 
+pub mod tmux;
+pub use tmux::Tmux;
+
 mod types;
-pub use types::Writer;
+pub use types::{CopyReport, Writer};

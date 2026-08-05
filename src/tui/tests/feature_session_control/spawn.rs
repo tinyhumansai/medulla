@@ -1,7 +1,7 @@
 //! `/harness <provider> [path]`: starting a named provider without the picker,
 //! and the two ways that can be asked for something impossible.
 
-use super::helpers::*;
+use crate::helpers::*;
 use crossterm::event::KeyCode;
 use medulla_tui::worker::pty::{PtyManager, SessionControl};
 

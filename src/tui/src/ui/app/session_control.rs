@@ -260,6 +260,21 @@ impl App {
         if let Some(session) = self.harness_focus.attached_to() {
             return Some((harnesses, session.to_string()));
         }
+        // A remote row is a session the cursor is genuinely on — it is just not
+        // one this machine can hand over (§E7). Refused here rather than fallen
+        // through, because the fallbacks below would then resolve to *something
+        // else*: with the cursor on a remote row `pane_session` is empty, so the
+        // single-held-session rule would hand back an unrelated local session
+        // the operator was not even looking at. That is the exact "handed back
+        // the wrong one" failure this function exists to prevent, and it is
+        // worse than the refusal because it is silent.
+        if let Some(agent) = self.pane_remote_session.clone() {
+            self.set_status(format!(
+                "{agent} runs on another host — you can watch this session, but \
+                 taking control is local-only for now"
+            ));
+            return None;
+        }
         if let Some(session) = self.pane_session.clone() {
             return Some((harnesses, session));
         }
@@ -355,20 +370,23 @@ impl App {
             // read. `/handoff` is still there for the operator who does want to
             // give one away.
             //
-            // The claim is read from two places, because either alone is wrong:
+            // The claim is read from three places, because no one of them is
+            // sufficient — and the two that were tried alone each had a hole:
             //
-            // - [`SessionOrigin`] is the durable fact and the primary test.
-            //   Dispatch created the session, so walking away still user-held
-            //   locks dispatch out of it. Crucially this does not depend on
-            //   *how* the operator came to hold it: the executor hands a failed
-            //   reusable turn straight to the operator
+            // - [`SessionOrigin`]: dispatch created the session, so walking away
+            //   still user-held locks dispatch out of it. This does not depend
+            //   on *how* the operator came to hold it, which matters because the
+            //   executor hands a failed reusable turn straight to the operator
             //   (`worker::executor::run`) without passing through
-            //   [`take_session`](Self::take_session), and keying on the map
-            //   alone let exactly that session be released in silence.
-            // - `sessions_taken` still decides the *wording*, and catches the
-            //   other direction: a user-originated session handed to the
-            //   orchestrator and later taken back is owed the question too,
-            //   even though its origin says "user".
+            //   [`take_session`](Self::take_session).
+            // - `orchestrator_claimed`: origin under-counts in the other
+            //   direction. A session the operator started stays origin `User`
+            //   forever, but once handed over it is genuinely dispatchable
+            //   (`SessionHandle::serves_label` adopts it), so the same failed
+            //   turn can hand it back user-held with origin `User` and no take
+            //   recorded. Without this set that released in silence too.
+            // - `sessions_taken`: catches a take that has not been released yet,
+            //   and is what decides the *wording* below.
             HandbackPolicy::Ask => {
                 let taken = self.sessions_taken.get(session).copied();
                 let orchestrator_originated = self
@@ -376,7 +394,8 @@ impl App {
                     .as_ref()
                     .and_then(|sessions| sessions.sessions.row(session))
                     .is_some_and(|row| row.origin.is_orchestrator());
-                if taken.is_none() && !orchestrator_originated {
+                let claimed = self.orchestrator_claimed.contains(session);
+                if taken.is_none() && !orchestrator_originated && !claimed {
                     return true;
                 }
                 self.handback_prompt = Some(HandbackPrompt {
@@ -480,6 +499,11 @@ impl App {
         // what a single flag amounted to, and it silently forgave every *other*
         // session the operator was still holding on the orchestrator's behalf.
         self.sessions_taken.remove(session);
+        // Remembered past the handback, and never cleared: from here the
+        // orchestrator can dispatch into this session, so if it ever comes back
+        // to the operator — including by the executor handing a failed turn over
+        // directly — letting go of it again is worth a question.
+        self.orchestrator_claimed.insert(session.to_string());
 
         let brief = medulla::hub::handoff::normalize(
             medulla::hub::HarnessHandoff {

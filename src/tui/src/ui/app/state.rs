@@ -160,6 +160,7 @@ impl App {
             help_scroll: 0,
             handback_policy,
             sessions_taken: std::collections::HashMap::new(),
+            orchestrator_claimed: std::collections::HashSet::new(),
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
@@ -353,6 +354,16 @@ impl App {
     /// one rather than counting rows it does not control.
     pub fn pane_session_for_test(&self) -> Option<&str> {
         self.pane_session.as_deref()
+    }
+
+    /// Stand a remote session under the rail cursor, as a draw against a linked
+    /// host would.
+    ///
+    /// Injection seam: reaching this state honestly needs a second machine, and
+    /// what reads it is a *refusal* — so a test that cannot set it cannot tell
+    /// the refusal apart from the silent wrong handover it exists to prevent.
+    pub fn set_pane_remote_session_for_test(&mut self, agent: Option<String>) {
+        self.pane_remote_session = agent;
     }
 
     /// Whether the "start a session" picker is on screen.

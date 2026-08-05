@@ -5,7 +5,7 @@
 //! orchestrator holds asks first, and letting go asks only about a session the
 //! orchestrator has a claim on.
 
-use super::helpers::*;
+use crate::helpers::*;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use medulla::protocol::HarnessProvider;
 use medulla_tui::worker::pty::{PtyManager, SessionControl};
@@ -422,6 +422,74 @@ fn releasing_a_task_spawned_session_asks_even_when_it_was_never_taken() {
         sessions.row(&id).unwrap().control,
         SessionControl::Orchestrator,
         "answering yes gives dispatch its session back"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn releasing_a_session_you_gave_away_and_got_back_asks_again() {
+    // The other half of the claim rule. `SessionOrigin` alone under-counts:
+    // a session the operator started stays origin `User` forever, but once
+    // handed over it is genuinely dispatchable — `SessionHandle::serves_label`
+    // adopts a handed-back operator session for a task. The executor can then
+    // hand a failed turn straight back user-held, with origin `User` and no take
+    // recorded, and releasing that in silence leaves dispatch locked out.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+
+    // Give it away, which is what makes it dispatchable from here on.
+    let _ = app.on_event(ctrl('g'));
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        SessionControl::Orchestrator
+    );
+
+    // Now the executor's failed-reusable-turn path: control back to the operator
+    // without passing through `take_session`.
+    sessions.set_control(&id, SessionControl::User);
+
+    let _ = render(&mut app, 140, 44);
+    let _ = app.on_event(focus_chord());
+    assert_eq!(app.attached_session(), Some(id.as_str()));
+    let _ = app.on_event(focus_chord());
+
+    let out = render(&mut app, 140, 44);
+    assert!(
+        out.contains("You still have this session"),
+        "a session the orchestrator has had a claim on is owed the question: {out}"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn ctrl_g_refuses_a_remote_row_rather_than_handing_back_something_else() {
+    // With the cursor on a session hosted elsewhere, `pane_session` is empty.
+    // Resolving the chord through the single-held-session fallback would then
+    // hand back an unrelated *local* session the operator was not looking at —
+    // silently, which is worse than the refusal.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+    let _ = render(&mut app, 140, 44);
+    app.set_pane_remote_session_for_test(Some("dev-2:codex".to_string()));
+
+    let _ = app.on_event(ctrl('g'));
+
+    assert!(
+        app.status().contains("another host"),
+        "the refusal must name the machine: {}",
+        app.status()
+    );
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        SessionControl::User,
+        "the unrelated local session must not have been handed back"
     );
 
     sessions.shutdown();

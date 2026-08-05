@@ -5,7 +5,7 @@
 //! operator's — there is no control question, and `claim_idle` must not hand it
 //! out.
 
-use super::helpers::*;
+use crate::helpers::*;
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
 use medulla_tui::worker::pty::{PtyManager, SessionControl};
 

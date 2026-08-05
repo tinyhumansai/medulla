@@ -1174,6 +1174,22 @@ pub struct App {
     /// question with A's takeover, and kept asking about sessions nobody had
     /// taken from anyone.
     pub(super) sessions_taken: std::collections::HashMap<String, TakeOrigin>,
+    /// Sessions the operator has at some point given to the orchestrator.
+    ///
+    /// Separate from [`sessions_taken`](Self::sessions_taken), which says who
+    /// holds a session *now*; this remembers that dispatch once had a claim on
+    /// it, and it is never cleared.
+    ///
+    /// Needed because [`SessionOrigin`](crate::worker::pty::SessionOrigin) alone
+    /// under-counts. A session the operator started carries origin `User`
+    /// forever, but handing it back makes it genuinely dispatchable —
+    /// `SessionHandle::serves_label` lets a handed-back operator session be
+    /// adopted for a task. If that turn then fails, the executor hands it
+    /// straight back to the operator without going through
+    /// [`take_session`](App::take_session), leaving a session with origin
+    /// `User`, no entry in `sessions_taken`, and dispatch locked out of it.
+    /// Releasing that in silence is the bug this set closes.
+    pub(super) orchestrator_claimed: std::collections::HashSet<String>,
     /// Commands raised by synchronous input handlers, drained by the event loop.
     ///
     /// The key and mouse handlers that move session control cannot return a

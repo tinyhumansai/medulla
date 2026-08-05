@@ -21,6 +21,10 @@ harness's lifecycle back to it. Without them a harness on a pty is opaque:
 - [`builtin.rs`](./builtin.rs) — Medulla's own reporting hooks: which events they
   cover, why the deciding events (`PreToolUse`, `PermissionRequest`) are
   deliberately not among them, and how the command reaches the launching binary.
+- [`grant.rs`](./grant.rs) — `seed_hook_grant`, the credential every spawn door
+  seeds so the built-in's `medulla hook <Event>` command has something to
+  report to; see "Medulla's own hooks" below for why every door needed it, not
+  only the one that installs the command.
 - [`report.rs`](./report.rs) — One report's shape and the bounded log it lands
   in, plus the rule that a summary travels and a payload never does.
 - [`native.rs`](./native.rs) — The hook document both Claude Code and Codex
@@ -36,6 +40,23 @@ Resolved at config load, ahead of the operator's own, and switched off with
 `[hookDefaults] enabled = false` (or `b` on the Hooks page). Each runs
 `medulla hook <Event>`, which reads the harness's native payload on stdin and
 files a one-line summary on the control socket that spawn was already handed.
+
+Resolving the command at load only gets it *installed* everywhere; it still
+needs a socket and a grant to report to. Every non-ACP spawn door now calls
+[`seed_hook_grant`](./grant.rs) at its own spawn seam — the operator-started
+pty pane, the executor's dispatched pty sessions, the headless daemon's
+one-shot runs, the interactive session, and the `medulla <cli>` wrapper — so
+each seeds the environment variables the shim reads
+(`MEDULLA_HOOK_SOCKET`/`MEDULLA_HOOK_GRANT`) with a hook-only grant scoped to
+that one spawn (see [`Grant::hook_only`](../control_socket/grants.rs)). Before
+that, only the pty pane's grant was seeded, so a hook installed everywhere else
+spawned, found nothing to report to, and exited — pure overhead, and a
+meaningfully wasteful one on `PostToolUse`, which fires once per tool call.
+**ACP dispatch remains the one door that cannot carry hooks at all**: Medulla
+spawns an ACP *server*, which spawns the harness itself, so there is no argv
+to install the command onto in the first place (see
+`daemon::providers::execute::run_provider_task`'s own comment). A configured
+hook there is reported once, as a warning, rather than silently doing nothing.
 
 Two properties are load-bearing:
 

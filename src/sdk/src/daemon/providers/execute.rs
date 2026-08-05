@@ -181,6 +181,16 @@ async fn run_provider_attempt(
     let mut merged_env = spec.env.clone();
     let attribution_env = crate::attribution::attribution_env(spec.attribution, &merged_env);
     merged_env.extend(attribution_env);
+    // The built-in reporting hooks just installed onto `extra_args` need this
+    // to find anything to report to — without it they spawn, find no grant,
+    // and exit, on every one of `PostToolUse`'s per-tool-call firings for the
+    // life of this run. Kept alive for the rest of this function (dropped at
+    // the end of its scope, after the child has fully exited), so the grant
+    // is revoked the moment this headless run is done rather than left live
+    // for the rest of the process. Unique per run: two runs sharing a session
+    // key would share a grant.
+    let hook_grant_session = format!("headless-{}", uuid::Uuid::new_v4());
+    let _hook_grant = crate::harness_hooks::seed_hook_grant(hook_grant_session, &mut merged_env);
     // Custom OpenAI-compatible router: layer the provider's endpoint env (and,
     // when configured, its API key) into the child at the spawn seam, so headless
     // daemon, operator-TUI daemon, and interactive wrappers all route identically.

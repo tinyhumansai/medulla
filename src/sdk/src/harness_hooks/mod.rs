@@ -55,6 +55,7 @@ use crate::protocol::HarnessProvider;
 pub mod builtin;
 mod claude;
 mod codex;
+mod grant;
 mod native;
 mod report;
 mod types;
@@ -62,6 +63,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use grant::{seed_hook_grant, HookGrantGuard};
 pub use report::{HookEventLog, HookReport};
 pub use types::{DroppedHook, HookEvent, HookHandler, HookInjection, HookSpec, HooksConfig};
 

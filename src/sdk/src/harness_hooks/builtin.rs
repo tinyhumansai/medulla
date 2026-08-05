@@ -13,14 +13,23 @@
 //! Every built-in runs the same command — `medulla hook <Event>` — against the
 //! Medulla binary that launched the harness. The shim reads the harness's native
 //! payload on stdin and forwards it to the control socket the spawn was already
-//! handed (see [`crate::control_socket`]), authenticating with that session's
-//! own grant. It writes nothing to stdout and always exits zero: a hook that
-//! failed loudly would interrupt the operator's session to report that Medulla's
-//! own bookkeeping had a bad day.
+//! handed (see [`crate::control_socket`]), authenticating with a hook-only grant
+//! scoped to that one spawn ([`super::seed_hook_grant`]). It writes nothing to
+//! stdout and always exits zero: a hook that failed loudly would interrupt the
+//! operator's session to report that Medulla's own bookkeeping had a bad day.
 //!
-//! A session spawned without a grant — fleet tools off, a remote worker, a
-//! harness the operator started themselves — runs the same command and it exits
-//! immediately, having found nothing to report to.
+//! `hooks(bin)` alone only gets the command *installed* — every spawn door but
+//! ACP dispatch (the pty pane, the executor, the headless daemon, the
+//! interactive session, the `medulla <cli>` wrapper) also calls
+//! [`super::seed_hook_grant`] at its own spawn seam, so the shim has a grant to
+//! present. A session spawned with no control plane bound — a remote worker's
+//! daemon, `medulla workflow`, a host with fleet tools off — runs the same
+//! command and it exits immediately, having found nothing to report to; that is
+//! the ordinary, harmless case `seed_hook_grant` itself is a no-op for. ACP
+//! dispatch is the one door that can install neither the command nor the grant:
+//! Medulla spawns an ACP *server*, which spawns the harness itself, so there is
+//! no argv to add either to (see
+//! `crate::daemon::providers::execute::run_provider_task`).
 //!
 //! # Which events
 //!

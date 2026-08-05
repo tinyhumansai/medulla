@@ -229,7 +229,11 @@ pub fn load_config(
     // every door a harness can come through — the pty pane, the executor, the
     // wrapper, the headless daemon — installs the same set without having to
     // know it exists, and the Hooks page can show the operator exactly what
-    // their harnesses will carry.
+    // their harnesses will carry. Resolving them here only gets the *command*
+    // installed everywhere, though — it still needs `harness_hooks::seed_hook_grant`
+    // called at each of those doors' own spawn seams to have anything to
+    // report to; see that function's docs for why every door needed its own
+    // fix rather than one shared at this layer.
     if config.hook_defaults.enabled {
         config.hooks = config
             .hooks

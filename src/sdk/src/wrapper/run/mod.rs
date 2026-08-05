@@ -144,6 +144,16 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     // attribution module docs for why the CLI flag alone is not enough.
     merge_attribution_env_into_config(&mut config);
     child_args.extend(config.child_args.iter().cloned());
+    // The built-in reporting hooks just installed onto `child_args` need this
+    // to find anything to report to — without it they spawn, find no grant,
+    // and exit, on every one of `PostToolUse`'s per-tool-call firings for the
+    // life of this wrapped session. `wrapper_session_id` is already unique
+    // per wrapper run, so it doubles as the grant's session key; the guard is
+    // held for the rest of this function and revokes the grant once the
+    // wrapped child has fully exited, rather than leaving it live for the
+    // rest of this process.
+    let _hook_grant =
+        crate::harness_hooks::seed_hook_grant(wrapper_session_id.clone(), &mut config.env);
 
     let ChildSession {
         input,

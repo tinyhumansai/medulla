@@ -514,14 +514,22 @@ impl App {
                 }
             }
             // A click inside the embedded terminal means "type here", the same
-            // as `Ctrl-]`. Checked after the rail so a click that changes rows
-            // is a navigation, not an attach to whatever the last frame showed.
+            // as Enter on its rail row. Checked after the rail so a click that
+            // changes rows is a navigation, not an attach to whatever the last
+            // frame showed.
+            //
+            // Routed through the same entry point Enter uses rather than
+            // attaching outright, because the pointer and the keyboard must not
+            // disagree about who ends up holding a harness. Clicking straight
+            // into an orchestrator-held pane used to take it silently — the very
+            // thing the Enter question exists to prevent, reachable by the
+            // gesture an operator is most likely to make first.
             if let Some((rect, session)) = self.hit_harness.clone() {
                 if rect.contains((x, y).into())
                     && self.harness_pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.attach_to_pane_harness();
+                    self.open_harness_enter_prompt();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

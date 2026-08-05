@@ -172,7 +172,7 @@ fn user_session(sessions: &PtyManager) -> String {
 }
 
 #[test]
-fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
+fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
     let sessions = PtyManager::new();
     let mut app = app_with_harnesses(sessions.clone());
 
@@ -189,13 +189,9 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
     assert!(out.contains("Choose workspace"), "{out}");
     assert!(out.contains("/"), "{out}");
 
-    // Taking the workspace asks who holds the harness. It offers managed
-    // first, so unmanaged is one arrow away.
-    let _ = app.on_event(key(KeyCode::Enter));
-    let out = render(&mut app, 140, 44);
-    assert!(out.contains("Choose control"), "{out}");
-    let _ = app.on_event(key(KeyCode::Down));
-
+    // The workspace step is the last one — its own title promises "Enter start",
+    // and there is no control question behind it to make a liar of it.
+    assert!(out.contains("Enter start"), "{out}");
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open", || sessions.rows().len() == 1);
 
@@ -259,8 +255,7 @@ fn the_picker_directory_can_be_edited_before_starting() {
         "editing must not start the harness"
     );
 
-    // Enter takes the directory, and the control step confirms the start.
-    let _ = app.on_event(key(KeyCode::Enter));
+    // Enter takes the directory and starts the harness in it.
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open", || sessions.rows().len() == 1);
     assert_eq!(sessions.rows().remove(0).cwd, "/tmp");
@@ -316,8 +311,7 @@ fn workspace_picker_autocompletes_folders_and_remembers_successful_choices() {
         "{out}"
     );
 
-    // Enter takes the completed folder, and the control step confirms.
-    let _ = app.on_event(key(KeyCode::Enter));
+    // Enter takes the completed folder and starts there.
     let _ = app.on_event(key(KeyCode::Enter));
     wait_for("the harness to open in the completed folder", || {
         sessions.rows().len() == 1
@@ -524,6 +518,155 @@ fn clicking_away_from_an_attached_harness_honors_handback_policy() {
         sessions.row(&id).unwrap().control,
         HarnessControl::Orchestrator
     );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn enter_on_a_harness_you_already_hold_just_types_into_it() {
+    // The reported confusion. Enter on a harness row raised the handover
+    // question, so the answer to "let me type in this" was an offer to give the
+    // harness away — over the pane being aimed at, and with Escape as its only
+    // useful answer. With operator-started sessions unmanaged, that was every
+    // session on the rail.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    assert_eq!(
+        app.attached_harness(),
+        Some(id.as_str()),
+        "Enter on a harness you hold means type into it: {}",
+        app.status()
+    );
+    let out = render(&mut app, 140, 44);
+    assert!(
+        !out.contains("still have this harness") && !out.contains("Take control"),
+        "there is nothing to negotiate about a harness that was always yours: {out}"
+    );
+    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+
+    sessions.shutdown();
+}
+
+#[test]
+fn enter_on_an_orchestrator_harness_still_asks_before_taking_it() {
+    // The other half of the same rule, and the case the question exists for:
+    // Enter is a navigation key, so walking the rail onto a harness dispatch is
+    // using must not lock the orchestrator out of that workspace silently.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+    sessions.set_control(&id, HarnessControl::Orchestrator);
+
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+
+    let _ = app.on_event(key(KeyCode::Enter));
+
+    let out = render(&mut app, 140, 44);
+    assert!(out.contains("Take control of this harness"), "{out}");
+    assert_eq!(app.attached_harness(), None, "asking is not taking");
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        HarnessControl::Orchestrator,
+        "control must not move until the question is answered"
+    );
+
+    let _ = app.on_event(key(KeyCode::Enter));
+    assert_eq!(app.attached_harness(), Some(id.as_str()));
+    assert_eq!(sessions.row(&id).unwrap().control, HarnessControl::User);
+
+    sessions.shutdown();
+}
+
+#[test]
+fn releasing_a_harness_you_started_yourself_asks_nothing() {
+    // `Ask` is the default policy, and the question it asks is "the orchestrator
+    // is locked out of this — shall I give it back?". For a session the operator
+    // started, that premise is false: dispatch never had it. Asking anyway put a
+    // modal in front of every `Ctrl-]`, which is how a confirmation stops being
+    // read.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let id = user_session(&sessions);
+
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+    let _ = app.on_event(focus_chord());
+    assert_eq!(app.attached_harness(), Some(id.as_str()));
+
+    let _ = app.on_event(focus_chord());
+
+    assert_eq!(
+        app.attached_harness(),
+        None,
+        "the keyboard comes straight back"
+    );
+    let out = render(&mut app, 140, 44);
+    assert!(!out.contains("You still have this harness"), "{out}");
+    assert_eq!(
+        sessions.row(&id).unwrap().control,
+        HarnessControl::User,
+        "and the harness is still the operator's"
+    );
+
+    sessions.shutdown();
+}
+
+#[test]
+fn a_kept_harness_is_asked_about_again_but_a_neighbour_is_not() {
+    // Two harnesses, one taken from the orchestrator and kept. Whether the
+    // release question is owed was a single flag, so holding one taken harness
+    // made *every* harness ask — including one the operator started, which
+    // dispatch had never touched.
+    let sessions = PtyManager::new();
+    let mut app = app_with_harnesses(sessions.clone());
+    let taken = user_session(&sessions);
+    let own = user_session(&sessions);
+    sessions.set_control(&taken, HarnessControl::Orchestrator);
+
+    // Take the first by focusing into it, then keep it on the way out.
+    let _ = render(&mut app, 140, 44);
+    select_harness_row(&mut app);
+    let _ = render(&mut app, 140, 44);
+    assert_eq!(app.harness_pane_session_for_test(), Some(taken.as_str()));
+    let _ = app.on_event(focus_chord());
+    let _ = app.on_event(focus_chord());
+    let _ = app.on_event(key(KeyCode::Char('n')));
+    assert_eq!(sessions.row(&taken).unwrap().control, HarnessControl::User);
+
+    // Step onto the harness the operator started and go in and out of it.
+    let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
+    let _ = render(&mut app, 140, 44);
+    assert_eq!(app.harness_pane_session_for_test(), Some(own.as_str()));
+    let _ = app.on_event(focus_chord());
+    assert_eq!(app.attached_harness(), Some(own.as_str()));
+    let _ = app.on_event(focus_chord());
+
+    let out = render(&mut app, 140, 44);
+    assert!(
+        !out.contains("You still have this harness"),
+        "the neighbouring harness was never the orchestrator's: {out}"
+    );
+    assert_eq!(app.attached_harness(), None);
+
+    // The taken one is still owed the question, and still worded as a take.
+    let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
+    let _ = render(&mut app, 140, 44);
+    assert_eq!(app.harness_pane_session_for_test(), Some(taken.as_str()));
+    let _ = app.on_event(focus_chord());
+    let _ = app.on_event(focus_chord());
+    let out = render(&mut app, 140, 44);
+    assert!(out.contains("You still have this harness"), "{out}");
 
     sessions.shutdown();
 }

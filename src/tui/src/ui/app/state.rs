@@ -160,7 +160,7 @@ impl App {
             hit_handback: Vec::new(),
             help_scroll: 0,
             handback_policy,
-            harness_took_control: false,
+            harness_taken: std::collections::HashMap::new(),
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,

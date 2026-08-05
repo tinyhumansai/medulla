@@ -578,17 +578,20 @@ pub(super) struct HarnessPicker {
     /// [`selected_harness_workspace`](App::selected_harness_workspace) to decide
     /// whether an entered directory outranks the completions listed under it.
     pub(super) workspace_picked: bool,
-    /// Whether to spawn managed (orchestrator can dispatch) or unmanaged.
-    pub(super) managed: bool,
 }
 
 /// Active stage of the manual harness launcher.
+///
+/// There is deliberately no "managed or unmanaged?" stage. A session the
+/// operator starts by hand is theirs — that is what starting it by hand *means*
+/// — and the orchestrator spawns its own harnesses managed without asking
+/// anybody. So the question only ever had one sensible answer, and asking it
+/// bought a keystroke, an extra screen, and a freshly started harness the
+/// operator then had to take back from the orchestrator before typing into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HarnessPickerStep {
     /// Choose an installed CLI or registered preset.
     Harness,
-    /// Choose managed or unmanaged control mode.
-    Decision,
     /// Choose or complete the working directory.
     Workspace,
 }
@@ -636,7 +639,12 @@ pub(super) struct PointerGrab {
 /// certainly thinking about it. Silently handing it back would be worse — it
 /// would resume dispatch into a harness mid-thought.
 pub(super) struct HandbackPrompt {
-    /// The session the operator is releasing.
+    /// The session the question is about.
+    ///
+    /// Every answer acts on this, never on whatever the rail last resolved: the
+    /// question can outlive the frame that raised it, and a `y` that moved
+    /// control of a *different* harness is the worst outcome this whole flow
+    /// has.
     pub(super) session: String,
     /// Whether attaching is what took control, as opposed to an explicit
     /// `/takecontrol`. An explicit take is a decision, so the prompt says so
@@ -665,7 +673,21 @@ pub(super) struct HandbackPrompt {
     pub(super) is_takeover: bool,
 }
 
-/// What to do when the operator releases a harness they hold.
+/// How the operator came to hold a harness the orchestrator had.
+///
+/// Only the wording of the release question turns on this — both origins ask,
+/// because both locked dispatch out of a workspace. What does *not* appear here
+/// is "started it myself": that harness was never taken from anyone, so it is
+/// absent from [`App::harness_taken`] rather than being a third variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TakeOrigin {
+    /// Focusing in took it, which the operator may not have realised.
+    Focus,
+    /// `/takecontrol`, `Ctrl-G`, or answering the takeover question — a decision.
+    Explicit,
+}
+
+/// What to do when the operator releases a harness they took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HandbackPolicy {
     /// Ask, every time.
@@ -1124,13 +1146,21 @@ pub struct App {
     pub(super) help_scroll: u16,
     /// What releasing a held harness does, from `[harness].handback`.
     pub(super) handback_policy: HandbackPolicy,
-    /// Whether attaching is what took control of the current harness.
+    /// The harnesses taken *from the orchestrator*, and how each was taken.
     ///
-    /// Distinguishes "you picked this up by focusing in" from "you asked for it
-    /// with /takecontrol", which the release prompt words differently: the
-    /// second was a decision, and re-asking about it as though it were an
-    /// accident is how a confirmation becomes noise.
-    pub(super) harness_took_control: bool,
+    /// Membership is the whole question the release prompt exists to ask. A
+    /// harness the operator started themselves was never the orchestrator's, so
+    /// letting go of the keyboard owes it nothing, and asking about it every
+    /// time is how a confirmation becomes furniture. One taken out from under
+    /// dispatch is different: walking away from it leaves the orchestrator
+    /// locked out of a workspace, silently and indefinitely.
+    ///
+    /// Keyed by session rather than kept as one flag because several harnesses
+    /// can be held at once — take A, keep it on release, then attach to B. A
+    /// single flag answered for whichever was touched last: it worded B's
+    /// question with A's takeover, and kept asking about harnesses nobody had
+    /// taken from anyone.
+    pub(super) harness_taken: std::collections::HashMap<String, TakeOrigin>,
     /// Commands raised by synchronous input handlers, drained by the event loop.
     ///
     /// The key and mouse handlers that move harness control cannot return a

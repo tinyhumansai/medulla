@@ -578,3 +578,54 @@ async fn a_step_spells_the_login_shell_the_same_way_the_config_does() {
     // assertion; naming the shell would pin the CI runner's login shell.
     assert!(result["output"].is_string(), "got {}", result["output"]);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_explicit_bash_spelling_outranks_the_hosts_configured_shell() {
+    // `language: "bash"` was writable long before `workflows.shell` existed, so
+    // an operator enabling a different shell must not silently re-point every
+    // bash-specific step at it. The host here is configured with `sh -x`; a
+    // step that asked for bash must get bash, and so must produce no trace.
+    let root = tempfile::tempdir().unwrap();
+    let mut settings = CapabilitySettings::rooted_at(root.path());
+    settings.allow_code = true;
+    settings.workspace = root.path().to_string_lossy().to_string();
+    settings.shell = crate::flow_engine::caps::script::Interpreter::validated("sh", &["-x".into()])
+        .expect("valid");
+    let invoker = MedullaToolInvoker::new(Arc::new(settings));
+
+    let pinned = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "language": "bash", "script": "echo \"${BASH_VERSION:+bash}\"" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert_eq!(pinned["output"], json!("bash"));
+    assert_eq!(
+        pinned["stderr"],
+        json!(""),
+        "the host's `sh -x` must not have run this step"
+    );
+
+    // The generic spelling is the one that opts into the host's choice.
+    let generic = invoker
+        .invoke(
+            "medulla:shell",
+            json!({ "language": "shell", "script": "echo generic" }),
+            None,
+        )
+        .await
+        .expect("runs");
+
+    assert!(
+        generic["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("echo generic"),
+        "language \"shell\" must follow the host, got {}",
+        generic["stderr"]
+    );
+}

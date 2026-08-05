@@ -136,7 +136,8 @@ impl MedullaToolInvoker {
         // Defaults to shell because that is what the slug says; naming another
         // language is how a step runs a short node or python program in the
         // workspace rather than in a `code` node's temporary directory.
-        let language = match args.get("language").and_then(Value::as_str) {
+        let spelling = args.get("language").and_then(Value::as_str);
+        let language = match spelling {
             Some(name) => ScriptLanguage::parse(name).ok_or_else(|| {
                 EngineError::Capability(format!(
                     "medulla:shell: unknown language '{name}'; known: {}",
@@ -167,6 +168,17 @@ impl MedullaToolInvoker {
                 language.as_str()
             )));
         }
+        // What this step runs under when it names no interpreter of its own.
+        // `language: "bash"` / `"sh"` is an author naming a specific shell —
+        // and they could only have written it before `workflows.shell` existed,
+        // so honouring the host setting there would re-point existing
+        // bash-specific steps at a different shell the moment an operator
+        // configures one. Only the generic `"shell"` follows the host.
+        let standing = match spelling {
+            Some(name) if ScriptLanguage::pins_interpreter(name) => Interpreter::default_shell(),
+            _ => self.settings.shell.clone(),
+        };
+
         let chosen = match (language, named) {
             // `resolve` rather than `validated`, so a step spells the login
             // shell the same way the operator's config does: `"user"` here
@@ -178,15 +190,15 @@ impl MedullaToolInvoker {
                 Interpreter::login_shell().as_deref(),
             )?),
             // Arguments with no program still mean "not the plain default":
-            // `shell_args: ["-l"]` alone asks for the host's shell, as a login
-            // shell. Dropping them would run the script non-login and look like
-            // the flag did nothing.
-            (ScriptLanguage::Shell, None) if !shell_args.is_empty() => Some(
-                Interpreter::validated(&self.settings.shell.program, &shell_args)?,
-            ),
-            // The host's configured shell, which is `bash` until an operator
-            // says otherwise.
-            (ScriptLanguage::Shell, None) => Some(self.settings.shell.clone()),
+            // `shell_args: ["-l"]` alone asks for the standing shell, as a
+            // login shell. Dropping them would run the script non-login and
+            // look like the flag did nothing.
+            (ScriptLanguage::Shell, None) if !shell_args.is_empty() => {
+                Some(Interpreter::validated(&standing.program, &shell_args)?)
+            }
+            // The standing shell: the host's configured one, unless the step
+            // spelled its language as a specific interpreter.
+            (ScriptLanguage::Shell, None) => Some(standing),
             _ => None,
         };
 

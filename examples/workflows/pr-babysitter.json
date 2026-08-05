@@ -75,7 +75,9 @@
           "blocking_feedback": "=((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0))",
           "feedback": "=.item.json.output.feedback",
           "pr": "=.item.json.output.pr",
-          "actionable": "=([.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0"
+          "conflicted": "=((.item.json.output.pr.mergeable == \"CONFLICTING\") or (.item.json.output.pr.mergeStateStatus == \"DIRTY\"))",
+          "draft": "=(.item.json.output.pr.isDraft // false)",
+          "actionable": "=([.item.json.output.checks[]? | select(.bucket == \"fail\" or .bucket == \"cancel\")] | length) > 0 or ((.item.json.output.feedback.unresolvedThreads // 0) + (.item.json.output.feedback.changesRequested // 0)) > 0 or (.item.json.output.pr.mergeable == \"CONFLICTING\") or (.item.json.output.pr.mergeStateStatus == \"DIRTY\")"
         }
       }
     },
@@ -90,7 +92,7 @@
       "kind": "agent",
       "name": "Fix and push",
       "config": {
-        "prompt": "=\"Work in the checkout at \" + .inputs.cwd + \", which is the one the pull request was read from — an agent step starts at the workspace root, not there.\\n\\nPull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
+        "prompt": "=\"Work in the checkout at \" + .inputs.cwd + \", which is the one the pull request was read from — an agent step starts at the workspace root, not there.\\n\\nPull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nMerge state: \" + ((.nodes.assess.item.pr.mergeStateStatus // \"UNKNOWN\") | tostring) + (if .nodes.assess.item.conflicted then \" — this branch conflicts with its base; merge the base in and resolve every conflict by understanding what both sides changed, never by taking one side wholesale.\" else \"\" end) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
       }
     },
     {
@@ -137,9 +139,11 @@
         "set": {
           "pr": "=.nodes.assess.item.pr",
           "rounds": "=.nodes.watch.iteration",
-          "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0)",
+          "green": "=(.nodes.assess.item.actionable | not) and (.nodes.assess.item.pending == 0) and ((.nodes.assess.item.draft) | not)",
           "failing": "=.nodes.assess.item.failing",
           "blocking_feedback": "=.nodes.assess.item.blocking_feedback",
+          "conflicted": "=.nodes.assess.item.conflicted",
+          "draft": "=.nodes.assess.item.draft",
           "merge_state": "=.nodes.assess.item.pr.mergeStateStatus",
           "mergeable": "=.nodes.assess.item.pr.mergeable"
         }

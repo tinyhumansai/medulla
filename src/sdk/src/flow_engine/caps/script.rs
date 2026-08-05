@@ -80,6 +80,19 @@ impl ScriptLanguage {
 
     /// Every spelling an author may write, for an error that teaches.
     pub const NAMES: [&'static str; 3] = ["javascript", "python", "shell"];
+
+    /// Whether `name` picks a specific interpreter rather than naming the
+    /// shell family generically.
+    ///
+    /// `"bash"` and `"sh"` are an author saying *which* shell, and they said it
+    /// before `workflows.shell` existed — a step spelled that way keeps
+    /// [`DEFAULT_SHELL`] even on a host that configured another shell, so
+    /// enabling `shell = "zsh"` cannot silently re-run bash-specific scripts
+    /// somewhere else. Only the generic `"shell"` follows the host.
+    #[must_use]
+    pub fn pins_interpreter(name: &str) -> bool {
+        matches!(name.trim().to_ascii_lowercase().as_str(), "bash" | "sh")
+    }
 }
 
 /// The shell a `shell` script runs under when nothing chooses another.

@@ -182,6 +182,53 @@ fn giving_a_seeded_agent_a_role_declares_it() {
 }
 
 #[test]
+fn the_agent_preview_never_draws_past_the_rows_it_was_given() {
+    // The role list is windowed to whatever the fixed agent details left over.
+    // A zero budget used to still force one checkbox through, so the block ran
+    // one row past the bottom of the pane on a short terminal — and the row that
+    // fell off was the one carrying the role cursor.
+    let (mut app, _dir) = app_with(
+        vec![worker("medulla-claude", "this-device")],
+        vec![AgentDeclaration::new(
+            "medulla-claude",
+            "this-device",
+            "claude",
+            "/w/medulla",
+        )],
+    );
+    cursor_to(&mut app, 1);
+    let (tree, rows, selected) = app.hosts_view();
+    let row = rows[selected];
+    assert!(row.agent.is_some(), "the cursor is on the agent row");
+
+    // The fixed identity block is the agent, so it is always drawn; what the
+    // budget governs is the role list hung under it.
+    let details = app.preview_height_within(&tree, row, 0);
+    assert!(details > 1, "the identity block is several rows: {details}");
+    for budget in 0..details {
+        assert_eq!(
+            app.preview_height_within(&tree, row, budget),
+            details,
+            "a {budget}-row pane has no room for roles at all"
+        );
+    }
+    // One row to spare buys the summary — the sentence saying what the agent is
+    // offered for — rather than one checkbox out of a dozen, which reads as the
+    // whole list.
+    assert_eq!(
+        app.preview_height_within(&tree, row, details + 1),
+        details + 1
+    );
+    for budget in details..=details + 12 {
+        assert!(
+            app.preview_height_within(&tree, row, budget) <= budget,
+            "a {budget}-row pane drew {} rows",
+            app.preview_height_within(&tree, row, budget)
+        );
+    }
+}
+
+#[test]
 fn a_remote_agent_is_read_only() {
     let (mut app, dir) = app_with(vec![worker("peer", "7Kx")], Vec::new());
     cursor_to(&mut app, 2); // local header, remote header, remote agent
@@ -242,6 +289,144 @@ fn a_failed_write_changes_nothing_at_all() {
             .roles
             .is_empty(),
         "the in-memory list must not drift from the file"
+    );
+}
+
+/// The same app with no config file at all, which is the "this run only" path.
+fn app_without_config(workers: Vec<WorkerInfo>, declarations: Vec<AgentDeclaration>) -> App {
+    let runtime = MockRuntime::empty();
+    runtime.set_workers(workers);
+    let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
+    loaded.config.fleet.agent_declarations = declarations;
+    App::new(Arc::new(runtime), loaded)
+}
+
+#[test]
+fn with_no_config_file_an_edit_lasts_the_run_and_says_so() {
+    // Nowhere to write is not a refusal — the roster is in front of the
+    // operator and has to stay editable — but it must not read as saved
+    // either. So the edit lands in *both* places for this run: the roster op
+    // the caller sends, and the declaration list the tree redraws from. Only
+    // updating the roster left the row showing the roles it had before.
+    let mut app = app_without_config(
+        vec![worker("medulla-claude", "this-device")],
+        vec![AgentDeclaration::new(
+            "medulla-claude",
+            "this-device",
+            "claude",
+            "/w/medulla",
+        )],
+    );
+    cursor_to(&mut app, 1);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(app.toggle_selected_agent_role(&role).is_some());
+    assert!(
+        app.status().contains("this run only"),
+        "the operator is told how long it lasts: {}",
+        app.status()
+    );
+    assert_eq!(
+        app.loaded.config.fleet.agent_declarations[0].roles,
+        vec![role.clone()],
+        "the declaration the tree reads from moved too"
+    );
+    assert_eq!(
+        app.selected_host_agent().map(|agent| agent.roles),
+        Some(vec![role.clone()]),
+        "so the row redraws assigned rather than reverting"
+    );
+
+    // And the toggle is not one-way: the second press sees the role it just
+    // wrote and takes it back off.
+    assert!(app.toggle_selected_agent_role(&role).is_some());
+    assert!(app.loaded.config.fleet.agent_declarations[0]
+        .roles
+        .is_empty());
+}
+
+#[test]
+fn with_no_config_file_a_rename_lasts_the_run_and_says_so() {
+    // The roster label has already changed by the time the persist runs, so a
+    // silent return would leave the operator reading a name that disappears at
+    // the next launch with nothing having said so.
+    let mut app = app_without_config(
+        Vec::new(),
+        vec![AgentDeclaration::new(
+            "api-codex",
+            "this-device",
+            "codex",
+            "/w/api",
+        )],
+    );
+
+    app.persist_agent_name("api-codex", "Backend");
+
+    assert!(
+        app.status().contains("this run only"),
+        "status: {}",
+        app.status()
+    );
+    assert_eq!(
+        app.loaded.config.fleet.agent_declarations[0]
+            .name
+            .as_deref(),
+        Some("Backend"),
+        "the name is the run's, in the same place the saved one would be"
+    );
+}
+
+#[test]
+fn with_no_config_file_undeclaring_lasts_the_run_and_says_so() {
+    // One rule for the whole path: removing is an edit like the others, so it
+    // applies for this run rather than being refused — and the status is what
+    // stops the agent's return at the next launch being a surprise.
+    let mut app = app_without_config(
+        Vec::new(),
+        vec![AgentDeclaration::new(
+            "api-codex",
+            "this-device",
+            "codex",
+            "/w/api",
+        )],
+    );
+    cursor_to(&mut app, 1);
+
+    assert!(app.undeclare_selected_agent());
+    assert!(app.loaded.config.fleet.agent_declarations.is_empty());
+    assert!(
+        app.status().contains("this run only"),
+        "status: {}",
+        app.status()
+    );
+}
+
+#[test]
+fn an_agent_with_no_workspace_cannot_be_declared_by_a_role_toggle() {
+    // An agent is `harness × workspace`. Seeding one with no directory writes a
+    // declaration no session can be opened from — `open_new_session` refuses it
+    // with "declares no workspace" — so the role toggle says so up front rather
+    // than saving a row the operator then cannot use.
+    let mut bare = worker("mystery", "this-device");
+    bare.workspace = None;
+    let (mut app, dir) = app_with(vec![bare], Vec::new());
+    cursor_to(&mut app, 1);
+
+    let role = app
+        .agent_templates()
+        .first()
+        .expect("built-in roles")
+        .id
+        .clone();
+    assert!(app.toggle_selected_agent_role(&role).is_none());
+    assert!(app.status().contains("no workspace"), "{}", app.status());
+    assert!(
+        medulla::config::load_agent_declarations(&dir.path().join("medulla.tui.json")).is_empty()
     );
 }
 

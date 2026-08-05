@@ -117,6 +117,10 @@ pub fn worker(id: &str, selected: bool) -> WorkerInfo {
 pub fn local_worker(id: &str, selected: bool) -> WorkerInfo {
     WorkerInfo {
         address: "this-device".into(),
+        // A local roster entry is an agent working *somewhere*: the directory is
+        // half of what an agent is, and the seed path that declares one from the
+        // roster has nothing to write down without it.
+        workspace: Some(format!("/w/{id}")),
         handle: None,
         ..worker(id, selected)
     }

@@ -32,6 +32,7 @@ fn sh(script: &str) -> LaunchSpec {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     LaunchSpec {
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,

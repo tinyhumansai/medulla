@@ -129,6 +129,7 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
     let id = sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin: "/bin/sh".to_string(),
             cwd: cwd.to_string(),
             env,

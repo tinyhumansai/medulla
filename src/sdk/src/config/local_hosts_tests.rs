@@ -58,6 +58,59 @@ fn the_primary_leads_and_each_extra_follows_in_order() {
 }
 
 #[test]
+fn an_extra_that_takes_the_primarys_address_is_not_a_second_host() {
+    // A bus address belongs to one host: the primary binds it and the extra's
+    // `bind` fails, so listing both would draw a host that is not going to be
+    // there. The one that binds is the one that stays.
+    let mut primary = HostSection {
+        workspace: "/w".into(),
+        ..HostSection::default()
+    };
+    primary.address = "chosen-by-hand".into();
+    let mut clash = extra("second", "/w/second");
+    clash.address = "chosen-by-hand".into();
+
+    let hosts = local_hosts(&primary, &[clash]);
+    let ids: Vec<&str> = hosts.iter().map(|host| host.id.as_str()).collect();
+    assert_eq!(ids, vec!["chosen-by-hand"]);
+    assert!(
+        hosts[0].primary,
+        "the primary keeps the address it declared"
+    );
+}
+
+#[test]
+fn two_names_that_slug_alike_are_one_host_not_two() {
+    // The slug is lowercased, so `API` and `api` are the same address. The
+    // second entry cannot bind, and a row for it would be the collision drawn
+    // twice rather than a host the operator has.
+    let primary = HostSection {
+        workspace: "/w".into(),
+        ..HostSection::default()
+    };
+    let extras = vec![
+        extra("API", "/w/api"),
+        extra("api", "/w/api-again"),
+        extra("web", "/w/web"),
+    ];
+
+    let hosts = local_hosts(&primary, &extras);
+    let ids: Vec<&str> = hosts.iter().map(|host| host.id.as_str()).collect();
+    assert_eq!(ids, vec!["this-device", "local-api", "local-web"]);
+    // Dropping the collision must not renumber what follows it: the fallback
+    // index is the entry's place in `[[hosts]]`, which is what the binder counts.
+    assert_eq!(
+        local_hosts(
+            &primary,
+            &[extra("API", "/w"), extra("api", "/w"), extra("", "/w/x")]
+        )
+        .last()
+        .map(|host| host.id.as_str()),
+        Some("local-host-3")
+    );
+}
+
+#[test]
 fn an_unnamed_host_falls_back_to_its_directory_then_the_path() {
     let unnamed = extra("", "");
     assert_eq!(

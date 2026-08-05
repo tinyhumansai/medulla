@@ -149,7 +149,7 @@ impl PtySessionExecutor {
         // borrow back; only the owned [`LaunchSpec`] crosses the await.
         let opened = match self.session_for(&options, class)? {
             SessionPlan::Reuse(opened) => opened,
-            SessionPlan::Launch(spec) => self.launch(spec).await?,
+            SessionPlan::Launch(spec) => self.launch(*spec).await?,
         };
         if let Some(pinned) = &opened.harness_session_id {
             // A reused session's transcript already exists, so the fresh-session
@@ -389,8 +389,9 @@ impl PtySessionExecutor {
             &mut extra_args,
             self.log.as_ref(),
         );
-        Ok(SessionPlan::Launch(LaunchSpec {
+        Ok(SessionPlan::Launch(Box::new(LaunchSpec {
             provider: options.provider,
+            preset: None,
             bin,
             cwd: options.cwd.clone(),
             env,
@@ -410,7 +411,7 @@ impl PtySessionExecutor {
             origin: SessionOrigin::Orchestrator,
             name: None,
             mcp_grant_session,
-        }))
+        })))
     }
 
     /// Start a fresh harness on the blocking pool.

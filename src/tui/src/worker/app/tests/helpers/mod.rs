@@ -49,6 +49,7 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         // Codex takes no preset session id, so its interactive argv is empty
         // and `/bin/sh` receives only the script.
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,

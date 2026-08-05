@@ -155,6 +155,7 @@ fn user_session(sessions: &PtyManager) -> String {
     sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin: "/bin/sh".to_string(),
             cwd: "/".to_string(),
             env,

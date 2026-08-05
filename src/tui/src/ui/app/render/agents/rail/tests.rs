@@ -155,6 +155,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         id: "w_1".into(),
         label: "local".into(),
         provider: medulla::protocol::HarnessProvider::Codex,
+        preset: None,
         state: PtyState::Running,
         cwd: cwd.into(),
         branch: Some("main".into()),

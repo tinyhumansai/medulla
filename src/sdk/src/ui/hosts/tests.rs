@@ -146,6 +146,36 @@ fn the_preview_reads_capacity_from_whichever_entry_probed_the_machine() {
 }
 
 #[test]
+fn a_remote_hosts_preview_reads_capacity_from_its_probed_entry_too() {
+    // The remote branch used to keep whichever agent opened the row, so a
+    // machine whose first agent had never been probed read "not reported" while
+    // a sibling at the same address held the capacity.
+    let bare = worker("agent-a", "addr-1");
+    let mut probed = worker("agent-b", "addr-1");
+    probed.cpu_cores = Some(8);
+
+    let rows = host_rows(&[bare, probed.clone()], &[], &[this_device()]);
+    let remote = rows
+        .iter()
+        .find(|row| row.kind == HostKind::Remote)
+        .expect("the peer is a remote host");
+    assert_eq!(remote.agents.len(), 2, "both agents are listed: {remote:?}");
+    assert_eq!(remote.detail_worker.as_deref(), Some("agent-b"));
+
+    // And a probed pick is not given up for a later unprobed one.
+    let rows = host_rows(
+        &[probed, worker("agent-c", "addr-1")],
+        &[],
+        &[this_device()],
+    );
+    let remote = rows
+        .iter()
+        .find(|row| row.kind == HostKind::Remote)
+        .expect("the peer is a remote host");
+    assert_eq!(remote.detail_worker.as_deref(), Some("agent-b"));
+}
+
+#[test]
 fn a_declaration_naming_an_unconfigured_host_still_gets_a_local_row() {
     // The `[[hosts]]` entry was removed, or the id was hand-written. The agents
     // are still declared on this machine — hiding them would lose them.

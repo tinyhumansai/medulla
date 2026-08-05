@@ -161,9 +161,7 @@ impl App {
     /// orchestrator may dispatch into what the operator is about to open.
     pub(in crate::ui::app) fn open_new_session(&mut self, agent_id: &str) {
         let Some(declaration) = self.declaration_for(agent_id) else {
-            self.set_status(format!(
-                "No agent \"{agent_id}\" is declared on this device"
-            ));
+            self.refuse_absent_declaration(agent_id);
             return;
         };
         let Some(workspace) = declaration.workspace.path() else {
@@ -204,9 +202,7 @@ impl App {
             return;
         };
         let Some(declaration) = self.declaration_for(agent_id) else {
-            self.set_status(format!(
-                "No agent \"{agent_id}\" is declared on this device"
-            ));
+            self.refuse_absent_declaration(agent_id);
             return;
         };
         let Some(choice) = harness_choice(&harnesses.choices(), &declaration.harness) else {
@@ -241,9 +237,37 @@ impl App {
         }
     }
 
-    /// The declaration for `agent_id` on this host, if there is one.
+    /// The declaration for `agent_id` **on this host**, if there is one.
+    ///
+    /// Scoped to the local host on purpose: a session is a process started on
+    /// this machine, so opening one from a declaration that names another
+    /// machine would file a running session under an agent that lives somewhere
+    /// else — and the rail, which resolves sessions against the *local*
+    /// declarations, would then list it as an orphan. The rail already limits
+    /// its `+ new session` row to local agents; `^T` reads whatever row the
+    /// cursor is on, so the filter has to live here too.
     fn declaration_for(&self, agent_id: &str) -> Option<AgentDeclaration> {
-        medulla::config::agent_declaration(self.agent_declarations(), agent_id).cloned()
+        self.local_agent_declarations()
+            .into_iter()
+            .find(|declaration| declaration.agent_id.trim() == agent_id.trim())
+    }
+
+    /// Say why there is no declaration here to open a session from.
+    ///
+    /// Two different answers, because they call for two different next steps: an
+    /// agent nobody declared anywhere is one to declare, and an agent declared
+    /// on another machine is one to start a session on *that* machine. Naming
+    /// the host is the whole of the difference, so the refusal carries it.
+    fn refuse_absent_declaration(&mut self, agent_id: &str) {
+        let elsewhere = medulla::config::agent_declaration(self.agent_declarations(), agent_id)
+            .map(|declaration| declaration.host_id.trim().to_string())
+            .filter(|host_id| !host_id.is_empty());
+        self.set_status(match elsewhere {
+            Some(host_id) => {
+                format!("{agent_id} is declared on {host_id} — open its sessions on that machine")
+            }
+            None => format!("No agent \"{agent_id}\" is declared on this device"),
+        });
     }
 
     /// Put the rail cursor on `agent_id`'s row, if it has one.

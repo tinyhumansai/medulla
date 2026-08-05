@@ -186,6 +186,55 @@ fn clicking_the_overflow_row_stops_a_task_stream_it_left_behind() {
     assert_eq!(app.watching, None);
 }
 
+/// Click the first row `want` accepts, resolved through the rendered hit map.
+fn click_row(app: &mut App, want: impl Fn(&RailRow) -> bool) -> Option<Cmd> {
+    draw(app);
+    let index = app
+        .rail_rows()
+        .iter()
+        .position(want)
+        .expect("the rail has the row under test");
+    let (rect, owners) = app.hit_agents.clone().expect("the rail was drawn");
+    let line = owners
+        .iter()
+        .position(|owner| *owner == index)
+        .expect("the row is on screen");
+    app.handle_click(rect.x, rect.y + line as u16)
+}
+
+#[test]
+fn clicking_an_action_row_stops_a_task_stream_it_left_behind() {
+    // `+ New agent` and `+ new session` are controls, not conversations: neither
+    // watches a task, and neither open method clears `watching`. A click that
+    // arrives from a task row therefore has to release that stream on its way,
+    // or a worker keeps sampling and sending a screen nobody is looking at.
+    for want in [
+        &(|row: &RailRow| row.is_new_agent()) as &dyn Fn(&RailRow) -> bool,
+        &|row: &RailRow| row.new_session_agent().is_some(),
+    ] {
+        let mut app = app_with_tasks("dev", 3);
+        app.set_local_harnesses(super::super::rail::tests::shell_harnesses(
+            crate::worker::pty::PtyManager::new(),
+        ));
+        app.loaded.config.fleet.agent_declarations = vec![medulla::runtime::AgentDeclaration::new(
+            "dev",
+            "",
+            "codex",
+            "/work/dev",
+        )];
+        let watched = ("worker-1".to_string(), "dev-t1".to_string());
+        app.watching = Some(watched.clone());
+
+        let cmd = click_row(&mut app, want);
+
+        assert!(
+            matches!(&cmd, Some(Cmd::WatchTask { stop, start: None }) if stop.as_ref() == Some(&watched)),
+            "expected the click to stop the previous watch, got {cmd:?}"
+        );
+        assert_eq!(app.watching, None);
+    }
+}
+
 #[test]
 fn an_expansion_follows_its_lane_when_the_rows_move() {
     let mut app = app_with_tasks("dev", 25);

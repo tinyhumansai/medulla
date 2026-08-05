@@ -34,7 +34,11 @@ pub(super) enum SessionPlan {
     /// An idle session for this conversation, already claimed.
     Reuse(OpenedSession),
     /// Nothing reusable: start a harness with this spec.
-    Launch(LaunchSpec),
+    ///
+    /// Boxed because a `LaunchSpec` is much the larger of the two — it carries
+    /// the child's whole environment — and every `Reuse` would otherwise pay
+    /// for a launch it is not doing.
+    Launch(Box<LaunchSpec>),
 }
 
 /// Runs delegated tasks inside live harness sessions.

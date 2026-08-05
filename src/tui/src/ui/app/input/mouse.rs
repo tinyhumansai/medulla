@@ -364,15 +364,22 @@ impl App {
                             // requiring a second keystroke to confirm what was
                             // already aimed at is the friction it exists to
                             // remove.
+                            //
+                            // Both action branches return the retarget rather
+                            // than nothing, for the same reason the overflow and
+                            // harness branches below do: an action row watches
+                            // no task, so a click arriving from one that did has
+                            // to stop that stream — and neither open method
+                            // clears `watching` on its own.
                             if row.is_new_agent() {
                                 self.open_new_agent_picker();
-                                return None;
+                                return self.retarget_watch();
                             }
                             // Same rule for the per-agent action: a click on
                             // `+ new session` opens the flow it names.
                             if let Some(agent_id) = row.new_session_agent().map(str::to_string) {
                                 self.open_new_session(&agent_id);
-                                return None;
+                                return self.retarget_watch();
                             }
                             // So is a lane's `+N more`: the click that lands on
                             // it is the request to see what it is counting.

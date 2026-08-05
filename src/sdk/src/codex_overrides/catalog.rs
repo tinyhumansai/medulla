@@ -28,15 +28,54 @@ use super::types::CodexOverridesError;
 /// The cached catalog Codex writes for itself, relative to its home.
 const CACHE_FILE: &str = "models_cache.json";
 
-/// Where the derived catalog for `model` is written.
+/// Where the derived catalog for `model`, `display_name` and `context_window`
+/// is written.
 ///
 /// Under Medulla's own state directory rather than Codex's home: this is
 /// generated data belonging to a Medulla run, and writing into `$CODEX_HOME`
 /// would put Medulla's file next to the operator's own config.
-pub fn catalog_path(model: &str, env: &HashMap<String, String>) -> PathBuf {
+///
+/// Keyed on a digest of all three inputs, not just the sanitized model slug:
+/// two presets that route the *same* model slug but declare a different
+/// display name or context window (or two slugs that sanitize to the same
+/// file name, e.g. `a/b` and `a_b`) would otherwise share one file. A later
+/// spawn's rename can then replace an earlier spawn's catalog after that
+/// spawn's `-c model_catalog_json=<path>` argv was already handed to Codex but
+/// before Codex has read it — silently swapping in the wrong context window
+/// or slug. Content-addressing means two identical derivations still share
+/// (and safely overwrite) the same file, so the common case of one preset
+/// launched repeatedly still reuses one path.
+pub fn catalog_path(
+    model: &str,
+    display_name: &str,
+    context_window: u32,
+    env: &HashMap<String, String>,
+) -> PathBuf {
+    let digest = content_digest(model, display_name, context_window);
     medulla_state_dir(env)
         .join("codex-catalogs")
-        .join(format!("{}.json", slug_file_name(model)))
+        .join(format!("{}-{digest}.json", slug_file_name(model)))
+}
+
+/// A short, non-cryptographic digest distinguishing catalog derivations.
+///
+/// Only needs to make two different `(model, display_name, context_window)`
+/// triples land in different files — not to resist a deliberate collision —
+/// so a plain FNV-1a over their bytes is enough and avoids a hashing
+/// dependency for one filename-uniqueness use.
+fn content_digest(model: &str, display_name: &str, context_window: u32) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in model
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(display_name.bytes())
+        .chain(std::iter::once(0))
+        .chain(context_window.to_le_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Derive and write the catalog for `model`, returning the file to hand Codex.
@@ -69,7 +108,7 @@ pub fn write_catalog(
     let entry = derive_entry(&cached, model, display_name, context_window)
         .ok_or(CodexOverridesError::NoUsableTemplate { path: source })?;
 
-    let path = catalog_path(model, env);
+    let path = catalog_path(model, display_name, context_window, env);
     // `path`'s own directory (`codex-catalogs/`) always has a parent — it is
     // joined onto `medulla_state_dir`/`home_dir`, which never returns a bare
     // root — so this can only fail if the directory could not be created.

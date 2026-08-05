@@ -212,10 +212,44 @@ fn a_missing_codex_cache_names_what_to_run() {
 #[test]
 fn a_slug_with_a_slash_stays_one_file() {
     let env = HashMap::from([("MEDULLA_HOME".to_string(), "/tmp/medulla".to_string())]);
-    let path = catalog_path("deepseek/deepseek-v4-flash-0731", &env);
+    let path = catalog_path("deepseek/deepseek-v4-flash-0731", "DeepSeek", 128_000, &env);
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap();
+    assert!(
+        file_name.starts_with("deepseek_deepseek-v4-flash-0731-"),
+        "{file_name}"
+    );
+    assert!(file_name.ends_with(".json"), "{file_name}");
     assert_eq!(
-        path,
-        std::path::Path::new("/tmp/medulla/codex-catalogs/deepseek_deepseek-v4-flash-0731.json")
+        path.parent().unwrap(),
+        std::path::Path::new("/tmp/medulla/codex-catalogs")
+    );
+}
+
+#[test]
+fn different_presets_for_the_same_model_slug_never_share_a_catalog_file() {
+    // Regression test: `catalog_path` used to be keyed on the sanitized model
+    // slug alone, so two presets routing the same slug with a different
+    // display name or context window (or two slugs that sanitize to the same
+    // file name) shared one file. A later spawn's rename could then replace
+    // an earlier spawn's catalog after its `-c model_catalog_json=<path>`
+    // argv was already handed to Codex but before Codex read it.
+    let env = HashMap::from([("MEDULLA_HOME".to_string(), "/tmp/medulla".to_string())]);
+    let same_name_and_window = catalog_path("deepseek/deepseek-v4", "DeepSeek", 128_000, &env);
+    let different_window = catalog_path("deepseek/deepseek-v4", "DeepSeek", 64_000, &env);
+    let different_name = catalog_path("deepseek/deepseek-v4", "DeepSeek (fast)", 128_000, &env);
+    // Two slugs that sanitize to the same file-name stem.
+    let colliding_slug = catalog_path("deepseek_v4", "DeepSeek", 128_000, &env);
+
+    assert_ne!(same_name_and_window, different_window);
+    assert_ne!(same_name_and_window, different_name);
+    assert_ne!(different_window, different_name);
+    assert_ne!(same_name_and_window, colliding_slug);
+
+    // An identical derivation still reuses the same path, so repeatedly
+    // launching one preset does not proliferate catalog files.
+    assert_eq!(
+        same_name_and_window,
+        catalog_path("deepseek/deepseek-v4", "DeepSeek", 128_000, &env)
     );
 }
 
@@ -250,7 +284,12 @@ fn two_concurrent_writers_for_the_same_model_both_succeed() {
             .expect("concurrent catalog write must not fail");
     }
 
-    let path = catalog_path("deepseek/deepseek-v4", &env);
+    let path = catalog_path(
+        "deepseek/deepseek-v4",
+        "DeepSeek",
+        DEFAULT_CONTEXT_WINDOW,
+        &env,
+    );
     let catalog: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(catalog["models"][0]["slug"], json!("deepseek/deepseek-v4"));
     // No leftover temporary files: every writer's own unique name was renamed

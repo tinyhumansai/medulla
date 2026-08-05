@@ -143,6 +143,10 @@ fn every_session_row_sits_under_the_agent_that_owns_it() {
     assert!(checked > 0, "the demo fixture dispatches at least one task");
 }
 
+// Unix-only: starts a real child on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of. The row model under test is
+// portable; only this way of standing a session up is not.
+#[cfg(unix)]
 #[test]
 fn a_dispatched_session_and_an_operator_session_are_the_same_row_type() {
     // §A0: the `── your harnesses ──` divider and the second row type are gone.
@@ -175,6 +179,10 @@ fn a_dispatched_session_and_an_operator_session_are_the_same_row_type() {
     harnesses.sessions.shutdown();
 }
 
+// Unix-only: starts a real child on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of. The row model under test is
+// portable; only this way of standing a session up is not.
+#[cfg(unix)]
 #[test]
 fn a_session_in_an_undeclared_directory_is_still_listed() {
     // Nothing declares `/`, so the session belongs to no agent — and a harness

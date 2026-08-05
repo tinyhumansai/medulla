@@ -131,6 +131,10 @@ fn a_new_session_under_an_agent_asks_for_a_name_first() {
     );
 }
 
+// Unix-only: starts a real child on a real pseudo-terminal via `/bin/sh`,
+// which Windows has no equivalent of. The row model under test is
+// portable; only this way of standing a session up is not.
+#[cfg(unix)]
 #[test]
 fn a_named_session_opens_in_the_agents_own_harness_and_workspace() {
     let sessions = PtyManager::new();

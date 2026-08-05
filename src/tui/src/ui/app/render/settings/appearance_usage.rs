@@ -51,7 +51,7 @@ impl App {
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled("Attention cues", heading)));
         lines.push(TLine::from(Span::styled(
-            "  How Medulla highlights a task or harness waiting for you.",
+            "  How Medulla highlights a task or session waiting for you.",
             description,
         )));
         lines.push(TLine::from(""));
@@ -180,7 +180,7 @@ impl App {
         // The harness-row toggles used to sit here. Point at where they went
         // rather than leaving an operator to find the new page by accident.
         lines.push(TLine::from(Span::styled(
-            "harness rows are laid out on the Status line page",
+            "session rows are laid out on the Status line page",
             Style::default().add_modifier(Modifier::DIM),
         )));
         let where_saved = match &self.config_path {

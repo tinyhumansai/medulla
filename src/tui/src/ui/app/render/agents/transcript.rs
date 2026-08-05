@@ -38,7 +38,7 @@ impl App {
         //
         // Resolved in `agents_selection`, not here: it decides the layout as
         // well as the contents, so the split has already been made for it.
-        if let Some(session_id) = selection.harness.clone() {
+        if let Some(session_id) = selection.session.clone() {
             self.draw_local_harness(f, area, &session_id);
             return;
         }

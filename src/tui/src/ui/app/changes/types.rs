@@ -36,11 +36,11 @@ pub(crate) type LoadedChanges = (Vec<String>, Vec<GitCommit>, Vec<ChangedFile>);
 /// How the active comparison baseline was chosen.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum BaselineSource {
-    /// The app-start snapshot used until a harness becomes available.
+    /// The app-start snapshot used until a session becomes available.
     #[default]
     AppLaunch,
-    /// The commit captured immediately before the selected harness was spawned.
-    HarnessLaunch,
+    /// The commit captured immediately before the selected session was spawned.
+    SessionLaunch,
     /// A commit chosen from repository history.
     Commit,
     /// A revision entered by the operator.
@@ -148,7 +148,7 @@ impl GitChangesState {
         }
     }
 
-    /// Clear repository-backed content when the selected harness cannot be
+    /// Clear repository-backed content when the selected session cannot be
     /// reviewed, preventing stale changes from another repository remaining on
     /// screen beneath the error.
     pub(crate) fn clear_repository(&mut self, error: String) {
@@ -172,10 +172,10 @@ impl GitChangesState {
         self.error = Some(error);
     }
 
-    /// Follow a harness's immutable launch snapshot while launch mode is active.
+    /// Follow a session's immutable launch snapshot while launch mode is active.
     /// Review comments survive baseline changes within the same repository and
     /// are cleared only when the repository root changes.
-    pub(crate) fn follow_harness(
+    pub(crate) fn follow_session(
         &mut self,
         cwd: &Path,
         launch_commit: &str,
@@ -189,7 +189,7 @@ impl GitChangesState {
         self.harness_checkout_identity = Some(checkout_identity.to_owned());
         if matches!(
             self.baseline_source,
-            BaselineSource::AppLaunch | BaselineSource::HarnessLaunch
+            BaselineSource::AppLaunch | BaselineSource::SessionLaunch
         ) && (self.root.as_ref() != Some(&root)
             || self.baseline.as_deref() != Some(launch_commit))
         {
@@ -200,7 +200,7 @@ impl GitChangesState {
             self.comments_root = Some(root.clone());
             self.root = Some(root);
             self.baseline = Some(launch_commit.to_owned());
-            self.baseline_source = BaselineSource::HarnessLaunch;
+            self.baseline_source = BaselineSource::SessionLaunch;
             self.selected = 0;
             self.cursor = 0;
             self.scroll = 0;
@@ -228,22 +228,22 @@ impl GitChangesState {
         Ok(())
     }
 
-    /// Return to the selected harness's repository and captured launch commit.
-    pub(crate) fn choose_harness_baseline(&mut self) -> Result<(), String> {
+    /// Return to the selected session's repository and captured launch commit.
+    pub(crate) fn choose_session_baseline(&mut self) -> Result<(), String> {
         let root = self
             .harness_root
             .clone()
-            .ok_or_else(|| "No harness Git repository is available".to_owned())?;
+            .ok_or_else(|| "No session Git repository is available".to_owned())?;
         let baseline = self
             .harness_baseline
             .clone()
-            .ok_or_else(|| "No harness launch snapshot is available".to_owned())?;
+            .ok_or_else(|| "No session launch snapshot is available".to_owned())?;
         let identity = self
             .harness_checkout_identity
             .as_deref()
-            .ok_or_else(|| "No harness checkout identity is available".to_owned())?;
+            .ok_or_else(|| "No session checkout identity is available".to_owned())?;
         if !crate::worker::pty::checkout::matches(&root, identity) {
-            return Err("Harness Git checkout changed since launch".to_owned());
+            return Err("Session Git checkout changed since launch".to_owned());
         }
         let comments_root = self.comments_root.as_ref().or(self.root.as_ref());
         if comments_root != Some(&root) {
@@ -252,7 +252,7 @@ impl GitChangesState {
         self.comments_root = Some(root.clone());
         self.root = Some(root);
         self.baseline = Some(baseline);
-        self.baseline_source = BaselineSource::HarnessLaunch;
+        self.baseline_source = BaselineSource::SessionLaunch;
         self.picking_baseline = false;
         self.selected = 0;
         self.cursor = 0;
@@ -265,7 +265,7 @@ impl GitChangesState {
     pub(crate) fn baseline_label(&self) -> String {
         let source = match self.baseline_source {
             BaselineSource::AppLaunch => "app launch",
-            BaselineSource::HarnessLaunch => "harness launch",
+            BaselineSource::SessionLaunch => "session launch",
             BaselineSource::Commit => "commit",
             BaselineSource::Manual => "manual",
         };

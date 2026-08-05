@@ -13,7 +13,7 @@ fn routing_nav_exposes_every_subpage() {
     // what it can reach.
     for page in [
         "Hosts",
-        "Harnesses",
+        "Harness Types",
         "Agent Template",
         "Add Host",
         "Strategies",
@@ -40,7 +40,7 @@ fn routing_menu_enters_leaves_and_jumps_between_content_panes() {
     assert!(!app.routing_focused());
 
     assert!(app.on_event(key(KeyCode::Down)).is_none());
-    assert_eq!(app.routing_subpage(), "Harnesses");
+    assert_eq!(app.routing_subpage(), "Harness Types");
     // Entering a capacity page pulls a fresh read; capacity is never streamed.
     assert!(matches!(
         app.on_event(key(KeyCode::Enter)),
@@ -201,8 +201,8 @@ fn arrowing_after_a_confirmed_kind_does_not_carry_the_confirmation_across() {
     let _ = app.on_event(key(KeyCode::Enter));
     let out = render(&mut app, 160, 44);
     assert!(
-        out.contains("Which harness it runs"),
-        "local now reaches its harness step: {out}"
+        out.contains("Which harness type it runs"),
+        "local now reaches its harness-type step: {out}"
     );
     assert!(
         app.prompt_state().is_none(),

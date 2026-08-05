@@ -360,7 +360,7 @@ async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
     // branch and simply OPENED A SECOND HARNESS in the same folder. Two agents,
     // one working tree, no mutual exclusion. So the assertion that matters here
     // is not just that the task is refused; it is that nothing new was spawned.
-    use super::super::pty::{HarnessControl, LaunchSpec};
+    use super::super::pty::{LaunchSpec, SessionControl};
 
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();
@@ -383,7 +383,7 @@ async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: crate::worker::pty::SessionOrigin::User,
             name: None,
             mcp_grant_session: None,
@@ -421,7 +421,7 @@ async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
 async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
     // The other half: the hold is a pause, not a wall. Handing back must make
     // the workspace usable again without the operator restarting anything.
-    use super::super::pty::{HarnessControl, LaunchSpec};
+    use super::super::pty::{LaunchSpec, SessionControl};
 
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();
@@ -446,7 +446,7 @@ async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: crate::worker::pty::SessionOrigin::User,
             name: None,
             mcp_grant_session: None,
@@ -464,7 +464,7 @@ async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
     .is_err());
 
     // The operator hands it back.
-    assert!(sessions.set_control(&held, HarnessControl::Orchestrator));
+    assert!(sessions.set_control(&held, SessionControl::Orchestrator));
 
     let reply = tokio::time::timeout(
         Duration::from_secs(30),

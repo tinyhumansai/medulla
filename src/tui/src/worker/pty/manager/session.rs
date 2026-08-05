@@ -7,7 +7,7 @@
 
 use medulla::protocol::HarnessProvider;
 
-use super::super::types::{HarnessControl, SessionRow};
+use super::super::types::{SessionControl, SessionRow};
 use super::{read, write, PtyManager};
 
 /// Advance the consumed-bell watermark without allowing a stale screen sample
@@ -27,7 +27,7 @@ impl PtyManager {
     ///
     /// A session the operator holds is never returned, however idle it looks.
     /// That is the whole of the unmanaged-harness feature and the whole of
-    /// takeover: [`HarnessControl`] is the gate, and this is where it bites.
+    /// takeover: [`SessionControl`] is the gate, and this is where it bites.
     /// Without it, attaching to a pane and typing does not stop the orchestrator
     /// pasting a task prompt into the same composer — the exact two-writers
     /// collision the `busy` flag above exists to prevent, reachable by an
@@ -72,7 +72,7 @@ impl PtyManager {
         self.handles()
             .into_iter()
             .find(|session| {
-                session.control() == HarnessControl::User
+                session.control() == SessionControl::User
                     && session.is_running()
                     && same_workspace(session.cwd(), cwd)
             })
@@ -80,7 +80,7 @@ impl PtyManager {
     }
 
     /// Who currently holds `id`, if it is a session we know about.
-    pub fn control(&self, id: &str) -> Option<HarnessControl> {
+    pub fn control(&self, id: &str) -> Option<SessionControl> {
         self.handle(id).map(|session| session.control())
     }
 
@@ -91,7 +91,7 @@ impl PtyManager {
     /// allowed to start one" — and a session taken over mid-turn is still
     /// running that turn. Clearing `busy` on handback would advertise a harness
     /// as free while it was still finishing someone else's work.
-    pub fn set_control(&self, id: &str, control: HarnessControl) -> bool {
+    pub fn set_control(&self, id: &str, control: SessionControl) -> bool {
         let Some(session) = self.handle(id) else {
             return false;
         };

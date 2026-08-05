@@ -102,7 +102,7 @@ impl App {
                     // always set; there is no "auto" state to fall back to.
                     optional: false,
                 },
-                help: "Worker harness processes Medulla may run at once.",
+                help: "Agent sessions Medulla may run at once.",
             },
         ]);
         rows

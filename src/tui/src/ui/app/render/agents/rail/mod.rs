@@ -52,8 +52,15 @@ pub(in crate::ui::app) const RAIL_MAX_CONTENT: usize = 36;
 /// two lines still reads as one row rather than as two entries.
 const CONT_INDENT: usize = 5;
 
-/// Build the rail title from the lane inventory and one attention snapshot.
-fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
+/// Build the rail title from the tree, the lane inventory, and one attention
+/// snapshot.
+///
+/// The count is of **agents** — the rows of the tree — not of lanes. A lane is
+/// folded from traffic, so counting lanes said how many things had been
+/// dispatched to, which is not what "Agents · 3" claims and drops to zero on a
+/// machine with three declared agents and a quiet morning. Running tasks still
+/// come from the lanes: that *is* a fact about traffic.
+fn rail_title(rows: &[RailRow], lanes: &[AgentLane], waiting: usize) -> String {
     let running_tasks: usize = lanes
         .iter()
         .map(|lane| {
@@ -63,7 +70,10 @@ fn rail_title(lanes: &[AgentLane], waiting: usize) -> String {
                 .count()
         })
         .sum();
-    let agents = lanes.iter().filter(|lane| !lane.role.is_function()).count();
+    let agents = rows
+        .iter()
+        .filter(|row| matches!(row, RailRow::Agent(_)))
+        .count();
     let mut title = if running_tasks > 0 {
         format!("Agents · {agents} · {running_tasks} running")
     } else {
@@ -127,7 +137,7 @@ impl App {
         // disagree with each other — and the render thread takes the sessions
         // lock once rather than once per lane per task.
         let waiting_sessions = self
-            .harnesses
+            .local_sessions
             .as_ref()
             .map(|h| h.sessions.waiting_sessions())
             .unwrap_or_default();
@@ -135,7 +145,7 @@ impl App {
         // rather than on rows of their own — the same number the tab badge
         // carries, so the two can never disagree.
         let waiting = App::count_waiting(&waiting_sessions, &self.harness_focus);
-        let title = rail_title(&selection.lanes, waiting);
+        let title = rail_title(&selection.rows, &selection.lanes, waiting);
         // The border says which half the keyboard is driving. Without it, Esc
         // moving focus to the rail is invisible until the next arrow press.
         let block = crate::ui::widgets::panel(&self.theme, title, self.agents_rail_focused());
@@ -301,7 +311,7 @@ impl App {
                         CONT_INDENT,
                     ));
                 }
-                lines.extend(self.own_harness_lines(local, active, width, now));
+                lines.extend(self.own_session_lines(local, active, width, now));
                 lines
             }
             other => wrap_line(
@@ -349,7 +359,7 @@ impl App {
                 // session over several lines; kept total so measurement can call
                 // either.
                 (None, Some(local)) => self
-                    .own_harness_lines(local, active, RAIL_MAX_CONTENT, now)
+                    .own_session_lines(local, active, RAIL_MAX_CONTENT, now)
                     .into_iter()
                     .next()
                     .unwrap_or_default(),

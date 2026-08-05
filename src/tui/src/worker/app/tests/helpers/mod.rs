@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use medulla::contacts::{AdmissionPolicy, ContactDesk, ContactRelay, IncomingRequest};
 use medulla::protocol::HarnessProvider;
 
-use super::super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
+use super::super::super::pty::{LaunchSpec, PtyManager, SessionControl};
 use super::super::state::WorkerWiring;
 use super::super::types::WorkerApp;
 
@@ -58,7 +58,7 @@ pub(super) fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,

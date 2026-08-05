@@ -2,20 +2,20 @@
 
 The `medulla` binary is both the terminal app and a small suite of subcommands
 for headless operation, bridging coding-agent harnesses to
-[tiny.place](https://tiny.place), and self-updating.
+the host link, and self-updating.
 
 | Command | What it does |
 | --- | --- |
 | `medulla` | Bare invocation starts the [TUI](#the-tui). |
 | `medulla run <instruction>` | [Headless one-shot](#medulla-run): submit one instruction and stream the cycle's events as JSON lines. |
 | `medulla login` / `logout` | [Browser OAuth login](authentication.md); logout clears the session and keeps the account selected. |
-| `medulla daemon` | [Coding-agent worker daemon](#medulla-daemon) over tiny.place (`--headless` for a service process). |
-| `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to tiny.place. |
+| `medulla daemon` | [Coding-agent worker daemon](#medulla-daemon) over the host link (`--headless` for a service process). |
+| `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to your orchestrator. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run multi-step plans. |
 | `medulla init [dir]` | [Draft a MEDULLA.md](#medulla-init) workspace profile. |
 | `medulla workspace <cmd>` | [Workspace registry](#medulla-workspace): `add [dir]` / `list` / `remove <dir\|id>`. |
-| `medulla hub` | [Relay hosted-backend tasks](#medulla-hub) to configured tiny.place workers. |
+| `medulla hub` | [Relay hosted-backend tasks](#medulla-hub) to configured host-link workers. |
 | `medulla update` | [Self-update](#medulla-update): download, verify, install the latest release. |
 | `medulla version` / `help` | Version string; usage. |
 
@@ -76,7 +76,7 @@ exactly what CI and container runs depend on.
 A headless coding-agent daemon that serves
 [claude](https://www.anthropic.com/claude-code),
 [codex](https://github.com/openai/codex), and
-[opencode](https://github.com/sst/opencode) over encrypted tiny.place DMs. On
+[opencode](https://github.com/sst/opencode) over encrypted host-link datagrams. On
 first launch it runs a one-time [worker registration](#first-run-worker-registration)
 flow. `medulla daemon --reonboard` forces that flow again.
 
@@ -91,7 +91,7 @@ saved masters, and operator messages), **Workspaces** (the canonicalized roots
 the worker may advertise), and **Requests** (pending contact requests to accept,
 decline, or block).
 
-The daemon creates and stores a worker-level tiny.place wallet locally; it does
+The daemon creates and stores a worker-level link identity locally; it does
 not need the master's backend token. Mode, harness, workspace, and master
 choices persist to the Medulla config, so the usual setup needs no environment
 variables.
@@ -105,7 +105,7 @@ Daemon flags:
 | `--providers <a,b>` | Restrict the accepted harnesses (default: all found on `PATH`). |
 | `--default-provider <name>` | Choose the default harness among those available. |
 | `--workspace <dir>` | Set the primary task working directory (default: cwd). |
-| `--handle <name>` | Register a tiny.place `@handle` on startup. |
+| `--handle <name>` | Register an `@handle` on startup. |
 | `--name <label>` | Override the worker's advertised display name. |
 | `--model <name>` | Supply a default model hint passed to the harness. |
 | `--opencode-agent <name>` | Agent name for the OpenCode provider. |
@@ -152,7 +152,7 @@ Pass `--no-pair` when the output is being parsed by a script.
 `medulla codex` / `medulla claude` / `medulla opencode` launch the real
 coding-agent CLI in your terminal exactly as if you had run it directly —
 unrecognized flags passed through verbatim — while bridging the
-session to tiny.place underneath. The wrapper tails the harness's own JSONL
+session to the host link underneath. The wrapper tails the harness's own JSONL
 transcript, normalizes each record into a typed `SessionEnvelopeV2` event, and
 forwards the stream as encrypted [Signal-protocol](https://signal.org/docs/) DMs
 to the configured owner; with inbound input enabled it also polls for
@@ -166,25 +166,27 @@ resize behaviour while owner messages are typed in alongside your keystrokes.
 ```sh
 medulla codex resume            # any args after the provider go to the CLI verbatim
 medulla claude --model opus-4   # unrecognized flags pass straight through
-medulla codex --no-bridge       # pure passthrough: run the CLI with no tiny.place bridge
+medulla codex --no-bridge       # pure passthrough: run the CLI with no host-link bridge
 medulla codex -- --no-bridge    # `--` forces everything after it to the child
 ```
 
-Configuration is by environment variable (mirroring the tinyplace CLI):
+Configuration is by environment variable. The `TINYPLACE_*` spelling of each of
+these is deprecated but still read, directly behind the `MEDULLA_*` name, so a
+host configured before the rename keeps working:
 
 | Variable | Effect |
 | --- | --- |
-| `TINYPLACE_HARNESS_DM_TO` / `TINYPLACE_<P>_DM_TO` / `TINYPLACE_OPENHUMAN_OWNER` | tiny.place owner to forward the session envelopes to. |
-| `TINYPLACE_HARNESS_RECEIVE_FROM` / `TINYPLACE_<P>_RECEIVE_FROM` | Peer whose input control frames / plain DMs are injected (defaults to the owner). |
-| `TINYPLACE_HARNESS_RECEIVE=0` / `TINYPLACE_<P>_RECEIVE=0` | Disable inbound input injection. |
-| `TINYPLACE_<P>_BIN` (`TINYPLACE_CODEX_BIN`, `TINYPLACE_CLAUDE_BIN`, `TINYPLACE_OPENCODE_BIN`) | Override the provider binary. |
-| `TINYPLACE_<P>_SESSIONS_DIR` | Override the transcript directory the tailer watches. |
+| `MEDULLA_HARNESS_DM_TO` / `MEDULLA_<P>_DM_TO` / `MEDULLA_OPENHUMAN_OWNER` | Owner to forward the session envelopes to. |
+| `MEDULLA_HARNESS_RECEIVE_FROM` / `MEDULLA_<P>_RECEIVE_FROM` | Peer whose input control frames / plain DMs are injected (defaults to the owner). |
+| `MEDULLA_HARNESS_RECEIVE=0` / `MEDULLA_<P>_RECEIVE=0` | Disable inbound input injection. |
+| `MEDULLA_<P>_BIN` (`MEDULLA_CODEX_BIN`, `MEDULLA_CLAUDE_BIN`, `MEDULLA_OPENCODE_BIN`) | Override the provider binary. |
+| `MEDULLA_<P>_SESSIONS_DIR` | Override the transcript directory the tailer watches. |
 
 If no owner is configured (and `--no-bridge` was not passed), the wrapper prints
 a single warning and runs as a plain passthrough.
 
 **Scope notes.** This is the single-terminal `--raw` wrapper. It does not build
-the tinyplace TUI chrome, the `--agent` plugin mode, the machine-bus
+the upstream TUI chrome, the `--agent` plugin mode, the machine-bus
 multi-terminal coordination, the opencode SSE server, or the terminal-envelope
 writer. `medulla
 opencode` runs as a passthrough with input injection but no transcript tailing
@@ -196,10 +198,10 @@ The first time a worker starts — `medulla daemon`, or a bridged `medulla
 codex|claude|opencode` — it runs a one-time onboarding flow that names the worker
 and connects it to an owner, then persists a small profile at
 `<medulla-home>/worker.json`. "Registered" means both that profile and a
-tiny.place identity exist; subsequent launches skip the flow.
+host-link identity exist; subsequent launches skip the flow.
 
 * **On a TTY** an onboarding screen walks three steps: **name** (prefilled with
-  `<username>@<hostname>/<ip>`), **connection** (creates/loads the tiny.place
+  `<username>@<hostname>/<ip>`), **connection** (creates/loads the host-link
   identity, shows the address + `@handle`, prompts for the OpenHuman owner —
   `Enter` saves, `Esc` skips), and **confirm** (a summary panel; `Enter`
   finishes, `q`/`Ctrl-C` aborts without writing). On completion, if an owner is
@@ -210,7 +212,7 @@ tiny.place identity exist; subsequent launches skip the flow.
 The profile threads through the rest of the worker: the daemon advertises the
 profile name as its directory-card label (unless `--name` overrides it), and the
 wrapper uses the profile owner as the final fallback in the recipient chain (any
-`TINYPLACE_*` env owner still wins).
+`MEDULLA_*` env owner still wins).
 
 ## `medulla sessions`
 
@@ -336,14 +338,14 @@ up front rather than corrupted.
 
 ## `medulla hub`
 
-Relay hosted-backend tasks to configured [tiny.place](https://tiny.place) workers:
+Relay hosted-backend tasks to configured host-link workers:
 
 ```sh
 medulla hub
 ```
 
 The hub is the outbound half of the peer harness plane. It takes a task the hosted
-backend produced for a registered worker, encodes a `medulla-tinyplace/1` task
+backend produced for a registered worker, encodes a `medulla-task/1` task
 frame, sends it in an encrypted Signal DM, and correlates the worker's
 status/reply/error frames back to the originating dispatch — routing each reply to
 exactly one waiting dispatch, since concurrent tasks share a destructively drained

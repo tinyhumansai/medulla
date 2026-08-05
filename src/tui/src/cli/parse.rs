@@ -548,9 +548,9 @@ medulla daemon --headless  Run without the operator screen (automatic when piped
                         --workspace <dir>      where peer tasks run\n  \
                         --no-trust-workspace   don't pre-trust it with claude\n  \
 medulla sessions        List recent claude/codex sessions as JSON\n  \
-medulla codex [args]    Run Codex in your terminal, bridged to tiny.place\n  \
-medulla claude [args]   Run Claude Code in your terminal, bridged to tiny.place\n  \
-medulla opencode [args] Run OpenCode in your terminal, bridged to tiny.place\n  \
+medulla codex [args]    Run Codex in your terminal, bridged to your orchestrator\n  \
+medulla claude [args]   Run Claude Code in your terminal, bridged to your orchestrator\n  \
+medulla opencode [args] Run OpenCode in your terminal, bridged to your orchestrator\n  \
 medulla login [flags]   Log in to the backend and store credentials\n  \
 medulla logout          Clear stored credentials\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
@@ -573,7 +573,7 @@ Daemon flags:\n  \
 --no-pair               Do not print the pairing block or copy the address\n  \
 --dangerously-skip-permissions  Pass the harness its skip-permissions flag\n\n\
 Wrapper flags:\n  \
---no-bridge             Run the CLI as a plain passthrough (no tiny.place bridge)\n  \
+--no-bridge             Run the CLI as a plain passthrough (no host-link bridge)\n  \
 --                      Pass all following arguments to the CLI verbatim\n\n\
 Workflow flags:\n  \
 --input <json>          Trigger payload for run / dry-run\n  \

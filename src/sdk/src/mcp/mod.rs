@@ -36,7 +36,7 @@
 //! family and wants to know the fleet's shape before planning around it.
 //!
 //! Routing a remote worker's fleet calls back to the orchestrator over the
-//! tiny.place bridge would remove the asymmetry, and is deliberately not done
+//! remote bridge would remove the asymmetry, and is deliberately not done
 //! here: it needs frames, cross-machine correlation, and abort routing that this
 //! surface does not yet have.
 //!

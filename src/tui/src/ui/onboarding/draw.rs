@@ -65,7 +65,7 @@ impl OnboardingScreen {
                 )));
                 lines.push(Line::from(""));
                 lines.push(Line::from(format!(
-                    "{} setting up the tiny.place identity…",
+                    "{} setting up the host-link identity…",
                     self.spinner()
                 )));
             }

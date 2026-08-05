@@ -9,7 +9,6 @@ pub struct WorkerTuiConfig {
     pub masters: Vec<medulla::config::Peer>,
     pub config_path: std::path::PathBuf,
     pub credential_dir: std::path::PathBuf,
-    pub contacts: Option<ContactDesk>,
     pub agent_id: Option<String>,
     pub startup_status: Option<String>,
     pub transport: Option<LinkBridge>,

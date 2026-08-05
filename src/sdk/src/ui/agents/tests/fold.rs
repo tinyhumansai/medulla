@@ -140,7 +140,7 @@ fn agent_lane_stacks_tasks_with_row_model() {
             },
         ));
     }
-    let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
+    let lanes = derive_agent_lanes(&events, "MEDULLA", &roster);
     let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
     assert_eq!(dev.tasks.len(), 10);
     let rows = agent_row_model(&lanes, 8);
@@ -280,14 +280,14 @@ fn session_lanes_group_under_machine() {
             harness: Some("codex".into()),
         },
     )];
-    let lanes = derive_agent_lanes(&events, "TINYPLACE", &[]);
+    let lanes = derive_agent_lanes(&events, "MEDULLA", &[]);
     let session = lanes
         .iter()
         .find(|l| l.session_id.as_deref() == Some("s1"))
         .unwrap();
     assert_eq!(session.parent_agent_id.as_deref(), Some("m1"));
     // A session lane is tagged only with a harness it learned itself (CODEX),
-    // never the global default (TINYPLACE).
+    // never the global default (MEDULLA).
     assert_eq!(session.harness_label.as_deref(), Some("CODEX"));
     assert_eq!(session.label, "[CODEX] ↳ s1");
 }
@@ -393,7 +393,7 @@ fn session_event_folds_into_grouped_session_lane() {
             content: "building".into(),
         },
     )];
-    let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
+    let lanes = derive_agent_lanes(&events, "MEDULLA", &roster);
     // The machine lane comes first, its session lane grouped immediately after.
     let machine_pos = lanes.iter().position(|l| l.key == "agent:m1").unwrap();
     let session_pos = lanes
@@ -425,7 +425,7 @@ fn roster_harness_metadata_tags_lane_label() {
         tags: vec![],
         metadata: meta,
     }];
-    let lanes = derive_agent_lanes(&[], "TINYPLACE", &roster);
+    let lanes = derive_agent_lanes(&[], "MEDULLA", &roster);
     let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
     // Its own harness (CODEX) wins over the global default.
     assert_eq!(dev.label, "[CODEX] Dev");
@@ -475,7 +475,7 @@ fn peer_session_state_colors_and_ended_marker() {
             },
         ),
     ];
-    let lanes = derive_agent_lanes(&events, "TINYPLACE", &[]);
+    let lanes = derive_agent_lanes(&events, "MEDULLA", &[]);
     let session = lanes
         .iter()
         .find(|l| l.session_id.as_deref() == Some("s1"))

@@ -3,14 +3,14 @@
 //! A plain `medulla` is both halves of the system: the orchestrator that decides
 //! what work to hand out, and a host that runs it. Before this, only the first
 //! half was in the process — the second needed a separate `medulla daemon`, a
-//! tiny.place identity for each side, and a contact edge between two programs on
+//! host-link identity for each side, and a contact edge between two programs on
 //! the same laptop, all so a task could travel through a relay to arrive back
 //! where it started.
 //!
 //! Here the host binds an address on an in-memory bus that the hub also
 //! dispatches over ([`RoutingBridge`](medulla::bridge::RoutingBridge)), so work
 //! for this device is delivered in-process and everything else still goes to
-//! remote workers over tiny.place. Configuration is the `[host]` section, with
+//! remote workers over the host link. Configuration is the `[host]` section, with
 //! `MEDULLA_HOST=0` as the single-run kill switch.
 //!
 //! Tasks run in **watchable** harness sessions

@@ -55,11 +55,11 @@ fn ranks_current_cwd_first_then_recency() {
 
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         claude_dir.to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         codex_dir.to_string_lossy().into_owned(),
     );
 
@@ -156,7 +156,7 @@ fn collect_session_files_recurses_and_filters() {
 fn sessions_dir_for_honors_env_override() {
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         "/tmp/custom-claude".to_string(),
     );
     assert_eq!(
@@ -170,7 +170,7 @@ fn discover_newest_session_file_matches_cwd_and_skips_old_and_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         dir.path().to_string_lossy().into_owned(),
     );
 
@@ -302,11 +302,11 @@ fn agent_kind_as_str() {
 fn missing_dirs_yield_no_sessions() {
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         "/no/such/claude/dir".to_string(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         "/no/such/codex/dir".to_string(),
     );
     let sessions = list_recent_sessions(&env, "/tmp", None, None);
@@ -322,13 +322,13 @@ fn env_dir_overrides_resolve() {
     );
     assert_eq!(claude_sessions_dir(&env), PathBuf::from("/custom/claude"));
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         "/custom/codex".to_string(),
     );
     assert_eq!(codex_sessions_dir(&env), PathBuf::from("/custom/codex"));
     // Empty values are ignored (fall through to the home default).
     let mut empty = HashMap::new();
-    empty.insert("TINYPLACE_CODEX_SESSIONS_DIR".to_string(), String::new());
+    empty.insert("MEDULLA_CODEX_SESSIONS_DIR".to_string(), String::new());
     assert!(codex_sessions_dir(&empty).ends_with("sessions"));
 }
 
@@ -358,11 +358,11 @@ fn dedupe_keeps_the_freshest_file_for_an_id() {
 
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         claude_dir.to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         tmp.join("codex").to_string_lossy().into_owned(),
     );
     let sessions = list_recent_sessions(&env, "/tmp", None, None);
@@ -379,7 +379,7 @@ fn a_pinned_session_id_beats_recency() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         dir.path().to_string_lossy().into_owned(),
     );
 
@@ -425,7 +425,7 @@ fn a_pin_that_matches_nothing_stays_unlocated_rather_than_taking_the_newest() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         dir.path().to_string_lossy().into_owned(),
     );
     write_session(

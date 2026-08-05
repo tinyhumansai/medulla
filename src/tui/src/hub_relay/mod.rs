@@ -81,9 +81,10 @@ fn link_from_config(env: &HashMap<String, String>, home: &Path) -> Option<HubLin
     let config = medulla::config::load_config(path.to_str(), env, &cwd)
         .ok()?
         .config;
+    let backend_url = config.backend.base_url.clone();
     let link = config
         .link
-        .unwrap_or_else(|| medulla::config::default_link_config(env));
+        .unwrap_or_else(|| medulla::config::default_link_config(env, &backend_url));
     link_from_resolved_config(&link, None)
 }
 
@@ -159,7 +160,7 @@ fn subscription_strategy_from_config(home: &Path) -> medulla::runtime::Subscript
 /// outlive the setting that produced it. A roster that kept it would, on the
 /// next run with hosting off, advertise a worker whose address nothing binds —
 /// and the router, finding no local endpoint, would send its tasks over
-/// tiny.place to a name no relay can resolve.
+/// the host link to a name no forwarder can resolve.
 fn roster_sink(
     home: &Path,
     log: medulla::hub::HubLog,

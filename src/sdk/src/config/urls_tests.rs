@@ -55,19 +55,30 @@ fn backend_url_precedence() {
 }
 
 #[test]
-fn tinyplace_url_precedence() {
+fn forwarder_url_follows_the_backend_unless_configured() {
+    // The forwarder is served by the same backend as everything else, so it
+    // derives from the already-resolved backend URL rather than naming a second
+    // host. An operator who moves `backend.baseUrl` moves the forwarder with it,
+    // which is the whole point: two endpoints on different forwarders both start
+    // cleanly and never hear from each other.
     assert_eq!(
-        resolve_tinyplace_base_url(&env(&[]), None),
-        "https://api.tiny.place"
+        resolve_forwarder_base_url("https://api.tinyhumans.ai", None),
+        "https://api.tinyhumans.ai"
     );
     assert_eq!(
-        resolve_tinyplace_base_url(&env(&[("MEDULLA_STAGING", "true")]), None),
-        "https://staging-api.tiny.place"
+        resolve_forwarder_base_url("https://staging-api.tinyhumans.ai", None),
+        "https://staging-api.tinyhumans.ai"
     );
-    // Explicit config beats the staging default.
+    // Explicit `link.forwarderUrl` still wins — a split deployment is allowed,
+    // it just has to be asked for.
     assert_eq!(
-        resolve_tinyplace_base_url(&env(&[("MEDULLA_STAGING", "1")]), Some("https://cfg")),
+        resolve_forwarder_base_url("https://api.tinyhumans.ai", Some("https://cfg")),
         "https://cfg"
+    );
+    // Blank / whitespace config is not a configuration.
+    assert_eq!(
+        resolve_forwarder_base_url("https://api.tinyhumans.ai", Some("   ")),
+        "https://api.tinyhumans.ai"
     );
 }
 
@@ -84,8 +95,8 @@ fn display_host_strips_scheme_port_and_path() {
     );
     assert_eq!(display_host("http://localhost:4000"), "localhost");
     assert_eq!(
-        display_host("  https://staging-api.tiny.place/  "),
-        "staging-api.tiny.place"
+        display_host("  https://staging-api.tinyhumans.ai/  "),
+        "staging-api.tinyhumans.ai"
     );
     assert_eq!(
         display_host("https://user:pw@api.example.com/x"),

@@ -49,7 +49,7 @@ impl MedullaConfig {
     }
 }
 
-/// One statically-configured tiny.place peer.
+/// One statically-configured host-link peer.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Peer {
@@ -92,7 +92,7 @@ pub struct Peer {
 pub struct HubWorkerConfig {
     /// The `agentId` the backend targets.
     pub id: String,
-    /// tiny.place address (base58 cryptoId or `@handle`).
+    /// link address (node name or `@handle`).
     pub address: String,
     /// Coding-agent harness the worker runs.
     pub harness: String,

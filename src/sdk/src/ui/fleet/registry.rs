@@ -2,7 +2,7 @@
 //!
 //! The registry — what `Runtime::workers()` returns, and what the Hosts page
 //! manages — predates the chain and keeps the wire's old name. What it holds is
-//! the host level: a machine, reachable over tiny.place, advertising the agent
+//! the host level: a machine, reachable over the host link, advertising the agent
 //! CLI runtimes it has, the cores and memory it runs on, and the token budgets
 //! those runtimes report.
 //!

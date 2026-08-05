@@ -51,11 +51,11 @@ fn staged_history(dir: &Path) -> HashMap<String, String> {
 
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".into(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".into(),
         dir.join("claude/projects").to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".into(),
+        "MEDULLA_CODEX_SESSIONS_DIR".into(),
         dir.join("codex/sessions").to_string_lossy().into_owned(),
     );
     env

@@ -25,7 +25,7 @@ pub enum Command {
     Login,
     /// Clear stored credentials.
     Logout,
-    /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
+    /// Launch a coding-agent CLI as a transparent host-link-bridged wrapper.
     Wrapper(HarnessProvider),
     /// Check for / install a newer release (`update [--check]`).
     Update,
@@ -34,7 +34,7 @@ pub enum Command {
     /// Manage the workspace registry (`add`/`list`/`remove`) — the directories
     /// the orchestrator knows about and can place work in.
     Workspace,
-    /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
+    /// Run the orchestrator hub: relay hosted-backend tasks to host-link
     /// workers over Signal DMs; carries the remaining args.
     Hub,
     /// Author, inspect, and run workflows (`list`/`get`/`create`/`apply-ops`/…).

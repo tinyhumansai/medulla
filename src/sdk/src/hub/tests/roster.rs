@@ -2,7 +2,7 @@
 //! unique.
 //!
 //! The roster is the only thing standing between an orchestrator's `agentId`
-//! and a tiny.place address, so these pin the resolution rules rather than the
+//! and a link address, so these pin the resolution rules rather than the
 //! transport — dispatch itself is covered in [`super::super::dispatch`].
 
 use super::super::roster::{

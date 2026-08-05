@@ -228,7 +228,7 @@ async fn presence_is_asked_of_the_remote() {
     // method it forgets to forward silently takes the trait's default instead of
     // reaching the transport that can actually answer. That default is "no
     // opinion", which reads as a healthy fleet — so the hub advertised a worker
-    // that tiny.place knew was down, and nothing anywhere said otherwise.
+    // that the roster knew was down, and nothing anywhere said otherwise.
     let network = LocalBridgeNetwork::new();
     let hub = network.bind("presence-hub").unwrap();
     let remote = Arc::new(RecordingRemote::default());
@@ -256,7 +256,7 @@ async fn a_local_only_bridge_has_nobody_to_ask_about_presence() {
 #[tokio::test]
 async fn a_device_local_address_is_answered_here_not_asked_of_the_relay() {
     // The regression this exists to catch: a host bound in this process is not
-    // a tiny.place identity and never heartbeats, so asking the relay returns
+    // a host-link identity and never heartbeats, so asking the relay returns
     // "no record" — which reads as offline and withholds every host on this
     // machine from the roster. Its liveness is knowable exactly right here.
     let network = LocalBridgeNetwork::new();

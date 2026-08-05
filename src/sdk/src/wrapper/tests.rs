@@ -58,7 +58,7 @@ fn profile_owner_is_the_last_recipient_fallback() {
     // An env owner beats the profile owner.
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_OPENHUMAN_OWNER".to_string(),
+        "MEDULLA_OPENHUMAN_OWNER".to_string(),
         "@env-owner".to_string(),
     );
     assert_eq!(
@@ -87,7 +87,7 @@ async fn missing_binary_is_a_clear_error() {
     let mut env = HashMap::new();
     env.insert("PATH".to_string(), "/nonexistent".to_string());
     env.insert(
-        "TINYPLACE_CODEX_BIN".to_string(),
+        "MEDULLA_CODEX_BIN".to_string(),
         "/no/such/codex-binary".to_string(),
     );
     let err = run_wrapper_with(WrapperConfig {
@@ -142,7 +142,7 @@ fn pinned_tailers_latch_by_identity_never_swapping() {
 
     let dir = tempfile::tempdir().unwrap();
     let here = dir.path().to_string_lossy().into_owned();
-    let env: HashMap<String, String> = [("TINYPLACE_CODEX_SESSIONS_DIR".to_string(), here.clone())]
+    let env: HashMap<String, String> = [("MEDULLA_CODEX_SESSIONS_DIR".to_string(), here.clone())]
         .into_iter()
         .collect();
 

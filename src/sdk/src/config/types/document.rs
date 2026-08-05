@@ -9,7 +9,7 @@ pub struct TuiConfig {
     /// Optional local OpenCode harness configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opencode: Option<OpencodeConfig>,
-    /// Optional tiny.place identity and discovery configuration.
+    /// Optional host-link identity and discovery configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<LinkConfig>,
     /// Orchestration limits.

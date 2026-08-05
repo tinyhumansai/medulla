@@ -37,7 +37,7 @@ done
     options.provider = HarnessProvider::Opencode;
     options.cwd = dir.path().to_string_lossy().into_owned();
     options.env.insert(
-        "TINYPLACE_OPENCODE_BIN".to_string(),
+        "MEDULLA_OPENCODE_BIN".to_string(),
         agent.to_string_lossy().into_owned(),
     );
     options.on_session = Some({

@@ -34,7 +34,7 @@
 //! - `--state-dir <dir>` — this endpoint's link identity directory (`node.json`).
 //!   Required in every mode.
 //! - `--forwarder <host:port>` — overrides the forwarder endpoint recorded at
-//!   enrollment. **Replaces `--endpoint`**, which named a tiny.place relay base
+//!   enrollment. **Replaces `--endpoint`**, which named a relay base
 //!   URL; there is no relay and no HTTP any more.
 //! - `--enroll` / `--host-state-dir <dir>` — enrollment mode and the host
 //!   identity directory to write.

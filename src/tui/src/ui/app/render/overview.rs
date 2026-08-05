@@ -89,9 +89,9 @@ impl App {
                 Style::default().fg(Color::Yellow),
             )));
         }
-        // tiny.place is a property of the wider run rather than of this device,
-        // so its presence summary rides along in this column when enabled.
-        orch.extend(self.tinyplace_lines());
+        // The host link is a property of the wider run rather than of this
+        // device, so its presence summary rides along in this column when enabled.
+        orch.extend(self.host_link_lines());
         f.render_widget(
             Paragraph::new(Text::from(orch)).block(self.panel("Orchestration")),
             orch_area,
@@ -179,12 +179,12 @@ impl App {
         );
     }
 
-    /// The tiny.place presence summary appended to the Orchestration panel, or
-    /// nothing at all when tiny.place is not configured.
+    /// The host-link presence summary appended to the Orchestration panel, or
+    /// nothing at all when no `[link]` section is configured.
     ///
     /// Kept to two lines — peers online and who this node is — because the panel
     /// it joins already spends most of its height on the run's own counters.
-    pub(super) fn tinyplace_lines(&self) -> Vec<TLine<'static>> {
+    pub(super) fn host_link_lines(&self) -> Vec<TLine<'static>> {
         if self.loaded.config.link.is_none() {
             return Vec::new();
         }
@@ -211,12 +211,12 @@ impl App {
         let mut lines = Vec::new();
         if readings > 0 {
             lines.push(TLine::from(Span::styled(
-                format!("tiny.place {online}/{} online", peers.len()),
+                format!("hosts {online}/{} online", peers.len()),
                 Style::default().fg(if online > 0 { Color::Green } else { Color::Red }),
             )));
         } else {
             lines.push(TLine::from(format!(
-                "tiny.place {} peers · presence pending",
+                "hosts {} peers · presence pending",
                 peers.len()
             )));
         }

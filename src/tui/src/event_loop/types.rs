@@ -112,7 +112,7 @@ pub(crate) struct SessionWiring {
     pub local_hosts: Option<crate::local_host::LocalHostHarnesses>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
-    /// The tiny.place presence observation, when that service is running.
+    /// The host-link presence observation, when that service is running.
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
     /// The Medulla home: where user-level application state is kept.

@@ -310,7 +310,7 @@ fn sweep_retired_credentials(env: &std::collections::HashMap<String, String>) {
 }
 
 /// `medulla hub`: run the orchestrator hub — bridge the hosted backend brain to
-/// tiny.place worker daemons. Takes the backend JWT from the core's app session
+/// host-link worker daemons. Takes the backend JWT from the core's app session
 /// and the worker roster from `MEDULLA_LINK_PEER` / `MEDULLA_HUB_WORKERS`.
 pub(crate) async fn run_hub(_args: &[String]) -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();

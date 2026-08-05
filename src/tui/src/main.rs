@@ -162,7 +162,7 @@ fn onboarding_ui() -> Option<medulla::onboarding::OnboardingUi> {
 
 /// Start the worker-daemon TUI (`medulla daemon --tui`).
 ///
-/// One process: the tiny.place identity, the contact queue, the harness PTYs,
+/// One process: the host-link identity, the contact queue, the harness PTYs,
 /// and the screen all live in it. Harness sessions run in the current working
 /// directory with this process's environment, so the operator sees the repo they
 /// launched from.
@@ -209,13 +209,11 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     // same identity directory, same forwarder. Requiring config for the TUI and
     // not for the daemon would mean adding `--tui` silently cost you your hosts.
     // It must be `default_link_config`, not `LinkConfig::default()`: only the
-    // former reads `MEDULLA_STAGING`, and a host on the prod forwarder never
-    // hears from an orchestrator on staging.
-    let link_config = loaded
-        .config
-        .link
-        .clone()
-        .unwrap_or_else(|| medulla::config::default_link_config(&env));
+    // former follows the resolved backend, and a host on the prod forwarder
+    // never hears from an orchestrator on staging.
+    let link_config = loaded.config.link.clone().unwrap_or_else(|| {
+        medulla::config::default_link_config(&env, &loaded.config.backend.base_url)
+    });
     let masters = link_config.peers.clone();
 
     // The bridge the worker loop serves peer work over. One endpoint holds the
@@ -285,9 +283,6 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         masters,
         config_path,
         credential_dir: std::path::PathBuf::from(&link_config.state_dir),
-        // The link has no contact graph — enrollment is the only handshake
-        // (protocol §7) — so there is no admission queue to render.
-        contacts: None,
         agent_id,
         startup_status,
         transport,

@@ -434,7 +434,7 @@ node dispatched by that run carries it as its `abort_id`.
 
 ## How the hosted orchestrator sees them
 
-The section above is the tiny.place peer contract: one hub, one worker, one task
+The section above is the host-link peer contract: one hub, one worker, one task
 frame. The *cloud* plane is the other direction — the hosted brain in the backend
 asking this machine what it has, over the same Socket.IO connection the hub
 already holds for `medulla:task_run`.

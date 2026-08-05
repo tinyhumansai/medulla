@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use medulla::config::Peer;
-use medulla::contacts::{ContactDesk, ContactRequest, RequestState};
 use medulla::protocol::HarnessProvider;
 
 use super::super::pty::{PtyManager, SessionRow};
@@ -50,13 +49,10 @@ impl WorkerApp {
             log_scroll: 0,
             harness,
             sessions: wiring.sessions,
-            contacts: wiring.contacts,
             agent_id: wiring.agent_id,
             providers: wiring.providers,
             tab: 0,
             session_index: 0,
-            contact_index: 0,
-            request_index: 0,
             master_index: 0,
             workspace_index: 0,
             masters: wiring.masters,
@@ -110,60 +106,7 @@ impl WorkerApp {
         rows.get(self.session_index.min(rows.len() - 1)).cloned()
     }
 
-    /// Every known contact request, first-seen order.
-    pub fn requests(&self) -> Vec<ContactRequest> {
-        self.contacts
-            .as_ref()
-            .map(|desk| desk.requests())
-            .unwrap_or_default()
-    }
-
-    /// Only the requests still waiting on a decision — the Requests tab's rows
-    /// and the tab-bar badge.
-    pub fn pending_requests(&self) -> Vec<ContactRequest> {
-        self.requests()
-            .into_iter()
-            .filter(|r| r.state == RequestState::Pending)
-            .collect()
-    }
-
-    /// The peers that have been accepted — the Contacts tab's rows.
-    ///
-    /// Asked of the desk rather than filtered out of the request queue: an
-    /// accepted contact stops being a pending request, so filtering the queue
-    /// showed only the peers this process accepted while it was running — an
-    /// empty list on every restart.
-    pub fn accepted_contacts(&self) -> Vec<ContactRequest> {
-        self.contacts
-            .as_ref()
-            .map(|desk| desk.accepted())
-            .unwrap_or_default()
-    }
-
-    /// The request under the Requests-tab cursor.
-    pub fn selected_request(&self) -> Option<ContactRequest> {
-        let rows = self.pending_requests();
-        if rows.is_empty() {
-            return None;
-        }
-        rows.get(self.request_index.min(rows.len() - 1)).cloned()
-    }
-
-    /// The contact under the Contacts-tab cursor.
-    pub fn selected_contact(&self) -> Option<ContactRequest> {
-        let rows = self.accepted_contacts();
-        if rows.is_empty() {
-            return None;
-        }
-        rows.get(self.contact_index.min(rows.len() - 1)).cloned()
-    }
-
-    /// The contact desk, for the event loop's async decisions.
-    pub fn contact_desk(&self) -> Option<ContactDesk> {
-        self.contacts.clone()
-    }
-
-    /// This daemon's tiny.place address, if it has one.
+    /// This daemon's link node name, if it has one.
     pub fn agent_id(&self) -> Option<&str> {
         self.agent_id.as_deref()
     }
@@ -178,35 +121,14 @@ impl WorkerApp {
         &self.masters
     }
 
-    /// Configured masters plus already-accepted peers learned from the relay.
+    /// The master rows the Master tab renders.
     ///
-    /// Older configurations may have established the relationship before the
-    /// explicit master roster existed. Showing those contacts keeps the daemon
-    /// controllable without asking the operator to pair the same identity twice.
+    /// Identical to [`masters`](Self::masters) today: the link has no contact
+    /// graph to merge in, so the configured `[link].peers` roster is the whole
+    /// list. Kept as its own accessor because it is what the render layer asks
+    /// for, and the two are different questions.
     pub fn master_rows(&self) -> Vec<Peer> {
-        let mut rows = self.masters.clone();
-        for contact in self.accepted_contacts() {
-            if rows.iter().any(|peer| {
-                peer.id == contact.agent_id
-                    || peer.address.as_deref() == Some(contact.agent_id.as_str())
-            }) {
-                continue;
-            }
-            rows.push(Peer {
-                id: contact.agent_id.clone(),
-                // Issued at enrollment, not here — this row is a name the
-                // operator or the contact desk knows, and the wire id arrives
-                // with the enrollment response (protocol §2).
-                node_id: None,
-                name: Some(contact.display_name().to_string()),
-                handle: contact.handle,
-                address: Some(contact.agent_id),
-                tags: Some(vec!["master".into()]),
-                description: Some("Accepted orchestrator peer".into()),
-                protocol: "task".into(),
-            });
-        }
-        rows
+        self.masters.clone()
     }
 
     /// Workspace roots currently approved for capability advertisement.
@@ -313,7 +235,7 @@ impl WorkerApp {
     /// active; Ctrl-O releases capture when arbitrary on-screen text is needed.
     pub fn copy_address(&mut self) {
         let Some(address) = self.agent_id.clone() else {
-            self.set_status("No tiny.place identity yet — nothing to copy");
+            self.set_status("No host-link identity yet — nothing to copy");
             return;
         };
         if let Some(sink) = &self.copy_capture {

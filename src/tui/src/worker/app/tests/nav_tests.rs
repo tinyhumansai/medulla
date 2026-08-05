@@ -6,22 +6,20 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::super::super::pty::PtyManager;
-use super::super::types::{ExecutionMode, WorkerCmd, TAB_CONTACTS, TAB_REQUESTS};
-use super::helpers::{app_with, desk_with, desk_with_contacts, headless_app, key, sh};
+use super::super::types::{ExecutionMode, WorkerCmd, TAB_MASTER};
+use super::helpers::{app_with, headless_app, key, sh};
 use medulla::protocol::HarnessProvider;
 
 // ------------------------------------------------------------- navigation ---
 
 #[test]
 fn tab_and_number_keys_move_between_tabs() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     assert_eq!(app.tab(), "Agents");
     app.on_key(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Master");
     app.on_key(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Workspaces");
-    app.on_key(key(KeyCode::Tab));
-    assert_eq!(app.tab(), "Requests");
     app.on_key(key(KeyCode::Tab));
     assert_eq!(app.tab(), "Agents", "wraps");
     app.on_key(key(KeyCode::Char('3')));
@@ -32,21 +30,21 @@ fn tab_and_number_keys_move_between_tabs() {
 fn backtab_walks_the_tabs_the_other_way() {
     // Shift-Tab is the only way back a step; without it the operator has to wrap
     // all the way round.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     assert_eq!(app.tab(), "Agents");
     app.on_key(key(KeyCode::BackTab));
     assert_eq!(
         app.tab(),
-        "Requests",
+        "Workspaces",
         "back-tab from the first tab wraps to the last"
     );
     app.on_key(key(KeyCode::BackTab));
-    assert_eq!(app.tab(), "Workspaces");
+    assert_eq!(app.tab(), "Master");
 }
 
 #[test]
 fn q_and_ctrl_c_quit_the_running_worker() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     assert_eq!(app.on_key(key(KeyCode::Char('q'))), Some(WorkerCmd::Quit));
 
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
@@ -55,15 +53,16 @@ fn q_and_ctrl_c_quit_the_running_worker() {
     assert_eq!(app.on_key(key(KeyCode::Char('c'))), None);
 }
 
-#[tokio::test]
-async fn the_contacts_cursor_moves_and_clamps() {
-    let desk = desk_with_contacts(&[], &["alice", "bob"]).await;
-    let mut app = app_with(PtyManager::new(), Some(desk));
-    app.set_tab(TAB_CONTACTS);
+#[test]
+fn the_master_cursor_moves_and_clamps() {
+    let mut app = app_with(PtyManager::new());
+    app.add_master("alice".into(), None);
+    app.add_master("bob".into(), None);
+    app.set_tab(TAB_MASTER);
 
-    // Two accepted contacts; the cursor starts on the first.
-    assert_eq!(app.selected_master_address().as_deref(), Some("alice"));
-    app.on_key(key(KeyCode::Down));
+    // `add_master` leaves the cursor on the row it just added, so the second
+    // one is selected — connecting a master and immediately messaging it should
+    // not need a keypress in between.
     assert_eq!(app.selected_master_address().as_deref(), Some("bob"));
     app.on_key(key(KeyCode::Down));
     assert_eq!(
@@ -73,35 +72,28 @@ async fn the_contacts_cursor_moves_and_clamps() {
     );
     app.on_key(key(KeyCode::Up));
     assert_eq!(app.selected_master_address().as_deref(), Some("alice"));
-}
-
-#[tokio::test]
-async fn the_requests_cursor_moves_between_pending_peers() {
-    let desk = desk_with(&["alice", "bob"]).await;
-    let mut app = app_with(PtyManager::new(), Some(desk));
-    app.set_tab(TAB_REQUESTS);
-
-    assert_eq!(app.selected_request().unwrap().agent_id, "alice");
-    app.on_key(key(KeyCode::Char('j')));
-    assert_eq!(app.selected_request().unwrap().agent_id, "bob");
-    app.on_key(key(KeyCode::Char('j')));
-    assert_eq!(app.selected_request().unwrap().agent_id, "bob", "clamps");
+    app.on_key(key(KeyCode::Up));
+    assert_eq!(
+        app.selected_master_address().as_deref(),
+        Some("alice"),
+        "clamps at the start"
+    );
 }
 
 // -------------------------------------------------------- state accessors ---
 
 #[test]
 fn is_headless_reflects_the_chosen_mode() {
-    let interactive = app_with(PtyManager::new(), None);
+    let interactive = app_with(PtyManager::new());
     assert!(!interactive.is_headless(), "interactive is not headless");
-    let headless = headless_app(PtyManager::new(), None);
+    let headless = headless_app(PtyManager::new());
     assert!(headless.is_headless());
     assert_eq!(headless.mode(), Some(ExecutionMode::Headless));
 }
 
 #[test]
 fn agent_id_and_providers_expose_the_wiring() {
-    let app = app_with(PtyManager::new(), None);
+    let app = app_with(PtyManager::new());
     assert_eq!(app.agent_id(), Some("So1anaWa11et"));
     assert_eq!(
         app.providers(),
@@ -113,28 +105,8 @@ fn agent_id_and_providers_expose_the_wiring() {
 fn with_now_overrides_the_clock() {
     // The event loop injects a clock so time-dependent rendering is testable;
     // the override must actually take effect.
-    let app = app_with(PtyManager::new(), None).with_now(Arc::new(|| 777));
+    let app = app_with(PtyManager::new()).with_now(Arc::new(|| 777));
     assert_eq!(app.now(), 777);
-}
-
-#[tokio::test]
-async fn contact_desk_is_exposed_when_configured_and_absent_otherwise() {
-    let with = app_with(PtyManager::new(), Some(desk_with(&["alice"]).await));
-    assert!(with.contact_desk().is_some());
-    let without = app_with(PtyManager::new(), None);
-    assert!(without.contact_desk().is_none());
-}
-
-#[test]
-fn contact_listings_are_empty_without_a_desk() {
-    // No tiny.place identity means no relay to ask, so every listing is empty
-    // rather than a panic on an absent desk.
-    let app = app_with(PtyManager::new(), None);
-    assert!(app.requests().is_empty());
-    assert!(app.pending_requests().is_empty());
-    assert!(app.accepted_contacts().is_empty());
-    assert!(app.selected_request().is_none());
-    assert!(app.selected_contact().is_none());
 }
 
 #[test]
@@ -143,7 +115,7 @@ fn the_session_manager_is_exposed_to_the_event_loop() {
     // and shut down; it must hand back the same manager the app was built with.
     let sessions = PtyManager::new();
     let id = sessions.open(sh("sleep 30", "peer-1")).unwrap();
-    let app = app_with(sessions.clone(), None);
+    let app = app_with(sessions.clone());
     let via_app = app.sessions();
     assert_eq!(
         via_app.rows().len(),
@@ -160,7 +132,7 @@ fn copying_the_address_without_a_capture_sink_uses_the_real_writer() {
     // clipboard binary, falling back to OSC 52 for the terminal) must also run
     // and report which mechanism took the address. Exercised without a capture
     // so the real writer, not the stub, is walked.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.on_key(key(KeyCode::Char('y')));
     let status = app.status();
     assert!(
@@ -174,7 +146,7 @@ fn the_session_cursor_moves_and_clamps() {
     let sessions = PtyManager::new();
     sessions.open(sh("sleep 30", "a")).unwrap();
     sessions.open(sh("sleep 30", "b")).unwrap();
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     assert_eq!(app.selected_session().unwrap().label, "a");
     app.on_key(key(KeyCode::Down));

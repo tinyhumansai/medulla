@@ -255,7 +255,7 @@ impl App {
             return None;
         }
         let agent_id = lane.agent_id.as_deref()?;
-        // Streams are addressed to the worker's tiny.place address; a lane
+        // Streams are addressed to the worker's link address; a lane
         // carries its roster id. A worker added by address is registered under
         // it, so that is the fallback.
         let address = self

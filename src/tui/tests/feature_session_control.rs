@@ -73,7 +73,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     // The picker resolves the binary through `provider_bin`, which reads this
     // override — so "start codex" starts a shell that sits there instead.
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_sessions(LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),

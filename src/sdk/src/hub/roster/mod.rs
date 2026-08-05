@@ -327,7 +327,7 @@ pub(super) fn addresses_of(workers: &[HubWorker]) -> Vec<String> {
     workers.iter().map(|w| w.address.clone()).collect()
 }
 
-/// Resolve a targeted `agentId` to a tiny.place address.
+/// Resolve a targeted `agentId` to a link address.
 ///
 /// Two cases that used to be one. An **absent** `agentId` means "any worker" —
 /// the backend omits it for an unattributed task — and falls back to the

@@ -12,8 +12,8 @@ use crate::session_history::SessionAgentKind;
 
 fn env_with_dirs(claude: &str, codex: &str) -> HashMap<String, String> {
     let mut env = HashMap::new();
-    env.insert("TINYPLACE_CLAUDE_SESSIONS_DIR".into(), claude.into());
-    env.insert("TINYPLACE_CODEX_SESSIONS_DIR".into(), codex.into());
+    env.insert("MEDULLA_CLAUDE_SESSIONS_DIR".into(), claude.into());
+    env.insert("MEDULLA_CODEX_SESSIONS_DIR".into(), codex.into());
     env
 }
 

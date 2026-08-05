@@ -27,12 +27,12 @@ impl Fixture {
         fs::create_dir_all(&cwd).unwrap();
         let mut env = HashMap::new();
         env.insert(
-            "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+            "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
             codex_dir.to_string_lossy().into_owned(),
         );
         // Steer the claude dir somewhere empty so it never interferes.
         env.insert(
-            "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+            "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
             dir.join("claude-empty").to_string_lossy().into_owned(),
         );
         Fixture {

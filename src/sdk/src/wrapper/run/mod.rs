@@ -1,6 +1,6 @@
 //! Process orchestration for a wrapped session: the [`run_wrapper`] entry point,
 //! the [`run_wrapper_with`] core loop that drives the child CLI and the
-//! tiny.place [`Bridge`](super::bridge::Bridge), and the exit-code / signal
+//! the [`Bridge`](super::bridge::Bridge), and the exit-code / signal
 //! plumbing around it.
 //!
 //! Spawning itself lives in [`child`], which hides whether the harness is on a
@@ -116,7 +116,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let mut bridge = build_bridge(&config, &wrapper_session_id, start_ms).await;
     let receive_active = bridge.as_ref().map(|b| b.receive_active).unwrap_or(false);
 
-    // Extra args from `TINYPLACE_<P>_ARGS` are prepended to the child argv.
+    // Extra args from `MEDULLA_<P>_ARGS` are prepended to the child argv.
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
     if config.provider == crate::protocol::HarnessProvider::Claude
         && config

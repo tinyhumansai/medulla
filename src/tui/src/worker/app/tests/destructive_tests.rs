@@ -14,7 +14,7 @@ fn killing_a_session_asks_first() {
     // acceptable.
     let sessions = PtyManager::new();
     let id = sessions.open(sh("sleep 30", "peer-1")).unwrap();
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('K')));
     assert_eq!(app.confirm(), Some(&Confirm::CloseSession(id.clone())));
@@ -33,7 +33,7 @@ fn anything_but_y_cancels_a_confirmation() {
     // A destructive action needs a deliberate yes, not merely "not Escape".
     let sessions = PtyManager::new();
     let id = sessions.open(sh("sleep 30", "peer-1")).unwrap();
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('K')));
     app.on_key(key(KeyCode::Char('n')));
@@ -47,7 +47,7 @@ fn anything_but_y_cancels_a_confirmation() {
 fn a_running_session_cannot_be_dropped() {
     let sessions = PtyManager::new();
     sessions.open(sh("sleep 30", "peer-1")).unwrap();
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('d')));
     assert_eq!(app.session_rows().len(), 1);
@@ -64,7 +64,7 @@ fn dropping_an_exited_session_forgets_it_without_asking() {
     wait_for("the session to exit", || {
         !sessions.row(&id).unwrap().state.is_running()
     });
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('d')));
     assert!(
@@ -90,7 +90,7 @@ fn killing_an_already_exited_session_says_so_rather_than_asking() {
     wait_for("the session to exit", || {
         !sessions.row(&id).unwrap().state.is_running()
     });
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('K')));
     assert!(
@@ -112,7 +112,7 @@ fn a_pending_confirmation_swaps_in_its_own_key_hints() {
     // has no on-screen prompt for the "y" the action is waiting on.
     let sessions = PtyManager::new();
     sessions.open(sh("sleep 30", "peer-1")).unwrap();
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
 
     app.on_key(key(KeyCode::Char('K')));
     assert!(app.confirm().is_some(), "the kill is armed");
@@ -126,7 +126,7 @@ fn a_pending_confirmation_swaps_in_its_own_key_hints() {
 
 #[test]
 fn kill_and_drop_report_when_there_is_no_session_to_act_on() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
 
     app.on_key(key(KeyCode::Char('K')));
     assert_eq!(app.status(), "No session selected");

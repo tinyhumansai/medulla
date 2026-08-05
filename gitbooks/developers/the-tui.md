@@ -29,9 +29,9 @@ slim build drops it rather than offering a tab that cannot draw anything.
 A plain `medulla` is both halves of the system: the **orchestrator** that decides
 what work to hand out, and a **host** that runs it. The host binds an address on
 an in-process bus the orchestrator dispatches over, so a task for this machine is
-delivered in memory — no tiny.place identity, no contact request, no relay
+delivered in memory — no host-link identity, no enrollment, no forwarder
 round-trip, and no second `medulla daemon` process beside the TUI. Workers on
-other machines still travel over tiny.place, and the orchestrator picks per
+other machines still travel over the host link, and the orchestrator picks per
 address, so the two coexist with no configuration.
 
 It is on by default and needs no setup. It serves whichever coding-agent CLIs it

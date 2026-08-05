@@ -95,7 +95,7 @@ fn arrows_step_a_number_and_persist_it() {
     let mut app = config_app(dir.path());
 
     // Rows are: Update check, then the medulla limits — so one press of j lands
-    // on Max passes. (No tiny.place row: it is unconfigured.)
+    // on Max passes. (No host-link row: it is unconfigured.)
     key(&mut app, KeyCode::Char('j'));
 
     key(&mut app, KeyCode::Right);

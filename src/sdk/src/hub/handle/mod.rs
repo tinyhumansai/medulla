@@ -18,7 +18,7 @@ pub(super) fn is_handle(address: &str) -> bool {
     address.trim_start().starts_with('@')
 }
 
-/// Whether `address` could plausibly be a tiny.place destination.
+/// Whether `address` could plausibly be a link destination.
 ///
 /// A cryptoId is a base58-encoded 32-byte key, so it is 32-64 characters from
 /// the base58 alphabet — which excludes `0`, `O`, `I` and `l` precisely because
@@ -284,7 +284,7 @@ impl HubHandle {
     /// id or the address is dropped first, so one peer can never occupy two
     /// roster slots however it was named.
     pub async fn add(&self, mut worker: HubWorker) -> anyhow::Result<()> {
-        // Address-shape validation exists to catch a mis-paste of a tiny.place
+        // Address-shape validation exists to catch a mis-paste of a link
         // cryptoId, which is otherwise silent. A device-local host is exempt:
         // its address is a name this process bound, so "does it exist" is
         // answerable exactly, and demanding base58 of it would make the host on
@@ -312,7 +312,7 @@ impl HubHandle {
                 None => {
                     let name = worker.address.clone();
                     (self.log)(&format!("hub: {name} is not in the directory"));
-                    anyhow::bail!("{name} is not in the tiny.place directory");
+                    anyhow::bail!("{name} is not in the peer roster");
                 }
             }
         }

@@ -40,6 +40,7 @@ fn config(spawner: Option<crate::wrapper::PtySpawner>) -> WrapperConfig {
         session_id: None,
         pty_spawner: spawner,
         attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
     }
 }
 

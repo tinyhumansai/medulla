@@ -15,7 +15,7 @@ use crate::ui::agents::{AgentRole, AgentRow};
 use crate::worker::pty::SessionRow;
 
 /// The label on the rail's "start a harness" row.
-pub(in crate::ui::app) const NEW_HARNESS_LABEL: &str = "+ New harness";
+pub(in crate::ui::app) const NEW_SESSION_LABEL: &str = "+ New session";
 
 /// One row of the Agents rail.
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ pub enum RailRow {
     /// nothing on screen to suggest it exists, which is the same as not having
     /// it for anyone who has not read the bindings.
     NewHarness,
-    /// The `── your harnesses ──` divider above the operator's own sessions.
+    /// The `── your sessions ──` divider above the operator's own sessions.
     HarnessSeparator,
     /// A harness the operator started, which no lane will ever describe.
     ///
@@ -80,7 +80,7 @@ impl App {
     /// nothing else.
     /// Operator-started harnesses hang below the lanes under their own divider,
     /// because they are the one thing running on this device that the event fold
-    /// cannot see. The `+ New harness` action sits between the two, directly
+    /// cannot see. The `+ New session` action sits between the two, directly
     /// under the orchestrator lane: it is what produces the group below it, and
     /// a device that hosts nothing cannot start one, so it is absent there
     /// rather than present and refusing.
@@ -163,7 +163,7 @@ impl App {
             .rows()
             .into_iter()
             .filter(|row| {
-                row.user_spawned || row.control == crate::worker::pty::HarnessControl::User
+                row.origin.is_user() || row.control == crate::worker::pty::HarnessControl::User
             })
             .collect();
         rows.sort_by_key(|row| row.started_at);

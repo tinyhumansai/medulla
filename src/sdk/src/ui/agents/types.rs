@@ -200,11 +200,15 @@ pub enum AgentRow {
         /// Whether this is the last shown sublane.
         last: bool,
     },
-    /// A `+N more` overflow row when sublanes are capped.
+    /// The overflow row under a lane whose sublanes are paged.
+    ///
+    /// Reads `+N more` while sublanes are still hidden, and `show less` once the
+    /// lane is fully revealed — one row for both directions, so paging a lane
+    /// open and folding it shut are the same keystroke in the same place.
     More {
         /// Index into the lanes slice.
         lane_index: usize,
-        /// Number of hidden sublanes.
+        /// Number of hidden sublanes; zero when this row only offers to collapse.
         hidden: usize,
     },
 }
@@ -220,7 +224,14 @@ impl AgentRow {
         }
     }
     /// Whether this row is selectable in the list.
+    ///
+    /// The overflow row is included: it is the control that pages a lane's
+    /// sublanes open and shut, so the cursor has to be able to reach it. The
+    /// `── functions ──` divider is a label and stays unreachable.
     pub fn selectable(&self) -> bool {
-        matches!(self, AgentRow::Lane { .. } | AgentRow::Sub { .. })
+        matches!(
+            self,
+            AgentRow::Lane { .. } | AgentRow::Sub { .. } | AgentRow::More { .. }
+        )
     }
 }

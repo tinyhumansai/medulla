@@ -113,6 +113,43 @@ fn session_titles_are_flattened_and_bounded_before_rail_wrapping() {
     assert!(displayed.ends_with('…'));
 }
 
+#[test]
+fn the_overflow_row_counts_what_is_hidden_and_offers_to_fold_when_nothing_is() {
+    let app = app();
+    let text = |hidden| {
+        let row = AgentRow::More {
+            lane_index: 0,
+            hidden,
+        };
+        app.agent_row_line(&row, &[lane()], false, &none_waiting())
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>()
+    };
+
+    assert!(text(7).contains("+7 more"));
+    // Fully revealed, the same row is the way back to one page.
+    assert!(text(0).contains("show less"));
+}
+
+#[test]
+fn the_overflow_row_highlights_under_the_cursor() {
+    let app = app();
+    let row = AgentRow::More {
+        lane_index: 0,
+        hidden: 3,
+    };
+
+    let selected = app.agent_row_line(&row, &[lane()], true, &none_waiting());
+    let idle = app.agent_row_line(&row, &[lane()], false, &none_waiting());
+
+    // It is a control, so it must show the cursor rather than staying dim the
+    // way the `── functions ──` label does.
+    assert_eq!(selected.spans[0].style, app.theme.selection());
+    assert!(idle.spans[0].style.add_modifier.contains(Modifier::DIM));
+}
+
 pub(super) fn harness_row(cwd: &str) -> SessionRow {
     SessionRow {
         id: "w_1".into(),
@@ -131,7 +168,8 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         last_error: None,
         busy: false,
         control: HarnessControl::User,
-        user_spawned: true,
+        origin: crate::worker::pty::SessionOrigin::User,
+        name: None,
         attention: None,
     }
 }

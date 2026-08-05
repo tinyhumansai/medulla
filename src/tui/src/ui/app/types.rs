@@ -289,10 +289,14 @@ pub struct WorkflowsState {
     pub(super) layout: medulla::ui::workflows::GraphLayout,
     /// Selected node in the canvas, in the layout's reading order.
     pub(super) node_index: usize,
-    /// Horizontal scroll of the canvas, in layers.
-    pub(super) canvas_layer: usize,
-    /// Vertical scroll of the canvas, in lanes.
-    pub(super) canvas_lane: usize,
+    /// Vertical scroll of the canvas, in rows.
+    ///
+    /// The only scroll the canvas has: the graph folds onto a new band whenever
+    /// a layer would run past the right edge, so it is never wider than the
+    /// pane and there is nothing to scroll horizontally. Counted in rows rather
+    /// than lanes because a fold puts a band boundary between two lanes, and a
+    /// scroll measured in lanes cannot address the gap.
+    pub(super) canvas_row: usize,
     /// Rows inside the graph panel during its most recent render.
     ///
     /// Navigation uses this measured viewport rather than the full terminal
@@ -839,6 +843,10 @@ pub struct App {
     pub(super) history: Vec<String>,
     pub(super) history_index: i64,
     pub(super) selected: usize,
+    /// The Overview tab's animated workflow graph. Held on the app because its
+    /// simulation has to survive between frames; it is advanced by the draw
+    /// path, which is the only thing that looks at it.
+    pub(super) graph: super::render::graph::Graph,
     pub(super) status: String,
     /// A persistent "update vX.Y.Z available" banner, set by the background
     /// update checker; shown in the header until the app exits.
@@ -846,6 +854,15 @@ pub struct App {
     pub(super) contexts: Vec<ContextItem>,
     pub(super) context_index: usize,
     pub(super) agent_index: usize,
+    /// Extra pages of sublanes revealed under an agent lane, keyed by lane key.
+    ///
+    /// Keyed by [`AgentLane::key`](crate::ui::agents::AgentLane::key) rather than
+    /// by the lane's rail position, because lanes are re-folded from events every
+    /// tick and a lane that appears or ends shifts every index below it — an
+    /// expansion tied to a position would silently jump to a different agent.
+    /// Absent means the lane shows its first page, which is the default every
+    /// lane starts at.
+    pub(super) subtask_pages: std::collections::HashMap<String, usize>,
     /// The `(worker address, task id)` whose screen is currently subscribed.
     ///
     /// Held so a selection change can stop the old stream as well as start the
@@ -960,7 +977,11 @@ pub struct App {
     /// Session-local ids intentionally hidden by the operator.
     pub(super) dismissed_decisions: std::collections::BTreeSet<String>,
     pub(super) prompt: Option<Prompt>,
-    /// The animation frame counter (drives the spinner).
+    /// The animation frame counter: one per event-loop tick (~90ms).
+    ///
+    /// Drives the spinner and the workflow canvas's flowing wires. Held on the
+    /// app rather than read from a clock so a test that draws frames explicitly
+    /// sees the same animation the terminal does.
     pub frame: usize,
     /// Whether the app currently captures the mouse.
     pub mouse_capture: bool,

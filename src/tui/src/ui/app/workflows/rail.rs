@@ -208,8 +208,7 @@ impl App {
         self.wf.run_index = None;
         self.wf.overlay = None;
         self.wf.node_index = 0;
-        self.wf.canvas_layer = 0;
-        self.wf.canvas_lane = 0;
+        self.wf.canvas_row = 0;
         self.wf.preview_scroll = 0;
         self.wf.copilot_scroll = 0;
         self.reload_workflow_runs();

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::daemon::providers::{Abort, RunTaskOptions};
 
 use super::super::interactive::{InteractiveSession, InteractiveSpec, StreamEvent};
+use super::super::registry::{SessionIdentity, TurnPlan};
 use super::super::routing::{route_transport, Transport};
 use super::super::types::{SessionClass, SessionPhase, TurnOrigin, TurnOutcome, TurnRequest};
 use super::{push_line, SessionManager, TranscriptRole};
@@ -108,14 +109,20 @@ impl SessionManager {
             .acquire_turn(&request.key, request.class)
             .await;
 
-        let id = self.ensure_session(&request);
+        // Resolved *before* the session is opened, because the plan is where a
+        // resumed conversation's identity lives. A closed session keeps its
+        // binding, so the next turn on that key opens a new record — and
+        // deciding its identity from the turn alone would hand a person's named
+        // session back as an unnamed orchestrator one the moment a task frame
+        // touched it.
+        let plan = self.inner.registry.plan(&request.key, request.class);
+        let id = self.ensure_session(&request, &plan);
         let abort = self.begin_turn(&id, &request);
 
         let transport = route_transport(request.class, request.key.provider);
         let outcome = match transport {
             Transport::Interactive => self.run_interactive(&id, &request, abort).await,
             Transport::OneShot => {
-                let plan = self.inner.registry.plan(&request.key, request.class);
                 let workspace_context = Arc::new(Mutex::new(plan.workspace_context.clone()));
                 let outcome = self
                     .run_one_shot(
@@ -135,6 +142,17 @@ impl SessionManager {
                             session_id.clone(),
                             workspace_context.lock().unwrap().clone(),
                         );
+                        // The binding outlives the record — it is what a later
+                        // turn resumes — so the session's identity is copied
+                        // onto it the moment there is a binding to hold it.
+                        // Skipping this would let a resumed conversation come
+                        // back as an unnamed orchestrator session.
+                        if let Some(record) = self.record(&id) {
+                            self.inner.registry.record_identity(
+                                &request.key,
+                                SessionIdentity::new(record.origin, record.name),
+                            );
+                        }
                     }
                 }
                 // A resumed process may report authoritative workspace movement
@@ -154,7 +172,12 @@ impl SessionManager {
     }
 
     /// Find or register the session a turn belongs to.
-    fn ensure_session(&self, request: &TurnRequest) -> String {
+    ///
+    /// `plan` is the registry's answer for this key, resolved by the caller
+    /// before this runs. It carries the identity of the binding a resumed turn
+    /// continues, which is the only place that survives the session record
+    /// being closed.
+    fn ensure_session(&self, request: &TurnRequest, plan: &TurnPlan) -> String {
         let existing = self
             .inner
             .sessions
@@ -164,6 +187,22 @@ impl SessionManager {
             .find(|entry| entry.record.key == request.key && !entry.record.phase.is_terminal())
             .map(|entry| entry.record.id.clone());
         existing.unwrap_or_else(|| {
+            // Resuming a binding means this is the *same* session continuing,
+            // whatever door this particular turn came through: closing a
+            // session keeps its binding, so a person's named session can be
+            // re-opened by a task frame, and reading the origin off that frame
+            // would silently rename their session to nothing and move it into
+            // the dispatch pool. The persisted identity wins whenever there is
+            // one.
+            //
+            // Auto-creation (§4.1) is the other branch: with no binding to
+            // continue, a session made to serve a task frame is the
+            // orchestrator's and one made for a typed prompt is the person's,
+            // and the turn's own provenance is the only thing that can say.
+            let identity = match plan.resume_session_id {
+                Some(_) => plan.identity.clone(),
+                None => SessionIdentity::new(request.origin.session_origin(), None),
+            };
             self.open(super::OpenSession {
                 conversation: request.key.conversation.clone(),
                 provider: Some(request.key.provider),
@@ -171,6 +210,8 @@ impl SessionManager {
                 driver: request.origin.driver(),
                 workspace: None,
                 model: request.model.clone(),
+                origin: identity.origin(),
+                name: identity.name,
             })
         })
     }
@@ -319,6 +360,7 @@ impl SessionManager {
             append_system_prompt: None,
             skip_permissions: self.inner.config.skip_permissions,
             extra_args: self.inner.config.extra_args.clone(),
+            hooks: self.inner.config.hooks.clone(),
         };
         match InteractiveSession::open(&spec).await {
             Ok(live) => {
@@ -369,6 +411,7 @@ impl SessionManager {
             abort: abort.clone(),
             router: self.inner.config.router.clone(),
             attribution: self.inner.config.attribution,
+            hooks: self.inner.config.hooks.clone(),
             on_event: None,
             on_stdin: None,
             on_session: None,

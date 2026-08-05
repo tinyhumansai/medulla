@@ -9,7 +9,7 @@
 //!
 //! [`claim_idle`]: crate::worker::pty::PtyManager::claim_idle
 
-use crate::worker::pty::{HarnessControl, LaunchSpec};
+use crate::worker::pty::{HarnessControl, LaunchSpec, SessionOrigin};
 
 use super::{HarnessChoice, LocalHarnesses};
 
@@ -43,6 +43,27 @@ impl LocalHarnesses {
         cwd: &str,
         skip_permissions: bool,
     ) -> Result<String, String> {
+        self.open_unmanaged_named(choice, cwd, skip_permissions, None)
+    }
+
+    /// [`open_unmanaged`](Self::open_unmanaged), with the display name the
+    /// person spinning the session up gave it.
+    ///
+    /// The seam for the picker's name prompt: a session a person starts is
+    /// [`SessionOrigin::User`]-originated and is the only kind that carries a
+    /// name, because a dispatched one is labelled from its task instead. `None`
+    /// leaves it unnamed, which is what the picker passes until it asks.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_unmanaged`](Self::open_unmanaged).
+    pub fn open_unmanaged_named(
+        &self,
+        choice: &HarnessChoice,
+        cwd: &str,
+        skip_permissions: bool,
+        name: Option<String>,
+    ) -> Result<String, String> {
         let cwd = self.resolve_workspace(cwd);
         if !std::path::Path::new(&cwd).is_dir() {
             return Err(format!("{cwd} is not a directory"));
@@ -50,7 +71,17 @@ impl LocalHarnesses {
 
         let provider = choice.provider;
         let bin = medulla::protocol::env::provider_bin(provider, &self.env);
-        let (env, extra_args) = self.spawn_env(choice)?;
+        let (mut env, mut extra_args) = self.spawn_env(choice)?;
+        // The operator's own session gets Medulla's tools too. This is the door
+        // a person is actually sitting in, so it is the one where a missing
+        // `workflow_run` is noticed — and, until now, the one that never had it.
+        let mcp_grant_session = crate::worker::pty::launch::attach_mcp(
+            provider,
+            &bin,
+            &mut env,
+            &mut extra_args,
+            self.log.as_ref(),
+        );
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
         self.sessions.open(LaunchSpec {
@@ -68,7 +99,13 @@ impl LocalHarnesses {
             model,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            // A person asked for this one, so it is theirs by origin as well as
+            // by control — and it stays user-originated even after they hand it
+            // to the orchestrator, which is the case the two fields exist to
+            // tell apart.
+            origin: SessionOrigin::User,
+            name,
+            mcp_grant_session,
         })
     }
 
@@ -112,10 +149,17 @@ impl LocalHarnesses {
         // attribution depended on which door the session came through.
         let attribution_env = medulla::attribution::attribution_env(self.attribution, &env);
         env.extend(attribution_env);
-        extra_args.extend(medulla::attribution::attribution_args(
-            choice.provider,
-            self.attribution,
-        ));
+        let (launch_args, hook_notes) =
+            medulla::harness_hooks::launch_args(choice.provider, self.attribution, &self.hooks);
+        extra_args.extend(launch_args);
+        // Routed to the log rather than stderr: this crate draws a full-screen
+        // TUI, where a stray line corrupts the pane. Covers both hooks the
+        // harness cannot run and hooks it will not run until trusted.
+        if let Some(log) = &self.log {
+            for note in &hook_notes {
+                log(note);
+            }
+        }
         let custom_router = choice.preset.as_ref().map(|preset| preset.router());
         // OpenRouter-bound sessions are re-pointed at Medulla's loopback
         // attribution proxy and the real key is scrubbed from `env`. A hand-opened

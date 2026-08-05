@@ -79,9 +79,14 @@ impl App {
             // Everything else the question is over is still swallowed, below.
         }
         // A modal swallows the mouse, the same way it swallows the keyboard.
-        // The harness picker is one: a click that navigated the rail behind it
-        // left an overlay on screen describing a row nobody was pointing at.
-        if self.resume_picker.is_some() || self.harness_picker.is_some() {
+        // Pickers and the hand-back question are modal: a click that navigated
+        // the rail behind one would leave an overlay describing a row nobody
+        // was pointing at. In particular, do not let a second harness click
+        // replace the session named by an already-visible hand-back prompt.
+        if self.resume_picker.is_some()
+            || self.harness_picker.is_some()
+            || self.handback_prompt.is_some()
+        {
             return None;
         }
         // An attached harness is a terminal, and a terminal owns the pointer
@@ -439,8 +444,7 @@ impl App {
                     // click on the second line of a wrapped harness row selects
                     // that harness rather than whatever follows it. The map
                     // covers the unselectable rows too — the `── functions ──`
-                    // separator and the `+N more` counter — because
-                    // `agent_index` indexes all of them.
+                    // separator — because `agent_index` indexes all of them.
                     let rel = (y - rect.y) as usize;
                     let rows = self.rail_rows();
                     if let Some(row) = owners.get(rel).and_then(|idx| rows.get(*idx)) {
@@ -459,6 +463,18 @@ impl App {
                             if row.is_new_harness() {
                                 self.open_harness_picker();
                                 return None;
+                            }
+                            // So is a lane's `+N more`: the click that lands on
+                            // it is the request to see what it is counting.
+                            //
+                            // Returns the retarget rather than nothing, for the
+                            // same reason the harness branch below does: the
+                            // overflow row watches no task, so a click arriving
+                            // from one has to stop that stream. The keyboard
+                            // path is already covered — the arrow that reaches
+                            // this row retargets on the way.
+                            if self.page_subtasks() {
+                                return self.retarget_watch();
                             }
                             if let Some(session) = row.session_id() {
                                 // Clicking the row of the harness the keyboard

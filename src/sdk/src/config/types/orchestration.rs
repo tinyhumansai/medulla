@@ -394,6 +394,13 @@ pub struct WorkflowsConfig {
     /// more is throttled to it rather than refused.
     #[serde(default = "d_max_parallel_agents")]
     pub max_parallel_agents: usize,
+    /// The ceiling on any one `loop` node's `max_iterations`.
+    ///
+    /// A pass through a loop body can be a whole harness session here, so this
+    /// bounds what a graph may ask for. Like `max_parallel_agents`, an
+    /// over-ask is clamped rather than refused.
+    #[serde(default = "d_max_loop_iterations")]
+    pub max_loop_iterations: u64,
     /// Whether and how a workflow reviews its own history.
     #[serde(default)]
     pub evolve: EvolveSettings,
@@ -461,12 +468,20 @@ impl Default for EvolveSettings {
     }
 }
 
-/// A run may take ten minutes: long enough for real work on a coding harness,
-/// short enough that a wedged run does not pin its record forever.
+/// Four harness tasks in flight per run: sized by what a worker pool can serve
+/// at once, not by what a graph feels like asking for.
 fn d_max_parallel_agents() -> usize {
     crate::flow_engine::DEFAULT_MAX_PARALLEL_AGENTS
 }
 
+/// Twenty-five passes through a loop body, matching the engine's own default so
+/// the common case is unchanged.
+fn d_max_loop_iterations() -> u64 {
+    crate::flow_engine::DEFAULT_MAX_LOOP_ITERATIONS
+}
+
+/// A run may take ten minutes: long enough for real work on a coding harness,
+/// short enough that a wedged run does not pin its record forever.
 fn d_run_timeout_secs() -> u64 {
     600
 }
@@ -483,6 +498,7 @@ impl Default for WorkflowsConfig {
             http_allowlist: Vec::new(),
             run_timeout_secs: d_run_timeout_secs(),
             max_parallel_agents: d_max_parallel_agents(),
+            max_loop_iterations: d_max_loop_iterations(),
             evolve: EvolveSettings::default(),
         }
     }

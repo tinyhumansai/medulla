@@ -214,6 +214,7 @@ fn local_context(
     // A folding sink rather than a null one: the fold is cheap, and it keeps
     // the door open for this command to print progress without re-wiring.
     let (sink, _fold) = folding_sink();
+    let max_loop_iterations = settings.max_loop_iterations;
 
     Ok((
         RunContext {
@@ -221,7 +222,10 @@ fn local_context(
             settings: Arc::new(settings),
             services: HostServices {
                 dispatch,
-                resolver: Arc::new(StoreWorkflowResolver::new(store.clone())),
+                resolver: Arc::new(StoreWorkflowResolver::new(
+                    store.clone(),
+                    max_loop_iterations,
+                )),
                 http_credentials: HashMap::new(),
             },
             sink,

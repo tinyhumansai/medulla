@@ -77,7 +77,7 @@ async fn the_resolver_hands_the_engine_a_saved_sub_workflow() {
     let record = parse_workflow(&document("child", "execute_by_workflow"), "child").unwrap();
     store.save(&record).unwrap();
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let graph = resolver.resolve("child").await.expect("resolves");
 
     assert_eq!(graph.nodes.len(), 2);
@@ -91,7 +91,7 @@ async fn resolving_an_unknown_sub_workflow_names_the_id_it_could_not_find() {
         root.path().join("runs"),
     ));
 
-    let resolver = StoreWorkflowResolver::new(store);
+    let resolver = StoreWorkflowResolver::new(store, u64::MAX);
     let err = resolver
         .resolve("ghost")
         .await

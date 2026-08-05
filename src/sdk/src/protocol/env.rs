@@ -110,6 +110,48 @@ fn default_bin(provider: HarnessProvider) -> &'static str {
     }
 }
 
+/// Whether `bin` is something other than `provider`'s verified default
+/// (`claude` / `codex` / `opencode` / `openhuman-core`).
+///
+/// This is what lets [`crate::mcp::attach_cli`] withhold the fleet grant from
+/// an overridden binary rather than hand it out: that binary is whatever the
+/// override names, executed as the harness `--mcp-config` registers Medulla's
+/// tools onto — so it receives that registration's argv itself and can open
+/// the file it names, same-user permissions notwithstanding, regardless of
+/// whether it behaves like the real Claude Code CLI once it does. Repository
+/// policy already calls a provider-binary override untrusted configuration to
+/// be validated at a boundary (see `AGENTS.md`'s security section); this is
+/// that boundary for the one credential this project hands a CLI-spawned
+/// harness.
+///
+/// # What a name-only check does not cover
+///
+/// The comparison is on the resolved *name*, so the bare default (`claude`)
+/// is trusted, and the spawn resolves that name through `PATH`. An attacker
+/// who could write `PATH` into a harness spawn's environment could therefore
+/// point it at their own `claude` while this reports "not overridden".
+///
+/// That is a stated limit rather than a live hole: no configuration surface
+/// writes `PATH` into a spawn environment. The only writes are fixed-key ones
+/// — the `[router]` injection, attribution, a custom harness preset's
+/// `ANTHROPIC_*` models, and the MCP variables — and the child's `PATH` is
+/// inherited from Medulla's own process. Anyone who can change *that* `PATH`
+/// is already executing as the operator, which is strictly more than the
+/// grant is worth. If a config surface ever gains a general environment map,
+/// this check has to resolve the binary to an absolute path before comparing,
+/// and this paragraph is the reason why.
+///
+/// Takes the **already-resolved** binary rather than an environment to resolve
+/// one from, and that is the whole point of the signature. A caller can hold
+/// more than one environment — `PtySessionExecutor` selects the executable
+/// from its own `self.env` while handing the child a per-run environment
+/// derived separately — and a trust decision that re-derived the binary from
+/// the *other* one would clear a wrapper that is about to be launched. There
+/// is only one executable, so only the executable is asked about.
+pub fn bin_is_overridden(provider: HarnessProvider, bin: &str) -> bool {
+    bin.trim() != default_bin(provider)
+}
+
 /// Resolve the provider binary: the first non-empty override, else the default
 /// (`claude` / `codex` / `opencode`). Overrides are trimmed.
 pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) -> String {

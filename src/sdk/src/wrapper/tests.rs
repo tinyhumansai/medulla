@@ -99,10 +99,35 @@ async fn missing_binary_is_a_clear_error() {
         session_id: Some("wsid-test".to_string()),
         pty_spawner: None,
         attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
     })
     .await
     .unwrap_err();
     assert!(err.to_string().contains("not found on PATH"), "got: {err}");
+}
+
+#[tokio::test]
+async fn claude_rejects_ambiguous_duplicate_settings() {
+    let mut env = HashMap::new();
+    let existing_binary = std::env::current_exe().expect("the test executable has a path");
+    env.insert(
+        "TINYPLACE_CLAUDE_BIN".to_string(),
+        existing_binary.to_string_lossy().into_owned(),
+    );
+    let err = run_wrapper_with(WrapperConfig {
+        provider: HarnessProvider::Claude,
+        child_args: vec!["--settings".to_string(), "{}".to_string()],
+        env,
+        cwd: ".".to_string(),
+        no_bridge: true,
+        session_id: Some("wsid-settings".to_string()),
+        pty_spawner: None,
+        attribution: true,
+        hooks: crate::harness_hooks::HooksConfig::default(),
+    })
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("--settings cannot be combined"));
 }
 
 /// Two pinned tailers, one directory, two transcripts — each latches only its

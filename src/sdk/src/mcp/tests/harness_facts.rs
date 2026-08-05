@@ -166,6 +166,22 @@ async fn the_host_tool_lists_the_harnesses_a_node_may_choose_between() {
 }
 
 #[tokio::test]
+async fn the_host_tool_reports_the_loop_iteration_ceiling() {
+    // The `loop` contract tells an author to check `workflow_host` for the
+    // current value (see `node_contracts::apply_host_overlay`) — the facts
+    // this call returns have to actually carry it, or that instruction sends
+    // the author nowhere.
+    let (_root, store) = store();
+
+    let (facts, _) = call(&store, "workflow_host", json!({})).await;
+
+    assert_eq!(
+        facts["maxLoopIterations"],
+        json!(crate::config::WorkflowsConfig::default().max_loop_iterations)
+    );
+}
+
+#[tokio::test]
 async fn the_host_tool_names_the_custom_presets_this_machine_has() {
     let (_root, store) = store();
     let policy = crate::workflows::ops::HostPolicy {

@@ -118,6 +118,9 @@ pub struct DaemonConfig {
     /// Medulla — the resolved `attribution.commit` config value (on by default;
     /// see [`crate::config::AttributionConfig`]).
     pub attribution: bool,
+    /// Lifecycle hooks supplied to supported harnesses launched here. The
+    /// launch adapter drops unsupported hooks with a diagnostic.
+    pub hooks: crate::harness_hooks::HooksConfig,
     /// Named OpenRouter presets this host exposes.
     pub custom_harnesses: Vec<crate::config::CustomHarnessConfig>,
     /// Operator-declared per-provider token budgets from the `[budget]` config.

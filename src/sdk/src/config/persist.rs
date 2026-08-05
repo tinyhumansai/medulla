@@ -262,11 +262,38 @@ pub fn persist_hub_workers(
             if let Some(label) = &w.label {
                 row.insert("label".into(), toml::Value::String(label.clone()));
             }
+            // The roles the operator assigned. Dropped here before, so a
+            // remembered worker came back as a general one and the assignment
+            // had to be redone every launch — and the roster is the only place a
+            // *remote* peer's roles are written down.
+            if !w.roles.is_empty() {
+                row.insert(
+                    "roles".into(),
+                    toml::Value::Array(w.roles.iter().cloned().map(toml::Value::String).collect()),
+                );
+            }
             row.insert("selected".into(), toml::Value::Boolean(w.selected));
             toml::Value::Table(row)
         })
         .collect();
     persist_setting(path, "hub", "workers", toml::Value::Array(rows))
+}
+
+/// Replace the declared-agent list in `[fleet].agentDeclarations`.
+///
+/// Replacing rather than merging is what makes a removal durable: a merge would
+/// leave an agent the operator deleted still on disk, and it would be advertised
+/// again on the next launch.
+///
+/// Serialised through the declaration's own serde representation, so the file
+/// shape and the shape the roster reads cannot drift apart.
+pub fn persist_agent_declarations(
+    path: &Path,
+    declarations: &[crate::runtime::AgentDeclaration],
+) -> anyhow::Result<()> {
+    let value = toml::Value::try_from(declarations)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize agent declarations: {error}"))?;
+    persist_setting(path, "fleet", "agentDeclarations", value)
 }
 
 /// Replace the workspace roots this daemon may advertise to an orchestrator.

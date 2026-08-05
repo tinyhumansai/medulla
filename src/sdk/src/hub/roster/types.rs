@@ -8,11 +8,27 @@ use super::*;
 /// and each addition should not break every construction site in the tree. The
 /// default worker is not a usable one — `id` and `address` are empty — so it is
 /// a starting point to fill in, never a worker to advertise.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HubWorker {
     /// The `agentId` the backend targets (defaults to the address).
     pub id: String,
+    /// The host this agent runs on.
+    ///
+    /// One machine now advertises one entry per **declared agent** rather than
+    /// one per machine, so the thing that says which machine an entry is on can
+    /// no longer be the entry's own address — several agents share it. Empty
+    /// means "this hub did not say", which is what a remote peer added by
+    /// address looks like; the backend then synthesizes a host for it exactly as
+    /// it does today.
+    ///
+    /// Carried but **not yet advertised**: emitting `hostId` (and the `hosts[]`
+    /// block it belongs with) is the wire change, and it is deliberately not
+    /// part of the declaration model landing here.
+    pub host_id: String,
     /// tiny.place address (base58 cryptoId or `@handle`).
+    ///
+    /// Not an identity: N declared agents on one machine share one address, and
+    /// [`id`](Self::id) is what distinguishes them.
     pub address: String,
     /// Coding-agent harness the worker runs.
     pub harness: String,
@@ -31,18 +47,32 @@ pub struct HubWorker {
     /// Empty means unspecified, and is advertised exactly as before — a general
     /// worker, not one excluded from everything.
     pub roles: Vec<String>,
-    /// Absolute path of the workspace this worker runs tasks in, when known.
+    /// The workspace this worker runs tasks in, when known: its path and its
+    /// declared type.
     ///
-    /// Advertised to the backend as `metadata.workspace`, which is what turns a
-    /// bare agent into a placed one: the backend derives a `WorkspaceDescriptor`
-    /// from it and hangs the agent off that workspace. Without it the
-    /// orchestrator sees an agent with no workspace and no placement, and
-    /// reports "no workspaces are declared on this host" — which reads as an
-    /// unusable fleet and makes it decline work it could in fact delegate.
+    /// The path is advertised to the backend as `metadata.workspace`, which is
+    /// what turns a bare agent into a placed one: the backend derives a
+    /// `WorkspaceDescriptor` from it and hangs the agent off that workspace.
+    /// Without it the orchestrator sees an agent with no workspace and no
+    /// placement, and reports "no workspaces are declared on this host" — which
+    /// reads as an unusable fleet and makes it decline work it could in fact
+    /// delegate. The *type* rides along in memory only for now; sending
+    /// `workspace` as an object is the wire change, not this one.
     ///
     /// `None` for a remote peer whose working directory this hub has no way to
     /// know; the backend then falls back to the worker's probed `capabilities.cwd`.
-    pub workspace: Option<String>,
+    ///
+    /// Was a bare `Option<String>` before agents were declared. Readers that
+    /// only want the path use [`workspace_path`](Self::workspace_path), which is
+    /// the same answer the old field gave.
+    pub workspace: Option<crate::runtime::WorkspaceRef>,
+    /// Sessions this agent may run at once, derived from its declared strategy
+    /// (`checkout` ⇒ 1, serial).
+    ///
+    /// Never configured directly: a number an operator could raise past what the
+    /// workspace can take is a number that corrupts a checkout. Code-plane data
+    /// — deterministic placement reads it, and no prompt ever does (spec §4.2).
+    pub max_sessions: u32,
     /// Who holds this worker's harness right now.
     ///
     /// Advertised as `metadata.control`, and **only** when a person holds it:
@@ -60,6 +90,42 @@ pub struct HubWorker {
     /// somebody has re-taken is a stale invitation, and advertising it would have
     /// the orchestrator plan work into a workspace it cannot enter.
     pub handoff: Option<super::super::HarnessHandoff>,
+}
+
+impl Default for HubWorker {
+    /// Written out rather than derived so `max_sessions` starts at the serial
+    /// `checkout` bound instead of `0`. A worker spread from the default and
+    /// never told its strategy would otherwise advertise a capacity of nothing,
+    /// which placement reads as "saturated" — the opposite of the permissive
+    /// default every other field here takes.
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            host_id: String::new(),
+            address: String::new(),
+            harness: String::new(),
+            label: None,
+            selected: false,
+            roles: Vec::new(),
+            workspace: None,
+            max_sessions: crate::runtime::WorkspaceStrategy::Checkout.max_sessions(),
+            control: super::super::HandoffControl::default(),
+            control_reason: None,
+            control_since: None,
+            handoff: None,
+        }
+    }
+}
+
+impl HubWorker {
+    /// The workspace path, when this hub knows it and it is not blank.
+    ///
+    /// The compatibility shim for everything that read `workspace` as a path
+    /// before it grew a type: the hold path resolves a worker by directory, and
+    /// the advert places an agent by it.
+    pub fn workspace_path(&self) -> Option<&str> {
+        self.workspace.as_ref().and_then(|w| w.path())
+    }
 }
 /// The roster shared between the socket layer and the [`HubHandle`].
 pub type SharedRoster = Arc<Mutex<Vec<HubWorker>>>;

@@ -257,3 +257,184 @@ fn transcript_role_and_open_session_builders_expose_stable_projections() {
     assert_eq!(request.driver, SessionDriver::Envelope);
     assert_eq!(request.class, Some(SessionClass::Bounded));
 }
+
+// ------------------------------------------------------------ provenance ---
+
+#[test]
+fn the_door_a_session_came_through_decides_its_origin() {
+    let (run, _) = recording_executor("ok", None);
+    let manager = manager(run);
+
+    // A person asked for this one, and named it.
+    let mine = manager.open(OpenSession::operator("alice").with_name("debug login"));
+    let mine = manager.record(&mine).expect("the session exists");
+    assert_eq!(mine.origin, SessionOrigin::User);
+    assert_eq!(mine.name.as_deref(), Some("debug login"));
+
+    // A dispatch asked for this one, and dispatches do not name sessions — the
+    // UI labels them from the task instead.
+    let dispatched = manager.open(OpenSession::orchestrator("bob"));
+    let dispatched = manager.record(&dispatched).expect("the session exists");
+    assert_eq!(dispatched.origin, SessionOrigin::Orchestrator);
+    assert_eq!(dispatched.name, None);
+}
+
+#[test]
+fn a_turns_provenance_decides_the_origin_of_the_session_it_auto_creates() {
+    // §4.1: a task frame with no session id creates one, and that session is
+    // the orchestrator's for the rest of its life.
+    assert_eq!(
+        TurnOrigin::Frame {
+            task_id: "t1".into(),
+            correlation_id: None,
+        }
+        .session_origin(),
+        SessionOrigin::Orchestrator
+    );
+    // Anything a person drives — directly, or through a wrapper this daemon only
+    // observes — is theirs.
+    assert_eq!(TurnOrigin::Operator.session_origin(), SessionOrigin::User);
+    assert_eq!(
+        TurnOrigin::Envelope {
+            event_id: "e1".into(),
+            seq: 1,
+        }
+        .session_origin(),
+        SessionOrigin::User
+    );
+}
+
+#[tokio::test]
+async fn a_task_frame_auto_creates_an_orchestrator_originated_session() {
+    let (run, _) = recording_executor("done", Some("thread-abc"));
+    let manager = manager(run);
+    let request = TurnRequest {
+        key: SessionKey::new("peer-1", HarnessProvider::Codex),
+        class: SessionClass::Unbound,
+        text: "ship it".to_string(),
+        origin: TurnOrigin::Frame {
+            task_id: "t1".to_string(),
+            correlation_id: None,
+        },
+        model: None,
+    };
+    manager.run_turn(request).await.expect("the turn runs");
+
+    let records = manager.records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].origin, SessionOrigin::Orchestrator);
+    assert_eq!(records[0].name, None);
+    // …and the binding the next turn resumes carries the same provenance, so a
+    // resumed conversation does not come back as somebody else's session.
+    assert_eq!(
+        manager.registry().identity(&records[0].key),
+        Some(SessionIdentity::orchestrator())
+    );
+}
+
+#[test]
+fn an_observed_wrapper_session_is_never_the_orchestrators() {
+    // It was started somewhere this daemon never dispatched to, so counting it
+    // as orchestrator-originated would make it a dispatch candidate in the rail.
+    let (run, _) = recording_executor("ok", None);
+    let manager = manager(run);
+    let envelope = prompt_envelope("wrap-1", "harn-1", "hello");
+    let Folded::Observe(observation) = crate::sessions::input::fold_envelope(&envelope) else {
+        panic!("expected an observation");
+    };
+    manager.observe(&observation);
+
+    let records = manager.records();
+    assert_eq!(records[0].origin, SessionOrigin::User);
+    assert_eq!(records[0].name, None, "nobody named it here");
+}
+
+#[tokio::test]
+async fn a_closed_user_session_resumed_by_a_task_frame_is_still_theirs() {
+    // Closing a session keeps its binding — that is what makes it resumable —
+    // but drops the record, so the next turn on that key opens a new one. Read
+    // the origin off *that* turn and a person's named session comes back as an
+    // unnamed orchestrator session the first time a dispatch touches it: their
+    // name is gone from the rail, and a session they own is now a dispatch
+    // candidate. The binding's identity is the only thing that survives the
+    // gap, so it is what decides.
+    let (run, _) = recording_executor("done", Some("thread-abc"));
+    let manager = manager(run);
+    let key = SessionKey::new("peer-1", HarnessProvider::Codex);
+
+    let opened = manager.open(
+        OpenSession::operator("peer-1")
+            .with_provider(HarnessProvider::Codex)
+            .with_name("payments bug"),
+    );
+    manager
+        .run_turn(TurnRequest {
+            key: key.clone(),
+            class: SessionClass::Unbound,
+            text: "look at this".to_string(),
+            origin: TurnOrigin::Operator,
+            model: None,
+        })
+        .await
+        .expect("the turn runs");
+    manager.close(&opened).await;
+
+    manager
+        .run_turn(TurnRequest {
+            key: key.clone(),
+            class: SessionClass::Unbound,
+            text: "ship it".to_string(),
+            origin: TurnOrigin::Frame {
+                task_id: "t1".to_string(),
+                correlation_id: None,
+            },
+            model: None,
+        })
+        .await
+        .expect("the turn runs");
+
+    let resumed = manager
+        .records()
+        .into_iter()
+        .find(|record| record.id != opened)
+        .expect("the frame turn opened a second record");
+    assert_eq!(
+        resumed.origin,
+        SessionOrigin::User,
+        "resuming a person's binding does not make the session the orchestrator's"
+    );
+    assert_eq!(resumed.name.as_deref(), Some("payments bug"));
+    assert_eq!(
+        manager.registry().identity(&key).map(|held| held.origin()),
+        Some(SessionOrigin::User),
+        "and the binding still says so"
+    );
+}
+
+#[tokio::test]
+async fn a_frame_turn_with_no_binding_to_resume_is_still_the_orchestrators() {
+    // The other branch of the same decision: with nothing bound, the turn's own
+    // provenance is the only thing that can answer, and §4.1 says a session made
+    // to serve a task frame is the orchestrator's.
+    let (run, _) = recording_executor("done", Some("thread-abc"));
+    let manager = manager(run);
+
+    manager
+        .run_turn(TurnRequest {
+            key: SessionKey::new("peer-2", HarnessProvider::Codex),
+            class: SessionClass::Unbound,
+            text: "ship it".to_string(),
+            origin: TurnOrigin::Frame {
+                task_id: "t1".to_string(),
+                correlation_id: None,
+            },
+            model: None,
+        })
+        .await
+        .expect("the turn runs");
+
+    let records = manager.records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].origin, SessionOrigin::Orchestrator);
+    assert_eq!(records[0].name, None);
+}

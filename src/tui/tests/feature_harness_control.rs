@@ -40,6 +40,7 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: workspace.to_string(),
@@ -75,6 +76,8 @@ fn app_with_workspace(sessions: PtyManager, workspace: &str) -> App {
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_harnesses(LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -161,7 +164,9 @@ fn user_session(sessions: &PtyManager) -> String {
             model: None,
             session_id: None,
             control: HarnessControl::User,
-            user_spawned: true,
+            origin: medulla_tui::worker::pty::SessionOrigin::User,
+            name: None,
+            mcp_grant_session: None,
         })
         .expect("open")
 }
@@ -195,7 +200,7 @@ fn ctrl_t_opens_the_picker_and_enter_starts_an_unmanaged_harness() {
     wait_for("the harness to open", || sessions.rows().len() == 1);
 
     let row = sessions.rows().remove(0);
-    assert!(row.user_spawned);
+    assert!(row.origin.is_user());
     assert_eq!(row.control, HarnessControl::User);
     assert!(!row.busy, "nothing is running in it yet");
     assert!(
@@ -216,7 +221,7 @@ fn an_unmanaged_harness_gets_its_own_rail_row() {
     let _ = user_session(&sessions);
 
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("your harnesses"), "{out}");
+    assert!(out.contains("your sessions"), "{out}");
     assert!(out.contains("unmanaged"), "{out}");
 
     sessions.shutdown();

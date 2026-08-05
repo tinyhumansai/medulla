@@ -68,13 +68,15 @@ pub use input::{fold, fold_envelope, Folded, Observation, SessionInput};
 pub use interactive::{InteractiveSession, InteractiveSpec, StreamEvent};
 pub use manager::{OpenSession, SessionConfig, SessionManager, TranscriptLine, TranscriptRole};
 pub use ops::SessionOp;
-pub use registry::{SessionRegistry, TurnPlan, WorkspaceContext, DEFAULT_MAX_BINDINGS};
+pub use registry::{
+    SessionIdentity, SessionRegistry, TurnPlan, WorkspaceContext, DEFAULT_MAX_BINDINGS,
+};
 pub use routing::{
     can_resume, can_run_interactive, has_continuity, route_session_class, route_transport,
     Stimulus, Transport,
 };
 pub use turn_stream::{LineFold, TurnStream};
 pub use types::{
-    SessionClass, SessionDriver, SessionKey, SessionPhase, SessionPolicy, SessionRecord,
-    TurnOrigin, TurnOutcome, TurnRequest,
+    SessionClass, SessionDriver, SessionKey, SessionOrigin, SessionPhase, SessionPolicy,
+    SessionRecord, TurnOrigin, TurnOutcome, TurnRequest,
 };

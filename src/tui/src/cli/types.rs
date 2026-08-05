@@ -45,6 +45,104 @@ pub enum Command {
     /// harness, handing the child a socket path and a grant token in its
     /// environment; run by hand it serves the workflow tools and no fleet.
     Mcp,
+    /// Generate harness-native skills that trigger saved workflows
+    /// (`list`/`install`/`sync`/`uninstall`).
+    Skills,
+}
+
+/// The `medulla skills` action.
+///
+/// Deliberately four verbs and no more: everything an operator does to a
+/// generated skill is "show me", "put it there", "make it match the store
+/// again", or "take it away".
+#[cfg(feature = "workflows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SkillsAction {
+    /// `list` — the managed skills currently on disk. The default, because it
+    /// is the read-only answer to a half-remembered command.
+    #[default]
+    List,
+    /// `install [<id>…]` — write skills for the named workflows, or all of them.
+    Install,
+    /// `sync` — reinstall every enabled workflow; with `--prune`, drop the rest.
+    Sync,
+    /// `uninstall [<id>…]` — remove managed skills.
+    Uninstall,
+}
+
+/// Parsed `medulla skills` flags.
+///
+/// The struct is the whole contract between [`parse_skills_args`] and the
+/// command: parsing resolves nothing about the filesystem, so every field here
+/// is either a literal from the command line or a validated enum. Where the
+/// root actually lands, and which harnesses exist on this machine, is decided
+/// by the runner.
+///
+/// [`parse_skills_args`]: super::parse_skills_args
+#[cfg(feature = "workflows")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillsArgs {
+    /// The selected verb.
+    pub action: SkillsAction,
+    /// Workflow ids named after the verb. Empty means "whatever the verb's
+    /// default set is" — every enabled workflow for `install` and `sync`, and,
+    /// for `uninstall`, everything managed on disk *only* once [`all`] says so.
+    ///
+    /// [`all`]: SkillsArgs::all
+    pub ids: Vec<String>,
+    /// `--harness <a,b>` (repeatable, comma-joined), or `all`. `None` means the
+    /// operator named none, and the runner should pick the harnesses whose
+    /// directories already exist.
+    pub targets: Option<Vec<medulla::workflows::skills::SkillTarget>>,
+    /// `--scope user|project|managed`: whether the root is `$HOME`, the project,
+    /// or Medulla's own root that harnesses it spawns are pointed at.
+    pub scope: medulla::workflows::skills::SkillScope,
+    /// `--dir <path>`: an explicit root, overriding whatever `--scope` would
+    /// have resolved to. Relative paths are resolved against the cwd by the
+    /// runner, not here.
+    pub dir: Option<String>,
+    /// `--with-mcp`: also register `medulla mcp` with each harness, without
+    /// which a generated skill has no tool to call.
+    pub with_mcp: bool,
+    /// `--with-commands`: also emit the slash-command variant.
+    pub with_commands: bool,
+    /// `--tools run|full`: the tool surface a skill-triggered MCP session gets.
+    /// Defaults to `run` — a trigger-only session has no business rewriting a
+    /// graph.
+    pub tools: String,
+    /// `--dry-run`: report the identical outcome and write nothing.
+    pub dry_run: bool,
+    /// `--prune` (`sync` only): delete managed skills for workflows that are no
+    /// longer enabled or no longer exist.
+    pub prune: bool,
+    /// `--all` (`uninstall` only): the explicit consent a blanket removal
+    /// needs. Without it a bare `uninstall` lists what it would delete and
+    /// fails, because "remove every managed skill" is one typo away from
+    /// `uninstall babysit` and is not recoverable from the output. Ignored when
+    /// ids are named — those are already an explicit choice.
+    pub all: bool,
+    /// `--json`: machine-readable output instead of the human summary.
+    pub json: bool,
+}
+
+#[cfg(feature = "workflows")]
+impl Default for SkillsArgs {
+    fn default() -> Self {
+        SkillsArgs {
+            action: SkillsAction::List,
+            ids: Vec::new(),
+            targets: None,
+            scope: medulla::workflows::skills::SkillScope::User,
+            dir: None,
+            with_mcp: false,
+            with_commands: false,
+            tools: "run".to_string(),
+            dry_run: false,
+            prune: false,
+            all: false,
+            json: false,
+        }
+    }
 }
 
 /// Parsed `medulla init` flags.

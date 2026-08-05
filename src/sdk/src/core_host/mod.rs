@@ -239,9 +239,10 @@ pub async fn boot() -> anyhow::Result<Core> {
 /// would make every one of them slow to start and leave background work running
 /// for the length of a `--help`-sized command.
 ///
-/// `platform` is the family the `auth` controllers are registered under; every
-/// other domain and every service is off. Callers must still have bound the
-/// workspace first — see [`bind_workspace`].
+/// `security` is the family that owns the `auth` controllers; `platform` stays
+/// enabled for the core's shared platform infrastructure. Every other domain
+/// and every service is off. Callers must still have bound the workspace first
+/// — see [`bind_workspace`].
 ///
 /// # Errors
 ///
@@ -249,6 +250,7 @@ pub async fn boot() -> anyhow::Result<Core> {
 pub async fn boot_for_auth() -> anyhow::Result<Core> {
     let mut domains = DomainSet::none();
     domains.platform = true;
+    domains.security = true;
     tracing::debug!("[core_host] boot_for_auth start");
     let runtime = CoreBuilder::new(HostKind::detect_standalone())
         .domains(domains)

@@ -4,6 +4,8 @@
 
 ## Contents
 
+- [`agent_declarations.rs`](./agent_declarations.rs) — Reading, querying and writing the declared-agent list (`[fleet].agentDeclarations`): the store the local roster is built from.
+- [`agent_declarations_tests.rs`](./agent_declarations_tests.rs) — Unit tests for the declared-agent store: the CRUD round-trip through the config file, and the queries the roster and the UI read it back with.
 - [`core_socket/`](./core_socket/) — Core (`medulla-serve`) socket resolution and validation: where the unix socket path the core runtime attaches to comes from (`--core-socket` flag, `MEDULLA_CORE_SOCKET` env var, `[core]` config section, or the default runtime dir), and the fail-fast check that a resolved path is actually attachable *before* `CoreRuntime::attach` is handed a value it can only spin on. AGENTS.md treats socket paths as untrusted configuration to be validated at boundaries — this module is that boundary.
 - [`core_socket_tests.rs`](./core_socket_tests.rs) — Unit tests for core-socket resolution and validation: the path/request precedence on `LoadedConfig`, the source naming, and the fail-fast `validate_core_socket` boundary check.
 - [`custom_harnesses.rs`](./custom_harnesses.rs) — Named OpenRouter-backed harness presets (`[[customHarnesses]]`): a coding CLI as the agent runtime with OpenRouter supplying the model and credential. Secrets are referenced by environment-variable name and never stored in the document. All three built-in harnesses are accepted — including OpenCode, whose native OpenRouter path is exactly the one that bypasses `crate::inference_proxy`.

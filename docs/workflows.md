@@ -1,9 +1,11 @@
 # Workflows
 
 A Medulla task is one instruction handed to one harness. A **workflow** is a
-saved, multi-step plan: a directed acyclic graph whose `agent` steps each run as
-a real coding-harness session — Claude Code, Codex, or OpenCode — in the order
-and with the parallelism the graph declares.
+saved, multi-step plan: a directed graph whose `agent` steps each run as a real
+coding-harness session — Claude Code, Codex, or OpenCode — in the order and with
+the parallelism the graph declares. The graph is usually acyclic, but it may
+contain a **bounded loop**: a `loop` node repeats a section until its
+`max_iterations` cap or its `condition` says stop.
 
 The engine is [`tinyflows`](https://github.com/tinyhumansai/tinyflows), vendored
 under `vendor/tinyflows` (see [vendoring.md](vendoring.md)). Medulla supplies the
@@ -26,9 +28,26 @@ repository copy, so edits never have to create untracked files in the checkout.
 A malformed document costs only itself: the rest of the catalogue still loads
 and the failure is reported.
 
-Run records live under `<medulla home>/state/workflows/runs/`, and the engine's
-checkpoints — what lets a paused run survive a restart — under
-`state/workflows/checkpoints/`.
+Everything produced by running or editing those sources is kept separately
+under `<medulla home>/state/workflows/`: run records, checkpoints, persistent
+step state, evolution notes and proposals, undo revisions, and coordination
+locks. The run history is scoped by workspace, so its concrete path is
+`state/workflows/scopes/<workspace-id>/runs/`. Revision history and locks are
+scoped by a stable digest of the authored catalog's full path under
+`state/workflows/definitions/`, so distinct catalogs cannot mix their history.
+
+For new installations, this makes `<medulla home>/workflows/` safe to sync on
+its own: it contains only the current authored `*.json` source files. Homes
+upgraded from an earlier release may retain a legacy `.revisions/` directory or
+`.workflow.lock` file there for compatibility; exclude those legacy artifacts
+when syncing. Newly written runs, revisions, locks, and other machine-local
+state always use `state/workflows/`.
+
+Homes first used by a release before this split may still contain a legacy
+`.revisions/` directory and hidden `.*.lock` files. They remain readable for
+compatibility but are never written again; exclude those two legacy patterns
+when syncing an existing home, or remove them while Medulla is stopped once
+their undo history is no longer needed.
 
 ## Writing one
 
@@ -186,6 +205,168 @@ capability stand-ins, with nothing dispatched.
 
 Every verb prints JSON and reads bulk input from stdin, so the command is usable
 by a person and by an agent without either being a special case.
+
+## Triggering one from your own harness
+
+Everything above assumes you are in Medulla. The other case is an operator
+sitting in their *own* Claude Code or Codex session who wants to say "babysit
+this PR" and have the saved `babysit` workflow start.
+
+Transport was never the problem: `medulla mcp` serves `workflow_run` to any MCP
+client. What that session lacks is knowing the workflow exists, what it takes,
+and that a tool call is how to start it. `medulla skills` writes that knowledge
+into the harness's own skill directory, one file per workflow:
+
+```sh
+medulla skills install                       # every enabled workflow
+medulla skills install babysit --with-mcp    # one, and attach the server
+medulla skills install --dry-run             # what would change, writing nothing
+medulla skills list                          # what is installed, and where
+medulla skills sync --prune                  # match the store again
+medulla skills uninstall babysit             # one
+medulla skills uninstall --all               # every managed skill under the root
+```
+
+A bare `medulla skills uninstall` with neither an id nor `--all` lists what it
+would remove and refuses: "remove everything" is one typo away from "remove this
+one", and the removal is not recoverable from the output.
+
+| flag | meaning |
+| --- | --- |
+| `--harness claude,codex,generic\|all` | which layouts to write (default: the ones already set up under the root) |
+| `--scope user\|project` | `$HOME`, or this checkout (default: `user`) |
+| `--dir <path>` | an explicit root, overriding `--scope` |
+| `--with-mcp` | also register `medulla mcp` with each harness |
+| `--with-commands` | also write the `/medulla-<id>` slash command |
+| `--tools run\|full` | the tool surface a skill-triggered session gets (default: `run`) |
+| `--prune` | on `sync`, delete skills for workflows that are gone or disabled |
+| `--dry-run`, `--json` | report without writing; machine-readable output |
+
+Claude gets `.claude/skills/medulla-<id>/SKILL.md`. Codex and every other
+harness get `.agents/skills/…`, the cross-tool
+[Agent Skills](https://agentskills.io) location: Codex still scans its own
+`$CODEX_HOME/skills`, but upstream calls that root deprecated, and it follows
+`CODEX_HOME` rather than the real home — so a skill written there is invisible
+to anyone running a Codex profile. An install retires a managed skill an
+earlier release left in `.codex/skills`, because Codex scans both and silently
+drops a `$name` mention that resolves to two skills.
+
+Generated files carry a `medulla:managed` marker line, and nothing
+without that marker is ever overwritten or deleted — a collision is reported and
+skipped, which means that workflow is *not* installed, and the command exits
+non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
+counts as someone else's for the same reason; remove it by hand to let Medulla
+manage that path again. Re-running is a no-op.
+Disabled workflows get no skill: a workflow that may not run should not be
+advertised as runnable.
+
+### Skills for the harnesses Medulla spawns
+
+The tools already arrive on their own: a session Medulla starts is handed the
+MCP server with a grant minted for it, so nothing needs installing for an
+`agent` step to *call* `workflow_run`. What it lacks is the knowledge — that
+`babysit` exists, and what it takes.
+
+Both doors carry it, by different means. Over ACP the offer rides on
+`session/new`'s `mcpServers`. A harness started as a CLI on a pseudo-terminal —
+the Workers pane's own sessions, and the ones a task frame opens on this device
+— has no such request, so the registration goes on the child's argv
+(`--mcp-config`, which *merges* with the servers the harness already knows) and
+the grant into its environment, where `/proc` keeps it readable only by you.
+Claude Code is the only CLI attached this way today; Codex configures its
+servers through `~/.codex/config.toml`, which is what `--with-mcp` writes.
+
+`--scope managed` fills that in without touching the operator's own
+directories:
+
+```sh
+medulla skills install --scope managed --harness claude
+```
+
+The root is `<medulla home>/claude-skills/`, laid out like a project root
+(`.claude/skills/…`), and Medulla adds `--add-dir <that directory>` when it
+spawns Claude Code. Each harness gets its own `<harness>-skills` directory, so
+the path handed to one never exposes another's files, and the Medulla home is
+already per-account. Claude loads `.claude/skills/` from an added directory — a
+documented exception to `--add-dir` being a file-access grant, and the reason
+this works at all; the `permissions.additionalDirectories` *setting* grants
+access without loading skills. The flag is added only once the root actually
+holds skills, so an install nobody ran changes no argv.
+
+Two things this deliberately does not do. It does not relocate the harness's
+config directory: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move credentials and
+settings along with the skills, and a session started under a fresh one is not
+logged in. And it does not register an MCP server into the managed root —
+`--with-mcp` there reports `already-attached`, because Medulla attaches the
+server itself, per session, with a grant no config file can express.
+
+Codex has no additional-directory flag, so `--scope managed` writes its files
+but nothing points a spawned Codex session at them yet. The ACP transport is
+the same story for both: Medulla drives `claude-agent-acp` over stdio and does
+not control the underlying CLI's argv, so this applies to the direct spawn path
+only.
+
+### Attaching the server
+
+`--with-mcp` registers `medulla mcp` alongside the skills, because a skill whose
+tool is missing just produces a session confidently reaching for something that
+is not there. Registration is a config merge, not a subprocess: `.mcp.json` for
+Claude at project scope, `~/.codex/config.toml` for Codex, both preserving every
+other server and key. Claude at user scope and the generic target have no file
+we can safely write, so the command prints the exact `claude mcp add` line for
+you to run instead of reporting a success Claude would never read.
+
+### What the model then does
+
+The skill's frontmatter description is the workflow's own description plus an
+explicit "use when" clause, which is what a paraphrased request matches against.
+The body is the call, built from the workflow's declared inputs:
+
+```json
+mcp__medulla__workflow_run
+{ "id": "babysit", "inputs": { "pr": "<pr>", "repo": "tinyhumansai/medulla" } }
+```
+
+with a table of every input — type, whether it is required, its default — and an
+instruction to ask for a missing required input rather than invent one. Inputs
+that have defaults appear filled in; the rest are type-shaped placeholders, not
+plausible-looking guesses. The body also says what to do when the tool is
+absent, which is a normal state for a skill file that outlives an MCP
+configuration: do not claim the run started, fall back to
+`medulla workflow run <id> --inputs '…'`, or attach the server.
+
+### Run-only tools, by default
+
+`--with-mcp` writes `MEDULLA_WORKFLOW_TOOLS=run` into the registration. That is
+a third tool mode beside `full` and `propose`, and
+it serves exactly six verbs — `workflow_list`, `workflow_get`,
+`workflow_dry_run`, `workflow_run`, `workflow_runs`, `workflow_run_get`.
+Authoring, deletion, defaults, the journal, and the proposal verbs are withheld
+from `tools/list` *and* refused by `tools/call`, with a refusal that says where
+those things happen instead.
+
+It is the default because a skill installed into your everyday harness hands
+*every* turn in that harness whatever surface the server exposes. A turn that
+came to trigger `nightly-sweep` has no business being able to rewrite or delete
+it, and an unrelated turn three hours later has less. Unlike `propose`, which
+denies a list of verbs, `run` allows a list: a verb added to the family later
+stays withheld until someone decides a trigger-only session needs it. `--tools
+full` opts back in for a session you actually want authoring from.
+
+### The blocking call
+
+`workflow_run` returns only when the run finishes. For a short workflow that is
+fine and the generated body says to expect minutes. For a `babysit`-class
+workflow it is an hour-long tool call, and most MCP clients will time out or the
+operator will interrupt — at which point the run is still going but its outcome
+is no longer observable from the harness.
+
+That is a real limitation, not a rough edge. The fix is a `workflow_start` verb
+returning `{ runId }` as soon as the run is admitted, with the skill body
+becoming start → report the id → poll `workflow_run_get`. **It is not built
+yet.** Until it is, prefer skills for workflows that finish inside a tool call,
+and start the long ones from Medulla or `medulla workflow run`, where nothing is
+waiting on a response.
 
 ## In the TUI
 

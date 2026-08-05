@@ -244,6 +244,34 @@ fn load_config_layers_global_project_env_flag() {
 }
 
 #[test]
+fn project_local_config_cannot_authorize_hook_commands() {
+    let home = temp_dir("hook-trust-home");
+    let cwd = temp_dir("hook-trust-cwd");
+    std::fs::create_dir_all(home_of(&home)).unwrap();
+    std::fs::create_dir_all(cwd.join(".medulla")).unwrap();
+    std::fs::write(
+        home_of(&home).join("config.toml"),
+        "[[hooks]]\nevent = \"SessionStart\"\ntype = \"command\"\ncommand = \"global-hook\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        cwd.join(".medulla").join("config.toml"),
+        "[[hooks]]\nevent = \"SessionStart\"\ntype = \"command\"\ncommand = \"project-hook\"\n",
+    )
+    .unwrap();
+
+    let loaded = load_config(
+        None,
+        &env(&[("MEDULLA_HOME", home.to_str().unwrap())]),
+        &cwd,
+    )
+    .unwrap();
+
+    assert_eq!(loaded.config.hooks.hooks.len(), 1);
+    assert_eq!(loaded.config.hooks.hooks[0].command(), "global-hook");
+}
+
+#[test]
 fn load_config_toml_and_json_parity() {
     let home = temp_dir("parity-home");
     let cwd = temp_dir("parity-cwd");

@@ -58,7 +58,9 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         session_id: None,
         model: None,
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
+        mcp_grant_session: None,
     }
 }
 
@@ -71,6 +73,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
 /// thing that lets a subscription resolve.
 fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
     let config = DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/tmp".into(),

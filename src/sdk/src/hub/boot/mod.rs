@@ -21,7 +21,7 @@ use rust_socketio::asynchronous::Client;
 use crate::bridge::{LinkBridge, LinkBridgeConfig, RoutingBridge};
 
 use super::handle::HubHandle;
-use super::roster::{HubWorker, SharedRoster};
+use super::roster::SharedRoster;
 use super::runner::TaskRunner;
 use super::socket::connect_harness;
 
@@ -86,18 +86,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         config
             .workers
             .iter()
-            .map(|w| HubWorker {
-                id: w.id.clone(),
-                address: w.address.clone(),
-                harness: w.harness.clone(),
-                label: (w.name != "medulla-worker").then(|| w.name.clone()),
-                selected: false,
-                // A spec describes a host this process just started; roles are
-                // an operator choice made later, on the Hosts page.
-                roles: Vec::new(),
-                workspace: w.workspace.clone(),
-                ..Default::default()
-            })
+            .map(super::roster::worker_from_spec)
             .collect(),
     ));
     let subscription_strategy = Arc::new(Mutex::new(config.subscription_strategy));

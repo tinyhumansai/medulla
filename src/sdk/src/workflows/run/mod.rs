@@ -187,7 +187,10 @@ async fn run_workflow_inner(
     let resolved_inputs = tinyflows::model::resolve_inputs(&workflow.graph.inputs, &inputs)
         .map_err(|err| WorkflowError::Engine(err.to_string()))?;
 
-    let execution_graph = agent_evidence::instrumented(&workflow.graph);
+    let execution_graph = clamp_loop_iterations(
+        agent_evidence::instrumented(&workflow.graph),
+        settings.max_loop_iterations,
+    );
     let compiled = execute::compile(&execution_graph).map_err(WorkflowError::Engine)?;
 
     // Claimed before anything can await, so a cancel arriving during setup is
@@ -308,6 +311,60 @@ fn remember_failure(store: &Arc<dyn WorkflowStore>, record: &RunRecord) {
             "could not record what this failure taught: {err}"
         );
     }
+}
+
+/// Lowers any `loop` node's `max_iterations` to this host's ceiling.
+///
+/// A loop's cap is the author's decision, but here a pass through the body can
+/// be a whole harness session, so a graph asking for a thousand of them is
+/// asking for something the operator never agreed to.
+///
+/// **Clamped, never refused** — the same contract as `max_parallel_agents`. A
+/// workflow that asks for more still runs; it just stops sooner. Refusing would
+/// make a graph authored against a more generous host unrunnable here, and the
+/// author usually cannot change this host's configuration.
+///
+/// Applied to the execution graph only. The stored document keeps the number
+/// the author wrote, so raising the ceiling later restores the intent without
+/// anyone having to re-edit the workflow.
+///
+/// Called on every resolved graph, not just the root:
+/// [`StoreWorkflowResolver`](crate::workflows::StoreWorkflowResolver) applies
+/// this to a `sub_workflow`'s child graph too, with the same ceiling, so a
+/// nested loop cannot outrun the host limit just because it is one
+/// `sub_workflow` hop away from the run that declared it.
+pub(crate) fn clamp_loop_iterations(
+    mut graph: tinyflows::model::WorkflowGraph,
+    ceiling: u64,
+) -> tinyflows::model::WorkflowGraph {
+    for node in &mut graph.nodes {
+        if node.kind != tinyflows::model::NodeKind::Loop {
+            continue;
+        }
+        // An absent cap falls through to the engine's own default
+        // (`tinyflows::nodes::control_flow::loop_node::DEFAULT_MAX_ITERATIONS`),
+        // which can itself exceed a low host ceiling — so it is treated as
+        // that declared value here rather than left for the engine to apply
+        // unclamped.
+        let declared = node
+            .config
+            .get("max_iterations")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(tinyflows::nodes::control_flow::loop_node::DEFAULT_MAX_ITERATIONS);
+        if declared <= ceiling {
+            continue;
+        }
+        tracing::info!(
+            node = %node.id,
+            declared,
+            ceiling,
+            "clamping loop max_iterations to the host ceiling"
+        );
+        if let Some(config) = node.config.as_object_mut() {
+            config.insert("max_iterations".to_string(), ceiling.into());
+        }
+    }
+    graph
 }
 
 /// The settings one run of `workflow` uses.
@@ -431,7 +488,10 @@ pub async fn resume_workflow(
     let workflow = require(context.store.as_ref(), &record.workflow_id)?;
     refuse_unresolved_harness(&workflow)?;
     let settings = settings_for(&context.settings, &workflow)?;
-    let execution_graph = agent_evidence::instrumented(&workflow.graph);
+    let execution_graph = clamp_loop_iterations(
+        agent_evidence::instrumented(&workflow.graph),
+        settings.max_loop_iterations,
+    );
     let compiled = execute::compile(&execution_graph).map_err(WorkflowError::Engine)?;
 
     let Some((_guard, cancelled)) = RunGuard::claim(run_id) else {

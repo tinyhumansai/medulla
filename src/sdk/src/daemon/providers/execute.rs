@@ -63,6 +63,22 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     // that is not OpenRouter.
     crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
     if super::acp::uses_acp(&options) {
+        // ACP dispatch cannot carry Medulla hooks. Every other path injects them
+        // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*
+        // (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`)
+        // which spawns the harness itself, so there is no argv to add to. Claude
+        // Code's env-based settings paths were checked as an alternative and do
+        // not deliver hooks either. Say so rather than let the operator believe a
+        // configured hook is running.
+        let configured = options.hooks.for_provider(options.provider).len();
+        if configured > 0 {
+            tracing::warn!(
+                provider = options.provider.as_str(),
+                hooks = configured,
+                "medulla hooks are not installed for ACP dispatch: the harness CLI is \
+                 launched by the ACP server, not by Medulla",
+            );
+        }
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;
@@ -85,6 +101,7 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         abort: options.abort,
         router,
         attribution: options.attribution,
+        hooks: options.hooks,
         on_workspace_context: options.on_workspace_context,
     };
     let mut attempt: u32 = 1;
@@ -150,10 +167,15 @@ async fn run_provider_attempt(
     // Medulla-launched harnesses attribute their commits to Medulla via a
     // `Co-authored-by` trailer. Nothing is persisted — the flags live only on
     // this child's argv. Empty for providers with no such knob.
-    extra_args.extend(crate::attribution::attribution_args(
-        spec.provider,
-        spec.attribution,
-    ));
+    // Attribution and the operator's Medulla hooks share Claude Code's single
+    // `--settings` flag, so they are built together — see
+    // `harness_hooks::launch_args`.
+    let (launch_args, hook_notes) =
+        crate::harness_hooks::launch_args(spec.provider, spec.attribution, &spec.hooks);
+    extra_args.extend(launch_args);
+    for note in &hook_notes {
+        tracing::warn!(provider = spec.provider.as_str(), "{note}");
+    }
     // For providers that use the git-hook path (Codex, Opencode), merge the
     // prepare-commit-msg hook env vars into the child's environment.
     let mut merged_env = spec.env.clone();
@@ -187,6 +209,17 @@ async fn run_provider_attempt(
         }
         extra_args.extend(injection.args);
     }
+    // Point the harness at Medulla's own skills root, when one has been
+    // installed. This is what makes a workflow a harness *can* trigger visible
+    // to it: the MCP tools arrive automatically, but nothing tells a session
+    // that `babysit` exists or what it takes. Empty when no managed skill has
+    // been installed for this provider, so the argv is unchanged for anyone who
+    // has not run `medulla skills install --scope managed`.
+    #[cfg(feature = "workflows")]
+    extra_args.extend(crate::workflows::skills::spawn_args(
+        spec.provider,
+        &spec.env,
+    ));
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,

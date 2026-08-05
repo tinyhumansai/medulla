@@ -8,6 +8,11 @@
 use super::PtyManager;
 
 impl PtyManager {
+    /// Whether `id` enabled xterm alternate-scroll mode (DECSET 1007).
+    pub fn alternate_scroll(&self, id: &str) -> Option<bool> {
+        Some(self.handle(id)?.alternate_scroll())
+    }
+
     /// Whether the child has turned bracketed-paste mode on (DECSET 2004).
     ///
     /// We are this child's terminal, so this is not a preference to guess at: a

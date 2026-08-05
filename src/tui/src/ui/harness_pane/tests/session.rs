@@ -41,7 +41,9 @@ fn sh(script: &str) -> LaunchSpec {
         session_id: None,
         model: None,
         control: HarnessControl::Orchestrator,
-        user_spawned: false,
+        origin: crate::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
+        mcp_grant_session: None,
     }
 }
 
@@ -50,8 +52,9 @@ fn sh(script: &str) -> LaunchSpec {
 /// Task resolution needs a live host and is covered by the daemon's own screen
 /// e2e; everything here is about what the pane does *once* a session is named,
 /// so the runtime is inert on purpose.
-fn harnesses(sessions: PtyManager) -> LocalHarnesses {
+pub(super) fn harnesses(sessions: PtyManager) -> LocalHarnesses {
     let config = medulla::daemon::DaemonConfig {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         providers: vec![HarnessProvider::Codex],
         default_provider: HarnessProvider::Codex,
         workspace: "/".to_string(),
@@ -77,6 +80,8 @@ fn harnesses(sessions: PtyManager) -> LocalHarnesses {
         Box::pin(async {}) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
     });
     LocalHarnesses {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
+        log: None,
         sessions,
         runtimes: std::sync::Arc::new(std::sync::Mutex::new(vec![
             medulla::daemon::DaemonRuntime::new(config, run_task, send),
@@ -253,6 +258,66 @@ fn a_codex_harness_is_attributed_by_hook_without_extra_argv() {
     assert!(extra_args.is_empty(), "{extra_args:?}");
 }
 
+/// The door an operator actually sits in. It spawns a CLI on a pty, where there
+/// is no `session/new` to carry an offer of Medulla's tools — so the
+/// registration has to reach the child on its argv, and for a long while it did
+/// not reach it at all: the harness came up with the workflow skills installed
+/// and no `workflow_run` to call.
+///
+/// Asserted against the *real spawn*, not the argv builder, because everything
+/// between the two is exactly what used to drop it.
+#[cfg(feature = "workflows")]
+#[test]
+fn an_operator_started_claude_is_handed_medullas_own_tools() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let argv = dir.path().join("argv");
+    let bin = dir.path().join("fake-claude");
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nsleep 30\n",
+            argv.display()
+        ),
+    )
+    .expect("the stand-in harness is writable");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in harness is executable");
+    }
+
+    let sessions = PtyManager::new();
+    let mut harnesses = harnesses(sessions.clone());
+    harnesses.workspace = dir.path().to_string_lossy().into_owned();
+    harnesses.env.insert(
+        "TINYVERSE_CLAUDE_BIN".to_string(),
+        bin.to_string_lossy().into_owned(),
+    );
+
+    let id = harnesses
+        .open_unmanaged(&HarnessChoice::native(HarnessProvider::Claude), "", false)
+        .expect("the stand-in harness starts");
+    wait_for("the child to record its argv", || argv.exists());
+    let recorded = std::fs::read_to_string(&argv).expect("the argv was recorded");
+    sessions.close(&id);
+
+    let mut lines = recorded.lines();
+    let Some(document) = lines
+        .find(|line| *line == "--mcp-config")
+        .and_then(|_| lines.next())
+    else {
+        panic!("claude must be registered through --mcp-config: {recorded}");
+    };
+    let document: serde_json::Value =
+        serde_json::from_str(document).expect("the registration is a JSON document");
+    assert_eq!(document["mcpServers"]["medulla"]["args"][0], "mcp");
+    assert!(
+        !recorded.contains(medulla::control_socket::MCP_GRANT_ENV),
+        "no bearer token may appear on an argv other users can read: {recorded}"
+    );
+}
+
 /// Spin until `check` passes or the deadline expires.
 ///
 /// The budget is far larger than these conditions actually need: real children
@@ -409,6 +474,61 @@ fn a_child_that_asks_for_the_mouse_has_wheel_notches_forwarded_to_it() {
     wait_for("the child to receive the wheel report", || {
         text(&harnesses, &id).contains("[<64;4;5M")
     });
+    sessions.close(&id);
+}
+
+#[test]
+fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Codex uses the terminal's alternate-scroll behaviour instead of mouse
+    // reporting: while mode 1007 is active, a terminal translates each wheel
+    // notch into cursor-key input for the child.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?1049h\\033[?1007h'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to enable alternate scrolling", || {
+        sessions
+            .alternate_scroll(&id)
+            .is_some_and(std::convert::identity)
+    });
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    wait_for("the child to receive translated wheel input", || {
+        text(&harnesses, &id).contains("^[[A^[[A^[[A")
+    });
+    harnesses.scroll(&id, 3, 4, false, 2);
+    wait_for("the child to receive downward wheel input", || {
+        text(&harnesses, &id).contains("^[[B^[[B")
+    });
+    sessions.close(&id);
+}
+
+#[test]
+fn alternate_screen_without_alternate_scroll_does_not_receive_arrows() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?1049h\\033[?1007lready'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the child to enter its alternate screen", || {
+        text(&harnesses, &id).contains("ready")
+    });
+    assert_eq!(sessions.alternate_scroll(&id), Some(false));
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        !text(&harnesses, &id).contains("^[[A"),
+        "mode 1049 alone must not synthesize cursor input"
+    );
     sessions.close(&id);
 }
 

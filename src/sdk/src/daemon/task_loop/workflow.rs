@@ -92,6 +92,7 @@ impl HarnessDispatch for RuntimeDispatch {
             skip_permissions: inner.config.skip_permissions,
             router: inner.config.router.clone(),
             attribution: inner.config.attribution,
+            hooks: inner.config.hooks.clone(),
             abort: Abort::new(),
             // The run observer already reports progress per node; forwarding a
             // harness's token-level chatter as well would double-report it.
@@ -269,12 +270,13 @@ impl DaemonRuntime {
         // Kept past the move into the resolver: a failed run gets a review, and
         // the review reads the same store the run wrote to.
         let evolve_store = store.clone();
+        let max_loop_iterations = settings.max_loop_iterations;
         let context = RunContext {
             store: store.clone(),
             settings,
             services: HostServices {
                 dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.clone())),
-                resolver: Arc::new(StoreWorkflowResolver::new(store)),
+                resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
                 http_credentials: Default::default(),
             },
             sink,

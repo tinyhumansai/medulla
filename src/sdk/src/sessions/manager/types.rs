@@ -8,7 +8,9 @@ use crate::daemon::providers::Abort;
 use crate::protocol::HarnessProvider;
 
 use super::super::interactive::InteractiveSession;
-use super::super::types::{SessionClass, SessionDriver, SessionPolicy, SessionRecord};
+use super::super::types::{
+    SessionClass, SessionDriver, SessionOrigin, SessionPolicy, SessionRecord,
+};
 
 /// How the manager spawns and routes sessions.
 #[derive(Debug, Clone)]
@@ -40,6 +42,9 @@ pub struct SessionConfig {
     /// — the resolved `attribution.commit` config value (on by default; see
     /// [`crate::config::AttributionConfig`]).
     pub attribution: bool,
+    /// Lifecycle hooks installed into every harness launched here — the
+    /// resolved `[[hooks]]` config section (see [`crate::harness_hooks`]).
+    pub hooks: crate::harness_hooks::HooksConfig,
 }
 
 impl Default for SessionConfig {
@@ -56,6 +61,7 @@ impl Default for SessionConfig {
             turn_timeout_ms: 300_000,
             router: None,
             attribution: true,
+            hooks: crate::harness_hooks::HooksConfig::default(),
         }
     }
 }
@@ -75,6 +81,11 @@ pub struct OpenSession {
     pub workspace: Option<String>,
     /// Override the configured model for this session.
     pub model: Option<String>,
+    /// Who is starting this session — set by the creation path and never
+    /// changed afterwards. See [`SessionOrigin`].
+    pub origin: SessionOrigin,
+    /// The name the person starting it gave it; `None` for a dispatch.
+    pub name: Option<String>,
 }
 
 impl OpenSession {
@@ -82,7 +93,9 @@ impl OpenSession {
     ///
     /// Defaults to [`SessionClass::Unbound`] because an operator opening a
     /// session from the TUI means to talk to it — a bounded session would be
-    /// gone before they could type.
+    /// gone before they could type. A person is asking for it, so it is
+    /// [`SessionOrigin::User`]-originated; name it with
+    /// [`with_name`](Self::with_name).
     pub fn operator(conversation: impl Into<String>) -> Self {
         OpenSession {
             conversation: conversation.into(),
@@ -91,7 +104,29 @@ impl OpenSession {
             driver: SessionDriver::Task,
             workspace: None,
             model: None,
+            origin: SessionOrigin::User,
+            name: None,
         }
+    }
+
+    /// A session opened to serve a dispatched task on `conversation`.
+    ///
+    /// The counterpart of [`operator`](Self::operator): same shape, opposite
+    /// provenance, and never named — the UI labels it from its task.
+    pub fn orchestrator(conversation: impl Into<String>) -> Self {
+        OpenSession {
+            origin: SessionOrigin::Orchestrator,
+            ..OpenSession::operator(conversation)
+        }
+    }
+
+    /// Give the session the display name a person typed.
+    ///
+    /// Naming does not change provenance: an orchestrator-originated session
+    /// that someone later labels is still `origin: orchestrator`.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     /// Set the harness provider.

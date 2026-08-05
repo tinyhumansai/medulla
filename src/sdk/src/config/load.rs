@@ -148,8 +148,18 @@ pub fn load_config(
     // serde-defaulted one, so an explicit config value beats a default.
     let mut merged = Value::Object(serde_json::Map::new());
     let mut sources: Vec<String> = Vec::new();
+    let global_config = home.join("config.toml");
     for layer in &layers {
-        if let Some(value) = read_config_value(layer)? {
+        if let Some(mut value) = read_config_value(layer)? {
+            // Project configuration is repository-controlled. It may tune the
+            // project, but it must not authorize shell commands in the
+            // operator's environment. Explicit --config files are an operator
+            // choice and remain trusted as the sole layer.
+            if explicit_config.is_none() && layer != &global_config {
+                if let Some(document) = value.as_object_mut() {
+                    document.remove("hooks");
+                }
+            }
             merge_value(&mut merged, value);
             sources.push(display_path(layer));
         }

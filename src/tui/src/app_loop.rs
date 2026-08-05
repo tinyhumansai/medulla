@@ -449,14 +449,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             hub_logs.push(format!("custom harnesses: cannot load ({error})"));
             Vec::new()
         });
-    let local_hosts = match crate::local_host::options_from_config_with_custom(
+    let local_hosts = match crate::local_host::options_from_config_with_custom_and_hooks(
         &loaded.config.host,
         &env,
         loaded.config.router.clone(),
         loaded.config.budget.clone(),
         Some(hub_logs.sink()),
         &custom_harnesses,
-        loaded.config.attribution.commit,
+        &crate::local_host::LaunchPolicy {
+            attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
+        },
     )
     .map(|options| {
         crate::local_host::start_all(
@@ -466,6 +469,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             &local_network,
             options,
             harness_sessions.clone(),
+            &loaded.config.fleet.agent_declarations,
         )
     }) {
         Ok((hosts, problems)) => {
@@ -535,6 +539,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
             custom_harnesses,
             router: loaded.config.router.clone(),
             attribution: loaded.config.attribution.commit,
+            hooks: loaded.config.hooks.clone(),
+            log: Some(hub_logs.sink()),
         }
     });
     // Shared with the hub's roster filter and appended to by the spawner, so a
@@ -547,14 +553,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // binding or session manager to hand a new host.
     let local_host_spawner = hosting
         .then(|| {
-            crate::local_host::options_from_config_with_custom(
+            crate::local_host::options_from_config_with_custom_and_hooks(
                 &loaded.config.host,
                 &env,
                 loaded.config.router.clone(),
                 loaded.config.budget.clone(),
                 Some(hub_logs.sink()),
                 &custom_harnesses,
-                loaded.config.attribution.commit,
+                &crate::local_host::LaunchPolicy {
+                    attribution: loaded.config.attribution.commit,
+                    hooks: loaded.config.hooks.clone(),
+                },
             )
             .ok()
             .map(|options| {
@@ -566,6 +575,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     host_runtimes.clone(),
                     started_hosts.clone(),
                     local_addresses.clone(),
+                    loaded.config.fleet.agent_declarations.clone(),
                 )
             })
         })
@@ -576,11 +586,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         // Always known, even with hosting off — it is what identifies a
         // remembered local roster entry that must not be inherited.
         host_addresses: local_addresses,
+        // Flattened: a host contributes one entry per agent declared on it, not
+        // one entry standing in for the machine.
         hosts: started_hosts
             .lock()
             .expect("started hosts")
             .iter()
-            .map(|host| host.spec().clone())
+            .flat_map(|host| host.specs().to_vec())
             .collect(),
     };
 

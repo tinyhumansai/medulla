@@ -10,6 +10,8 @@ use super::types::{
     Command, InitArgs, LoginArgs, RunArgs, TuiArgs, UpdateArgs, WorkflowAction, WorkflowArgs,
     WorkspaceAction, WorkspaceArgs,
 };
+#[cfg(feature = "workflows")]
+use super::types::{SkillsAction, SkillsArgs};
 
 /// Dispatch on the first argument. Anything else (including TUI flags) is the TUI.
 pub fn parse_command(args: &[String]) -> Command {
@@ -31,6 +33,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("workspace") | Some("workspaces") => Command::Workspace,
         Some("hub") => Command::Hub,
         Some("workflow") | Some("workflows") => Command::Workflow,
+        Some("skills") | Some("skill") => Command::Skills,
         Some("mcp") => Command::Mcp,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
@@ -286,6 +289,198 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
     out
 }
 
+/// The `medulla skills` flags that take a value, as `--flag value`.
+#[cfg(feature = "workflows")]
+const SKILLS_VALUE_FLAGS: [&str; 4] = ["--harness", "--scope", "--dir", "--tools"];
+
+/// The `medulla skills` flags that take no value.
+#[cfg(feature = "workflows")]
+const SKILLS_BOOL_FLAGS: [&str; 6] = [
+    "--with-mcp",
+    "--with-commands",
+    "--dry-run",
+    "--prune",
+    "--all",
+    "--json",
+];
+
+/// Rewrite `--flag=value` into `--flag`, `value` so the main loop sees one
+/// spelling.
+///
+/// Only the flag token is split, and only on its *first* `=`, so a value that
+/// itself contains one (`--dir /srv/a=b`) is untouched.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when a value flag is given no value
+/// (`--dir=`), when a boolean flag is given one (`--json=true`), or when the
+/// head of an `=` form is not a flag this verb has. Each of those is a request
+/// the operator meant, and honouring the rest of the command line while
+/// discarding it is how a scratch-directory run becomes a `$HOME` run.
+#[cfg(feature = "workflows")]
+fn split_skills_flag_values(args: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::with_capacity(args.len());
+    for arg in args {
+        let Some((head, value)) = arg.split_once('=') else {
+            out.push(arg.clone());
+            continue;
+        };
+        if !head.starts_with('-') {
+            out.push(arg.clone());
+            continue;
+        }
+        if SKILLS_VALUE_FLAGS.contains(&head) {
+            if value.is_empty() {
+                return Err(format!("{head} was given no value"));
+            }
+            out.push(head.to_string());
+            out.push(value.to_string());
+        } else if SKILLS_BOOL_FLAGS.contains(&head) {
+            return Err(format!("{head} takes no value (got `{arg}`)"));
+        } else {
+            return Err(format!(
+                "unknown flag `{head}` for `medulla skills`. Run `medulla help` for the flags \
+                 this verb takes."
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// Parse `medulla skills` flags out of the args following `skills`.
+///
+/// Stricter than its sibling parsers, and deliberately so: every flag here
+/// decides *where files are written*, so a flag that does not arrive is not a
+/// harmless no-op. A `--dir=/tmp/x` that was quietly dropped retargets the
+/// whole operation at `$HOME` while still reporting success — and with
+/// `uninstall --all` that is the difference between clearing a scratch
+/// directory and clearing the operator's real one. So both spellings of a value
+/// flag are accepted, and an unrecognised flag is an error rather than a bare
+/// word, which is the opposite of what the rest of the CLI does.
+///
+/// The first bare word selects the verb; every later bare word is a workflow id.
+///
+/// # Errors
+///
+/// Returns an operator-facing sentence when `--harness`, `--scope`, or
+/// `--tools` is given a value that is not one of its accepted ones, when one of
+/// them is given no value at all, when a flag is not recognised or is given a
+/// value it does not take, or when `--prune` is asked for alongside explicit
+/// workflow ids — a combination whose two possible meanings differ by which
+/// files get deleted.
+#[cfg(feature = "workflows")]
+pub fn parse_skills_args(args: &[String]) -> Result<SkillsArgs, String> {
+    use medulla::workflows::skills::{SkillScope, SkillTarget};
+
+    let args = split_skills_flag_values(args)?;
+    let args = args.as_slice();
+    let mut out = SkillsArgs::default();
+    let mut bare: Vec<String> = Vec::new();
+    // Accumulated separately from `out.targets` so that "no --harness at all"
+    // stays distinguishable from "--harness with an empty list", which the
+    // runner treats very differently.
+    let mut targets: Option<Vec<SkillTarget>> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            // Repeatable *and* comma-joined: `--harness claude --harness codex`
+            // and `--harness claude,codex` are the same request, because both
+            // spellings turn up in shell history and neither is wrong.
+            "--harness" => {
+                let value = it.next().ok_or_else(|| {
+                    "--harness expects claude, codex, generic, or all".to_string()
+                })?;
+                let chosen = targets.get_or_insert_with(Vec::new);
+                if value.trim().eq_ignore_ascii_case("all") {
+                    chosen.extend(SkillTarget::ALL);
+                } else {
+                    for part in value.split(',').filter(|part| !part.trim().is_empty()) {
+                        chosen.push(SkillTarget::parse(part)?);
+                    }
+                }
+            }
+            "--scope" => {
+                let value = it
+                    .next()
+                    .ok_or_else(|| "--scope expects user, project, or managed".to_string())?;
+                out.scope = SkillScope::parse(value)?;
+            }
+            "--dir" => {
+                let value = it
+                    .next()
+                    .ok_or_else(|| "--dir expects a directory path".to_string())?;
+                out.dir = Some(value.clone());
+            }
+            "--tools" => {
+                let value = it
+                    .next()
+                    .ok_or_else(|| "--tools expects run or full".to_string())?;
+                out.tools = match value.trim().to_ascii_lowercase().as_str() {
+                    "run" => "run".to_string(),
+                    "full" => "full".to_string(),
+                    other => {
+                        return Err(format!(
+                            "unknown tool mode `{other}` (expected run or full)"
+                        ))
+                    }
+                };
+            }
+            "--with-mcp" => out.with_mcp = true,
+            "--with-commands" => out.with_commands = true,
+            "--dry-run" => out.dry_run = true,
+            "--prune" => out.prune = true,
+            "--all" => out.all = true,
+            "--json" => out.json = true,
+            other if other.starts_with('-') => {
+                return Err(format!(
+                    "unknown flag `{other}` for `medulla skills`. Run `medulla help` for the \
+                     flags this verb takes."
+                ));
+            }
+            other => bare.push(other.to_string()),
+        }
+    }
+
+    // Duplicates are a natural consequence of accepting both spellings; writing
+    // the same file twice would double every line of the report.
+    if let Some(chosen) = targets.as_mut() {
+        let mut seen = Vec::new();
+        chosen.retain(|target| {
+            let fresh = !seen.contains(target);
+            seen.push(*target);
+            fresh
+        });
+    }
+    out.targets = targets;
+
+    out.action = match bare.first().map(String::as_str) {
+        Some("install") | Some("add") => SkillsAction::Install,
+        Some("sync") | Some("refresh") => SkillsAction::Sync,
+        Some("uninstall") | Some("remove") | Some("rm") => SkillsAction::Uninstall,
+        _ => SkillsAction::List,
+    };
+    // Only ids, never the verb: `skills install` must not try to install a
+    // workflow called "install".
+    out.ids = bare.into_iter().skip(1).collect();
+
+    // `sync <ids> --prune` has no honest reading. Pruning asks "which managed
+    // skills belong to no live workflow?", which is a question about the whole
+    // store; answering it from a one-id keep set would delete the skills for
+    // every workflow the operator did not happen to name. Refusing beats
+    // guessing at which of the two surprises they wanted.
+    if out.action == SkillsAction::Sync && out.prune && !out.ids.is_empty() {
+        return Err(format!(
+            "--prune cannot be combined with workflow ids ({}): pruning decides what to remove by \
+             looking at every workflow, so restricting it to the ids you named would delete the \
+             skills for the ones you did not. Run `medulla skills sync --prune` for all of them, \
+             or `medulla skills sync {}` without --prune.",
+            out.ids.join(", "),
+            out.ids.join(" "),
+        ));
+    }
+    Ok(out)
+}
+
 /// Parse the TUI's own flags out of `argv[1..]`.
 pub fn parse_tui_args(args: &[String]) -> TuiArgs {
     let mut out = TuiArgs::default();
@@ -358,6 +553,7 @@ medulla logout          Clear stored credentials\n  \
 medulla init [dir]      Write a MEDULLA.md workspace profile for a directory\n  \
 medulla workspace <cmd> Workspace registry: add [dir]|list|remove <dir|id>\n  \
 medulla workflow <cmd>  Workflows: list|get|create|apply-ops|validate|dry-run|run|resume|cancel|catalog\n  \
+medulla skills <cmd>    Harness skills for workflows: list|install|sync|uninstall\n  \
 medulla mcp             Serve Medulla's tools over MCP (spawned for harnesses)\n  \
 medulla workflow mcp    Alias for `medulla mcp`, workflow tools only\n  \
 medulla update [--check] Update to the latest release (--check only reports)\n  \
@@ -384,6 +580,17 @@ Workflow flags:\n  \
 --approve <node-id>     Gate to release on resume (repeatable)\n  \
 --reject <node-id>      Gate to refuse on resume (repeatable)\n\n\
 Workflow documents and graph ops are read from stdin; every verb prints JSON.\n\n\
+Skills flags:\n  \
+--harness <a,b>         claude, codex, generic, or all (default: those already set up)\n  \
+--scope <user|project|managed>\n                          Install into $HOME, into this checkout, or into Medulla's\n                          own root that spawned harnesses are pointed at (default: user)\n  \
+--dir <path>            Explicit root, overriding --scope\n  \
+--with-mcp              Also register `medulla mcp` with each harness\n  \
+--with-commands         Also write the slash-command variant\n  \
+--tools <run|full>      Tool surface a skill-triggered session gets (default: run)\n  \
+--prune                 Remove skills for workflows that are gone (sync, no ids)\n  \
+--all                   Remove every managed skill (uninstall, instead of ids)\n  \
+--dry-run               Report what would change and write nothing\n  \
+--json                  Emit JSON instead of the human summary\n\n\
 Login flags:\n  \
 --provider <name>       OAuth provider: google (default), github, twitter\n  \
 --no-browser            Print the login URL without launching a browser\n  \

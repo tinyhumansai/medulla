@@ -22,6 +22,7 @@ mod agents;
 mod changes;
 mod decisions;
 mod feedback;
+pub(super) mod graph;
 mod harness_modals;
 mod overview;
 mod points;
@@ -488,7 +489,7 @@ impl App {
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else {
-            "Tab views · Esc/↑↓ rail · ⏎/^] harness · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
+            "Tab views · Esc/↑↓ rail · ⏎/^] harness · d harness diff · ⇧⏎ newline · ⌥X cancel · ⌥A answer · ^N thread · ^↑↓ switch · ^Y copy · ^X abort"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(

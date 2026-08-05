@@ -2,6 +2,7 @@
 //! operator watches about it, and the handle the UI holds.
 
 use medulla::protocol::HarnessProvider;
+pub use medulla::sessions::SessionOrigin;
 
 use super::attention::HarnessAttention;
 
@@ -63,6 +64,12 @@ impl PtyState {
 /// into a composer the operator was already typing in — a harness serves one turn
 /// at a time, so two writers produce one confidently wrong answer rather than an
 /// error.
+///
+/// Nor is it [`SessionOrigin`], which is who *started* the session. Control
+/// moves — `ctrl-g` takes a session and handing it back returns it — and origin
+/// never does. A task-spawned session an operator is holding is
+/// `origin: orchestrator, control: user`; both halves are true at once, and only
+/// this one gates dispatch.
 ///
 /// This is the single gate on dispatch: [`claim_idle`](super::PtyManager::claim_idle)
 /// only ever returns an orchestrator-held session. An "unmanaged" harness is not a
@@ -143,12 +150,26 @@ pub struct LaunchSpec {
     /// session; an operator spawning one from the TUI opens a
     /// [`User`](HarnessControl::User) one, which is what makes it unmanaged.
     pub control: HarnessControl,
-    /// Whether an operator asked for this session rather than a task frame.
+    /// Who is starting this session — see [`SessionOrigin`].
     ///
-    /// Display only — never gate behaviour on it. Control is the gate; this
-    /// exists so the rail can say "unmanaged" instead of the less useful
-    /// "orchestrator-spawned, currently yours".
-    pub user_spawned: bool,
+    /// Display and labelling only — never gate behaviour on it. Control is the
+    /// gate; this is what lets a session be shown under its agent as "started
+    /// by you" rather than the less useful "orchestrator-spawned, currently
+    /// yours". It is fixed here for the session's whole life.
+    pub origin: SessionOrigin,
+    /// The display name the operator gave this session as they spun it up.
+    ///
+    /// `None` for a dispatched session, which is labelled from its task
+    /// instead, and `None` today for an operator-started one as well — the
+    /// picker has no name prompt yet. The field is the seam that lets one
+    /// appear without touching this layer again.
+    pub name: Option<String>,
+    /// The key this session's MCP fleet grant was minted under, when one was.
+    ///
+    /// Carried so the grant can be handed back when the harness exits: a
+    /// capability that outlives the session it was minted for is a token
+    /// nothing revokes and a leaked subprocess could still redeem.
+    pub mcp_grant_session: Option<String>,
 }
 
 /// The operator-facing projection of one session, for the list pane.
@@ -200,8 +221,14 @@ pub struct SessionRow {
     pub busy: bool,
     /// Who holds this session right now — see [`HarnessControl`].
     pub control: HarnessControl,
-    /// Whether an operator spawned it rather than a task frame. Display only.
-    pub user_spawned: bool,
+    /// Who started it — see [`SessionOrigin`]. Immutable, and independent of
+    /// [`SessionRow::control`]: taking a dispatched session does not make it
+    /// yours to have started.
+    pub origin: SessionOrigin,
+    /// The name the operator gave it when they started it, if they gave one.
+    ///
+    /// `None` for a dispatched session; the UI labels those from their task.
+    pub name: Option<String>,
     /// What this harness is waiting on the operator for, if anything.
     ///
     /// The one piece of session state nothing else on this row can express. A

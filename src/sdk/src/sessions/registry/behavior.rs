@@ -19,7 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::types::{Inner, SessionBinding, SessionRegistry, TurnPlan, WorkspaceContext};
+use super::types::{
+    Inner, SessionBinding, SessionIdentity, SessionRegistry, TurnPlan, WorkspaceContext,
+};
 use crate::sessions::routing::can_resume;
 use crate::sessions::types::{SessionClass, SessionKey};
 
@@ -35,6 +37,7 @@ impl TurnPlan {
             class,
             resume_session_id: None,
             workspace_context: WorkspaceContext::default(),
+            identity: SessionIdentity::default(),
             bind: false,
         }
     }
@@ -99,12 +102,14 @@ impl SessionRegistry {
                 class,
                 resume_session_id: Some(binding.session_id),
                 workspace_context: binding.workspace_context,
+                identity: binding.identity.unwrap_or_default(),
                 bind: false,
             },
             None => TurnPlan {
                 class,
                 resume_session_id: None,
                 workspace_context: WorkspaceContext::default(),
+                identity: SessionIdentity::default(),
                 bind: true,
             },
         }
@@ -126,14 +131,96 @@ impl SessionRegistry {
         if session_id.trim().is_empty() {
             return;
         }
-        self.inner.lock().unwrap().record(
-            key.map_key(),
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        // Identity outlives the harness session id it is recorded beside: a
+        // conversation that rebinds — a reset, or a codex rollout announcing a
+        // new id — is the same session to the person who named it. Rebuilding
+        // the binding from scratch would silently rename their session back to
+        // nothing, so the existing identity is carried across.
+        let identity = inner
+            .get(&map_key)
+            .and_then(|binding| binding.identity.clone());
+        inner.record(
+            map_key,
             SessionBinding {
                 session_id,
                 workspace_context,
+                identity,
             },
             self.max_bindings,
         );
+    }
+
+    /// Record who a bound session belongs to and what it is called.
+    ///
+    /// A no-op when nothing is bound yet, exactly like
+    /// [`record_workspace_context`](Self::record_workspace_context): the binding
+    /// *is* the session here, and there is nothing to attach an identity to
+    /// before one exists. Returns whether it landed.
+    ///
+    /// **The origin is established once and never rewritten.** The first call
+    /// after a binding appears sets it — that is the creating path copying the
+    /// session's provenance across — and every later call keeps the origin
+    /// already stored, taking only the name. So a caller cannot move a
+    /// dispatched session into somebody's personal list, or a person's session
+    /// into the dispatch pool, by re-recording an identity with the other
+    /// origin. [`rename`](Self::rename) is the honest way to say "only the
+    /// label changed".
+    pub fn record_identity(&self, key: &SessionKey, identity: SessionIdentity) -> bool {
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .bindings
+            .iter_mut()
+            .find_map(|(k, binding)| (k == &map_key).then_some(binding))
+        {
+            Some(binding) => {
+                binding.identity = Some(match binding.identity.take() {
+                    Some(held) => SessionIdentity::new(held.origin(), identity.name),
+                    None => identity,
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Rename `key`'s bound session, leaving whose it is alone.
+    ///
+    /// The name-only half of [`record_identity`](Self::record_identity), for the
+    /// caller that has a new display name and no business asserting an origin.
+    /// Returns whether a binding took it.
+    pub fn rename(&self, key: &SessionKey, name: Option<String>) -> bool {
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .bindings
+            .iter_mut()
+            .find_map(|(k, binding)| (k == &map_key).then_some(binding))
+        {
+            Some(binding) => {
+                binding
+                    .identity
+                    .get_or_insert_with(SessionIdentity::default)
+                    .rename(name);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The identity attached to `key`'s binding, if it has one.
+    ///
+    /// A binding whose creating path recorded nothing reads as the
+    /// auto-creation default — an unnamed orchestrator session — which is what
+    /// it is: the registry binds for a dispatch before anybody claims it.
+    pub fn identity(&self, key: &SessionKey) -> Option<SessionIdentity> {
+        self.inner
+            .lock()
+            .unwrap()
+            .get(&key.map_key())
+            .map(|binding| binding.identity.clone().unwrap_or_default())
     }
 
     /// Replace the workspace state attached to an existing binding.

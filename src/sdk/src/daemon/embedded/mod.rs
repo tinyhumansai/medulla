@@ -135,6 +135,7 @@ impl EmbeddedDaemon {
             skip_permissions: options.skip_permissions,
             router: options.router.clone(),
             attribution: options.attribution,
+            hooks: options.hooks.clone(),
             custom_harnesses: options.custom_harnesses.clone(),
             budget: options.budget.clone(),
         };

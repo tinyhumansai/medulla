@@ -92,6 +92,7 @@ fn live_options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        hooks: medulla::harness_hooks::HooksConfig::default(),
         conversation: peer.to_string(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
@@ -221,7 +222,9 @@ async fn experiment_codex_dialog_dismissal() {
             session_id: None,
             model: None,
             control: HarnessControl::Orchestrator,
-            user_spawned: false,
+            origin: crate::worker::pty::SessionOrigin::Orchestrator,
+            name: None,
+            mcp_grant_session: None,
         })
         .expect("open");
 
@@ -303,7 +306,9 @@ async fn experiment_codex_startup_dialog_dismissal() {
             session_id: None,
             model: None,
             control: HarnessControl::Orchestrator,
-            user_spawned: false,
+            origin: crate::worker::pty::SessionOrigin::Orchestrator,
+            name: None,
+            mcp_grant_session: None,
         })
         .expect("open");
 
@@ -376,7 +381,9 @@ async fn diagnose_codex_paste_rendering() {
             session_id: None,
             model: None,
             control: HarnessControl::Orchestrator,
-            user_spawned: false,
+            origin: crate::worker::pty::SessionOrigin::Orchestrator,
+            name: None,
+            mcp_grant_session: None,
         })
         .expect("open codex session");
 

@@ -51,7 +51,7 @@ impl App {
         self.agents_focus == AgentsFocus::Rail || !self.agents_composer_shown()
     }
 
-    /// Whether the rail cursor sits on the `+ New harness` action row.
+    /// Whether the rail cursor sits on the `+ New session` action row.
     pub(in crate::ui::app) fn on_new_harness_row(&self) -> bool {
         let rows = self.rail_rows();
         rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
@@ -82,6 +82,13 @@ impl App {
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
         match k.code {
+            // A harness row has an immutable launch snapshot. Jump straight to
+            // its diff rather than making the operator tab across and rely on
+            // the Changes view to remember which of several harnesses they had
+            // selected. When no harness is shown, `d` remains ordinary typing.
+            KeyCode::Char('d') if !ctrl && !alt && self.harness_pane_session.is_some() => {
+                AgentsKey::Handled(self.open_selected_harness_changes())
+            }
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
@@ -99,12 +106,13 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the action row, where it is the action. A visible harness consumes
-            // it earlier and takes the keyboard instead.
+            // the rows that are themselves an action: the harness starter, and a
+            // lane's `+N more`, where it pages the hidden sublanes into view. A
+            // visible harness consumes it earlier and takes the keyboard instead.
             KeyCode::Enter => {
                 if self.on_new_harness_row() {
                     self.open_harness_picker();
-                } else {
+                } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }
                 AgentsKey::Handled(None)

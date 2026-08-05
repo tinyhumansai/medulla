@@ -6,6 +6,7 @@ use medulla::protocol::HarnessProvider;
 use portable_pty::{Child, MasterPty};
 
 use super::super::attention::HarnessAttention;
+use super::super::types::SessionOrigin;
 
 /// [`SessionHandle::state`] discriminants. Kept as a `u8` so the whole liveness
 /// question is one relaxed atomic load rather than a lock.
@@ -102,6 +103,12 @@ pub(crate) struct ColdFields {
     pub(super) label: String,
     /// The harness session id — minted for claude, read back for codex.
     pub(super) session_id: Option<String>,
+    /// The display name a person gave this session.
+    ///
+    /// Mutable, unlike [`SessionMeta::origin`] beside it: a name is a label the
+    /// operator owns and may change, where provenance is a fact about how the
+    /// session came to exist. `None` until somebody names it.
+    pub(super) name: Option<String>,
     /// The non-empty terminal title last advertised by the harness.
     pub(super) thread_name: Option<String>,
     /// Why the session failed, when it did.
@@ -150,12 +157,19 @@ pub(crate) struct SessionMeta {
     pub(crate) launch_checkout_identity: Option<String>,
     /// Epoch ms when the session started.
     pub(crate) started_at: i64,
-    /// Whether an operator asked for this session rather than a task frame.
+    /// Who started this session — see
+    /// [`SessionOrigin`](super::super::types::SessionOrigin).
     ///
-    /// Display only — never gate behaviour on it. Control is the gate; this is
-    /// what lets the rail say "unmanaged", and what marks a session whose
+    /// It lives in the immutable half of the handle *because* it is immutable:
+    /// control is an atomic bit that takeover flips, and origin is a fact about
+    /// this session's birth that nothing may rewrite. Display and labelling
+    /// only — never gate behaviour on it — but it is what marks a session whose
     /// synthetic `you:` label is still up for adoption.
-    pub(crate) user_spawned: bool,
+    pub(crate) origin: SessionOrigin,
+    /// The key this session's MCP fleet grant was minted under, when one was.
+    ///
+    /// Read once, when the child is reaped, to give the capability back.
+    pub(crate) mcp_grant_session: Option<String>,
 }
 
 /// One live PTY-backed harness session, and everything the manager knows about
@@ -223,8 +237,45 @@ pub struct SessionHandle {
     pub(crate) attention: Mutex<AttentionState>,
     /// The terminal emulator holding this session's screen + scrollback.
     pub(super) screen: Mutex<vt100::Parser>,
+    /// Parser for terminal modes the screen emulator does not expose publicly.
+    pub(super) modes: Mutex<TerminalModes>,
     /// The pty ends, until the session is reaped.
     pub(super) io: Mutex<Option<SessionIo>>,
     /// The child handle, for signalling and reaping. `None` once reaped.
     pub(super) child: Mutex<Option<Box<dyn Child + Send + Sync>>>,
+}
+
+/// Terminal modes needed by the host but not exposed by [`vt100::Screen`].
+pub(super) struct TerminalModes {
+    /// Stateful parser, retained so escape sequences split across PTY reads work.
+    pub(super) parser: vte::Parser,
+    /// Whether xterm alternate-scroll mode (DECSET 1007) is enabled.
+    pub(super) alternate_scroll: bool,
+}
+
+impl Default for TerminalModes {
+    fn default() -> Self {
+        Self {
+            parser: vte::Parser::new(),
+            alternate_scroll: false,
+        }
+    }
+}
+
+impl vte::Perform for TerminalModes {
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        intermediates: &[u8],
+        ignore: bool,
+        action: char,
+    ) {
+        if !ignore
+            && intermediates == [b'?']
+            && matches!(action, 'h' | 'l')
+            && params.iter().any(|param| param == [1007])
+        {
+            self.alternate_scroll = action == 'h';
+        }
+    }
 }

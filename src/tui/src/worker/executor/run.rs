@@ -34,7 +34,7 @@ use medulla::session_history::SessionAgentKind;
 use medulla::sessions::{SessionClass, TurnStream};
 use medulla::wrapper::tail::SessionTailer;
 
-use super::super::pty::{HarnessControl, LaunchSpec, PtyManager};
+use super::super::pty::{HarnessControl, LaunchSpec, PtyManager, SessionOrigin};
 use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
@@ -74,7 +74,14 @@ impl PtySessionExecutor {
             workspace,
             claims: Arc::new(Mutex::new(HashSet::new())),
             workspace_context: Arc::new(Mutex::new(HashMap::new())),
+            log: None,
         }
+    }
+
+    /// Route executor diagnostics into the owning TUI's log surface.
+    pub fn with_log(mut self, log: medulla::daemon::LogFn) -> Self {
+        self.log = Some(log);
+        self
     }
 
     /// Adapt this executor into the [`RunTaskFn`] the daemon runtime takes.
@@ -365,10 +372,26 @@ impl PtySessionExecutor {
         // live harness mid-conversation. Router/model drift across turns of the
         // same conversation is the same trade the headless executor's own resume
         // path accepts.
-        let (env, extra_args) = self.spawn_env(options)?;
+        let (mut env, mut extra_args) = self.spawn_env(options)?;
+        // Resolved once, from `self.env`, and then both *used* to launch and
+        // *shown* to the trust decision below. Deriving it twice from two
+        // different environments is what let an override live in `self.env`,
+        // select the executable, and still be invisible to `attach_mcp`
+        // reading the per-run child environment.
+        let bin = medulla::protocol::env::provider_bin(options.provider, &self.env);
+        // Medulla's own tools, on the same terms an ACP-dispatched session gets
+        // them. A task frame that asked for a workflow to be run needs the verb
+        // to run it with.
+        let mcp_grant_session = super::super::pty::launch::attach_mcp(
+            options.provider,
+            &bin,
+            &mut env,
+            &mut extra_args,
+            self.log.as_ref(),
+        );
         Ok(SessionPlan::Launch(LaunchSpec {
             provider: options.provider,
-            bin: medulla::protocol::env::provider_bin(options.provider, &self.env),
+            bin,
             cwd: options.cwd.clone(),
             env,
             extra_args,
@@ -380,7 +403,13 @@ impl PtySessionExecutor {
             // operator can still take it over later; that is what stops the
             // next frame landing in a composer they are typing in.
             control: HarnessControl::Orchestrator,
-            user_spawned: false,
+            // …and that later takeover does *not* touch this: the session was
+            // auto-created by a dispatch (§4.1), which is true for the rest of
+            // its life however many times control changes hands. Unnamed on
+            // purpose — the UI labels it from the task it was created for.
+            origin: SessionOrigin::Orchestrator,
+            name: None,
+            mcp_grant_session,
         }))
     }
 
@@ -432,10 +461,23 @@ impl PtySessionExecutor {
         // as headless ones, so this path carries the same attribution.
         let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
         env.extend(attribution_env);
-        extra_args.extend(medulla::attribution::attribution_args(
+        // Attribution and the operator's configured hooks share Claude Code's
+        // single `--settings` flag, so both are built together — a watched PTY
+        // session runs the same lifecycle policy a headless one does.
+        let (launch_args, hook_notes) = medulla::harness_hooks::launch_args(
             options.provider,
             options.attribution,
-        ));
+            &options.hooks,
+        );
+        extra_args.extend(launch_args);
+        // Routed to the log rather than stderr: this crate draws a full-screen
+        // TUI, where a stray line corrupts the pane. Covers both hooks the
+        // harness cannot run and hooks it will not run until trusted.
+        if let Some(log) = &self.log {
+            for note in &hook_notes {
+                log(note);
+            }
+        }
         // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
         // proxy, and the real key is scrubbed from `env` here, before any of it
         // reaches the child. A no-op for every other endpoint.

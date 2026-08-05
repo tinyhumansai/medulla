@@ -19,6 +19,8 @@ Cross-module integration, feature, and mocked end-to-end coverage for the SDK.
 - [`feature_status.rs`](./feature_status.rs) — Coverage for the derived session-status machine branches that the inline `protocol::status` tests do not reach: agent thinking/message derivations, the lifecycle phase ladder, and the empty-call-id path.
 - [`feature_workflow_dispatch.rs`](./feature_workflow_dispatch.rs) — An orchestrator dispatching a *workflow* to a worker, end to end.
 - [`feature_workflow_examples.rs`](./feature_workflow_examples.rs) — The shipped example workflows must stay valid.
+- [`feature_workflow_run_mode.rs`](./feature_workflow_run_mode.rs) — The trigger-only MCP surface (`MEDULLA_WORKFLOW_TOOLS=run`) driven through the real request handler: the six served verbs, and a real `workflow_run` that dispatches to no harness.
+- [`feature_workflow_skills.rs`](./feature_workflow_skills.rs) — Generated harness skills end to end: author through `ops`, install into a scratch `$HOME`, edit and sync, prune a deleted workflow.
 
 ## Maintenance
 

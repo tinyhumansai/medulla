@@ -50,6 +50,9 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
         .into_iter()
         .map(|w| WorkerSpec {
             id: w.id,
+            // A remembered row names a remote peer; which machine it is on is
+            // the peer's own business, and this hub has never claimed to know.
+            host_id: String::new(),
             address: w.address,
             name: w.label.unwrap_or_else(|| "medulla-worker".to_string()),
             description: format!("{} daemon", w.harness),
@@ -58,6 +61,11 @@ fn workers_from_config(home: &Path) -> Vec<WorkerSpec> {
             // injected fresh each launch (see `build_hub_config_with_host`),
             // and a remote peer's is unknown here.
             workspace: None,
+            roles: w.roles,
+            // Unstated for a remote peer: its concurrency is whatever it
+            // declares on its own machine. Normalised where the roster entry is
+            // built.
+            max_sessions: 0,
         })
         .collect()
 }
@@ -194,7 +202,7 @@ fn workers_from_env(env: &HashMap<String, String>) -> Vec<WorkerSpec> {
         name: "medulla-worker".to_string(),
         description: format!("{provider} daemon"),
         harness: provider.clone(),
-        workspace: None,
+        ..Default::default()
     };
     if let Some(list) = env
         .get("MEDULLA_HUB_WORKERS")
@@ -387,8 +395,16 @@ fn build_hub_config_with_host_and_link(
             }
             // Inserted in declaration order, so the primary leads and the
             // extras follow it the way they read in the config.
+            //
+            // De-duplicated by **id**, not by address: several declared agents
+            // share one host's address, and dropping every worker at that
+            // address would leave only the last one inserted — a machine would
+            // advertise one of its agents and silently lose the rest. Remembered
+            // entries at a device-local address are already gone (above), so
+            // this only guards against an env-seeded id colliding with a
+            // declared one.
             for host in dispatch.hosts.iter().rev() {
-                workers.retain(|worker| worker.address != host.address);
+                workers.retain(|worker| worker.id != host.id);
                 workers.insert(0, host.clone());
             }
             (Some(dispatch.network.clone()), dispatch.hub_address.clone())

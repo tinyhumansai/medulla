@@ -2,8 +2,9 @@
 //!
 //! Every test draws the whole tab onto a [`TestBackend`] and reads the resulting
 //! screen, because the thing under test is what an operator sees: that the three
-//! panes are all present, that the graph is drawn as boxes joined by wires, and
-//! that a run overlaid on it marks the steps it reached.
+//! panes are all present, that the graph is drawn as marked nodes joined by
+//! wires, that its wires carry a moving flow highlight, and that a run overlaid
+//! on it marks the steps it reached.
 
 use std::sync::Arc;
 
@@ -167,24 +168,22 @@ fn canvas_navigation_uses_the_split_graph_panes_measured_height() {
     let (_home, mut app) = app_with(&[fanout("parallel")], &[]);
 
     render_sized(&mut app, 140, 34);
-    let measured_lanes = app.visible_lanes();
-    assert_eq!(
-        measured_lanes,
-        (app.wf.graph_rows / super::LANE_STRIDE).max(1)
-    );
+    let measured_rows = app.visible_rows();
+    assert_eq!(measured_rows, app.wf.graph_rows.max(1));
 
     app.move_graph_cursor(Move::Forward);
     for _ in 0..7 {
         app.move_graph_cursor(Move::LaneDown);
     }
-    let selected_lane = app.selected_graph_node().expect("selected node").lane;
+    let node = app.selected_graph_node().expect("selected node").clone();
+    let (_, row) = app.graph_cell(node.layer, node.lane);
     assert!(
-        selected_lane < app.wf.canvas_lane + measured_lanes,
-        "lane {selected_lane} must remain inside {}..{}",
-        app.wf.canvas_lane,
-        app.wf.canvas_lane + measured_lanes
+        row >= app.wf.canvas_row && row < app.wf.canvas_row + measured_rows,
+        "row {row} must remain inside {}..{}",
+        app.wf.canvas_row,
+        app.wf.canvas_row + measured_rows
     );
-    assert!(app.wf.canvas_lane > 0, "the reduced pane must scroll");
+    assert!(app.wf.canvas_row > 0, "the reduced pane must scroll");
 }
 
 #[test]
@@ -219,21 +218,29 @@ fn long_workflow_names_cannot_widen_the_rail_past_the_agents_cap() {
 }
 
 #[test]
-fn the_graph_is_drawn_as_boxes_joined_by_wires() {
+fn the_graph_is_drawn_as_marked_nodes_joined_by_wires() {
     let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
 
     let screen = render(&mut app);
 
-    assert!(screen.contains("▶ Start"), "the trigger box is missing");
-    assert!(screen.contains("◆ Check"), "the condition box is missing");
+    assert!(screen.contains("▶ Start"), "the trigger node is missing");
+    assert!(screen.contains("◆ Check"), "the condition node is missing");
     assert!(
         screen.contains("Start · trigger") && screen.contains("wheel/Page scroll"),
         "the selected step's persistent detail pane is missing: {screen}"
     );
+    // One row per node, wires attaching on that same row: a node and the node
+    // it feeds share a line. This is what buys the canvas the four-fold density
+    // that drawing each node as a box cost.
+    let row = screen
+        .lines()
+        .find(|line| line.contains("▶ Start"))
+        .expect("the trigger is on some row");
     assert!(
-        screen.contains('╭') && screen.contains('╯'),
-        "nodes are drawn as boxes"
+        row.contains("◆ Check"),
+        "a node sits inline with the node it feeds: {row}"
     );
+    assert!(row.contains('─'), "joined by a wire on that row: {row}");
     assert!(screen.contains('▶'), "edges end in an arrowhead");
     assert!(
         screen.contains('│'),
@@ -536,33 +543,4 @@ fn a_terminal_too_small_to_draw_anything_does_not_panic() {
     render_sized(&mut app, 20, 6);
 }
 
-#[test]
-fn a_graph_wider_than_the_canvas_scrolls_to_the_cursor() {
-    let mut long = diamond("long");
-    long.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("Step {index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
-    let (_home, mut app) = app_with(&[long], &[]);
-
-    let start = render(&mut app);
-    assert!(start.contains("Step 0"));
-    assert!(!start.contains("Step 11"), "the far end is off screen");
-
-    for _ in 0..11 {
-        app.move_graph_cursor(Move::Forward);
-    }
-    let end = render(&mut app);
-    assert!(
-        end.contains("Step 11"),
-        "the cursor pulled the canvas along"
-    );
-}
+mod layout_tests;

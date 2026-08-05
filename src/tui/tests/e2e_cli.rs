@@ -104,7 +104,11 @@ fn logout_sweeps_a_retired_credential_file() {
 
     let output = run(&["logout"], dir.path(), dir.path());
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!credentials.exists(), "the retired file is gone");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Logged out"), "{stdout}");

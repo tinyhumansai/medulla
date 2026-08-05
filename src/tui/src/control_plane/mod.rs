@@ -66,6 +66,27 @@ pub(crate) async fn start(
     // any replaceable ancestor. Only a directory it creates is chmodded.
     match ControlServer::bind(&path, ops, Default::default()).await {
         Ok(server) => {
+            // A grant this fresh registry never minted can never be redeemed,
+            // so any `--mcp-config` file a *previous* run of this account left
+            // behind — most often one whose process was killed before it could
+            // reap its own sessions — is pure leftover by now.
+            //
+            // Strictly *before* the install below, and that ordering is the
+            // whole correctness argument. `install` publishes
+            // `control_socket::active()`, and by this point the hub is already
+            // up: another Tokio worker can answer an arriving task and launch
+            // a PTY session the instant a plane exists. Sweeping after the
+            // publish would race that launch and delete the config file it had
+            // just written, leaving a live session pointed at a file that no
+            // longer exists — the fleet tools silently absent from a harness
+            // that was granted them. Sweeping first means every file this run
+            // writes is written after the last deletion this run performs.
+            // The socket is passed rather than read back from the plane for
+            // the same reason: it is not published yet, and the directory
+            // these files live in is keyed off it. `mcp` itself only exists
+            // with the `workflows` feature compiled in.
+            #[cfg(feature = "workflows")]
+            medulla::mcp::sweep_stale_config_files(server.path());
             // Recorded process-wide so the ACP spawn path can mint a grant
             // per session without the registry being threaded through the
             // hub, the daemon, and the provider layer to reach it.

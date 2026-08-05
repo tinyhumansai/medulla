@@ -45,6 +45,7 @@
 //! sends and expects nothing back from. That is the whole protocol surface for a
 //! server that exposes tools and no resources or prompts.
 
+pub mod attach;
 pub mod backend;
 pub(crate) mod tools;
 mod types;
@@ -52,6 +53,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use attach::{
+    attach_cli, config_dir_for_socket, revoke_session, sweep_stale_config_files, ServerSpec,
+};
 pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{
     tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,

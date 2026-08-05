@@ -6,13 +6,99 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Weak};
 
-use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtyPair, PtySize};
 
 use super::super::handle::{release_queued, SessionHandle, SessionMeta};
 use super::super::launch::{interactive_args, mint_session_id};
 use super::super::types::{LaunchSpec, DEFAULT_COLS, DEFAULT_ROWS, SCROLLBACK};
 
 use super::{write, PtyManager, BUF_LEN, OPENPTY_ATTEMPTS, OPENPTY_RETRY_CAP, OPENPTY_RETRY_PAUSE};
+
+/// Cleans up a launch that fails partway through.
+///
+/// A fleet grant is minted (see [`crate::worker::pty::launch::attach_mcp`])
+/// before this module's fallible pty and process setup ever runs, and nothing
+/// else revokes it until a [`SessionHandle`] exists to do that when it is
+/// reaped. Constructed with the session key `open` minted its grant under, and
+/// armed with the child once `spawn_command` succeeds, so a failure anywhere
+/// in between has one place to answer to.
+///
+/// [`Self::disarm`] hands both back out once a handle exists to take over —
+/// after that point this is inert, and its `Drop` does nothing.
+///
+/// `pub(super)` rather than private: `manager::tests` exercises its `Drop`
+/// directly with a recording stand-in child, which a real failure inside
+/// `open` is not reliable enough to provoke in a test.
+pub(super) struct LaunchGuard {
+    /// `None` when this launch minted no grant — a provider with no
+    /// registration flag, or a host with no control plane bound.
+    grant: Option<String>,
+    /// `Some` from the moment `spawn_command` returns until [`Self::disarm`]
+    /// hands it to its permanent owner.
+    child: Option<Box<dyn Child + Send + Sync>>,
+    /// Cleared by [`Self::disarm`]; `Drop` is a no-op once it is.
+    armed: bool,
+}
+
+impl LaunchGuard {
+    pub(super) fn new(grant: Option<String>) -> Self {
+        Self {
+            grant,
+            child: None,
+            armed: true,
+        }
+    }
+
+    /// Record the spawned child, so a later failure in this function can kill
+    /// it. Nothing else is tracking it yet: it is not in a `SessionHandle`
+    /// until the handle is built, several fallible calls later.
+    pub(super) fn set_child(&mut self, child: Box<dyn Child + Send + Sync>) {
+        self.child = Some(child);
+    }
+
+    /// Hand the child to its permanent owner and stop cleaning up: a
+    /// `SessionHandle` now exists, and its own reap revokes the grant (see
+    /// `handle::lifecycle::SessionHandle::reap`) and will kill the child if
+    /// asked to. `None` only if called before [`Self::set_child`], which
+    /// nothing in this module does.
+    pub(super) fn disarm(mut self) -> Option<Box<dyn Child + Send + Sync>> {
+        self.armed = false;
+        self.child.take()
+    }
+}
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // The child outlived the grant it was launched to redeem, so kill it
+        // before giving the grant back — a live child holding a revoked grant
+        // is merely broken, but a live child holding one nobody revoked is
+        // exactly the capability leak this guard exists to close.
+        //
+        // Then *wait* on it. This guard is the child's only owner on this path
+        // — `SessionHandle::reap`, which normally does the waiting, is never
+        // reached because the handle was never built — so dropping a killed
+        // child without reaping it leaves a zombie holding a process slot
+        // until Medulla itself exits. A run of pty setup failures is exactly
+        // the case where that accumulates, and it is also the case where the
+        // machine is already short of descriptors.
+        //
+        // Blocking here is safe: `open` runs on the blocking pool (see its
+        // docs), and the wait follows a kill, so it returns as soon as the
+        // signal is reaped rather than lasting as long as the session would
+        // have.
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        #[cfg(feature = "workflows")]
+        if let Some(session) = &self.grant {
+            medulla::mcp::revoke_session(session);
+        }
+    }
+}
 
 impl PtyManager {
     /// Launch a harness on a fresh PTY and start draining it.
@@ -28,6 +114,14 @@ impl PtyManager {
     /// worker for up to half a second per launch, which under a burst starved
     /// the runtime the inbox drain and the screen samplers also live on.
     pub fn open(&self, spec: LaunchSpec) -> Result<String, String> {
+        // Constructed before the *first* fallible call in this function, not
+        // just before `spawn_command`: `spec.mcp_grant_session` was already
+        // minted by the caller before `open` was ever reached, so even
+        // `open_pty()` failing — file descriptors exhausted, most likely —
+        // must not return with that grant live and nothing left to revoke it.
+        // See the type's own docs for what it does from here on.
+        let mut guard = LaunchGuard::new(spec.mcp_grant_session.clone());
+
         // Before the pty, because it shells out to `git`: one more reason this
         // whole function belongs on a blocking thread.
         let branch = git_branch(&spec.cwd);
@@ -70,6 +164,7 @@ impl PtyManager {
             .slave
             .spawn_command(command)
             .map_err(|err| format!("could not start {}: {err}", spec.bin))?;
+        guard.set_child(child);
         // Drop the slave once the child holds it: while we keep a handle the
         // master never sees EOF, so the reader would hang after the child exits.
         drop(pty.slave);
@@ -82,6 +177,9 @@ impl PtyManager {
             .master
             .take_writer()
             .map_err(|err| format!("could not write to the pty: {err}"))?;
+        let child = guard
+            .disarm()
+            .expect("the guard was armed with a child immediately after spawn_command succeeded");
 
         // The write half moves onto its own thread below; the session holds
         // only the queue, so no caller ever waits on a child that is not
@@ -101,9 +199,14 @@ impl PtyManager {
                 launch_commit,
                 launch_checkout_identity,
                 started_at: now,
-                user_spawned: spec.user_spawned,
+                // Whichever door this launch came through is this session's
+                // provenance from here on. The executor's task path stamps
+                // `Orchestrator`; the operator's picker stamps `User`.
+                origin: spec.origin,
+                mcp_grant_session: spec.mcp_grant_session,
             },
             spec.label,
+            spec.name,
             session_id,
             spec.control,
             vt100::Parser::new(DEFAULT_ROWS, DEFAULT_COLS, SCROLLBACK),

@@ -108,6 +108,14 @@ pub struct LocalHarnesses {
     /// but not to a harness the operator opened by hand would make attribution
     /// depend on which door the session came through.
     pub attribution: bool,
+    /// Lifecycle hooks supplied to a supported operator-started harness — the resolved
+    /// `[[hooks]]` config section. Carried here for the same reason
+    /// `attribution` is: a policy that applied to a dispatched task but not to a
+    /// harness the operator opened by hand would silently depend on which door
+    /// the session came through.
+    pub hooks: medulla::harness_hooks::HooksConfig,
+    /// TUI-safe diagnostic sink for hook coverage warnings.
+    pub log: Option<medulla::daemon::LogFn>,
 }
 
 impl LocalHarnesses {

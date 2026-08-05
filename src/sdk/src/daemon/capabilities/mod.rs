@@ -103,6 +103,10 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         // when the only credential is bound to the gateway via `apiKeyEnv`).
         router: options.router.clone(),
         attribution: options.attribution,
+        // The capability probe is Medulla's own introspection, not the
+        // operator's work: running their hooks against it would fire
+        // checkpoint/commit side effects for a prompt they never issued.
+        hooks: crate::harness_hooks::HooksConfig::default(),
         on_event: None,
         on_stdin: None,
         on_session: None,

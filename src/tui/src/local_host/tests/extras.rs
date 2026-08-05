@@ -105,7 +105,18 @@ async fn a_failing_extra_does_not_take_the_other_hosts_down() {
             ..HostSection::default()
         },
     ];
-    let options = options_from_config(&primary, &env, None, None, None, true).expect("options");
+    let options = options_from_config(
+        &primary,
+        &env,
+        None,
+        None,
+        None,
+        &super::super::LaunchPolicy {
+            attribution: true,
+            ..Default::default()
+        },
+    )
+    .expect("options");
 
     let (hosts, problems) = start_all(
         &primary,
@@ -114,6 +125,7 @@ async fn a_failing_extra_does_not_take_the_other_hosts_down() {
         &network,
         options,
         PtyManager::new(),
+        &[],
     );
 
     assert_eq!(hosts.len(), 2, "the primary and the first extra both start");

@@ -9,7 +9,8 @@ use portable_pty::{Child, MasterPty};
 use super::super::sync::lock;
 use super::super::types::HarnessControl;
 use super::types::{
-    AttentionState, ColdFields, SessionIo, SessionMeta, NO_EXIT_CODE, STATE_EXITED, STATE_RUNNING,
+    AttentionState, ColdFields, SessionIo, SessionMeta, TerminalModes, NO_EXIT_CODE, STATE_EXITED,
+    STATE_RUNNING,
 };
 use super::SessionHandle;
 
@@ -23,6 +24,7 @@ impl SessionHandle {
     pub(in super::super) fn new(
         meta: SessionMeta,
         label: String,
+        name: Option<String>,
         session_id: Option<String>,
         control: HarnessControl,
         screen: vt100::Parser,
@@ -38,7 +40,11 @@ impl SessionHandle {
         // Not so for an operator-spawned session: nothing is about to run in it,
         // it is sitting at a prompt waiting to be typed in. Leaving it claimed
         // would make the rail read "busy" for a harness that is plainly idle.
-        let busy = !meta.user_spawned;
+        //
+        // Origin, not control, answers this: what matters is whether a turn was
+        // dispatched into this session at birth, and only the path that created
+        // it knows that.
+        let busy = !meta.origin.is_user();
         SessionHandle {
             meta,
             state: AtomicU8::new(STATE_RUNNING),
@@ -51,6 +57,7 @@ impl SessionHandle {
             cold: Mutex::new(ColdFields {
                 label,
                 session_id,
+                name,
                 thread_name: None,
                 last_error: None,
             }),
@@ -63,6 +70,7 @@ impl SessionHandle {
                 checked_at: started_at,
             }),
             screen: Mutex::new(screen),
+            modes: Mutex::new(TerminalModes::default()),
             io: Mutex::new(Some(SessionIo { master, writes })),
             child: Mutex::new(Some(child)),
         }
@@ -117,5 +125,13 @@ impl SessionHandle {
         // The screen is deliberately kept: the operator usually wants to read
         // how a session ended. Only the descriptors go.
         *lock(&self.io) = None;
+        // The session's capability goes with it. A grant left in the registry
+        // after its harness exits is a live token with no live session — and
+        // the MCP server is a *subprocess* of the harness, so one that outlived
+        // its parent would still be able to redeem it.
+        #[cfg(feature = "workflows")]
+        if let Some(session) = &self.meta.mcp_grant_session {
+            medulla::mcp::revoke_session(session);
+        }
     }
 }

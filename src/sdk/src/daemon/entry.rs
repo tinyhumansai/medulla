@@ -24,7 +24,24 @@ use super::types::{
     DaemonConfig, DaemonRuntime, SendFn, DEFAULT_MAX_PENDING, DEFAULT_STATUS_THROTTLE_MS,
 };
 
-const DEFAULT_CONCURRENCY: usize = 2;
+/// Host-wide task slots, effectively unlimited by default.
+///
+/// This cap predates declared agents: when a machine was one worker with one
+/// implicit session, a small number was the only thing standing between a
+/// fan-out and a thrashed laptop. It is the wrong instrument now, and it queued
+/// invisibly — a third concurrent task waited on a slot even when it targeted a
+/// different agent in a different workspace, where nothing could collide.
+///
+/// What actually bounds concurrency now sits at the grain that owns the hazard:
+/// per-agent `max_sessions` derived from the agent's workspace strategy, and the
+/// checkout serialization that keeps a second writer out of a tree someone is
+/// already working in. A host-wide count knows about neither, so it can only
+/// delay work that was already safe.
+///
+/// The semaphore itself stays — `active_count` derives the running-task figure
+/// from its permits — and an operator can still set `concurrency` in config to
+/// impose a real cap on a small machine.
+const DEFAULT_CONCURRENCY: usize = 1024;
 const DEFAULT_TASK_TIMEOUT_MS: u64 = 600_000;
 const DEFAULT_POLL_MS: u64 = 2_000;
 

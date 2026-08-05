@@ -3,13 +3,15 @@
 //! its attribution; [`roster`] covers advertising, addressing and dedupe;
 //! [`dispatch`] the sender-runner's full dispatch/route/settle path against a
 //! fake worker; [`liveness`] the two-layer timeout gate of host-link protocol
-//! §6.3.
+//! §6.3; [`held_watchdog`] the third gate on that window — a session an operator
+//! is holding.
 
 mod activity;
 mod capabilities;
 mod dispatch;
 mod handoff_advert;
 mod held;
+mod held_watchdog;
 mod liveness;
 mod roster;
 mod system_info;

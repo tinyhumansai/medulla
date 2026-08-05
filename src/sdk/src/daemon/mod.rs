@@ -44,5 +44,5 @@ pub(crate) use status::TOOL_CALL_ID_SEPARATOR;
 pub use status::{status_detail, work_detail, THINKING_PREFIX, TOOL_PREFIX};
 pub use types::{
     DaemonConfig, DaemonRuntime, LogFn, NowFn, SendFn, CAPACITY_REJECTION_PREFIX,
-    HARNESS_HELD_PREFIX,
+    HARNESS_HELD_PREFIX, SESSION_HELD_STATUS_PREFIX, SESSION_RESUMED_STATUS_PREFIX,
 };

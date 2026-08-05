@@ -255,11 +255,24 @@ pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     if first != "---" {
         return None;
     }
+    // Only search lines inside a *closed* frontmatter block. An unclosed
+    // block (no second `---`) is not frontmatter at all as far as any parser
+    // is concerned, so a `# medulla:managed` line found only by scanning to
+    // EOF would be prose in a hand-written file, not a marker of ours.
+    let mut body = Vec::new();
+    let mut closed = false;
     for line in lines {
-        let line = line.trim();
-        if line == "---" {
-            return None;
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            closed = true;
+            break;
         }
+        body.push(trimmed);
+    }
+    if !closed {
+        return None;
+    }
+    for line in body {
         if let Some(rest) = line.strip_prefix("# medulla:managed ") {
             return parse_marker_fields(rest.trim());
         }

@@ -329,7 +329,7 @@ fn the_handback_question_does_not_swallow_the_release_of_a_press_it_interrupted(
     let _ = app.on_event(press(3, 1));
     let out = render(&mut app).join("\n");
     assert!(
-        out.contains("You still have this harness"),
+        out.contains("You still have this session"),
         "clicking out must raise the hand-back question: {out}"
     );
 
@@ -352,7 +352,7 @@ fn the_handback_question_does_not_swallow_the_release_of_a_press_it_interrupted(
 }
 
 #[test]
-fn clicking_another_harness_row_asks_about_the_harness_being_left() {
+fn clicking_another_session_row_asks_about_the_session_being_left() {
     // The rail used to be waved through as navigation chrome, so a click on the
     // neighbouring harness row skipped the hand-back policy entirely. The next
     // draw then detached the attached session silently — while the question on
@@ -387,8 +387,8 @@ fn clicking_another_harness_row_asks_about_the_harness_being_left() {
     );
     let out = render(&mut app).join("\n");
     assert!(
-        out.contains("You still have this harness"),
-        "leaving a harness by the rail must ask the same question: {out}"
+        out.contains("You still have this session"),
+        "leaving a session by the rail must ask the same question: {out}"
     );
     assert_eq!(
         app.attached_session(),
@@ -437,7 +437,7 @@ fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
     let _ = app.on_event(press(5, rows[0]));
     let out = render(&mut app).join("\n");
     assert!(
-        !out.contains("You still have this harness"),
+        !out.contains("You still have this session"),
         "clicking your own row must ask nothing: {out}"
     );
     assert_eq!(
@@ -472,7 +472,7 @@ fn the_handback_question_is_answered_by_clicking_its_answers() {
     let _ = app.on_event(press(3, 1));
     let lines = render(&mut app);
     assert!(
-        lines.join("\n").contains("You still have this harness"),
+        lines.join("\n").contains("You still have this session"),
         "the question must be up before it can be clicked"
     );
 
@@ -513,7 +513,7 @@ fn the_handback_question_is_answered_by_clicking_its_answers() {
     assert!(
         !render(&mut app)
             .join("\n")
-            .contains("You still have this harness"),
+            .contains("You still have this session"),
         "and close the question"
     );
 
@@ -542,7 +542,7 @@ fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
     let _ = app.on_event(press(x + 2, y));
     let out = render(&mut app).join("\n");
     assert!(
-        out.contains("You still have this harness"),
+        out.contains("You still have this session"),
         "a click on the body must leave the question up: {out}"
     );
     assert_eq!(
@@ -556,7 +556,7 @@ fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
     let _ = app.on_event(press(x + "[Y] hand back".chars().count() as u16 + 1, y));
     let out = render(&mut app).join("\n");
     assert!(
-        out.contains("You still have this harness"),
+        out.contains("You still have this session"),
         "a click between answers must leave the question up: {out}"
     );
     assert_eq!(

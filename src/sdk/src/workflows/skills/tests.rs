@@ -89,8 +89,22 @@ fn a_skill_the_old_layout_installed_is_adopted_and_rewritten() {
 /// a file it never wrote.
 #[test]
 fn an_unclosed_frontmatter_is_never_scanned_for_a_marker() {
-    let unclosed = "---\nname: not-a-real-skill\n# medulla:managed workflow=babysit rev=abc\nno closing delimiter below\n";
+    let unclosed = "---\n# medulla:managed workflow=babysit rev=abc\nno closing delimiter below\n";
     assert_eq!(parse_marker(unclosed), None);
+}
+
+/// `seal` always splices the marker onto the line directly after the opening
+/// `---`, so that is the only slot a real file of ours ever has it in. A
+/// hand-written skill can legitimately mention `# medulla:managed` deeper in
+/// its own (otherwise valid, closed) frontmatter — a migration note, or
+/// documentation about this feature — and that must not be read as a marker
+/// either, for the same reason an unclosed block is rejected: it would let
+/// Medulla adopt, and later overwrite or prune, a file it never wrote.
+#[test]
+fn a_marker_deeper_in_a_closed_frontmatter_block_is_not_recognised() {
+    let deeper =
+        "---\nname: not-a-real-skill\n# medulla:managed workflow=babysit rev=abc\n---\nbody\n";
+    assert_eq!(parse_marker(deeper), None);
 }
 
 #[test]

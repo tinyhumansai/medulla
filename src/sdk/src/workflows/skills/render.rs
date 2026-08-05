@@ -244,8 +244,16 @@ fn decode_marker_id(field: &str) -> Option<String> {
 /// missing counts as not ours for the same reason: the only safe reading of a
 /// line we cannot fully account for is that someone else wrote it.
 ///
-/// The search stops at the end of the frontmatter block. A `# medulla:managed`
-/// line in the prose below is a document *about* these files, not one of them.
+/// The marker occupies an exact slot, not merely "somewhere inside the
+/// frontmatter": [`seal`] always splices it onto the line immediately after
+/// the opening `---`, so a well-formed file of ours has it on line 2 and
+/// nowhere else. Accepting it anywhere else in the block would let a
+/// hand-written skill whose own frontmatter happens to carry a
+/// `# medulla:managed` comment — documentation about this feature, or a
+/// migration note — be adopted, and later overwritten or pruned, as if we had
+/// written it. A `---` that never closes is rejected outright for the same
+/// reason: it is not frontmatter any parser would recognise, so nothing
+/// inside it can be read as ours either.
 pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     let mut lines = file.lines();
     let first = lines.next()?.trim();
@@ -255,29 +263,14 @@ pub(crate) fn parse_marker(file: &str) -> Option<(String, String)> {
     if first != "---" {
         return None;
     }
-    // Only search lines inside a *closed* frontmatter block. An unclosed
-    // block (no second `---`) is not frontmatter at all as far as any parser
-    // is concerned, so a `# medulla:managed` line found only by scanning to
-    // EOF would be prose in a hand-written file, not a marker of ours.
-    let mut body = Vec::new();
-    let mut closed = false;
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            closed = true;
-            break;
-        }
-        body.push(trimmed);
-    }
-    if !closed {
+    let second = lines.next()?.trim();
+    let rest = second.strip_prefix("# medulla:managed ")?;
+    // The block still has to close for this to be frontmatter at all — a
+    // marker-shaped second line above an unclosed `---` is not one either.
+    if !lines.any(|line| line.trim() == "---") {
         return None;
     }
-    for line in body {
-        if let Some(rest) = line.strip_prefix("# medulla:managed ") {
-            return parse_marker_fields(rest.trim());
-        }
-    }
-    None
+    parse_marker_fields(rest.trim())
 }
 
 /// Parses the marker's `key=value` field list, whatever comment wrapped it.

@@ -440,4 +440,23 @@ fn the_agents_heading_sits_under_the_create_action_and_only_over_a_tree() {
         heading < first_agent,
         "and precedes the tree it heads: {rows:?}"
     );
+
+    // The other half of "only over a tree": a hosting device with nothing
+    // declared and no traffic still offers the create action, and a heading
+    // there would announce a section that is not on the rail. Built on the empty
+    // runtime rather than `hosting_app`, whose demo lanes are themselves agents.
+    let mut bare = App::new(
+        Arc::new(MockRuntime::empty()) as Arc<dyn Runtime>,
+        LoadedConfig::defaults("medulla.tui.json".into()),
+    );
+    bare.set_local_sessions(shell_harnesses(PtyManager::new()));
+    let rows = bare.rail_rows();
+    assert!(
+        rows.iter().any(|row| matches!(row, RailRow::NewAgent)),
+        "the create action is still offered: {rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|row| matches!(row, RailRow::AgentsHeader)),
+        "but nothing is headed: {rows:?}"
+    );
 }

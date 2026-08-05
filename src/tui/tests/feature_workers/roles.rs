@@ -136,9 +136,15 @@ fn removing_a_row_takes_the_arrows_back_off_the_role_list() {
     // not the one the cursor started in. What matters here is that the arrows
     // are back on the tree, which is a preview of an agent rather than toggles
     // being driven.
+    assert!(
+        !app.host_roles_focused(),
+        "the removal took the arrows off the toggles"
+    );
     let _ = app.on_event(key(KeyCode::Down));
-    let out = render(&mut app, 130, 44);
-    assert!(out.contains("Agent · "), "back on the tree: {out}");
+    assert!(
+        !app.host_roles_focused(),
+        "and Down walked the tree rather than the role list"
+    );
 }
 
 #[test]

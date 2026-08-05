@@ -141,6 +141,16 @@ impl App {
         tree.get(row.host)?.agents.get(row.agent?).cloned()
     }
 
+    /// Whether the preview's role toggles hold the arrows.
+    ///
+    /// The Hosts page has two cursors on one screen — the tree and the toggle
+    /// list — and which of them a keypress reaches is not legible from the
+    /// rendered buffer alone: an agent preview is drawn either way.
+    /// Test/inspection seam.
+    pub fn host_roles_focused(&self) -> bool {
+        self.host_roles_focus
+    }
+
     /// Whether the cursor is on a host header rather than an agent.
     /// Test/inspection seam.
     pub fn hosts_cursor_on_host(&self) -> bool {

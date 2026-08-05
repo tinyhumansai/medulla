@@ -499,6 +499,38 @@ pub fn revoke_session(session: &str) {
     }
 }
 
+/// An explicit path to the binary that serves Medulla's MCP tools.
+///
+/// Normally there is nothing to set: the server is *this* program run as
+/// `medulla mcp`, and [`std::env::current_exe`] names it. That assumption holds
+/// for the TUI, the daemon, and the CLI, and breaks for anything that links the
+/// SDK without being the Medulla binary — most visibly a `cargo test` harness,
+/// where `current_exe` is `target/debug/deps/<suite>-<hash>` and running it with
+/// `mcp` on its argv serves nothing at all. The result is not an error but an
+/// agent with no tools, which is the failure this whole module is trying to make
+/// impossible; an integration test that wants a *real* tool surface points this
+/// at a built `medulla`.
+///
+/// Untrusted configuration, per `AGENTS.md`: whatever it names is executed. It
+/// is honoured only when it points at an existing file, and it never widens what
+/// a session is served — the grant still decides that.
+pub const SERVER_COMMAND_ENV: &str = "MEDULLA_MCP_COMMAND";
+
+/// The binary a spawned tool server runs.
+///
+/// `None` when neither the override nor this process's own path resolves, which
+/// leaves the caller no command to register — see [`server_spec`], which
+/// attaches nothing rather than a registration the harness would fail to start.
+pub fn server_command() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(SERVER_COMMAND_ENV) {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    std::env::current_exe().ok()
+}
+
 /// The server to offer a session, or `None` when no family would be served.
 ///
 /// `fleet` is the grant the caller resolved — locally minted
@@ -518,7 +550,7 @@ pub fn server_spec(
     if !workflows_enabled && fleet.is_none() {
         return None;
     }
-    let command = std::env::current_exe().ok()?;
+    let command = server_command()?;
     let mut spec = ServerSpec {
         name: super::SERVER_NAME,
         command,

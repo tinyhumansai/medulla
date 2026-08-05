@@ -161,6 +161,7 @@ impl App {
         } else {
             operator
         };
+        self.sync_local_sessions_hooks();
         self.hook_index = crate::ui::selection::clamp(self.hook_index, self.hook_rows().len());
         self.set_status(if enabled {
             "Medulla's own hooks on · new harnesses report their lifecycle"
@@ -178,16 +179,18 @@ impl App {
     /// saved" while leaving a file the running Medulla ignores after restart
     /// (chatgpt-codex-connector P2 on PR #192).
     fn persist_hooks(&mut self, hooks: HooksConfig, success: &str) {
-        let Some(path) = &self.hooks_config_path else {
+        let Some(path) = self.hooks_config_path.clone() else {
             self.set_status("Hook changed for this session; no config path is writable");
             self.loaded.config.hooks = hooks;
+            self.sync_local_sessions_hooks();
             return;
         };
         // Only the operator's own: writing Medulla's built-ins into their file
         // would pin one release's defaults there forever.
-        match medulla::config::persist_hooks(path, &hooks.operator_hooks()) {
+        match medulla::config::persist_hooks(&path, &hooks.operator_hooks()) {
             Ok(()) => {
                 self.loaded.config.hooks = hooks;
+                self.sync_local_sessions_hooks();
                 // Tell the operator when this landed somewhere other than the
                 // path other settings save to, so a hook that "saved" but is
                 // not in the project's own config is not a mystery.
@@ -202,6 +205,25 @@ impl App {
                 self.set_status(note)
             }
             Err(error) => self.set_status(format!("Cannot save hooks: {error}")),
+        }
+    }
+
+    /// Carry the just-saved hook set into the live operator-started launch
+    /// path, not only `self.loaded.config.hooks`.
+    ///
+    /// `LocalSessions` (the seam `open_unmanaged` reads — see
+    /// `harness_pane::spawn`) is handed its own clone of the resolved hooks
+    /// once at startup, so an edit here previously updated the config the
+    /// *next restart* would read while a session opened from the Agents pane
+    /// before that restart kept launching with the hook set from before the
+    /// edit: a hook just added would not run, and one just removed still
+    /// would, even though the status line claimed "applies to harnesses
+    /// started from now on" (chatgpt-codex-connector P2 on PR #192). `None`
+    /// when this device is not hosting — there is then no live launch state
+    /// to carry the edit into.
+    fn sync_local_sessions_hooks(&mut self) {
+        if let Some(sessions) = self.local_sessions.as_mut() {
+            sessions.hooks = self.loaded.config.hooks.clone();
         }
     }
 }

@@ -15,6 +15,27 @@ fn app_with_config(path: &std::path::Path) -> App {
     app
 }
 
+/// An app whose live operator-launch state (`local_sessions`) is populated, the
+/// way a hosting device's really is — see `app_loop::run_tui`'s
+/// `LocalSessions` construction.
+fn app_hosting(path: &std::path::Path) -> App {
+    let mut app = app_with_config(path);
+    app.local_sessions = Some(crate::ui::harness_pane::LocalSessions {
+        sessions: crate::worker::pty::PtyManager::new(),
+        runtimes: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        hub_address: "this-device".to_string(),
+        env: std::collections::HashMap::new(),
+        workspace: "/repos/acme".to_string(),
+        providers: Vec::new(),
+        custom_harnesses: Vec::new(),
+        router: None,
+        attribution: true,
+        hooks: app.loaded.config.hooks.clone(),
+        log: None,
+    });
+    app
+}
+
 /// An app whose loaded config already carries Medulla's own hooks, as a real
 /// load would leave it.
 fn app_with_builtins(path: &std::path::Path) -> App {
@@ -121,6 +142,66 @@ fn turning_medullas_own_hooks_off_withdraws_them_here_and_on_disk() {
     app.toggle_builtin_hooks();
     assert!(app.loaded.config.hook_defaults.enabled);
     assert_eq!(app.hook_rows().len(), with_builtins);
+}
+
+/// The P2 Codex found on this branch: saving a hook updated
+/// `loaded.config.hooks`, but `LocalSessions.hooks` — the copy
+/// `harness_pane::spawn::open_unmanaged` actually reads when the operator
+/// starts a harness from the Agents pane — was a separate clone taken once at
+/// startup and never touched again. The status line claimed "applies to
+/// harnesses started from now on" while a session opened before a restart
+/// still launched with the stale hook set: a newly added hook would not run,
+/// and a removed one would keep running.
+#[test]
+fn saving_a_hook_updates_the_live_operator_launch_state_too() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    let mut app = app_hosting(&path);
+    assert!(
+        app.local_sessions.as_ref().unwrap().hooks.hooks.is_empty(),
+        "starts with no hooks"
+    );
+
+    app.save_hook(None, "Stop |  |  |  | notify-send done");
+
+    let live = &app.local_sessions.as_ref().unwrap().hooks;
+    assert_eq!(
+        live.hooks, app.loaded.config.hooks.hooks,
+        "the live launch state must match what was just saved"
+    );
+    assert!(
+        live.hooks.iter().any(|h| h.command() == "notify-send done"),
+        "the freshly added hook must reach the live launch state: {live:?}"
+    );
+}
+
+/// The same staleness class applies to turning Medulla's own hooks off: the
+/// operator flips `b`, the status line says the harnesses report nothing —
+/// that has to be true for a session opened from the Agents pane right after,
+/// not only for one started following a restart.
+#[test]
+fn toggling_builtin_hooks_updates_the_live_operator_launch_state_too() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    let mut app = app_hosting(&path);
+    app.loaded.config.hooks = HooksConfig::default()
+        .with_builtin(medulla::harness_hooks::builtin::hooks("/usr/bin/medulla"));
+    app.local_sessions.as_mut().unwrap().hooks = app.loaded.config.hooks.clone();
+    let with_builtins = app.local_sessions.as_ref().unwrap().hooks.hooks.len();
+    assert!(with_builtins > 0);
+
+    app.toggle_builtin_hooks();
+
+    let live = &app.local_sessions.as_ref().unwrap().hooks;
+    assert_eq!(
+        live.hooks, app.loaded.config.hooks.hooks,
+        "the live launch state must match what was just toggled"
+    );
+    assert!(
+        live.hooks.is_empty(),
+        "no operator hooks were declared, so turning built-ins off must leave \
+         the live launch state empty too: {live:?}"
+    );
 }
 
 /// The P2 Codex found on this branch: `config_path` can resolve to a

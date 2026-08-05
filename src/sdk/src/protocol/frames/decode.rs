@@ -117,6 +117,18 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         Some(serde_json::Value::Object(inputs)) => inputs.clone(),
         Some(_) => return None,
     };
+    // Decoded so a *response* can report which session served the task. Nothing
+    // on the receiving side of a `task` frame reads it: honouring an inbound
+    // session id is session targeting, which is deliberately not implemented —
+    // one caller must not be able to run inside a session opened for another.
+    // Blank is treated as absent, so a sender that always writes the key does
+    // not report a session nothing can resume.
+    let session_id = obj
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
 
     Some(TaskFrame {
         proto: MEDULLA_TASK_PROTO.to_string(),
@@ -137,6 +149,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         fleet_depth,
         usage,
         work,
+        session_id,
     })
 }
 

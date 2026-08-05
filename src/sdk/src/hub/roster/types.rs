@@ -21,9 +21,9 @@ pub struct HubWorker {
     /// address looks like; the backend then synthesizes a host for it exactly as
     /// it does today.
     ///
-    /// Carried but **not yet advertised**: emitting `hostId` (and the `hosts[]`
-    /// block it belongs with) is the wire change, and it is deliberately not
-    /// part of the declaration model landing here.
+    /// Advertised as the agent's `hostId`, and as one entry in the payload's
+    /// `hosts[]` block. Blank is omitted from both, which is what leaves the
+    /// backend's `host:${socketId}` synthesis in place for a peer nobody placed.
     pub host_id: String,
     /// tiny.place address (base58 cryptoId or `@handle`).
     ///
@@ -57,7 +57,7 @@ pub struct HubWorker {
     /// placement, and reports "no workspaces are declared on this host" — which
     /// reads as an unusable fleet and makes it decline work it could in fact
     /// delegate. The *type* rides along in memory only for now; sending
-    /// `workspace` as an object is the wire change, not this one.
+    /// `workspace` as an object is deferred with the remote-host work.
     ///
     /// `None` for a remote peer whose working directory this hub has no way to
     /// know; the backend then falls back to the worker's probed `capabilities.cwd`.
@@ -72,6 +72,9 @@ pub struct HubWorker {
     /// Never configured directly: a number an operator could raise past what the
     /// workspace can take is a number that corrupts a checkout. Code-plane data
     /// — deterministic placement reads it, and no prompt ever does (spec §4.2).
+    ///
+    /// Advertised as `metadata.maxSessions`; a zero is withheld, since a
+    /// capacity of nothing reads as saturated.
     pub max_sessions: u32,
     /// Who holds this worker's harness right now.
     ///
@@ -129,6 +132,17 @@ impl HubWorker {
 }
 /// The roster shared between the socket layer and the [`HubHandle`].
 pub type SharedRoster = Arc<Mutex<Vec<HubWorker>>>;
+
+/// The hosts *this machine* declares, as the advert's `hosts[]` block reads them.
+///
+/// Shared and appended to rather than snapshotted at launch, for the same reason
+/// the roster is: a host started mid-session must be advertised as `local` on the
+/// very next registration, and a launch-time copy would describe it as a remote
+/// host this hub merely fronts.
+///
+/// Empty is the honest answer for a hub that hosts nothing itself — every agent
+/// it advertises then belongs to somebody else's machine.
+pub type SharedLocalHosts = Arc<Mutex<Vec<crate::config::LocalHostRef>>>;
 
 /// Live subscription-selection policy shared by the socket task path and the
 /// operator-facing hub handle.

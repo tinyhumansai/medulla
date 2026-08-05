@@ -35,6 +35,17 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     // rather than sent empty when unknown, so the backend falls through to the
     // worker's probed `capabilities.cwd` instead of placing it at "".
     let mut metadata = json!({ "address": w.address, "harness": w.harness });
+    // How many sessions this agent may run at once, derived from its declared
+    // strategy. Code-plane data: deterministic placement reads it to decide
+    // whether an agent has headroom, and no prompt ever does (spec §4.2).
+    //
+    // A zero is withheld rather than sent. Capacity of nothing reads as
+    // "saturated" — the opposite of the permissive default every other omission
+    // here means — and an agent that never stated a strategy should be treated
+    // as available, not as full.
+    if w.max_sessions > 0 {
+        metadata["maxSessions"] = json!(w.max_sessions);
+    }
     // The role ids, not just their text. The description and tags are what the
     // model reads; the ids are what anything downstream joins on — asking for a
     // role by name, or applying its tools and instructions at delegate time.
@@ -45,9 +56,10 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
     if !roles.is_empty() {
         metadata["roles"] = json!(roles.iter().map(|t| t.id.as_str()).collect::<Vec<_>>());
     }
-    // The path, not the `{path, type}` object the entity model carries: the
-    // object is the wire change, and this advert stays byte-identical for a
-    // worker whose placement has not changed.
+    // The path, not the `{path, type}` object the entity model carries. The
+    // backend parses both, so widening it buys nothing today and would only
+    // churn every reader of this advert; the type rides along with the
+    // remote-host work that gives a worktree a reason to be named.
     if let Some(workspace) = w.workspace_path() {
         metadata["workspace"] = json!(workspace);
     }
@@ -78,7 +90,15 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
             metadata["handoff"] = value;
         }
     }
-    json!({
+    // The host this agent runs on, when this hub knows which one. The backend
+    // prefers a supplied id and only synthesizes `host:${socketId}` as a last
+    // resort, so saying it here is what stops five machines behind one hub
+    // socket from collapsing into one synthetic host.
+    //
+    // Blank means this hub did not say — a remote peer the operator added by
+    // address, which has no declared host — and is omitted rather than sent
+    // empty so the backend's synthesis still applies to exactly those.
+    let mut agent = json!({
         "id": w.id,
         // The name falls back to the id, not to a second constant. `agent_list`
         // renders `id (name)`, so two different readable tokens put the wrong
@@ -107,7 +127,91 @@ fn to_agent(w: &HubWorker, catalog: &[crate::runtime::AgentTemplate]) -> Value {
         // fan-outs that ask for code.
         "tags": role_tags(&roles),
         "metadata": metadata,
-    })
+    });
+    // `hostId` goes ONLY on an agent with no workspace. The library's contract
+    // (`AgentDescriptor.hostId`) is explicit: it names the host a *local* agent
+    // runs on, "only meaningful when `workspaceId` is absent", and must NEVER be
+    // set on a harness-backed agent, whose host is derived by walking up from
+    // its workspace. Setting it on every agent made the server skip synthesizing
+    // a `workspaceId` from `metadata.workspace` (`a supplied workspaceId or
+    // hostId always wins`), which orphaned every agent from the
+    // agent→workspace→harness→host chain: `host_list` still rendered them, but
+    // placement reported "no agent inside <host> is available (none declared
+    // there)" and no task could be dispatched. The `hosts[]` block carries host
+    // identity for the topology; a workspace-backed agent must not repeat it.
+    if w.workspace_path().is_none() {
+        if let Some(host_id) = host_id_of(w) {
+            agent["hostId"] = json!(host_id);
+        }
+    }
+    agent
+}
+
+/// The host id a worker is placed on, when it declares one.
+///
+/// Trimmed, and blank reads as "not declared" rather than as a host whose id is
+/// the empty string — which would key every unplaced worker to the same
+/// non-existent host.
+fn host_id_of(w: &HubWorker) -> Option<&str> {
+    let host_id = w.host_id.trim();
+    (!host_id.is_empty()).then_some(host_id)
+}
+
+/// The `hosts[]` block: one entry per host the advertised agents are placed on.
+///
+/// Derived from the agents rather than listed from config alone, so the two
+/// halves of one payload cannot disagree: every `hostId` an agent carries has an
+/// entry here, and no entry describes a host with nothing on it. A host whose
+/// agents were all withheld by the liveness filter is therefore withheld too —
+/// the same rule the agent list follows, applied one level up.
+///
+/// `declared` is what this machine declares locally
+/// ([`local_hosts`](crate::config::local_hosts)), and is the whole of how `kind`
+/// is decided: a host this machine declares is `local`, and any other host an
+/// agent names is one the hub merely fronts, so it is `remote`. Nothing is
+/// probed to establish this, per the declaration doctrine (spec §2.1).
+///
+/// `resources` is deliberately never emitted. The hub holds per-*worker*
+/// capability probes, not host-level facts, and aggregating those into a host
+/// resource claim would be inventing a number — the backend drops what it
+/// cannot validate anyway, so an absent block is honest where a synthesised one
+/// would not be.
+fn to_hosts(advertised: &[&HubWorker], declared: &[crate::config::LocalHostRef]) -> Vec<Value> {
+    let mut hosts: Vec<Value> = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for w in advertised {
+        let Some(host_id) = host_id_of(w) else {
+            continue;
+        };
+        if seen.contains(&host_id) {
+            continue;
+        }
+        seen.push(host_id);
+        let local = declared.iter().find(|host| host.id == host_id);
+        let mut entry = json!({
+            "hostId": host_id,
+            "kind": if local.is_some() { "local" } else { "remote" },
+        });
+        // The name only exists for a host this machine declared; a host learned
+        // from an agent's placement has an id and nothing else to call it.
+        // Omitted rather than defaulted to the id, which the backend can do
+        // itself and which would otherwise look like an operator's choice.
+        if let Some(name) = local
+            .map(|host| host.name.trim())
+            .filter(|name| !name.is_empty())
+        {
+            entry["name"] = json!(name);
+        }
+        // The address its agents are reached at — the same value they advertise
+        // as `metadata.address`, taken from the agent rather than re-derived so
+        // the two can never disagree.
+        let address = w.address.trim();
+        if !address.is_empty() {
+            entry["address"] = json!(address);
+        }
+        hosts.push(entry);
+    }
+    hosts
 }
 
 /// The tag set a worker advertises: `code`, plus each role's own tags.
@@ -180,13 +284,23 @@ pub(super) fn register_payload(
     workers: &[HubWorker],
     online: &std::collections::HashMap<String, bool>,
     catalog: &[crate::runtime::AgentTemplate],
+    declared_hosts: &[crate::config::LocalHostRef],
 ) -> Value {
-    let reachable = workers.iter().filter(|w| is_reachable(w, online));
-    json!({
+    let reachable: Vec<&HubWorker> = workers.iter().filter(|w| is_reachable(w, online)).collect();
+    let hosts = to_hosts(&reachable, declared_hosts);
+    let mut payload = json!({
         "agents": reachable
+            .iter()
             .map(|w| to_agent(w, catalog))
             .collect::<Vec<_>>()
-    })
+    });
+    // Omitted rather than sent empty. `hosts: []` is a key that says nothing —
+    // no agent named a host — and this payload is re-emitted on every roster
+    // mutation, so a key that carries no information is only noise in a diff.
+    if !hosts.is_empty() {
+        payload["hosts"] = json!(hosts);
+    }
+    payload
 }
 
 /// Whether `w` should be advertised, given what presence reported.
@@ -440,4 +554,4 @@ fn slug(text: &str) -> String {
 
 mod types;
 pub use types::SharedRoster;
-pub use types::{HubWorker, SharedSubscriptionStrategy};
+pub use types::{HubWorker, SharedLocalHosts, SharedSubscriptionStrategy};

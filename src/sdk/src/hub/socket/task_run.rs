@@ -66,15 +66,36 @@ pub(in crate::hub) fn result_frame(
     outcome: &Result<TaskOutcome, RunError>,
 ) -> Value {
     match outcome {
-        Ok(outcome) => json!({
-            "taskId": task_id,
-            "ok": true,
-            "reply": outcome.reply,
-            "usage": {
-                "inputTokens": outcome.usage.input_tokens,
-                "outputTokens": outcome.usage.output_tokens,
-            },
-        }),
+        Ok(outcome) => {
+            let mut frame = json!({
+                "taskId": task_id,
+                "ok": true,
+                "reply": outcome.reply,
+                "usage": {
+                    "inputTokens": outcome.usage.input_tokens,
+                    "outputTokens": outcome.usage.output_tokens,
+                },
+            });
+            // Which session served the task, when the worker said. Additive and
+            // ignorable — the backend's result handler validates nothing beyond
+            // `taskId` and strips no fields — and the slot it lands in already
+            // exists (`ManagerTaskEntry.agentSessionId`). The backend built that
+            // path expecting a session id back; this is medulla finally sending
+            // one.
+            //
+            // Reporting only. Nothing here accepts a session id *inbound*:
+            // targeting a specific session is a separate change with a separate
+            // trust story, and a task frame's `conversation` stays `None`.
+            if let Some(session_id) = outcome
+                .session_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            {
+                frame["sessionId"] = json!(session_id);
+            }
+            frame
+        }
         // A held workspace is the one failure the orchestrator can act on
         // *specifically*, so it is the one that names itself. `reason` and
         // `retryAfterMs` are additive and ignorable: a backend that has never

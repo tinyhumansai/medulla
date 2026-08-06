@@ -83,10 +83,10 @@ fn editing_a_labeled_hook_preserves_its_label() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     let mut app = app_with_config(&path);
-    app.loaded.config.hooks.hooks.push(medulla::harness_hooks::HookSpec::from_editor_line(
-        "Stop |  |  |  | notify-send done",
-    )
-    .expect("valid editor line"));
+    app.loaded.config.hooks.hooks.push(
+        medulla::harness_hooks::HookSpec::from_editor_line("Stop |  |  |  | notify-send done")
+            .expect("valid editor line"),
+    );
     app.loaded.config.hooks.hooks[0].label = Some("My hook".to_string());
 
     app.save_hook(Some(0), "Stop |  |  | 5 | notify-send done");

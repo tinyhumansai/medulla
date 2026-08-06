@@ -222,3 +222,181 @@ fn a_provider_without_a_directory_flag_is_left_alone() {
         "nothing reads a managed Codex directory today, so nothing should write one"
     );
 }
+
+/// Two workspaces do not share a catalog, so they must not share a managed
+/// directory either.
+///
+/// `discover` layers `<cwd>/.medulla/workflows` under the user-global one, so a
+/// project-local workflow belongs to exactly one project. With one
+/// account-wide directory the second refresh would prune the first project's
+/// skill — the operator's other session would silently lose it — and, worse,
+/// each session would be handed the other project's skills for as long as the
+/// window between the two passes lasted.
+#[test]
+fn two_workspaces_do_not_prune_or_read_each_others_skills() {
+    let home = TempDir::new().unwrap();
+    let one = TempDir::new().unwrap();
+    let two = TempDir::new().unwrap();
+    let env = env_at(home.path());
+
+    write_workflow(&env, "shared", "Everyone's.", true);
+    write_project_workflow(one.path(), "only-one", "First project's.", true);
+    write_project_workflow(two.path(), "only-two", "Second project's.", true);
+
+    let args_one = refresh_managed(HarnessProvider::Claude, &env, one.path());
+    let args_two = refresh_managed(HarnessProvider::Claude, &env, two.path());
+
+    assert_ne!(
+        args_one, args_two,
+        "each workspace must be pointed at its own directory"
+    );
+
+    // The second refresh must not have taken the first's skill with it.
+    assert!(managed_skill(&env, one.path(), "only-one").is_file());
+    assert!(managed_skill(&env, two.path(), "only-two").is_file());
+
+    // And neither session can see the other project's workflow at all.
+    assert!(
+        !managed_skill(&env, one.path(), "only-two").exists(),
+        "a session must never be handed another project's skills"
+    );
+    assert!(
+        !managed_skill(&env, two.path(), "only-one").exists(),
+        "a session must never be handed another project's skills"
+    );
+
+    // The user-global layer is still in both, since it is in both catalogs.
+    assert!(managed_skill(&env, one.path(), "shared").is_file());
+    assert!(managed_skill(&env, two.path(), "shared").is_file());
+}
+
+/// Concurrent refreshes of one workspace serialize rather than interleave.
+///
+/// The failure this rules out is a lost skill: a pass that read the directory
+/// before a second pass wrote to it would find that file's workflow absent from
+/// its own listing and prune it away. The refreshes here run against a store
+/// that changes underneath them, which is the shape that produces two
+/// disagreeing listings in the first place.
+#[test]
+fn concurrent_refreshes_leave_the_directory_matching_the_store() {
+    use std::sync::{Arc, Barrier};
+
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let env = env_at(home.path());
+    write_workflow(&env, "keeper", "Stays throughout.", true);
+
+    // Released together so the passes genuinely overlap rather than happening
+    // to run one after another by scheduling luck.
+    let barrier = Arc::new(Barrier::new(4));
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let env = env.clone();
+            let cwd = cwd.path().to_path_buf();
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..8 {
+                    sync_managed(SkillTarget::Claude, &env, &cwd).expect("refresh succeeds");
+                }
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().expect("no refresh panicked");
+    }
+
+    // One last pass with nothing else running fixes the store state the answer
+    // is checked against.
+    sync_managed(SkillTarget::Claude, &env, cwd.path()).unwrap();
+    assert!(
+        managed_skill(&env, cwd.path(), "keeper").is_file(),
+        "no pass may prune a skill whose workflow is still in the store"
+    );
+}
+
+/// The lock is exclusive across processes, not merely across threads sharing
+/// one guard: a refresh blocks while another holds the workspace's lock file.
+#[test]
+fn a_refresh_waits_for_the_workspace_lock() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let env = env_at(home.path());
+    write_workflow(&env, "babysit", "Watch a PR.", true);
+
+    let held = refresh::RefreshLock::acquire(&managed_root(&env, cwd.path())).unwrap();
+
+    let (tx, rx) = mpsc::channel();
+    let worker = {
+        let env = env.clone();
+        let cwd = cwd.path().to_path_buf();
+        std::thread::spawn(move || {
+            sync_managed(SkillTarget::Claude, &env, &cwd).expect("refresh succeeds");
+            let _ = tx.send(());
+        })
+    };
+
+    assert!(
+        rx.recv_timeout(Duration::from_millis(250)).is_err(),
+        "a refresh must not proceed while another holds the workspace lock"
+    );
+    assert!(
+        !managed_skill(&env, cwd.path(), "babysit").exists(),
+        "and it must not have written anything either"
+    );
+
+    drop(held);
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("the refresh proceeds once the lock is released");
+    worker.join().unwrap();
+    assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
+}
+
+/// Skills a pre-0.9 release left in the unscoped root are retired, since
+/// nothing points a harness at that directory any more.
+#[test]
+fn the_unscoped_managed_root_is_retired() {
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let env = env_at(home.path());
+    write_workflow(&env, "babysit", "Watch a PR.", true);
+
+    // What the old layout wrote: the same install, at the Medulla home itself.
+    let legacy = crate::home::medulla_home(&env).join("claude-skills");
+    install(
+        &[
+            crate::workflows::store::FileWorkflowStore::discover(&env, cwd.path())
+                .load()
+                .workflows[0]
+                .summary(),
+        ],
+        &InstallOptions {
+            targets: vec![SkillTarget::Claude],
+            scope: SkillScope::Project,
+            root: legacy.clone(),
+            with_commands: false,
+            dry_run: false,
+        },
+    )
+    .unwrap();
+    let stranded = skill_path(SkillTarget::Claude, &legacy, &slug_for("babysit"));
+    assert!(stranded.is_file(), "fixture must reproduce the old layout");
+
+    // A file the operator put there themselves, to prove the removal is still
+    // marker-gated.
+    let theirs = skill_path(SkillTarget::Claude, &legacy, "hand-written");
+    fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+    fs::write(&theirs, "---\nname: mine\n---\n").unwrap();
+
+    refresh_managed(HarnessProvider::Claude, &env, cwd.path());
+
+    assert!(
+        !stranded.exists(),
+        "a skill nothing reads any more must not be left behind"
+    );
+    assert!(theirs.is_file(), "a file Medulla did not generate stays");
+    assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
+}

@@ -98,11 +98,22 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
 /// Installs `workflows` and, with `prune`, removes managed files for anything
 /// else.
 ///
-/// The pruned set is "every managed file under the target directories whose
+/// The pruned set is "every generated file under the target directories whose
 /// workflow is not in `workflows`" — which covers a deleted workflow, a renamed
 /// one, and a workflow that has since been disabled (disabled workflows are not
-/// installed, so they are not in the keep set either). Unmarked neighbours are
-/// left alone, as everywhere else.
+/// installed, so they are not in the keep set either).
+///
+/// Membership is decided by marker first and by the `medulla-` slug prefix
+/// second: a `medulla-*` skill directory or command file that no enabled
+/// workflow claims is removed even when it carries no marker we can read. That
+/// prefix is Medulla's namespace, and a leftover we cannot identify is exactly
+/// the one an operator cannot get rid of any other way. Neighbours outside the
+/// prefix are left alone, as everywhere else, and so is anything a *kept*
+/// workflow's slug points at — that stays under the marker rule, where foreign
+/// content is a collision rather than a deletion.
+///
+/// Codex's deprecated `.codex/skills` root is swept too, since
+/// [`install`] only retires what a still-installed workflow left there.
 ///
 /// # Errors
 ///
@@ -117,18 +128,14 @@ pub fn sync(
         return Ok(report);
     }
 
-    let keep: BTreeSet<&str> = workflows
-        .iter()
-        .filter(|summary| summary.enabled)
-        .map(|summary| summary.id.as_str())
-        .collect();
+    let enabled = || workflows.iter().filter(|summary| summary.enabled);
+    let keep_ids: BTreeSet<&str> = enabled().map(|summary| summary.id.as_str()).collect();
+    let keep_slugs: BTreeSet<String> = enabled().map(|summary| slug_for(&summary.id)).collect();
 
     for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
-        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
-            if keep.contains(managed.workflow_id.as_str()) {
-                continue;
-            }
-            report.files.push(remove_managed(&managed, opts)?);
+        let root = target_root(*target, opts.scope, &opts.root);
+        for stale in scan_prunable(*target, &root, &keep_ids, &keep_slugs)? {
+            report.files.push(remove_managed(&stale, opts)?);
         }
     }
     Ok(report)

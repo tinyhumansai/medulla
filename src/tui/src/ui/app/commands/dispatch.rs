@@ -1,7 +1,7 @@
 //! Runtime, prompt, clipboard, slash-command, and settings command dispatch.
 
 use crate::ui::agents::TaskState;
-use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
+use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
 use medulla::runtime::WorkerOp;
@@ -371,7 +371,7 @@ impl App {
             ));
             return;
         }
-        let via = copy_to_clipboard(&text, current_platform(), |osc| {
+        let report = copy_to_clipboard(&text, current_platform(), |osc| {
             use std::io::Write;
             let _ = std::io::stdout().write_all(osc.as_bytes());
             let _ = std::io::stdout().flush();
@@ -386,10 +386,10 @@ impl App {
             if rows == 1 { "" } else { "s" },
             text.len()
         );
-        self.set_status(if via == OSC_52 {
-            format!("Sent {what} · {size} → terminal (OSC 52); check your clipboard")
+        self.set_status(if report.confirmed() {
+            format!("Copied {what} · {size} → clipboard ({})", report.describe())
         } else {
-            format!("Copied {what} · {size} → clipboard ({via})")
+            format!("Sent {what} · {size} → terminal (OSC 52); check your clipboard")
         });
     }
 
@@ -410,14 +410,15 @@ impl App {
             self.set_status(format!("Copied {what} (captured)"));
             return;
         }
-        let via = copy_for_operator(text, current_platform(), |osc| {
+        let report = copy_for_operator(text, current_platform(), |osc| {
             use std::io::Write;
             let _ = std::io::stdout().write_all(osc.as_bytes());
             let _ = std::io::stdout().flush();
         });
-        self.set_status(match via {
-            Some(writer) => format!("Copied {what} → clipboard ({writer})"),
-            None => format!("Sent {what} → terminal (OSC 52); check your clipboard"),
+        self.set_status(if report.confirmed() {
+            format!("Copied {what} → clipboard ({})", report.describe())
+        } else {
+            format!("Sent {what} → terminal (OSC 52); check your clipboard")
         });
     }
 

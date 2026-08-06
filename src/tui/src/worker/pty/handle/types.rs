@@ -276,20 +276,51 @@ pub struct SessionHandle {
 pub(super) struct TerminalModes {
     /// Stateful parser, retained so escape sequences split across PTY reads work.
     pub(super) parser: vte::Parser,
+    /// Independent OSC 52 capture, retained across reads for the same reason.
+    ///
+    /// See [`super::osc52`] for why `vte`'s own OSC dispatch is not enough on
+    /// its own: its OSC buffer is a fixed 1024 bytes, so a copy larger than
+    /// that arrives truncated through [`vte::Perform::osc_dispatch`] alone.
+    pub(super) osc52: super::osc52::Osc52Scanner,
     /// Whether xterm alternate-scroll mode (DECSET 1007) is enabled.
     pub(super) alternate_scroll: bool,
+    /// The clipboard write the child last asked for (OSC 52), until it is taken.
+    ///
+    /// A harness copying something — a `y` in its own copy mode, a `tmux
+    /// load-buffer -w` run inside the pane, a script echoing the escape — is
+    /// asking *its* terminal for the clipboard, and its terminal is us. Nobody
+    /// downstream would ever see it otherwise: `vt100` drops OSC 52, and the
+    /// child's bytes are parsed into a screen grid rather than replayed to our
+    /// own stdout, so the copy would die in this process. Captured here and
+    /// [taken](super::SessionHandle::take_clipboard) by the reader thread, which
+    /// forwards it on to the operator's terminal.
+    ///
+    /// Last write wins, which is what a clipboard is: a copy nobody has
+    /// collected yet is superseded by the next one, exactly as in a real
+    /// terminal.
+    pub(super) clipboard: Option<String>,
 }
 
 impl Default for TerminalModes {
     fn default() -> Self {
         Self {
             parser: vte::Parser::new(),
+            osc52: super::osc52::Osc52Scanner::default(),
             alternate_scroll: false,
+            clipboard: None,
         }
     }
 }
 
 impl vte::Perform for TerminalModes {
+    /// Capture the child's clipboard writes; every other OSC is the screen
+    /// emulator's business.
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if let Some(text) = medulla::clipboard::tmux::osc52_from_params(params) {
+            self.clipboard = Some(text);
+        }
+    }
+
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,

@@ -197,7 +197,7 @@ fn run_history_is_empty_rather_than_missing_for_a_workflow_that_never_ran() {
     let (_root, store) = store();
     create(&store, &document("sweep"), "sweep").unwrap();
 
-    let runs = list_runs(&store, "sweep").unwrap();
+    let runs = list_runs(&store, "sweep", StepDetail::Counts).unwrap();
 
     assert_eq!(runs["runs"].as_array().unwrap().len(), 0);
 }

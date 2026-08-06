@@ -57,8 +57,10 @@ fn zero_input_skill_states_an_empty_inputs_object() {
         .body
         .contains("medulla workflow run babysit --inputs '{}'"));
     assert!(skill.body.contains("medulla skills install --with-mcp"));
-    // Blocking behaviour is stated, because it is the surprising part.
-    assert!(skill.body.contains("blocks until the run finishes"));
+    // The asynchrony is stated, because it is the surprising part: a model that
+    // assumed the call waits would report a started run as a finished one.
+    assert!(skill.body.contains("does not wait for the run"));
+    assert!(skill.body.contains("mcp__medulla__workflow_run_get"));
 }
 
 #[test]

@@ -116,6 +116,7 @@ async fn run(
             http_credentials: HashMap::new(),
         },
         sink,
+        step_snapshot: None,
     };
 
     let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await?;

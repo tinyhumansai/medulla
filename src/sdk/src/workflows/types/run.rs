@@ -19,14 +19,28 @@ pub(crate) const MAX_EVIDENCE_BYTES: usize = 64 * 1024;
 /// durable inspection copy is bounded, so one response cannot make every
 /// future history listing read an arbitrarily large file.
 pub(crate) fn bounded_evidence(value: &serde_json::Value) -> serde_json::Value {
+    bounded_within(value, MAX_EVIDENCE_BYTES)
+}
+
+/// Keep small values intact and summarize ones larger than `max_bytes`.
+///
+/// The same bounding as [`bounded_evidence`] against a caller-chosen budget.
+/// The durable record uses a generous one because it is written once; a reply
+/// projected for a model uses a much smaller one, because a hundred of them
+/// land in the same context window.
+///
+/// The wrapper shape is deliberately identical at every budget, so a reader
+/// that knows how to unpack a truncated run file already knows how to unpack a
+/// truncated reply.
+pub(crate) fn bounded_within(value: &serde_json::Value, max_bytes: usize) -> serde_json::Value {
     let serialized = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
-    if serialized.len() <= MAX_EVIDENCE_BYTES {
+    if serialized.len() <= max_bytes {
         return value.clone();
     }
     // The preview is itself embedded in JSON, so reserve half the budget for
     // escaping plus the wrapper metadata. Quotes and backslashes can nearly
     // double when serialized a second time.
-    let preview_budget = MAX_EVIDENCE_BYTES / 2 - 256;
+    let preview_budget = (max_bytes / 2).saturating_sub(256);
     let end = serialized
         .char_indices()
         .map(|(index, _)| index)
@@ -39,7 +53,7 @@ pub(crate) fn bounded_evidence(value: &serde_json::Value) -> serde_json::Value {
         "preview": &serialized[..end],
     });
     debug_assert!(serde_json::to_vec(&bounded)
-        .map(|body| body.len() <= MAX_EVIDENCE_BYTES)
+        .map(|body| body.len() <= max_bytes.max(512))
         .unwrap_or(false));
     bounded
 }

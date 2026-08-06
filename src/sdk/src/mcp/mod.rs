@@ -41,12 +41,14 @@
 //! surface does not yet have.
 //!
 //! Only the pieces of MCP a stdio tool server actually needs are implemented —
-//! `initialize`, `tools/list`, `tools/call`, and the `notifications/*` a client
-//! sends and expects nothing back from. That is the whole protocol surface for a
-//! server that exposes tools and no resources or prompts.
+//! `initialize`, `tools/list`, `tools/call`, the `notifications/*` a client
+//! sends and expects nothing back from, and `notifications/progress` going the
+//! other way ([`progress`]). That is the whole protocol surface for a server
+//! that exposes tools and no resources or prompts.
 
 pub mod attach;
 pub mod backend;
+pub(crate) mod progress;
 pub(crate) mod tools;
 mod types;
 
@@ -327,14 +329,19 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // asked. A host with no grant in its environment — a remote worker, or one
     // with fleet tools turned off — gets the offline stand-in and serves the
     // workflow tools alone rather than failing to start.
+    // The outbound channel is built before the session because the session
+    // holds a handle to it: a long tool call reports progress on the same
+    // stdout its eventual response goes down, and the writer task below is what
+    // keeps the two from interleaving mid-line.
+    let (responses, mut pending_responses) =
+        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
     let session = Arc::new(
         McpSession::local(store, policy, mode)
             .with_workflows_enabled(workflows_enabled)
-            .with_fleet(backend::from_env(env).await),
+            .with_fleet(backend::from_env(env).await)
+            .with_notifications(responses.clone()),
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    let (responses, mut pending_responses) =
-        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
     let mut writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(response) = pending_responses.recv().await {
@@ -405,6 +412,14 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             }
         }
     }
+    // A default `workflow_run` has already answered by this point, but the
+    // server still owns its detached work after stdin closes.
+    session.run_liveness.wait_for_all().await;
+    // Both senders, in order. The session holds one so a tool call can report
+    // progress; leaving it alive here would keep the channel open, the writer
+    // waiting on a message that can never arrive, and this function blocked on
+    // a task that will never return.
+    drop(session);
     drop(responses);
     writer.await.map_err(std::io::Error::other)??;
     Ok(())
@@ -414,7 +429,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
 ///
 /// A custom-harness preset attaches to a fleet `hostId`; one for another
 /// machine is not this device's to advertise (`workflow_host`) or execute
-/// (`workflow_run`, which reaches [`crate::workflows::local::run_here`] and
+/// (`workflow_run`, which reaches [`crate::workflows::local::LocalRun`] and
 /// starts an embedded daemon *on this device*). This is the third local
 /// execution path that starts one — the CLI
 /// (`commands::workflow::local_custom_harnesses` in the `medulla-tui` crate)

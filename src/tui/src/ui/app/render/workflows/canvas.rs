@@ -11,6 +11,10 @@
 //! survives an edge that spans several layers, because the painter tunnels
 //! behind any box in the way rather than writing over it.
 //!
+//! Every band runs left to right, so an edge that folds onto the next band runs
+//! back across the pane to reach it. That wire is the price of the graph reading
+//! the same way everywhere, and it is worth paying.
+//!
 //! Wires also carry a moving highlight, so a plan reads as something work flows
 //! through rather than as a static diagram. With a run overlaid the highlight is
 //! literal — it only travels the edges that run actually took — and with no run
@@ -27,24 +31,21 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::GUTTER_SPAN;
+use super::{GUTTER_GAP, GUTTER_SPAN, MAX_NODE_WIDTH};
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that
 /// leaves it.
 const NODE_GAP: usize = 1;
 
-/// Cells past a node's trailing edge that its outgoing wires turn down in.
+/// How many columns a port label has: the cells strictly between the gutter's
+/// vertical run and the arrowhead at the target's leading edge.
 ///
-/// Near the source side, leaving the rest of the gutter for the port label —
-/// which is written on the *incoming* run rather than the outgoing one, because
-/// every edge out of one node shares that node's exit row and two labels there
-/// would overwrite each other.
-const GUTTER_GAP: usize = NODE_GAP + 1;
-
-/// How many columns a port label has, between the gutter's vertical run and the
-/// arrowhead at the target's leading edge.
-const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 2;
+/// Three come off the span rather than two — the gutter's own column, the
+/// arrowhead's, and the blank [`NODE_GAP`] leaves before the name. A label sized
+/// to include the arrowhead's cell is written after the arrow and simply
+/// replaces it.
+const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 3;
 
 /// The row inside a node that wires attach to. A node is one row tall, so this
 /// is that row.
@@ -112,11 +113,13 @@ impl App {
 
         let overlay = self.selected_workflow_run().map(RunOverlay::new);
         let mut canvas = Canvas::new(inner.width as usize, inner.height as usize);
-        // Wires first, so a box drawn over a wire's last cell wins — the
-        // painter locks node cells, and an edge routed before its target exists
-        // would otherwise have written into it.
-        self.paint_edges(&mut canvas, layout, overlay.as_ref());
+        // Nodes first, because that is what the canvas's cell locking is for: a
+        // wire routed across a name then tunnels behind it. Painted the other
+        // way round the lock has nothing to protect yet, and a label's own
+        // spaces come out as wire — `↺ Until green and clean` reading
+        // `↺─Until─green─and clean` wherever an edge happened to cross it.
         self.paint_nodes(&mut canvas, layout, overlay.as_ref());
+        self.paint_edges(&mut canvas, layout, overlay.as_ref());
         f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
     }
 
@@ -236,11 +239,6 @@ impl App {
             };
             let style = CellStyle::colored(wire_color).dimmed();
 
-            // Which way the two bands run. In a reversed band a forward edge
-            // travels leftward, so every "out of the source" and "into the
-            // target" column below is mirrored rather than assumed rightward.
-            let out_reversed = self.layer_reversed(from.layer);
-            let in_reversed = self.layer_reversed(to.layer);
             let folds = self.band_of(to.layer) != self.band_of(from.layer);
 
             // Wires leave and arrive at the *text*, not at the column slot: a
@@ -248,85 +246,81 @@ impl App {
             // is what made the graph look ragged, however well the columns
             // themselves lined up. The column a wire turns down in is still on
             // the slot grid, so the turns of a whole column agree.
+            //
+            // Clamped to the canvas on the right, because the columns are sized
+            // to fill the pane and the last one of a band therefore has no
+            // gutter left to turn in. Buying it one by making every band
+            // narrower costs most of a layer per band on a narrow pane, so the
+            // fold turns against the frame instead — the wire stays whole and
+            // still says which way the graph continues.
             let (from_width, to_width) = (
                 self.label_width(from, overlay),
                 self.label_width(to, overlay),
             );
-            let (exit, gutter) = if out_reversed {
-                (
-                    fx.saturating_sub(1 + NODE_GAP),
-                    fx.saturating_sub(GUTTER_GAP),
-                )
-            } else {
-                (
-                    fx + from_width + NODE_GAP,
-                    fx + self.column_width(from.layer) + GUTTER_GAP,
-                )
-            };
-            // The cell an arrowhead lands on: one clear cell outside the
-            // target's leading edge, which is its right edge on a band that runs
-            // right to left. The blank between the arrowhead and the marker is
-            // what stops a wire and a name reading as one run of characters.
-            let entry = if in_reversed {
-                tx + to_width + NODE_GAP
-            } else {
-                tx.saturating_sub(1 + NODE_GAP)
-            };
-            let head = if in_reversed { '◀' } else { '▶' };
+            let right = canvas.width().saturating_sub(1);
+            let exit = (fx + from_width + NODE_GAP).min(right);
+            let gutter = (fx + self.column_width(from.layer) + GUTTER_GAP).min(right);
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
-            // Whether the target is ahead of the source along the band: a
-            // target behind it is a loop, and comes back into its trailing edge.
-            let forward = if out_reversed { tx < fx } else { tx > fx };
+            // Whether the target sits behind the source in the plan — a loop's
+            // closing arm. Compared by layer rather than by column: the sway
+            // moves a node a cell either way, and a wire that changed which end
+            // of its target it aimed at as the graph breathed would twitch.
+            let backward = to.layer <= from.layer;
+            // The cell an arrowhead lands on: one clear cell outside the edge of
+            // the target it arrives at. Every band runs left to right, so a
+            // forward edge arrives at the target's left. A loop's closing arm
+            // arrives at the *trailing* edge instead, so it comes back in the
+            // side the work left by rather than crossing the whole box to reach
+            // its front. The blank between the arrowhead and the marker is what
+            // stops a wire and a name reading as one run of characters.
+            let (entry, head) = if backward {
+                ((tx + to_width + NODE_GAP).min(right), '◀')
+            } else {
+                (tx.saturating_sub(1 + NODE_GAP), '▶')
+            };
+
+            // The blank row a wire crosses the pane on when it cannot go
+            // straight to its target: the row beside the target's lane, on the
+            // side the wire arrives from. A fold coming down from the band above
+            // turns in on the row above; a loop climbing back up turns in on the
+            // row below.
+            let link_row = if folds || (backward && from_row == to_row) {
+                Some(if from_row < to_row {
+                    to_row - 1
+                } else {
+                    to_row + 1
+                })
+            } else {
+                None
+            };
 
             // The wire as a polyline, corner to corner. Building it up front is
             // what lets the flow highlight ride the path that was actually
             // drawn rather than the straight line between the two nodes, which
             // is not where the wire is.
-            let points: Vec<(usize, usize)> = if folds {
-                // Out, down into the blank row above the target's band, across
-                // to the target's column, then down into it. With alternating
-                // band directions that "across" is a short hop, because the
-                // next band picks up under where this one ended.
-                let link_row = to_row.saturating_sub(1);
-                vec![
+            let points: Vec<(usize, usize)> = match link_row {
+                // Out to the gutter, down or up to the link row, back across the
+                // pane to the target's column, then in. A fold is a run back to
+                // the left margin, which is the cost of every band reading the
+                // same way; a same-row loop takes the blank row under the lane
+                // rather than running straight back along a row full of the very
+                // steps it repeats.
+                Some(link_row) => vec![
                     (exit, from_row),
                     (gutter, from_row),
                     (gutter, link_row),
                     (entry, link_row),
                     (entry, to_row),
-                ]
-            } else if forward {
-                vec![
+                ],
+                None => vec![
                     (exit, from_row),
                     (gutter, from_row),
                     (gutter, to_row),
                     (entry, to_row),
-                ]
-            } else {
-                // A loop back to an earlier step in the same band: it returns
-                // the way it came, into the node's trailing edge.
-                let tail = if in_reversed {
-                    tx.saturating_sub(1 + NODE_GAP)
-                } else {
-                    tx + to_width + NODE_GAP
-                };
-                vec![
-                    (exit, from_row),
-                    (gutter, from_row),
-                    (gutter, to_row),
-                    (tail, to_row),
-                ]
+                ],
             };
             let route = paint_route(canvas, &points, style);
-
-            let (head_x, head) = if folds || forward {
-                (entry, head)
-            } else if in_reversed {
-                (tx.saturating_sub(1 + NODE_GAP), '▶')
-            } else {
-                (tx + to_width + NODE_GAP, '◀')
-            };
-            canvas.arrow(head_x, to_row, head, style);
+            canvas.arrow(entry, to_row, head, style);
 
             // The moving highlight. Undimmed against the dim wire, so the eye
             // follows it without the wire itself competing with the nodes.
@@ -337,41 +331,63 @@ impl App {
             // The port label is what tells a reader which arm of a branch they
             // are following, so it is written along the run into the target —
             // one label per target row, rather than every arm of a branch
-            // fighting for the source's single exit row. Clipped rather than
-            // dropped when a case name is long: its first letters still
-            // distinguish it from its siblings.
-            if let Some(label) = &edge.label {
-                let label = crate::ui::util::clip(label, LABEL_WIDTH);
-                // Written along the run into the target — one label per target
-                // row, rather than every arm of a branch fighting for the
-                // source's single exit row. A folded arm writes its name on the
-                // row it comes across on instead; dropping it there would leave
-                // the reader unable to tell which arm of a branch wrapped, which
-                // is the one thing the label exists to say.
-                let (label_x, label_row) = if folds {
-                    // A fold's corner sits directly above its arrowhead and its
-                    // run is short — often only a cell or two, which is the
-                    // whole point of alternating the bands. So the name goes
-                    // beside the corner on the side the run does *not* come
-                    // from, where there is empty canvas, rather than over the
-                    // couple of wire cells there are.
-                    let corner = entry;
-                    let x = if gutter > corner {
-                        corner.saturating_sub(label.width())
-                    } else {
-                        corner + 1
-                    };
-                    (x, to_row.saturating_sub(1))
-                } else if out_reversed {
-                    (entry + 1, to_row)
-                } else {
-                    (gutter + 1, to_row)
+            // fighting for the source's single exit row.
+            //
+            // A loop's closing arm carries no choice to report — it is the one
+            // way back — so it is left unlabelled rather than writing a port
+            // name across the run it returns along.
+            if let (Some(label), false) = (&edge.label, backward) {
+                let (caption, x, row) = match link_row {
+                    Some(link_row) => self.fold_caption(label, entry, gutter, link_row),
+                    // Between two columns of one band there is only the gutter,
+                    // so the name is squeezed into it and clipped rather than
+                    // dropped: its first letters still tell it from its
+                    // siblings, which is the one thing it exists to say.
+                    None => (
+                        crate::ui::util::clip(label, LABEL_WIDTH),
+                        gutter + 1,
+                        to_row,
+                    ),
                 };
-                if forward || folds {
-                    canvas.text(label_x, label_row, &label, style);
-                }
+                canvas.label(x, row, &caption, style);
             }
         }
+    }
+
+    /// Where a folded edge's port name goes, and what fits there.
+    ///
+    /// A fold's run spans the pane, so unlike the gutter case this has room to
+    /// spare: the name is written in full and given a blank cell either side,
+    /// because the [`Canvas::label`] blanks are what separate it from the wire.
+    /// Butted straight onto the corner the run turns at, `body` read as part of
+    /// the drawing — `╭body────────` — rather than as a caption on it.
+    ///
+    /// It sits at the corner rather than mid-run because that is the end a
+    /// reader arrives at: the corner is directly above the arrowhead, so the
+    /// name and the step it names are read together.
+    fn fold_caption(
+        &self,
+        label: &str,
+        entry: usize,
+        gutter: usize,
+        link_row: usize,
+    ) -> (String, usize, usize) {
+        // Two blanks and at least one cell of wire left over, so the caption
+        // cannot swallow the run it is captioning.
+        let room = gutter.abs_diff(entry).saturating_sub(4).min(MAX_NODE_WIDTH);
+        if room == 0 {
+            return (String::new(), entry, link_row);
+        }
+        let caption = format!(" {} ", crate::ui::util::clip(label, room));
+        // Inside the run, on the side it comes across from — which is the right
+        // for a fold turning down at the left margin, and the left for one whose
+        // target sits further along its band.
+        let x = if gutter > entry {
+            entry + 1
+        } else {
+            entry.saturating_sub(caption.width())
+        };
+        (caption, x, link_row)
     }
 
     /// How many columns a node's label actually occupies on screen.

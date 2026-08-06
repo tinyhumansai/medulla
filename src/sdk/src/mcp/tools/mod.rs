@@ -16,6 +16,7 @@ pub(crate) use support::{arg, content, schema};
 
 use serde_json::{json, Value};
 
+use super::progress::Progress;
 use super::{McpSession, RpcError};
 
 /// The tool definitions this session is served.
@@ -47,6 +48,9 @@ pub(super) async fn call(session: &McpSession, params: &Value) -> Result<Value, 
         .and_then(Value::as_str)
         .ok_or_else(|| RpcError::invalid_params("missing tool name"))?;
     let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+    // Read from the request rather than the session: the token is per-call, and
+    // a client may want notifications for a workflow run and not for a listing.
+    let progress = Progress::from_params(params, session.notifications.as_ref());
 
     // A tool excluded by the grant or mode is refused before family dispatch,
     // whatever arguments the caller supplied.
@@ -71,6 +75,6 @@ pub(super) async fn call(session: &McpSession, params: &Value) -> Result<Value, 
     if name.starts_with("fleet_") {
         fleet::call(session, name, &arguments).await
     } else {
-        crate::workflows::mcp::call(session, name, arguments).await
+        crate::workflows::mcp::call(session, name, arguments, progress).await
     }
 }

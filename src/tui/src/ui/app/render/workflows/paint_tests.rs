@@ -294,3 +294,46 @@ fn bold_and_dim_survive_serialisation() {
     assert!(styles[2].add_modifier.contains(Modifier::DIM));
     assert!(!styles[2].add_modifier.contains(Modifier::BOLD));
 }
+
+#[test]
+fn a_labels_own_spaces_are_not_resolved_as_wire() {
+    let mut canvas = Canvas::new(14, 1);
+    // The wire is laid first and the name written over it, which is the order
+    // an edge routed behind a box arrives in.
+    canvas.horizontal(0, 13, 0, CellStyle::default());
+    canvas.text(2, 0, "a b c", CellStyle::default());
+
+    assert_eq!(rows(canvas), vec!["──a b c───────"]);
+}
+
+#[test]
+fn a_run_of_one_cell_records_no_direction() {
+    let mut canvas = Canvas::new(3, 3);
+    // A route whose horizontal leg is degenerate: two vertical runs meeting at
+    // a corner that goes nowhere sideways.
+    canvas.horizontal(1, 1, 1, CellStyle::default());
+    canvas.vertical(1, 1, 2, CellStyle::default());
+
+    // `╭` — a stub pointing at empty canvas — is what a spurious RIGHT drew.
+    assert_eq!(rows(canvas), vec!["   ", " │ ", " │ "]);
+}
+
+#[test]
+fn a_port_name_gives_way_to_a_node_rather_than_overwriting_it() {
+    let mut canvas = Canvas::new(10, 1);
+    canvas.text(4, 0, "node", CellStyle::default());
+
+    canvas.label(2, 0, "true", CellStyle::default());
+
+    assert_eq!(rows(canvas), vec!["  trnode  "]);
+}
+
+#[test]
+fn a_port_name_that_would_run_off_the_canvas_is_dropped_whole() {
+    let mut canvas = Canvas::new(8, 1);
+
+    canvas.label(6, 0, "false", CellStyle::default());
+
+    // Better nothing than `fa`, which reads as a different case.
+    assert_eq!(rows(canvas), vec!["        "]);
+}

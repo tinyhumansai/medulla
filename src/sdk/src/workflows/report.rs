@@ -159,7 +159,7 @@ impl RunReporter {
                     tokio::time::sleep(MIN_REPORT_INTERVAL).await;
                 }
             });
-            let reporter = RunReporter { reports };
+            let reporter = RunReporter { reports, pending };
             reporter.send(Report {
                 status: "running",
                 detail: Some("started".to_string()),

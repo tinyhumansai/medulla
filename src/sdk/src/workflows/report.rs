@@ -64,6 +64,11 @@ pub fn wire_status(status: crate::workflows::RunStatus) -> &'static str {
 /// Dropping it ends the forwarder; the run itself is untouched.
 pub struct RunReporter {
     reports: tokio::sync::mpsc::UnboundedSender<Report>,
+    /// Progress frames queued but not yet taken by the forwarder.
+    ///
+    /// Shared with the forwarder, which decrements as it drains, so the sink
+    /// can tell a backlog from a queue that is simply being kept full.
+    pending: Arc<AtomicUsize>,
 }
 
 /// One thing worth telling the control plane about a run.

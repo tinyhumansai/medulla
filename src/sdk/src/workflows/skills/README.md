@@ -198,6 +198,23 @@ skill of a workflow that still exists — an operator who saved a malformed edit
 would find an unrelated skill gone. When the load reports any error the pass
 installs without pruning: a stale skill is the cheaper mistake.
 
+The root is scoped to the session's working directory, because the catalog it
+renders is: `FileWorkflowStore::discover` layers `<cwd>/.medulla/workflows` under
+the user-global directory, so two projects genuinely have two catalogs. One
+account-wide root would hand a session opened in one project the other project's
+skills, and let either project's prune delete the other's. The scope segment is
+the same path digest the store uses for its own per-workspace state, shared
+rather than re-derived.
+
+Within one workspace, two spawns can still race — a worker and a task frame come
+up together — so the load, the writes, and the prune all run under an exclusive
+lock on that workspace's root. Without it the losing pass could scan the
+directory using a listing taken before the winner's write, decide that skill's
+workflow is absent, and delete it; the operator would find a workflow they had
+just authored missing from the session that came up a moment later. The pass
+also retires anything left in the old unscoped `<medulla home>/<harness>-skills`
+root, which no `--add-dir` names any more.
+
 Only Claude is refreshed, matching `spawn_args`. Pointing a harness at a
 directory needs the harness to have a flag for it, and `--add-dir` is the only
 one; rewriting a directory no spawned process reads would be writing files for

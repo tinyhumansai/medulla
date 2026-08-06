@@ -27,9 +27,7 @@ const BROKEN: &[Writer] = &[Writer {
 /// A tmux context naming a socket no server is listening on, so `load_buffer`
 /// fails the same way on a machine with tmux installed and one without.
 fn dead_tmux() -> Tmux {
-    Tmux {
-        socket: "/medulla-not-a-real-tmux-socket-xyz".to_string(),
-    }
+    Tmux::from_raw("/medulla-not-a-real-tmux-socket-xyz")
 }
 
 #[test]

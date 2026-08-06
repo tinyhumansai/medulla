@@ -347,6 +347,39 @@ fn sync_prune_removes_orphans_and_spares_unmarked_neighbours() {
     assert_eq!(fs::read_to_string(&neighbour).unwrap(), "mine\n");
 }
 
+/// A rename onto the old id's slug is installed by the pass that retires the
+/// old file, not by some later one.
+///
+/// `deploy.prod` and `deploy-prod` slugify alike, so the renamed workflow wants
+/// the exact path its former self owns. Installing before pruning would call
+/// that a collision, skip the write, and then delete the old file anyway —
+/// leaving the session that triggered the refresh with no skill for a workflow
+/// that plainly exists.
+#[test]
+fn a_rename_onto_the_old_slug_is_installed_by_the_same_sync() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+    install(&[summary("deploy.prod", "Ship it.")], &options).unwrap();
+    let path = skill_path(SkillTarget::Claude, home.path(), "medulla-deploy-prod");
+
+    let renamed = summary("deploy-prod", "Ship it.");
+    let mut dry_options = options.clone();
+    dry_options.dry_run = true;
+    let dry = sync(&[renamed.clone()], &dry_options, true).unwrap();
+    let report = sync(&[renamed], &options, true).unwrap();
+
+    assert_eq!(dry, report, "dry run and real run disagreed");
+    assert_eq!(report.count(FileAction::SlugCollision), 0, "{report:?}");
+    assert_eq!(report.count(FileAction::Removed), 1, "{report:?}");
+    assert_eq!(report.count(FileAction::Created), 1, "{report:?}");
+    let body = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        parse_marker(&body).map(|(id, _)| id),
+        Some("deploy-prod".to_string()),
+        "got {body}"
+    );
+}
+
 #[test]
 fn sync_without_prune_leaves_orphans_in_place() {
     let home = TempDir::new().unwrap();

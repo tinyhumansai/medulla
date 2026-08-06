@@ -158,3 +158,63 @@ fn a_reported_run_that_is_still_going_reads_as_live() {
 
     assert!(super::LiveRun::from_reported(&run).running);
 }
+
+#[test]
+fn the_selected_reported_run_beats_a_local_run_of_the_same_workflow() {
+    use medulla::control_socket::{RunReport, RunStatusWire};
+
+    let mut app = app();
+    // The workflow-level fallback needs a selection to fall back *to*, which is
+    // exactly the state that used to answer with the wrong run.
+    app.workflows = vec![medulla::workflows::WorkflowSummary {
+        id: "review".to_string(),
+        name: "review".to_string(),
+        description: String::new(),
+        enabled: true,
+        node_count: 1,
+        trigger_kind: None,
+        inputs: Vec::new(),
+    }];
+    app.workflow_index = 0;
+
+    // A local run of the same workflow is live here...
+    app.workflow_run_started("review", "run-local");
+    app.workflow_run_output("run-local", "implement", "local frame".into());
+    // ...and another process reports one the operator then selects from the rail.
+    app.harness_runs.report(
+        "grant-1",
+        RunReport {
+            run_id: "run-remote".to_string(),
+            workflow_id: "review".to_string(),
+            status: RunStatusWire::Running,
+            node: Some("implement".to_string()),
+            detail: Some("remote frame".to_string()),
+        },
+    );
+    app.wf.overlay = Some("run-remote".to_string());
+
+    let view = app.live_run_view().expect("the selected run");
+    assert_eq!(view.frames("implement"), ["remote frame"]);
+}
+
+#[test]
+fn an_overlay_naming_nothing_still_falls_back_to_the_workflows_live_run() {
+    let mut app = app();
+    app.workflows = vec![medulla::workflows::WorkflowSummary {
+        id: "review".to_string(),
+        name: "review".to_string(),
+        description: String::new(),
+        enabled: true,
+        node_count: 1,
+        trigger_kind: None,
+        inputs: Vec::new(),
+    }];
+    app.workflow_index = 0;
+    app.workflow_run_started("review", "run-local");
+    app.workflow_run_output("run-local", "implement", "local frame".into());
+    // Pressing `x` before the run row exists: the id names neither source.
+    app.wf.overlay = Some("run-gone".to_string());
+
+    let view = app.live_run_view().expect("the workflow's live run");
+    assert_eq!(view.frames("implement"), ["local frame"]);
+}

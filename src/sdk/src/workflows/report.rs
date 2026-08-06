@@ -118,12 +118,24 @@ impl RunReporter {
                     return;
                 };
                 while let Some(mut report) = inbox.recv().await {
+                    drained.fetch_sub(usize::from(!report.terminal), Ordering::Relaxed);
                     // Take the newest queued report and drop what it overtook:
                     // the reader only ever shows the latest line, so delivering
                     // the ones behind it would cost bandwidth to display
-                    // nothing. Nothing is ever queued behind the terminal
-                    // report, so this cannot overtake the run's own ending.
+                    // nothing.
+                    //
+                    // The terminal report is the exception. `settled` and the
+                    // per-node progress sink are separate producers, so a frame
+                    // a harness emitted on its way out can be queued *after*
+                    // the run has ended — and coalescing it over the terminal
+                    // report would leave the rail row running forever. Once a
+                    // terminal report is in hand, later progress is stale by
+                    // definition and is dropped instead.
                     while let Ok(next) = inbox.try_recv() {
+                        drained.fetch_sub(usize::from(!next.terminal), Ordering::Relaxed);
+                        if report.terminal && !next.terminal {
+                            continue;
+                        }
                         report = next;
                     }
                     let terminal = report.terminal;

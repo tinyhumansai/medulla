@@ -144,7 +144,20 @@ fn operand(part: &str) -> Operand {
     // it. Both are about the same value, so the left-most operand is the one
     // worth naming; the rest is machinery.
     let head = split_first(body, &["//", "|"]);
-    match as_path(head) {
+    // A head that is itself wrapped — `(.item.findings | tostring) // "none"`
+    // splits to `(.item.findings | tostring)` — is not a path, so classifying
+    // it directly would give up and print the jq source. Peel it the same way
+    // instead. This recurses only when the split actually cut something, so it
+    // terminates on a body with no top-level separator.
+    if head != body {
+        return match operand(head) {
+            // Nothing legible came out of the head after all, so name the whole
+            // expression rather than a fragment of it.
+            Operand::Program(_) => Operand::Program(body.to_string()),
+            classified => classified,
+        };
+    }
+    match as_path(body) {
         Some(path) => Operand::Path(path),
         None => Operand::Program(body.to_string()),
     }

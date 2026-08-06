@@ -93,6 +93,7 @@ fn install_over(
                         &summary.id,
                         opts,
                         &mut claimed,
+                        cleared,
                     )?);
                 }
             }

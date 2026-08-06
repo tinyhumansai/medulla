@@ -184,3 +184,27 @@ fn a_workflow_with_no_inputs_still_reads_as_it_always_did() {
         rows[0].detail
     );
 }
+
+#[test]
+fn a_bounded_input_shows_its_text_rather_than_the_wrapper() {
+    // An input over `MAX_INPUT_BYTES` is stored as a `_medullaTruncated`
+    // wrapper. A rail row that serialized the wrapper would spend all 48
+    // characters on our own bookkeeping instead of the argument.
+    let record = run("run-1", RunStatus::Succeeded).with_inputs(
+        &serde_json::json!({ "instruction": format!("rebuild the index {}", "y".repeat(8_000)) })
+            .as_object()
+            .cloned()
+            .expect("an object"),
+        &serde_json::json!({}),
+    );
+    assert!(
+        record.inputs["instruction"]["_medullaTruncated"] == serde_json::json!(true),
+        "the fixture must actually be bounded"
+    );
+    let rows = run_rows(&[record]);
+    assert!(
+        rows[0].detail.starts_with("instruction=rebuild the index"),
+        "{}",
+        rows[0].detail
+    );
+}

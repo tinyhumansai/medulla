@@ -143,3 +143,28 @@ fn durations_read_as_a_person_would_say_them() {
     assert_eq!(human_duration(95_000), "1m 35s");
     assert_eq!(human_duration(3_800_000), "1h 3m");
 }
+
+#[test]
+fn a_bounded_input_row_reads_as_the_text_it_was_given() {
+    let mut record = settled();
+    record.inputs = serde_json::json!({
+        "instruction": {
+            "_medullaTruncated": true,
+            "originalBytes": 9_001,
+            "preview": "rebuild the index",
+        }
+    })
+    .as_object()
+    .cloned()
+    .expect("an object");
+    assert_eq!(
+        row(&run_overview(&record), "input instruction").as_deref(),
+        Some("rebuild the index")
+    );
+}
+
+#[test]
+fn a_plain_string_input_is_not_quoted() {
+    assert_eq!(value_text(&serde_json::json!("main")), "main");
+    assert_eq!(value_text(&serde_json::json!(3)), "3");
+}

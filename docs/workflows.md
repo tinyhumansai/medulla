@@ -417,7 +417,26 @@ them tools directly — it offers them. Every ACP session gets an MCP server
 | `workflow_apply_ops` / `workflow_preview_ops` | edit by graph patch |
 | `workflow_validate` | check a saved or unsaved graph |
 | `workflow_dry_run` | simulate without dispatching |
+| `workflow_run` | run it for real; answers with a run id |
+| `workflow_run_get` | one run, summarized or in full |
 | `workflow_runs` | run history |
+
+`workflow_run` starts the run and returns as soon as it is admitted, with the
+run id to follow it by. It does not wait, because a real workflow outlives any
+client's idle ceiling — a measured three-pass babysit ran 35 minutes, one step
+of it 20 — and a client that gives up at 30 minutes reports a failure for a run
+that is still going and about to succeed. The run record exists from the moment
+the run starts, so `workflow_run_get` answers "how far has it got" and "what did
+it do" with the same call.
+
+Waiting is still available where it is honest: `wait: true` blocks until the run
+settles, and `waitMs` blocks for a budget and then hands back the run id rather
+than erroring. A caller that does wait gets an MCP progress notification per
+step, which is what keeps its idle timer from firing mid-run.
+
+Reads are summarized by default, for the same reason: `workflow_runs` carries no
+step bodies at all, and `workflow_run_get` bounds each step's output. Pass
+`steps: "full"` when the elided half is the thing you need.
 
 `workflow_apply_ops` is the one that matters for editing. Rewriting a whole
 document loses whatever the model misremembered; a patch is checked op by op, and

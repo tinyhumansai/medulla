@@ -15,6 +15,13 @@ use crate::workflows::WorkflowSummary;
 /// The tool a generated skill instructs the model to call.
 const RUN_TOOL: &str = "mcp__medulla__workflow_run";
 
+/// The tool that answers what the started run did.
+///
+/// Named in the body because starting a run and reading it are now two calls: a
+/// skill that only knew the first would report "it is running" and never say
+/// how it went.
+const GET_TOOL: &str = "mcp__medulla__workflow_run_get";
+
 /// The longest slug either verified harness accepts as a skill name.
 ///
 /// Codex rejects a name over 64 characters outright (`InvalidField`), and the
@@ -117,9 +124,10 @@ pub fn render_command(skill: &super::RenderedSkill, summary: &WorkflowSummary) -
     out.push_str(&inputs_section(&summary.inputs));
     out.push('\n');
     out.push_str(&format!(
-        "The call blocks until the run finishes, which can take minutes. When it \
-         returns, report the run's status and, if it failed, the id and error of the \
-         failing step.\n\n{}",
+        "The call comes back at once with a `runId`; the run keeps going without it, \
+         and can take minutes to hours. Follow it with `{GET_TOOL}` using that id, and \
+         report the run's status and, if it failed, the id and error of the failing \
+         step.\n\n{}",
         fallback_section(summary)
     ));
     seal(&summary.id, &out).0
@@ -358,18 +366,22 @@ fn skill_content(summary: &WorkflowSummary, slug: &str, description: &str) -> St
     out.push_str(&inputs_section(&summary.inputs));
     out.push('\n');
 
-    out.push_str(
+    out.push_str(&format!(
         "## While it runs\n\n\
-         This call **blocks until the run finishes**, and a workflow can take minutes. \
-         That is expected: wait for the response rather than calling again, and tell the \
-         operator the run is under way if they ask.\n\n\
+         This call **does not wait for the run**. It starts it and answers at once with \
+         a `runId`, and the run carries on without the call — a workflow can take \
+         minutes to hours. Do not start it again; tell the operator it is under way if \
+         they ask, and follow the run by its id.\n\n\
          ## Reading the result\n\n\
-         The call returns the whole run record. Read `status` first — `succeeded`, \
-         `failed`, or `cancelled` — then `steps`, which lists each node with its own \
-         status and output. On failure, report the id of the first failing step and its \
-         error verbatim rather than summarising it away; that string is what the \
-         operator needs to fix the workflow.\n\n",
-    );
+         Call `{GET_TOOL}` with that `runId`. While `status` is `running` the run has \
+         not finished — say so and check again later rather than treating it as a \
+         result. Once it settles, `status` is `succeeded`, `failed`, or `cancelled`, and \
+         `steps` lists each node with its own status and a bounded preview of its \
+         output; pass `\"steps\": \"full\"` when a truncated one is what you need to \
+         read. On failure, report the id of the first failing step and its error \
+         verbatim rather than summarising it away; that string is what the operator \
+         needs to fix the workflow.\n\n"
+    ));
     out.push_str(&fallback_section(summary));
     out
 }

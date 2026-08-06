@@ -31,8 +31,11 @@ contains four things that each exist for a reason:
   `false`, `{}`) rather than plausible-looking invented values, because a model
   that copies an invented value ships it to a real run. Inputs with defaults
   show the default, so the example is runnable as written.
-- **A "while it runs" paragraph.** `workflow_run` blocks until the run finishes.
-  Saying so is what stops a model calling it again a minute later.
+- **A "while it runs" paragraph.** `workflow_run` starts the run and answers at
+  once with a run id; the run continues without the call. Saying so is what
+  stops a model reporting a started run as a finished one, or calling it again a
+  minute later — and the paragraph names `workflow_run_get`, because starting a
+  run and reading it are two calls.
 - **A fallback paragraph.** Skills are copied into user-scope directories that
   outlive any MCP configuration, so the tool being absent is a normal state. The
   body says: do not claim the run started, run `medulla workflow run` from the

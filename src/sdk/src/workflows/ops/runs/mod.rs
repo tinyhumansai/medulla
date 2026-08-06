@@ -5,14 +5,21 @@
 //! read for the same reason a run record is: to work out what happened and go
 //! back from it.
 
-use std::collections::HashMap;
-use std::path::Path;
+pub mod view;
+
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
 use super::record_value;
+use crate::workflows::local::LocalRun;
 use crate::workflows::{StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowStore};
+
+pub use view::StepDetail;
 
 /// Simulate a workflow: resolve every expression and satisfy every declared
 /// output shape, without dispatching to a harness or touching the network.
@@ -39,8 +46,43 @@ pub async fn dry_run(
 }
 
 /// A workflow's run history, newest first.
-pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowError> {
-    Ok(json!({ "runs": store.list_runs(id)? }))
+///
+/// `detail` decides how much of each run's steps comes back. A history listing
+/// is read to find *which* run to look at, so the caller that wants a hundred
+/// of them should not be paying for a hundred agent transcripts to do it.
+pub fn list_runs(
+    store: &Arc<dyn WorkflowStore>,
+    id: &str,
+    detail: StepDetail,
+) -> Result<Value, WorkflowError> {
+    let runs = store
+        .list_runs(id)?
+        .iter()
+        .map(|record| view::project(record, detail))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({ "runs": runs }))
+}
+
+/// How long a caller is willing to hold a `workflow_run` call open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Wait {
+    /// Return as soon as the run is admitted, with its id.
+    #[default]
+    No,
+    /// Block until the run settles, however long that takes.
+    Forever,
+    /// Block until the run settles or this budget expires, whichever is first.
+    Until(Duration),
+}
+
+impl Wait {
+    /// Whether this mode holds the call open at all.
+    ///
+    /// The one thing worth knowing about a `Wait` from outside: a caller that
+    /// is not waiting has nobody to send progress to.
+    pub fn blocks(self) -> bool {
+        !matches!(self, Self::No)
+    }
 }
 
 /// Run a workflow on this machine, for real.
@@ -49,35 +91,67 @@ pub fn list_runs(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, Work
 /// scripts, and makes whatever changes the graph describes. Refused when the
 /// host or the workflow is disabled — the two switches an operator has.
 ///
-/// Returns the whole run record rather than a summary: the caller is usually a
-/// model deciding what to fix next, and every step's status and diagnostics are
-/// what that decision needs.
+/// **Async by default.** A real workflow outlives any request timeout worth
+/// setting: a three-pass babysit measured 35 minutes, one step of it 20. So
+/// [`Wait::No`] returns as soon as the run is admitted, with the run id to poll
+/// [`get_run`] with, and the run continues in the background. Blocking is still
+/// available for the short workflows where it is honest — a dry-run-sized graph,
+/// a test — under [`Wait::Forever`], or bounded with [`Wait::Until`], which
+/// answers with the run id rather than an error when its budget runs out.
 ///
-/// `run_input` carries the trigger payload and the declared-input values
-/// together — see [`crate::workflows::local::run_here`].
-pub async fn run(
-    store: &Arc<dyn WorkflowStore>,
-    config: &crate::config::WorkflowsConfig,
-    custom_harnesses: &[crate::config::CustomHarnessConfig],
-    env: &HashMap<String, String>,
-    cwd: &Path,
-    id: &str,
-    run_input: tinyflows::engine::RunInput,
-) -> Result<Value, WorkflowError> {
-    let record = crate::workflows::local::run_here(
-        store.clone(),
-        config,
-        custom_harnesses,
-        env,
-        cwd,
-        id,
-        run_input,
-    )
-    .await?;
+/// Everything that can be refused cheaply is still refused synchronously, in
+/// every mode: a disabled workflow, an unknown one, a host that cannot start a
+/// daemon. Only a run that genuinely began comes back as a run id.
+///
+/// A blocking wait returns the whole run record: the caller is usually a model
+/// deciding what to fix next, and every step's status and diagnostics are what
+/// that decision needs.
+pub async fn run(request: LocalRun<'_>, wait: Wait) -> Result<Value, WorkflowError> {
+    let started = request.start().await?;
+    // Kept because every branch that does not produce a record answers with
+    // them, and the branches that wait consume the handle to find that out.
+    let run_id = started.run_id.clone();
+    let workflow_id = started.workflow_id.clone();
+    let settled = match wait {
+        Wait::No => None,
+        Wait::Forever => Some(started.settled().await?),
+        Wait::Until(budget) => match started.settled_within(budget).await? {
+            Some(record) => Some(record),
+            None => return Ok(admitted(&run_id, &workflow_id, Some(budget))),
+        },
+    };
+    let Some(record) = settled else {
+        return Ok(admitted(&run_id, &workflow_id, None));
+    };
     Ok(json!({
         "ok": record.status == crate::workflows::RunStatus::Succeeded,
         "run": record,
     }))
+}
+
+/// What a caller that is not holding the call open gets back.
+///
+/// `ok: true` says the run *started*, which is the only question this answer is
+/// in a position to settle, and the wording says so — a model that read `ok`
+/// as "it worked" would otherwise report success for a run still in its first
+/// step. `waited` is present only when a budget expired, because "I gave up
+/// after 30s" and "I never waited" lead to different next moves.
+fn admitted(run_id: &str, workflow_id: &str, waited: Option<Duration>) -> Value {
+    let mut value = json!({
+        "ok": true,
+        "runId": run_id,
+        "workflowId": workflow_id,
+        "status": "running",
+        "note": format!(
+            "the run started and is still going; it does not need this call to stay open. Poll \
+             workflow_run_get with runId '{run_id}' for its status, and again when it is settled \
+             for what it did."
+        ),
+    });
+    if let Some(waited) = waited {
+        value["waitedMs"] = json!(waited.as_millis() as u64);
+    }
+    value
 }
 
 /// A workflow's edit history: the versions it has been written over, newest
@@ -143,11 +217,18 @@ pub fn undo(store: &Arc<dyn WorkflowStore>, id: &str) -> Result<Value, WorkflowE
     }
 }
 
-/// One run record.
-pub fn get_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Result<Value, WorkflowError> {
+/// One run record, at the level of step detail `detail` asks for.
+///
+/// The polling half of an async [`run`]: a run id in, what that run has done so
+/// far out — including while it is still going, because the record is written
+/// as `running` the moment the run is admitted.
+pub fn get_run(
+    store: &Arc<dyn WorkflowStore>,
+    run_id: &str,
+    detail: StepDetail,
+) -> Result<Value, WorkflowError> {
     let record = crate::workflows::require_run(store.as_ref(), run_id)?;
-    serde_json::to_value(record)
-        .map_err(|err| WorkflowError::Engine(format!("could not serialize run '{run_id}': {err}")))
+    view::project(&record, detail)
 }
 
 /// Cancel a run executing in *this* process.

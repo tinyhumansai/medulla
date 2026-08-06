@@ -172,7 +172,7 @@ fn the_reads_answer_exactly_as_the_operations_do() {
     );
     assert_eq!(
         bridge.runs("sweep").unwrap(),
-        ops::list_runs(&store, "sweep").unwrap()
+        ops::list_runs(&store, "sweep", ops::StepDetail::Full).unwrap()
     );
     assert_eq!(
         bridge.node_kinds(Some("agent")).unwrap(),

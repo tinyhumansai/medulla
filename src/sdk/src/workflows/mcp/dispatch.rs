@@ -6,12 +6,14 @@
 
 use serde_json::{json, Value};
 
+use crate::mcp::progress::Progress;
 use crate::mcp::tools::{arg, content};
 use crate::mcp::{McpSession, RpcError};
 use crate::workflows::authoring::GraphHandle;
-use crate::workflows::ops;
+use crate::workflows::ops::{self, StepDetail, Wait};
 
 use super::evolve::ToolMode;
+use super::run_progress;
 
 /// Every tool this server exposes, in the order a model meets them.
 ///
@@ -85,11 +87,48 @@ fn declared_inputs(
     }
 }
 
+/// How a caller asks to wait for a run, and what it means.
+///
+/// Async is the default because a real workflow outlives any client's idle
+/// ceiling: `wait` is the opt-in for the short ones, and `waitMs` the middle
+/// ground that holds the call open for as long as it is worth holding and then
+/// hands back the run id rather than an error.
+///
+/// # Errors
+///
+/// A `waitMs` that is not a positive number is rejected; guessing what a
+/// caller meant by `-1` or `"30s"` would be guessing how long to block for.
+fn wait_mode(arguments: &Value) -> Result<Wait, RpcError> {
+    if let Some(budget) = arguments.get("waitMs") {
+        let millis = budget.as_u64().filter(|millis| *millis > 0).ok_or_else(|| {
+            RpcError::invalid_params(
+                "workflow_run: 'waitMs' must be a positive number of milliseconds to wait before                  answering with the run id",
+            )
+        })?;
+        return Ok(Wait::Until(std::time::Duration::from_millis(millis)));
+    }
+    match arguments.get("wait") {
+        Some(Value::Bool(true)) => Ok(Wait::Forever),
+        _ => Ok(Wait::No),
+    }
+}
+
+/// Read the optional `steps` argument: how much of each step to send back.
+fn step_detail(arguments: &Value, default: StepDetail) -> Result<StepDetail, RpcError> {
+    StepDetail::parse(arguments.get("steps").and_then(Value::as_str), default)
+        .map_err(|err| RpcError::invalid_params(err.to_string()))
+}
+
 /// Run a `tools/call`.
+///
+/// `progress` is the client's notification channel for this call, when it asked
+/// for one. Only a call that blocks can use it — a tool that has already
+/// answered has nothing left to be making progress on.
 pub(crate) async fn call(
     session: &McpSession,
     name: &str,
     arguments: Value,
+    progress: Option<Progress>,
 ) -> Result<Value, RpcError> {
     let store = &session.store;
     let policy = &session.policy;
@@ -155,22 +194,45 @@ pub(crate) async fn call(
             let id = arg(&arguments, "id")?;
             let input = arguments.get("input").cloned().unwrap_or(json!({}));
             let inputs = declared_inputs(&arguments, "workflow_run")?;
+            let wait = wait_mode(&arguments)?;
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             ops::run(
-                store,
-                &policy.workflows,
-                &policy.custom_harness_configs,
-                &env,
-                &cwd,
-                id,
-                tinyflows::engine::RunInput::new(input).with_inputs(inputs),
+                crate::workflows::local::LocalRun {
+                    store: store.clone(),
+                    config: &policy.workflows,
+                    custom_harnesses: &policy.custom_harness_configs,
+                    env: &env,
+                    cwd: &cwd,
+                    workflow_id: id,
+                    input: tinyflows::engine::RunInput::new(input).with_inputs(inputs),
+                    // Only for a call that is holding itself open. A run that
+                    // has already answered with its id would be reporting
+                    // progress against a token the client stopped watching.
+                    sink: progress
+                        .filter(|_| wait.blocks())
+                        .map(|progress| run_progress::sink(progress, id)),
+                },
+                wait,
             )
             .await
             .map_err(to_rpc)
         }
-        "workflow_runs" => ops::list_runs(store, arg(&arguments, "id")?).map_err(to_rpc),
-        "workflow_run_get" => ops::get_run(store, arg(&arguments, "runId")?).map_err(to_rpc),
+        // Counts by default: a history listing is read to find *which* run to
+        // look at, and inlining every step of every run is what made the
+        // cheapest question — "did my run finish?" — the most expensive answer.
+        "workflow_runs" => ops::list_runs(
+            store,
+            arg(&arguments, "id")?,
+            step_detail(&arguments, StepDetail::Counts)?,
+        )
+        .map_err(to_rpc),
+        "workflow_run_get" => ops::get_run(
+            store,
+            arg(&arguments, "runId")?,
+            step_detail(&arguments, StepDetail::Summary)?,
+        )
+        .map_err(to_rpc),
         "workflow_defaults" => {
             let id = arg(&arguments, "id")?;
             let harness = arguments.get("harness").and_then(Value::as_str);

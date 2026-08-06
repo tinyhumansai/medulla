@@ -62,7 +62,13 @@ impl Tmux {
     /// without mutating the process environment.
     ///
     /// `$TMUX` is `<socket>,<server-pid>,<session-index>`; only the socket is
-    /// needed, and a value carrying just the socket is accepted too.
+    /// needed, and a value carrying just the socket is accepted too. The
+    /// socket path itself may contain commas — tmux started with `-S
+    /// /some,path` writes exactly that path into `$TMUX` — so the two
+    /// trailing fields are peeled off from the right rather than splitting at
+    /// the first comma, which would validate a truncated, nonexistent prefix
+    /// instead of the real path and leave this process wrongly concluding it
+    /// is not inside tmux.
     ///
     /// `$TMUX` is inherited environment, so it is untrusted: a child process,
     /// or anything else able to set the environment this process launches
@@ -72,8 +78,19 @@ impl Tmux {
     /// actually exists and is owned by the user running this process — rather
     /// than left to whatever `tmux -S` happens to do with it.
     pub fn parse(value: Option<&str>) -> Option<Self> {
-        let socket = value?.split(',').next().unwrap_or_default().trim();
-        Self::validated(socket)
+        let value = value?.trim();
+        let mut fields = value.rsplitn(3, ',');
+        // Consume the trailing session-index and server-pid fields, if
+        // present, so what remains is the socket path however many commas it
+        // contains. A value carrying just the socket (no commas at all) is
+        // accepted too: `rsplitn` then yields the whole value as the sole
+        // field.
+        let socket = match (fields.next(), fields.next(), fields.next()) {
+            (Some(_session), Some(_pid), Some(socket)) => socket,
+            (Some(socket), None, None) => socket,
+            _ => value,
+        };
+        Self::validated(socket.trim())
     }
 
     /// Accept `socket` only when it names a real Unix socket owned by us.

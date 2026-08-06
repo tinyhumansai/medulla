@@ -37,19 +37,14 @@ use medulla::control_socket::hook_grant_from_env;
 use medulla::harness_hooks::HookEvent;
 
 /// `medulla::harness_hooks::builtin`'s declared timeout for `event`'s
-/// built-in (its private `timeout_for`, mirrored here since the two crates
-/// cannot share it directly), so the shim's own deadline can never exceed
-/// what the harness will actually wait before it gives up on this process
-/// outright — a hard kill, not the quiet, no-report exit the module docs
-/// promise. `SessionEnd` is 3 seconds (Codex's own hook config refuses a
-/// longer one, and Medulla installs the same declared timeout on both
-/// harnesses for that event — that crate's private `SESSION_END_TIMEOUT_SECS`);
-/// every other event is 5.
+/// built-in, so the shim's own deadline can never exceed what the harness
+/// will actually wait before it gives up on this process outright — a hard
+/// kill, not the quiet, no-report exit the module docs promise. `SessionEnd`
+/// is 3 seconds (Codex's own hook config refuses a longer one); every other
+/// event is 5. Read from the SDK rather than mirrored here, so the two can
+/// never drift apart.
 fn declared_timeout(event: HookEvent) -> Duration {
-    match event {
-        HookEvent::SessionEnd => Duration::from_secs(3),
-        _ => Duration::from_secs(5),
-    }
+    medulla::harness_hooks::builtin::declared_timeout(event)
 }
 
 /// Subtracted from [`declared_timeout`] before anything runs, so the shim's

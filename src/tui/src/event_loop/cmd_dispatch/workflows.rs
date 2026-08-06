@@ -39,7 +39,15 @@ pub(super) fn spawn_run(
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses, &tx, &hooks).await;
+        let outcome = run(
+            &id,
+            inputs,
+            &workflows_config,
+            &custom_harnesses,
+            &tx,
+            &hooks,
+        )
+        .await;
         let (status, failed) = match outcome {
             Ok((summary, failed)) => (summary, failed),
             Err(err) => (format!("workflow '{id}' failed: {err}"), None),

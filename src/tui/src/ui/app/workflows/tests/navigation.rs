@@ -5,7 +5,6 @@
 //! is already on disk and one that is still executing — a run started over MCP
 //! is reported long before it settles, and the record is written when it does.
 
-
 use super::{app_with, diamond};
 
 /// Persist a settled run of `workflow` under `id`, as a finished run leaves it.
@@ -26,8 +25,14 @@ fn opening_a_persisted_run_selects_its_row_and_overlays_it() {
 
     app.open_workflow_run("review", "run-1");
 
-    assert_eq!(app.tab_index, super::super::super::types::tab_pos("Workflows"));
-    assert_eq!(app.selected_workflow().map(|w| w.id.as_str()), Some("review"));
+    assert_eq!(
+        app.tab_index,
+        super::super::super::types::tab_pos("Workflows")
+    );
+    assert_eq!(
+        app.selected_workflow().map(|w| w.id.as_str()),
+        Some("review")
+    );
     // The record is on disk, so the run rail lands on its row rather than
     // leaving the cursor where it was.
     assert_eq!(app.wf.run_index, Some(0));
@@ -40,7 +45,10 @@ fn opening_a_run_with_no_record_yet_still_overlays_it() {
 
     app.open_workflow_run("review", "run-live");
 
-    assert_eq!(app.selected_workflow().map(|w| w.id.as_str()), Some("review"));
+    assert_eq!(
+        app.selected_workflow().map(|w| w.id.as_str()),
+        Some("review")
+    );
     // No row to select — the record appears when the run settles — but the
     // overlay is what the node preview reads streamed output by, so it is set
     // regardless. Refusing the jump would leave the operator on the Agents rail

@@ -85,7 +85,10 @@ fn a_detail_line_is_flattened_and_clipped_rather_than_refused() {
     .expect("a long detail line is a verbose harness, not a broken one");
 
     let recorded = runs.for_session("session-1");
-    let detail = recorded[0].detail.as_deref().expect("a detail was recorded");
+    let detail = recorded[0]
+        .detail
+        .as_deref()
+        .expect("a detail was recorded");
     assert!(!detail.contains('\u{1b}'), "control characters survived");
     assert!(!detail.contains('\n'));
     assert!(detail.len() < noisy.len());

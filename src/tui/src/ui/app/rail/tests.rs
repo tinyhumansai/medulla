@@ -56,6 +56,34 @@ pub(in crate::ui::app) fn shell_harnesses(
     }
 }
 
+/// A minimal live pty row, for the rail rules that only look at its identity.
+pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionRow {
+    crate::worker::pty::SessionRow {
+        id: id.to_string(),
+        label: id.to_string(),
+        provider: HarnessProvider::Codex,
+        preset: None,
+        state: crate::worker::pty::PtyState::Running,
+        cwd: "/".to_string(),
+        branch: None,
+        launch_root: None,
+        launch_commit: None,
+        launch_checkout_identity: None,
+        session_id: None,
+        thread_name: None,
+        started_at: 0,
+        last_output_at: 0,
+        last_error: None,
+        busy: false,
+        control: crate::worker::pty::SessionControl::Orchestrator,
+        origin: crate::ui::app::rail::types::SessionOrigin::Orchestrator,
+        retained: false,
+        name: None,
+        attention: None,
+        mcp_grant_session: None,
+    }
+}
+
 /// The agent rows, in rail order.
 fn agent_ids(app: &App) -> Vec<String> {
     app.rail_rows()
@@ -581,7 +609,7 @@ mod merging_a_served_dispatch {
         // Otherwise a second live pty would collapse onto a task already being
         // served, and the rail would lose a running harness.
         let mut taken = task_row("t-1");
-        taken.local = Some(crate::ui::app::rail::tests::stub_session("w_1"));
+        taken.local = Some(super::stub_session("w_1"));
         let mut owner = group(vec![taken]);
         let mut groups = vec![&mut owner];
 

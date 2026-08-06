@@ -505,6 +505,27 @@ fn unplaced_host(hosts: &[HostGroup], host_id: &str) -> Option<usize> {
         .position(|host| !host_id.is_empty() && host.row.host_id.trim() == host_id)
         .or_else(|| hosts.iter().position(|host| host.row.local))
 }
+/// The placed task row `session_id` is serving, given a task-to-session lookup.
+///
+/// Split from the [`App`] method so the row-picking rule is testable without a
+/// daemon: `served` is the only thing the real call needs a running hub for.
+fn task_row_serving<'a>(
+    groups: &'a mut [&mut AgentGroup],
+    session_id: &str,
+    served: impl Fn(&str) -> Option<String>,
+) -> Option<&'a mut SessionRailRow> {
+    groups
+        .iter_mut()
+        .flat_map(|group| group.sessions.iter_mut())
+        .find(|session| {
+            session.local.is_none()
+                && session
+                    .task
+                    .as_ref()
+                    .is_some_and(|task| served(&task.task_id).as_deref() == Some(session_id))
+        })
+}
+
 /// The workflow-run rows that belong under one session, oldest first.
 ///
 /// Keyed by the grant session recorded on the PTY row at launch — the same key

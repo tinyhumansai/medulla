@@ -60,11 +60,11 @@ pub(super) fn hook_report(
     Ok(json!({ "recorded": true }))
 }
 
-/// Clip `summary` to [`MAX_SUMMARY`] characters, on a character boundary.
-fn truncate(summary: &str) -> String {
-    if summary.chars().count() <= MAX_SUMMARY {
-        return summary.to_string();
+/// Clip `value` to `max_chars` characters, on a character boundary.
+fn truncate_to(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
     }
-    let clipped: String = summary.chars().take(MAX_SUMMARY - 1).collect();
+    let clipped: String = value.chars().take(max_chars - 1).collect();
     format!("{clipped}…")
 }

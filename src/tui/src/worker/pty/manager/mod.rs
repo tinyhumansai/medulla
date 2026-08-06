@@ -125,13 +125,27 @@ impl PtyManager {
     /// The default sink writes escape sequences to this process's terminal and
     /// shells out to `tmux`/`pbcopy`; a test wants neither, and wants to assert
     /// on what a harness asked to copy.
+    ///
+    /// `clipboard` is driven by a single dedicated worker thread rather than one
+    /// spawned per copy: a harness that emits two OSC 52 sequences close
+    /// together previously raced two independent threads against `tmux`/
+    /// `pbcopy`, and whichever happened to finish last — not whichever copied
+    /// last — is what ended up in the operator's clipboard. Draining one
+    /// channel in submission order makes "last copy wins" actually mean the
+    /// last one the harness sent.
     pub fn with_now_and_clipboard(now: NowFn, clipboard: ClipboardSink) -> Self {
+        let (clipboard_tx, clipboard_rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            while let Ok(text) = clipboard_rx.recv() {
+                clipboard(&text);
+            }
+        });
         PtyManager {
             inner: Arc::new(Inner {
                 sessions: RwLock::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 now,
-                clipboard,
+                clipboard_tx: std::sync::Mutex::new(clipboard_tx),
             }),
         }
     }

@@ -52,8 +52,9 @@ pub(super) fn hook_report(
     report.summary = optional_str(params, "summary")
         .map(|summary| truncate(&summary))
         .unwrap_or_default();
-    report.cwd = optional_str(params, "cwd");
-    report.harness_session_id = optional_str(params, "harnessSessionId");
+    report.cwd = optional_str(params, "cwd").map(|cwd| truncate_to(&cwd, MAX_FIELD));
+    report.harness_session_id =
+        optional_str(params, "harnessSessionId").map(|id| truncate_to(&id, MAX_FIELD));
 
     ops.record_hook_event(report);
     Ok(json!({ "recorded": true }))

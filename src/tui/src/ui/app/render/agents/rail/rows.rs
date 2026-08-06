@@ -17,6 +17,13 @@ use super::status::HarnessVisualState;
 use super::wrap::{home_dir, wrap_line};
 use super::CONT_INDENT;
 
+/// Maximum terminal-cell width reserved for a session title in an agent label.
+///
+/// [`slug`] bounds its output in Unicode *characters*, which is the right unit
+/// for a name but not for a row: 48 wide characters (`界`) still occupy 96
+/// columns. The rail budgets cells, so the slug is clipped again here.
+const SESSION_TITLE_MAX_CELLS: usize = 48;
+
 impl App {
     /// Format one operator-started harness using the configured status-line layout.
     ///

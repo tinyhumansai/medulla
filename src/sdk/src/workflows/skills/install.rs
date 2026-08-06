@@ -468,11 +468,45 @@ fn scan_candidates(target: SkillTarget, root: &Path) -> io::Result<Vec<Candidate
                 slug,
                 target,
                 is_skill: false,
+                symlinked: false,
             });
         }
     }
 
     found.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(found)
+}
+
+/// Every entry of one skills root that sits where a generated skill directory
+/// would, marked or not.
+///
+/// A missing directory yields nothing rather than an error: not having a
+/// `.codex` is the normal state for most machines. Split out from
+/// [`scan_candidates`] so the prune pass can point it at Codex's deprecated
+/// `.codex/skills` root, which has no commands directory beside it.
+fn scan_skill_dirs(target: SkillTarget, skills: &Path) -> io::Result<Vec<Candidate>> {
+    let mut found = Vec::new();
+    for entry in read_dir_opt(skills)? {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        // An entry whose type will not read is treated as a symlink: that is the
+        // conservative direction when guessing wrong means deleting through one.
+        let symlinked = entry
+            .file_type()
+            .map(|kind| kind.is_symlink())
+            .unwrap_or(true);
+        let path = dir.join("SKILL.md");
+        found.push(Candidate {
+            marker: read_marker(&path)?,
+            path,
+            slug: entry.file_name().to_string_lossy().into_owned(),
+            target,
+            is_skill: true,
+            symlinked,
+        });
+    }
     Ok(found)
 }
 

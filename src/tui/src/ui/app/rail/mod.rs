@@ -228,7 +228,7 @@ impl App {
             // task row takes the local session rather than a second row for the
             // same process appearing beside it — which is exactly the "carries
             // either (or … both)" case [`SessionRailRow`] documents.
-            if let Some(existing) = self.task_row_serving(&mut groups, &row.id).take() {
+            if let Some(existing) = self.task_row_serving(&mut groups, &row.id) {
                 existing.local = Some(row);
                 continue;
             }

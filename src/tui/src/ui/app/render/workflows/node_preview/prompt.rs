@@ -186,6 +186,29 @@ fn split_first<'a>(body: &'a str, separators: &[&str]) -> &'a str {
         .unwrap_or(body)
 }
 
+/// Where `needle` first appears outside quotes and brackets as a whole word.
+///
+/// For jq's word-shaped operators (`then`, `else`, `end`), where a plain
+/// substring search would match inside a field name that happens to contain
+/// one. Punctuation operators like `|` and `//` cannot collide that way and use
+/// [`find_top_level`] directly.
+fn find_top_level_keyword(body: &str, needle: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(offset) = find_top_level(&body[from..], needle).map(|at| from + at) {
+        let before = body[..offset].chars().next_back();
+        let after = body[offset + needle.len()..].chars().next();
+        // `.` counts as a leading identifier character so `.then` reads as a
+        // field access rather than as the keyword.
+        let starts_word = before.is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '.');
+        let ends_word = after.is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        if starts_word && ends_word {
+            return Some(offset);
+        }
+        from = offset + needle.len();
+    }
+    None
+}
+
 /// Where `needle` first appears outside quotes and brackets, if it does.
 fn find_top_level(body: &str, needle: &str) -> Option<usize> {
     let mut depth = 0_usize;

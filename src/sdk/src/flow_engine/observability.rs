@@ -41,7 +41,7 @@ use crate::harness_work::kinds;
 pub type WorkEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
 /// A best-effort durable copy of the completed steps in a still-running run.
-pub(crate) type StepSnapshot = Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>;
+pub type StepSnapshot = Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>;
 
 /// A sink that discards everything, for runs nobody is watching.
 pub fn null_sink() -> WorkEventSink {

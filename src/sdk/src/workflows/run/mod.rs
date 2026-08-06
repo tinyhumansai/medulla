@@ -61,7 +61,7 @@ pub struct RunContext {
     /// Where progress events go.
     pub sink: WorkEventSink,
     /// Persists completed-step snapshots while the run is still executing.
-    pub(crate) step_snapshot: Option<StepSnapshot>,
+    pub step_snapshot: Option<StepSnapshot>,
 }
 
 /// Write a terminal status onto a run record unless a settled path already did.

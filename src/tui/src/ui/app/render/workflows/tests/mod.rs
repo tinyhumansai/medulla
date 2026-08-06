@@ -661,3 +661,39 @@ fn a_fold_turns_against_the_frame_rather_than_costing_a_column() {
         "the fold has no visible turn: {screen}"
     );
 }
+
+#[test]
+fn a_port_name_in_the_gutter_leaves_the_arrowhead_its_cell() {
+    let (_home, mut app) = app_with(&[diamond("nightly")], &[]);
+
+    let screen = render(&mut app);
+
+    // `false` is the longest port name in ordinary use and exactly fills the
+    // gutter. Written a cell wider it lands on the arrowhead — and since the
+    // label is painted after the arrow, it simply replaces it, leaving an arm
+    // that reads as a wire which never arrived.
+    assert!(
+        screen.contains("false▶"),
+        "the false arm lost its arrowhead: {screen}"
+    );
+    assert!(screen.contains("true"), "and the true arm is still named");
+}
+
+#[test]
+fn a_folded_arms_port_name_stands_clear_of_the_wire() {
+    let (_home, mut app) = app_with(&[looping("babysit")], &[]);
+
+    // Narrow enough that the loop's body arm folds onto the next band.
+    let screen = render_sized(&mut app, 74, 30);
+    let row = screen
+        .lines()
+        .find(|line| line.contains("body"))
+        .expect("the body arm is named somewhere");
+    let at = row.find("body").expect("just found it");
+
+    // A blank either side, so the name reads as a caption on the wire rather
+    // than as part of the drawing: `╭body────────` ran the corner, the name and
+    // the run together into one token.
+    assert_eq!(&row[at - 1..at], " ", "no blank before the name: {row}");
+    assert_eq!(&row[at + 4..at + 5], " ", "no blank after the name: {row}");
+}

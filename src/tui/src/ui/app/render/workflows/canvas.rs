@@ -31,16 +31,21 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::{GUTTER_GAP, GUTTER_SPAN};
+use super::{GUTTER_GAP, GUTTER_SPAN, MAX_NODE_WIDTH};
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that
 /// leaves it.
 const NODE_GAP: usize = 1;
 
-/// How many columns a port label has, between the gutter's vertical run and the
-/// arrowhead at the target's leading edge.
-const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 2;
+/// How many columns a port label has: the cells strictly between the gutter's
+/// vertical run and the arrowhead at the target's leading edge.
+///
+/// Three come off the span rather than two — the gutter's own column, the
+/// arrowhead's, and the blank [`NODE_GAP`] leaves before the name. A label sized
+/// to include the arrowhead's cell is written after the arrow and simply
+/// replaces it.
+const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 3;
 
 /// The row inside a node that wires attach to. A node is one row tall, so this
 /// is that row.
@@ -326,32 +331,63 @@ impl App {
             // The port label is what tells a reader which arm of a branch they
             // are following, so it is written along the run into the target —
             // one label per target row, rather than every arm of a branch
-            // fighting for the source's single exit row. Clipped rather than
-            // dropped when a case name is long: its first letters still
-            // distinguish it from its siblings.
-            if let Some(label) = &edge.label {
-                let label = crate::ui::util::clip(label, LABEL_WIDTH);
-                // Written along the run into the target — one label per target
-                // row, rather than every arm of a branch fighting for the
-                // source's single exit row. A folded arm writes its name on the
-                // row it comes across on instead; dropping it there would leave
-                // the reader unable to tell which arm of a branch wrapped, which
-                // is the one thing the label exists to say.
-                let (label_x, label_row) = match link_row {
-                    // Beside the corner the wire turns down at, on the long run
-                    // it came across on. Not left of the corner: a fold turns in
-                    // the left margin, where there are no columns to write in.
-                    Some(link_row) => (entry + 1, link_row),
-                    None => (gutter + 1, to_row),
+            // fighting for the source's single exit row.
+            //
+            // A loop's closing arm carries no choice to report — it is the one
+            // way back — so it is left unlabelled rather than writing a port
+            // name across the run it returns along.
+            if let (Some(label), false) = (&edge.label, backward) {
+                let (caption, x, row) = match link_row {
+                    Some(link_row) => self.fold_caption(label, entry, gutter, link_row),
+                    // Between two columns of one band there is only the gutter,
+                    // so the name is squeezed into it and clipped rather than
+                    // dropped: its first letters still tell it from its
+                    // siblings, which is the one thing it exists to say.
+                    None => (
+                        crate::ui::util::clip(label, LABEL_WIDTH),
+                        gutter + 1,
+                        to_row,
+                    ),
                 };
-                // A loop's closing arm carries no choice to report — it is the
-                // one way back — so it is left unlabelled rather than writing a
-                // port name across the run it returns along.
-                if !backward {
-                    canvas.label(label_x, label_row, &label, style);
-                }
+                canvas.label(x, row, &caption, style);
             }
         }
+    }
+
+    /// Where a folded edge's port name goes, and what fits there.
+    ///
+    /// A fold's run spans the pane, so unlike the gutter case this has room to
+    /// spare: the name is written in full and given a blank cell either side,
+    /// because the [`Canvas::label`] blanks are what separate it from the wire.
+    /// Butted straight onto the corner the run turns at, `body` read as part of
+    /// the drawing — `╭body────────` — rather than as a caption on it.
+    ///
+    /// It sits at the corner rather than mid-run because that is the end a
+    /// reader arrives at: the corner is directly above the arrowhead, so the
+    /// name and the step it names are read together.
+    fn fold_caption(
+        &self,
+        label: &str,
+        entry: usize,
+        gutter: usize,
+        link_row: usize,
+    ) -> (String, usize, usize) {
+        // Two blanks and at least one cell of wire left over, so the caption
+        // cannot swallow the run it is captioning.
+        let room = gutter.abs_diff(entry).saturating_sub(4).min(MAX_NODE_WIDTH);
+        if room == 0 {
+            return (String::new(), entry, link_row);
+        }
+        let caption = format!(" {} ", crate::ui::util::clip(label, room));
+        // Inside the run, on the side it comes across from — which is the right
+        // for a fold turning down at the left margin, and the left for one whose
+        // target sits further along its band.
+        let x = if gutter > entry {
+            entry + 1
+        } else {
+            entry.saturating_sub(caption.width())
+        };
+        (caption, x, link_row)
     }
 
     /// How many columns a node's label actually occupies on screen.

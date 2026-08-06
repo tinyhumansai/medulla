@@ -28,7 +28,7 @@ pub use file::{
 // workflow state lands on disk. The copilot transcripts are one such piece and
 // live outside this module, so both are visible in-crate rather than each
 // keeping a second copy that could disagree about what a safe name is.
-pub(crate) use file::{safe_component, write_atomic};
+pub(crate) use file::{safe_component, write_atomic, workspace_scope};
 
 use crate::workflows::types::{
     RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,

@@ -22,6 +22,23 @@ use crate::worker::pty::PtyManager;
 use super::super::HarnessChoice;
 use super::session::{harnesses, wait_for};
 
+/// A stand-in harness that records the argv it was spawned with at `argv`, then
+/// sits still long enough for the test to read it.
+///
+/// The record is written to a sibling and *renamed* into place rather than
+/// redirected straight at `argv`, because the tests wait on `argv.exists()`.
+/// A plain `> argv` creates the file the moment the shell sets up the
+/// redirection, before `printf` has written a byte, so a loaded machine can
+/// let the waiter through and read an empty file — the flake this shape
+/// removes. A rename is atomic, so the path appears only once the content
+/// behind it is whole.
+fn records_argv_then_sleeps(argv: &std::path::Path) -> String {
+    format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > {0}.tmp\nmv {0}.tmp {0}\nsleep 30\n",
+        argv.display()
+    )
+}
+
 #[test]
 fn picker_choices_include_every_native_provider_and_registered_preset() {
     let mut harnesses = harnesses(PtyManager::new());

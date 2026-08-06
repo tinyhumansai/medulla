@@ -70,8 +70,7 @@ fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-async fn async_main() -> anyhow::Result<()> {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
     let command = parse_command(&raw);
 
     // Load a cwd `.env` into the process env before anything reads it (this is

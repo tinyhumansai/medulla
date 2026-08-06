@@ -23,6 +23,8 @@
 //! than queueing thousands of lines that are stale by the time they arrive.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::flow_engine::NodeProgressSink;
@@ -32,6 +34,16 @@ use crate::flow_engine::NodeProgressSink;
 /// Fast enough that a watching rail row looks live, slow enough that a chatty
 /// harness cannot turn a progress stream into a control-socket flood.
 const MIN_REPORT_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How many progress frames may sit unsent before new ones are dropped.
+///
+/// The forwarder coalesces, but only once it is awake: while it is awaiting
+/// `connect` or `report_run` a chatty harness can enqueue without limit, and
+/// the reader would never see those frames anyway. Dropping at the sink is
+/// what makes the queue's size a property of this constant rather than of how
+/// long a stalled control plane takes to answer. Terminal reports bypass this
+/// entirely — there is exactly one per run, and it is the report that matters.
+const MAX_PENDING_PROGRESS: usize = 64;
 
 /// The wire word for a settled run's status.
 ///

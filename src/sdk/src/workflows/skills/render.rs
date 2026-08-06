@@ -31,6 +31,13 @@ const GET_TOOL: &str = "mcp__medulla__workflow_run_get";
 /// they will not read.
 const MAX_SLUG_CHARS: usize = 64;
 
+/// The namespace every generated slug opens with.
+///
+/// Load-bearing beyond the cosmetic: [`super::install`] treats a `medulla-`
+/// skill directory with no workflow behind it as ours to retire, so the prefix
+/// is the one thing that makes a marker-less leftover recognisable.
+pub(crate) const SLUG_PREFIX: &str = "medulla-";
+
 /// The slug a workflow's skill is installed under.
 ///
 /// Prefixed with `medulla-` so a directory listing of `~/.claude/skills` says
@@ -56,7 +63,7 @@ pub fn slug_for(workflow_id: &str) -> String {
     if slug.is_empty() {
         slug.push_str("workflow");
     }
-    let mut slug = format!("medulla-{slug}");
+    let mut slug = format!("{SLUG_PREFIX}{slug}");
     if slug.len() > MAX_SLUG_CHARS {
         // ASCII by construction, so a byte truncation is a char truncation. A
         // trailing dash would read as an accident.

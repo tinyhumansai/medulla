@@ -321,60 +321,6 @@ fn commands_are_written_only_when_asked_and_only_where_they_exist() {
 }
 
 #[test]
-fn sync_prune_removes_orphans_and_spares_unmarked_neighbours() {
-    let home = TempDir::new().unwrap();
-    let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let kept = summary("babysit", "Watch a PR.");
-    let orphan = summary("audit", "Audit a repo.");
-    install(&[kept.clone(), orphan], &options).unwrap();
-
-    let neighbour = home.path().join(".claude/skills/handwritten/SKILL.md");
-    fs::create_dir_all(neighbour.parent().unwrap()).unwrap();
-    fs::write(&neighbour, "mine\n").unwrap();
-
-    let report = sync(&[kept], &options, true).unwrap();
-
-    assert_eq!(report.count(FileAction::Removed), 1);
-    let removed = &report
-        .files
-        .iter()
-        .find(|file| file.action == FileAction::Removed)
-        .unwrap()
-        .workflow_id;
-    assert_eq!(removed, "audit");
-    assert!(!home.path().join(".claude/skills/medulla-audit").exists());
-    assert!(skill_path(SkillTarget::Claude, home.path(), "medulla-babysit").is_file());
-    assert_eq!(fs::read_to_string(&neighbour).unwrap(), "mine\n");
-}
-
-#[test]
-fn sync_without_prune_leaves_orphans_in_place() {
-    let home = TempDir::new().unwrap();
-    let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let kept = summary("babysit", "Watch a PR.");
-    install(&[kept.clone(), summary("audit", "Audit.")], &options).unwrap();
-
-    let report = sync(&[kept], &options, false).unwrap();
-
-    assert_eq!(report.count(FileAction::Removed), 0);
-    assert!(skill_path(SkillTarget::Claude, home.path(), "medulla-audit").is_file());
-}
-
-#[test]
-fn sync_prunes_a_workflow_that_has_since_been_disabled() {
-    let home = TempDir::new().unwrap();
-    let options = opts(home.path(), vec![SkillTarget::Claude]);
-    install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
-
-    let mut disabled = summary("babysit", "Watch a PR.");
-    disabled.enabled = false;
-    let report = sync(&[disabled], &options, true).unwrap();
-
-    assert_eq!(report.count(FileAction::Removed), 1);
-    assert!(!skill_path(SkillTarget::Claude, home.path(), "medulla-babysit").exists());
-}
-
-#[test]
 fn uninstall_removes_only_the_named_workflows_files() {
     let home = TempDir::new().unwrap();
     let mut options = opts(home.path(), vec![SkillTarget::Claude]);

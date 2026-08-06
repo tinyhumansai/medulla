@@ -2,10 +2,20 @@
 //! discipline that makes it safe to touch `~/.claude`.
 //!
 //! One rule governs every path in here: a file we did not write is never
-//! overwritten and never deleted. Ownership is proved by the marker line
-//! [`super::render`] puts at the top of everything it generates, so a
-//! hand-written `~/.claude/skills/medulla-babysit/SKILL.md` survives an install
-//! intact and is reported as a collision instead.
+//! overwritten. Ownership is proved by the marker line [`super::render`] puts
+//! at the top of everything it generates, so a hand-written
+//! `~/.claude/skills/medulla-babysit/SKILL.md` survives an install intact and
+//! is reported as a collision instead.
+//!
+//! Removal carries one deliberate exception, and only under
+//! [`sync`]`(.., prune = true)`: the `medulla-` slug prefix is Medulla's
+//! namespace, so a `medulla-*` skill directory with no enabled workflow behind
+//! it is retired even when its marker is missing or unreadable. Without that,
+//! a leftover written by a release whose marker we can no longer parse — or
+//! one an operator's editor mangled — is undeletable by any command, and the
+//! harness goes on advertising a workflow that does not exist. A `medulla-*`
+//! directory that *does* match an enabled workflow keeps the marker rule
+//! intact: unmanaged content there is a collision, never a removal.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -14,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::workflows::WorkflowSummary;
 
-use super::render::{parse_marker, render, render_command};
+use super::render::{parse_marker, render, render_command, slug_for, SLUG_PREFIX};
 use super::targets::{
     command_path, commands_dir, dedupe_by_skills_dir, legacy_codex_skills_dir, skill_path,
     skills_dir, target_root,
@@ -88,11 +98,32 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
 /// Installs `workflows` and, with `prune`, removes managed files for anything
 /// else.
 ///
-/// The pruned set is "every managed file under the target directories whose
+/// The pruned set is "every generated file under the target directories whose
 /// workflow is not in `workflows`" — which covers a deleted workflow, a renamed
 /// one, and a workflow that has since been disabled (disabled workflows are not
-/// installed, so they are not in the keep set either). Unmarked neighbours are
-/// left alone, as everywhere else.
+/// installed, so they are not in the keep set either).
+///
+/// Membership is decided by marker first and by the `medulla-` slug prefix
+/// second: a `medulla-*` skill directory or command file that no enabled
+/// workflow claims is removed even when it carries no marker we can read. That
+/// prefix is Medulla's namespace, and a leftover we cannot identify is exactly
+/// the one an operator cannot get rid of any other way. Neighbours outside the
+/// prefix are left alone, as everywhere else, and so is anything a *kept*
+/// workflow's slug points at — that stays under the marker rule, where foreign
+/// content is a collision rather than a deletion.
+///
+/// Codex's deprecated `.codex/skills` root is swept too, since
+/// [`install`] only retires what a still-installed workflow left there. That
+/// sweep keys off Codex being *requested*, not off Codex surviving
+/// [`dedupe_by_skills_dir`]: `--harness generic,codex` collapses to Generic
+/// alone, because both write `.agents/skills`, and the legacy leftovers would
+/// otherwise go unswept purely because of the order the harnesses were named.
+///
+/// A `medulla-*` entry that is a symlink to a directory is never pruned on the
+/// prefix rule. `read_dir` resolves it, so the `SKILL.md` behind it belongs to
+/// whatever the operator linked in — outside the root entirely — and deleting
+/// it would destroy content Medulla never wrote. A marked file reached that way
+/// is still ours to remove: we wrote the marker, so we know what it is.
 ///
 /// # Errors
 ///
@@ -107,18 +138,26 @@ pub fn sync(
         return Ok(report);
     }
 
-    let keep: BTreeSet<&str> = workflows
-        .iter()
-        .filter(|summary| summary.enabled)
-        .map(|summary| summary.id.as_str())
-        .collect();
+    let enabled = || workflows.iter().filter(|summary| summary.enabled);
+    let keep_ids: BTreeSet<&str> = enabled().map(|summary| summary.id.as_str()).collect();
+    let keep_slugs: BTreeSet<String> = enabled().map(|summary| slug_for(&summary.id)).collect();
 
     for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
-        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
-            if keep.contains(managed.workflow_id.as_str()) {
-                continue;
-            }
-            report.files.push(remove_managed(&managed, opts)?);
+        let root = target_root(*target, opts.scope, &opts.root);
+        let candidates = scan_candidates(*target, &root)?;
+        for stale in prunable(candidates, &keep_ids, &keep_slugs) {
+            report.files.push(remove_managed(&stale, opts)?);
+        }
+    }
+
+    // Deliberately outside the loop above and keyed off the requested targets:
+    // the deduped list may have dropped Codex, and `.codex/skills` is a root no
+    // other target shares, so it must be swept exactly once either way.
+    if opts.targets.contains(&SkillTarget::Codex) {
+        let root = target_root(SkillTarget::Codex, opts.scope, &opts.root);
+        let candidates = scan_skill_dirs(SkillTarget::Codex, &legacy_codex_skills_dir(&root))?;
+        for stale in prunable(candidates, &keep_ids, &keep_slugs) {
+            report.files.push(remove_managed(&stale, opts)?);
         }
     }
     Ok(report)
@@ -319,31 +358,99 @@ fn remove_managed(managed: &ManagedFile, opts: &InstallOptions) -> io::Result<Fi
     })
 }
 
+/// A file in a generated file's place, with whatever marker it turned out to
+/// carry.
+///
+/// The marker is `None` for a file we cannot identify — someone else's, an
+/// unreadable one, or a `SKILL.md` that is not there at all because only the
+/// directory around it survived.
+struct Candidate {
+    path: PathBuf,
+    slug: String,
+    marker: Option<(String, String)>,
+    target: SkillTarget,
+    is_skill: bool,
+    /// Whether the directory entry this came from is a symlink, which makes
+    /// `path` point outside the root we are allowed to delete under. Always
+    /// `false` for a command file: removing that path unlinks the symlink
+    /// itself, never what it points at.
+    symlinked: bool,
+}
+
+impl Candidate {
+    /// The [`ManagedFile`] a removal needs, for a candidate we have decided is
+    /// ours to retire.
+    ///
+    /// An unmarked candidate has no workflow to name, so the report attributes
+    /// it to its slug — the only identity it has left.
+    fn into_managed(self) -> ManagedFile {
+        let (workflow_id, rev) = self
+            .marker
+            .unwrap_or_else(|| (self.slug.clone(), String::new()));
+        ManagedFile {
+            path: self.path,
+            slug: self.slug,
+            workflow_id,
+            rev,
+            target: self.target,
+            is_skill: self.is_skill,
+        }
+    }
+}
+
 /// Every marked file under one target's skill and command directories.
 ///
 /// Missing directories yield nothing rather than an error: not having a
 /// `.codex` is the normal state for most machines.
 fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>> {
-    let mut found = Vec::new();
+    Ok(scan_candidates(target, root)?
+        .into_iter()
+        .filter(|candidate| candidate.marker.is_some())
+        .map(Candidate::into_managed)
+        .collect())
+}
 
-    for entry in read_dir_opt(&skills_dir(target, root))? {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let path = dir.join("SKILL.md");
-        let slug = entry.file_name().to_string_lossy().into_owned();
-        if let Some((workflow_id, rev)) = read_marker(&path)? {
-            found.push(ManagedFile {
-                path,
-                slug,
-                workflow_id,
-                rev,
-                target,
-                is_skill: true,
-            });
-        }
-    }
+/// The subset of `candidates` a prune pass should remove.
+///
+/// Two rules, in order. A file whose marker names a workflow goes when that
+/// workflow is not kept — the long-standing behaviour. A file with no marker we
+/// can read goes when its slug is in the `medulla-` namespace and no kept
+/// workflow claims that slug; that is what retires a leftover from a release
+/// whose marker we no longer recognise, or a directory whose `SKILL.md` an
+/// operator deleted by hand.
+///
+/// The prefix rule stops at a symlinked directory. Its `SKILL.md` is content the
+/// operator linked in from somewhere outside the root, and the prefix alone is
+/// far too thin a claim to delete a file on the strength of. The marker rule is
+/// unaffected: a marker we wrote identifies the file no matter where it sits.
+fn prunable(
+    candidates: Vec<Candidate>,
+    keep_ids: &BTreeSet<&str>,
+    keep_slugs: &BTreeSet<String>,
+) -> Vec<ManagedFile> {
+    candidates
+        .into_iter()
+        .filter(|candidate| match &candidate.marker {
+            Some((workflow_id, _)) => !keep_ids.contains(workflow_id.as_str()),
+            None => {
+                !candidate.symlinked
+                    && candidate.slug.starts_with(SLUG_PREFIX)
+                    && !keep_slugs.contains(&candidate.slug)
+            }
+        })
+        .map(Candidate::into_managed)
+        .collect()
+}
+
+/// Every file in a generated file's place under one target's skill and command
+/// directories, marked or not, sorted by path.
+///
+/// Covers only the directories the target currently writes. Codex's deprecated
+/// `.codex/skills` is reached through [`scan_skill_dirs`] by the prune pass
+/// alone — the listing paths report what a harness will actually load, and
+/// [`install`] cleans that root only on behalf of a workflow that still exists.
+fn scan_candidates(target: SkillTarget, root: &Path) -> io::Result<Vec<Candidate>> {
+    let mut found = scan_skill_dirs(target, &skills_dir(target, root))?;
 
     if let Some(dir) = commands_dir(target, root) {
         for entry in read_dir_opt(&dir)? {
@@ -355,19 +462,51 @@ fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if let Some((workflow_id, rev)) = read_marker(&path)? {
-                found.push(ManagedFile {
-                    path,
-                    slug,
-                    workflow_id,
-                    rev,
-                    target,
-                    is_skill: false,
-                });
-            }
+            found.push(Candidate {
+                marker: read_marker(&path)?,
+                path,
+                slug,
+                target,
+                is_skill: false,
+                symlinked: false,
+            });
         }
     }
 
+    found.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(found)
+}
+
+/// Every entry of one skills root that sits where a generated skill directory
+/// would, marked or not.
+///
+/// A missing directory yields nothing rather than an error: not having a
+/// `.codex` is the normal state for most machines. Split out from
+/// [`scan_candidates`] so the prune pass can point it at Codex's deprecated
+/// `.codex/skills` root, which has no commands directory beside it.
+fn scan_skill_dirs(target: SkillTarget, skills: &Path) -> io::Result<Vec<Candidate>> {
+    let mut found = Vec::new();
+    for entry in read_dir_opt(skills)? {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        // An entry whose type will not read is treated as a symlink: that is the
+        // conservative direction when guessing wrong means deleting through one.
+        let symlinked = entry
+            .file_type()
+            .map(|kind| kind.is_symlink())
+            .unwrap_or(true);
+        let path = dir.join("SKILL.md");
+        found.push(Candidate {
+            marker: read_marker(&path)?,
+            path,
+            slug: entry.file_name().to_string_lossy().into_owned(),
+            target,
+            is_skill: true,
+            symlinked,
+        });
+    }
     found.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(found)
 }

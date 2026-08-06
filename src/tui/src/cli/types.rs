@@ -120,7 +120,9 @@ pub struct SkillsArgs {
     /// `--dry-run`: report the identical outcome and write nothing.
     pub dry_run: bool,
     /// `--prune` (`sync` only): delete managed skills for workflows that are no
-    /// longer enabled or no longer exist.
+    /// longer enabled or no longer exist, plus any other `medulla-*` skill or
+    /// command with no enabled workflow behind it — a marker this build cannot
+    /// read leaves the slug prefix as the only identity a leftover has.
     pub prune: bool,
     /// `--all` (`uninstall` only): the explicit consent a blanket removal
     /// needs. Without it a bare `uninstall` lists what it would delete and

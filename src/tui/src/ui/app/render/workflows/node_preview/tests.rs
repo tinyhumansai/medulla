@@ -473,3 +473,46 @@ fn a_hand_edited_harness_that_cannot_be_read_says_so_rather_than_showing_a_fallb
 
     assert!(preview.contains("custom harness id"), "{preview}");
 }
+
+#[test]
+fn a_wrapped_operand_behind_a_fallback_is_still_named_by_its_value() {
+    // `(… | tostring) // "none"`: the fallback splits first, and its head is
+    // itself parenthesized. Classifying that head directly finds no path, and
+    // the preview used to give up and print the jq source.
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Findings: \" + ((.item.json.json.findings | tostring) // \"none\")"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(preview.contains("Findings: ${findings}"), "{preview}");
+    assert!(
+        preview.contains("dynamic input  previous step → findings"),
+        "{preview}"
+    );
+    assert!(!preview.contains("tostring"), "{preview}");
+    assert!(!preview.contains("${value}"), "{preview}");
+}
+
+#[test]
+fn a_wrapped_operand_with_nothing_legible_keeps_its_whole_source() {
+    // The other half of the same rule: when peeling the head still finds no
+    // path, the operator sees the complete expression rather than the fragment
+    // the split happened to cut.
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Files: \" + (([.nodes.survey.item.files[].path] | join(\", \")) // \"none\")"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(preview.contains("Files: ${value}"), "{preview}");
+    assert!(preview.contains("join("), "{preview}");
+    // The fallback is part of what fills the placeholder, so it is not dropped.
+    assert!(preview.contains("none"), "{preview}");
+}

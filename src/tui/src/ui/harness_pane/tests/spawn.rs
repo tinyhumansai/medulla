@@ -295,13 +295,17 @@ fn an_operator_started_claude_is_pointed_at_the_managed_skills() {
         &InstallOptions {
             targets: vec![SkillTarget::Claude],
             scope: SkillScope::Managed,
-            root: managed_root(&env),
+            root: managed_root(&env, dir.path()),
             with_commands: false,
             dry_run: false,
         },
     )
     .expect("the managed skill is installable");
-    let expected = managed_dir(SkillTarget::Claude, &env).display().to_string();
+    // The managed root is scoped to the workspace the session opens in, which
+    // here is the scratch directory the pane is pointed at below.
+    let expected = managed_dir(SkillTarget::Claude, &env, dir.path())
+        .display()
+        .to_string();
 
     let sessions = PtyManager::new();
     let mut harnesses = harnesses(sessions.clone());

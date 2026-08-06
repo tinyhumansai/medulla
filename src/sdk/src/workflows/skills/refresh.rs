@@ -153,6 +153,11 @@ pub fn sync_managed(
 /// Idempotent and safe to race — removing an already-removed file is not an
 /// error — so it needs no lock of its own even though the directory is shared
 /// by every workspace.
+///
+/// # Errors
+///
+/// Propagates filesystem errors from reading or removing under the legacy root.
+/// The caller treats them as non-fatal.
 fn retire_unscoped(
     target: SkillTarget,
     env: &HashMap<String, String>,

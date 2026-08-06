@@ -28,13 +28,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// A session that starts run after run keeps its recent ones; the rest is the
 /// workflow's own durable history, which the Workflows page reads from disk.
-const MAX_RUNS_PER_SESSION: usize = 8;
+pub(super) const MAX_RUNS_PER_SESSION: usize = 8;
 
 /// The most progress frames retained per run.
 ///
 /// Enough to watch a step work; the run's own record is where the durable
 /// account of it lives.
-const MAX_FRAMES_PER_RUN: usize = 200;
+pub(super) const MAX_FRAMES_PER_RUN: usize = 200;
 
 /// How the reporting side says a run is going.
 ///

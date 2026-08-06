@@ -370,6 +370,11 @@ struct Candidate {
     marker: Option<(String, String)>,
     target: SkillTarget,
     is_skill: bool,
+    /// Whether the directory entry this came from is a symlink, which makes
+    /// `path` point outside the root we are allowed to delete under. Always
+    /// `false` for a command file: removing that path unlinks the symlink
+    /// itself, never what it points at.
+    symlinked: bool,
 }
 
 impl Candidate {

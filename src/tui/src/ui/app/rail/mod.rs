@@ -400,7 +400,10 @@ impl App {
     /// runs by ([`run_rows_under`]) — which meant the runs an orchestrator's own
     /// harnesses start, the majority of them, were the ones the rail could not
     /// show. A run is minutes-to-hours of work in another process; leaving it
-    /// invisible is the same failure retention exists to prevent.
+    /// invisible is the same failure retention exists to prevent. That does not
+    /// double the row: [`attach_sessions`](Self::attach_sessions) merges such a
+    /// session into the task row already standing for it, which is what gives
+    /// that row the grant it was missing.
     pub(super) fn own_session_rows(&self) -> Vec<SessionRow> {
         let Some(harnesses) = self.local_sessions.as_ref() else {
             return Vec::new();

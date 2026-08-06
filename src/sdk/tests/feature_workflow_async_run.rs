@@ -108,6 +108,7 @@ fn request<'a>(
         workflow_id: id,
         input: tinyflows::engine::RunInput::new(json!({})),
         sink: None,
+        liveness: None,
     }
 }
 
@@ -204,7 +205,7 @@ async fn a_wait_budget_that_expires_hands_back_the_run_rather_than_an_error() {
 }
 
 #[tokio::test]
-async fn a_run_rejected_for_bad_inputs_settles_as_failed_rather_than_running_forever() {
+async fn a_run_rejected_for_bad_inputs_is_never_admitted() {
     // Regression for the admission record `LocalRun::start` writes before the
     // detached task ever calls `run_workflow`: `run_workflow` resolves declared
     // inputs before it claims the run or writes its own record, so a caller
@@ -216,22 +217,19 @@ async fn a_run_rejected_for_bad_inputs_settles_as_failed_rather_than_running_for
     let config = medulla::config::WorkflowsConfig::default();
     let env = env_with_only_claude();
 
-    let answer = ops::run(
+    let error = ops::run(
         request(&store, &config, &env, root.path(), "needs-input"),
         Wait::No,
     )
     .await
-    .expect("admitted despite the bad call — the refusal surfaces once the task runs");
-
-    let run_id = answer["runId"].as_str().expect("a run id").to_string();
-    let done = settled(&store, &run_id, 200).await;
-    assert_eq!(done["status"], "failed", "{done}");
+    .expect_err("missing declared inputs are a synchronous call error");
+    assert!(error.to_string().contains("repo"), "{error}");
     assert!(
-        done["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("repo"),
-        "{done}"
+        ops::list_runs(&store, "needs-input", StepDetail::Counts).unwrap()["runs"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "no invalid run should appear in history"
     );
 }
 

@@ -645,7 +645,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         crate::control_plane::start(
             &env,
             &loaded.config,
-            hub_session.is_some(),
             hub_slot.clone(),
             local_default_worker,
             hook_log.clone(),

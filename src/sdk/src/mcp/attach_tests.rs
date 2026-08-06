@@ -446,3 +446,73 @@ fn attach_cli_never_writes_the_process_environment() {
         "attach_cli must never write the harness's own environment: {env:?}"
     );
 }
+
+#[test]
+fn attaching_a_cli_tells_the_server_which_session_it_serves() {
+    // Without this the tool server cannot attribute a run it starts, and the
+    // Agents rail has nothing to nest the run under.
+    let mut env = HashMap::new();
+    let mut args = Vec::new();
+    attach_cli(
+        crate::protocol::HarnessProvider::Claude,
+        "claude",
+        "pty-origin",
+        &mut env,
+        &mut args,
+        None,
+    );
+    let document: Value = serde_json::from_str(&args[1]).expect("a JSON document");
+    assert_eq!(
+        document["mcpServers"]["medulla"]["env"][super::ORIGIN_SESSION_ENV],
+        "pty-origin"
+    );
+    assert!(
+        !env.contains_key(super::ORIGIN_SESSION_ENV),
+        "it belongs to the server's own spawn, not to the harness's environment"
+    );
+}
+
+#[test]
+fn a_blank_session_key_stamps_nothing() {
+    // A caller with no session to name must not write an empty attribution the
+    // rail would then try to match runs against.
+    let spec = ServerSpec {
+        name: "medulla",
+        command: "medulla".into(),
+        args: vec!["mcp".into()],
+        env: Vec::new(),
+        secret_env: Vec::new(),
+    }
+    .for_session("   ");
+    assert!(spec.env.is_empty());
+}
+
+/// The file transport carries the session too, so the ACP door attributes runs
+/// exactly as the argv door does.
+#[test]
+fn a_written_config_file_carries_the_session_alongside_the_grant() {
+    let _home = ScratchHome::install();
+    let session = "attach-test-carries-session";
+    let spec = server_spec(
+        Some("run"),
+        Some((PathBuf::from("/run/medulla.sock"), "s3cret".to_string())),
+        true,
+    )
+    .expect("a server is served here")
+    .for_session(session);
+
+    let path = spec
+        .write_config_file(session)
+        .expect("the config file is writable");
+    let contents = std::fs::read_to_string(&path).expect("the file was written");
+    std::fs::remove_file(&path).ok();
+
+    let document: Value = serde_json::from_str(&contents).expect("a JSON document");
+    let env = &document["mcpServers"]["medulla"]["env"];
+    assert_eq!(env[super::ORIGIN_SESSION_ENV], session);
+    assert_eq!(
+        env[crate::control_socket::MCP_GRANT_ENV],
+        "s3cret",
+        "and the grant is still there beside it"
+    );
+}

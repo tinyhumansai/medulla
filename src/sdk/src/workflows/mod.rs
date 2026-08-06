@@ -69,6 +69,7 @@ pub use tinyflows::model::{InputType, WorkflowGraph, WorkflowInput};
 pub(crate) use types::bounded_evidence;
 pub use types::{
     fingerprint, record_fingerprint, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus,
-    ProposalVerification, RunId, RunRecord, RunStatus, RunStep, WorkflowDefaults, WorkflowError,
-    WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision, WorkflowSummary,
+    ProposalVerification, RunId, RunOrigin, RunRecord, RunStatus, RunStep, WorkflowDefaults,
+    WorkflowError, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,
+    WorkflowSummary,
 };

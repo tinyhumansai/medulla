@@ -32,6 +32,9 @@ fn run(id: &str, status: RunStatus) -> RunRecord {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     }
@@ -123,4 +126,85 @@ fn every_status_has_a_word_and_a_colour() {
     assert_eq!(status_color(RunStatus::Failed), "red");
     assert_eq!(status_color(RunStatus::Cancelled), "red");
     assert_eq!(status_color(RunStatus::Interrupted), "red");
+}
+
+#[test]
+fn a_run_row_leads_with_what_it_was_given() {
+    // Two runs of one workflow are otherwise the same sentence, so the
+    // arguments come first — that is what an operator is scanning for.
+    let record = run("run-1", RunStatus::Succeeded).with_inputs(
+        &serde_json::json!({ "repo": "acme/api" })
+            .as_object()
+            .cloned()
+            .expect("an object"),
+        &serde_json::json!({}),
+    );
+    let rows = run_rows(&[record]);
+    assert!(
+        rows[0].detail.starts_with("repo=acme/api · "),
+        "{}",
+        rows[0].detail
+    );
+}
+
+#[test]
+fn a_run_row_says_how_long_the_run_took() {
+    let mut record = run("run-1", RunStatus::Succeeded);
+    record.started_at = 1_000;
+    record.finished_at = Some(1_000 + 95_000);
+    let rows = run_rows(&[record]);
+    assert!(rows[0].detail.contains("1m 35s"), "{}", rows[0].detail);
+}
+
+#[test]
+fn a_long_input_set_is_cut_rather_than_widening_the_rail() {
+    let record = run("run-1", RunStatus::Succeeded).with_inputs(
+        &serde_json::json!({ "instruction": "y".repeat(500) })
+            .as_object()
+            .cloned()
+            .expect("an object"),
+        &serde_json::json!({}),
+    );
+    let rows = run_rows(&[record]);
+    let digest = rows[0]
+        .detail
+        .split(" · ")
+        .next()
+        .expect("the digest leads the row");
+    assert!(digest.chars().count() <= INPUTS_CHARS, "{digest:?}");
+    assert!(digest.ends_with('…'));
+}
+
+#[test]
+fn a_workflow_with_no_inputs_still_reads_as_it_always_did() {
+    let rows = run_rows(&[run("run-1", RunStatus::Running)]);
+    assert!(
+        rows[0].detail.starts_with("running · 1 step"),
+        "{}",
+        rows[0].detail
+    );
+}
+
+#[test]
+fn a_bounded_input_shows_its_text_rather_than_the_wrapper() {
+    // An input over `MAX_INPUT_BYTES` is stored as a `_medullaTruncated`
+    // wrapper. A rail row that serialized the wrapper would spend all 48
+    // characters on our own bookkeeping instead of the argument.
+    let record = run("run-1", RunStatus::Succeeded).with_inputs(
+        &serde_json::json!({ "instruction": format!("rebuild the index {}", "y".repeat(8_000)) })
+            .as_object()
+            .cloned()
+            .expect("an object"),
+        &serde_json::json!({}),
+    );
+    assert!(
+        record.inputs["instruction"]["_medullaTruncated"] == serde_json::json!(true),
+        "the fixture must actually be bounded"
+    );
+    let rows = run_rows(&[record]);
+    assert!(
+        rows[0].detail.starts_with("instruction=rebuild the index"),
+        "{}",
+        rows[0].detail
+    );
 }

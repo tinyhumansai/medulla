@@ -73,14 +73,34 @@ pub fn run_rows(runs: &[RunRecord]) -> Vec<WorkflowRow> {
         .collect()
 }
 
-/// The trailing text for a run: where it got to, and what it is waiting on.
+/// Characters of the run's inputs the listing row carries.
+///
+/// A rail is narrow and the renderer clips, but clipping *here* decides which
+/// inputs survive rather than leaving it to whatever column the pane happens to
+/// have. Enough for two or three short arguments, which is what identifies a run.
+const INPUTS_CHARS: usize = 48;
+
+/// The trailing text for a run: what it was given, where it got to, and what it
+/// is waiting on.
+///
+/// The inputs lead. Every run of one workflow shares its name, its step count,
+/// and usually its status too, so a history listing without them is the same
+/// sentence repeated — and the argument a run was given is the one thing that
+/// tells an operator which run they are looking for.
 fn run_detail(run: &RunRecord) -> String {
-    let mut parts = vec![status_label(run.status).to_string()];
+    let mut parts = Vec::new();
+    if let Some(inputs) = input_digest(run) {
+        parts.push(inputs);
+    }
+    parts.push(status_label(run.status).to_string());
     parts.push(format!(
         "{} step{}",
         run.steps.len(),
         if run.steps.len() == 1 { "" } else { "s" }
     ));
+    if let Some(elapsed) = run.duration_ms() {
+        parts.push(super::run_view::human_duration(elapsed));
+    }
     if !run.pending_approvals.is_empty() {
         parts.push(format!("awaiting {}", run.pending_approvals.join(", ")));
     }
@@ -88,6 +108,38 @@ fn run_detail(run: &RunRecord) -> String {
         parts.push(error.clone());
     }
     parts.join(" · ")
+}
+
+/// The run's inputs as `name=value` pairs, bounded to [`INPUTS_CHARS`].
+///
+/// `None` when the run recorded none — a workflow that takes no arguments, or a
+/// record written before runs kept them.
+fn input_digest(run: &RunRecord) -> Option<String> {
+    if run.inputs.is_empty() {
+        return None;
+    }
+    let mut digest = String::new();
+    for (name, value) in &run.inputs {
+        // Through `value_text` so an input the record bounded shows the text it
+        // was given rather than the wrapper we stored it in.
+        let value = super::run_view::value_text(value);
+        let pair = format!("{name}={}", value.replace(['\n', '\r'], " "));
+        if !digest.is_empty() {
+            digest.push(' ');
+        }
+        digest.push_str(&pair);
+        if digest.chars().count() >= INPUTS_CHARS {
+            break;
+        }
+    }
+    if digest.chars().count() > INPUTS_CHARS {
+        digest = digest
+            .chars()
+            .take(INPUTS_CHARS.saturating_sub(1))
+            .chain(std::iter::once('…'))
+            .collect();
+    }
+    Some(digest)
 }
 
 /// The operator-facing word for a run status.

@@ -270,6 +270,15 @@ fn local_context(
             ),
             sink,
             step_snapshot: None,
+            // `medulla workflow run` on a terminal. The workspace is worth
+            // recording even though nothing else about the caller is: a run
+            // that touched the wrong checkout is a common enough mistake that
+            // the record should be able to prove which one it used.
+            origin: Some(
+                medulla::workflows::RunOrigin::of_kind(medulla::workflows::RunOrigin::CLI)
+                    .labelled("medulla workflow run")
+                    .in_workspace(cwd.to_string_lossy()),
+            ),
         },
         run_id,
     ))

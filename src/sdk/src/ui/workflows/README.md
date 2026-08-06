@@ -15,6 +15,8 @@ The UI-facing view of installed workflows: their listings, their graphs, and the
 - [`progress.rs`](./progress.rs) — Reading a harness progress frame as the kind of transcript line it is.
 - [`rows_tests.rs`](./rows_tests.rs) — Tests for the workflow row builders.
 - [`rows.rs`](./rows.rs) — Listing rows for installed workflows and their runs.
+- [`run_view_tests.rs`](./run_view_tests.rs) — What a run's overview shows, and what it refuses to leave out.
+- [`run_view.rs`](./run_view.rs) — What one run says about itself: its inputs, its origin, and how far it got.
 
 ## Maintenance
 

@@ -394,16 +394,22 @@ waiting on a response.
 Workflows is a top-level tab: a sidebar, a canvas, and a copilot.
 
 - **The sidebar** lists the installed workflows, with the selected one's runs
-  indented beneath it. It behaves like the Settings and Routing navs — `↑↓` walk
-  it, `1`-`9` jump, `Enter` opens the graph, `Esc` comes back.
+  indented beneath it. A run row leads with what the run was *given* — the
+  declared inputs as `name=value` — then where it got to and how long it took,
+  because every run of one workflow otherwise reads as the same sentence. It
+  behaves like the Settings and Routing navs — `↑↓` walk it, `1`-`9` jump,
+  `Enter` opens the graph, `Esc` comes back.
 - **The canvas** draws the selected workflow's graph: a box per node, laid out
   left to right by how far each step is from the trigger, a lane per concurrent
   branch, and the branch's port name written on the wire that carries it. `←→`
   follows edges, `↑↓` walks the lanes of a branch, and `i` expands the strip
   below into the selected node's whole declaration. Selecting a run in the
   sidebar overlays it: each box is recoloured by how that run left it, the steps
-  it never reached are dimmed, and the inspector shows the node's duration and
-  any diagnostics.
+  it never reached are dimmed, and the strip below leads with a header saying
+  what the run was started with, who started it, and how it went, before the
+  selected node's own evidence. `i` opens the full account — every input, the
+  trigger payload, the origin, the timings, and what the run's diagnosis found.
+
 - **The copilot** (`c`) is a conversation that edits the graph. Ask for a change
   in plain words; a real agent session makes it with the MCP tools below, and
   the graph is then re-read from the store so the transcript reports what

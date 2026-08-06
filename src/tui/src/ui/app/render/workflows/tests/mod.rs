@@ -288,6 +288,9 @@ fn the_selected_workflows_runs_are_listed_under_it_in_the_rail() {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     };
@@ -326,6 +329,9 @@ fn selecting_a_run_overlays_it_on_the_graph() {
         ],
         pending_approvals: Vec::new(),
         error: Some("boom".into()),
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     };

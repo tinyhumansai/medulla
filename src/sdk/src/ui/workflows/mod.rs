@@ -15,6 +15,8 @@
 //! - [`copilot`] — the transcript model for the graph-editing assistant.
 //! - [`progress`] — reading that assistant's progress frames as tool calls or
 //!   chatter.
+//! - [`run_view`] — what one run says about itself: its inputs, its origin, and
+//!   how far it got.
 
 pub mod copilot;
 pub mod graph;
@@ -22,6 +24,7 @@ pub mod inspect;
 pub mod journal;
 pub mod progress;
 pub mod rows;
+pub mod run_view;
 
 pub use copilot::{CopilotState, CopilotTurn, TurnRole};
 pub use graph::{GraphLayout, Move, PlacedEdge, PlacedNode};
@@ -31,3 +34,4 @@ pub use inspect::{
 pub use journal::{actionable, displayed, note_rows, pending, proposal_detail, proposal_rows};
 pub use progress::{classify as classify_progress, Progress};
 pub use rows::{run_rows, status_color, status_label, workflow_rows, WorkflowRow};
+pub use run_view::{human_duration, run_overview, short_session, value_text};

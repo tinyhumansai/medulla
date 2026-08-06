@@ -194,6 +194,12 @@ pub struct LocalRun<'a> {
     pub sink: Option<crate::flow_engine::WorkEventSink>,
     /// Keeps an MCP server alive after a detached call returns.
     pub liveness: Option<RunLiveness>,
+    /// Who asked for this run, when the caller can say.
+    ///
+    /// The harness session that called `workflow_run` fills this in, which is
+    /// what lets the Agents rail nest the run under the session that started
+    /// it. `None` for a caller with nothing to declare.
+    pub origin: Option<crate::workflows::RunOrigin>,
 }
 
 /// A run that has been admitted and is executing in the background.
@@ -304,6 +310,7 @@ impl LocalRun<'_> {
             input,
             sink,
             liveness,
+            origin,
         } = self;
 
         // Checked before the host, not after: starting a host requires a
@@ -322,8 +329,13 @@ impl LocalRun<'_> {
                 "workflow '{workflow_id}' is disabled"
             )));
         }
-        tinyflows::model::resolve_inputs(&workflow.graph.inputs, &input.inputs)
-            .map_err(|err| crate::workflows::WorkflowError::Engine(err.to_string()))?;
+        // Kept, not discarded: this is the same resolution `run_workflow` does,
+        // and recording *it* rather than the raw arguments means the admission
+        // record and the settled one agree — a caller that relied on a declared
+        // default would otherwise see its value appear only once the run ended.
+        let resolved_inputs =
+            tinyflows::model::resolve_inputs(&workflow.graph.inputs, &input.inputs)
+                .map_err(|err| crate::workflows::WorkflowError::Engine(err.to_string()))?;
 
         let home = crate::home::medulla_home(env);
         let mut settings = CapabilitySettings::from_config(config, &home);
@@ -352,7 +364,14 @@ impl LocalRun<'_> {
         let max_loop_iterations = settings.max_loop_iterations;
         let run_id = format!("run-{}", uuid::Uuid::new_v4());
         let started_at = crate::clock::now_millis() as u64;
-        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at);
+        // The admission record carries the inputs and the origin from the very
+        // first write. A caller that hands back the run id immediately — which
+        // is the default — leaves this as the only record until the run
+        // settles, and a `running` row that cannot say what it was asked to do
+        // is the thing this change exists to remove.
+        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at)
+            .with_inputs(&resolved_inputs, &input.trigger)
+            .with_origin(origin.clone());
         store.record_run(&admitted)?;
         let snapshot_store = store.clone();
         let snapshot_run_id = run_id.clone();
@@ -377,6 +396,7 @@ impl LocalRun<'_> {
             settings: Arc::new(settings),
             services,
             sink,
+            origin,
             step_snapshot: Some(Arc::new(move |steps| {
                 match snapshot_store.get_run(&snapshot_run_id) {
                     Ok(Some(mut record))
@@ -400,6 +420,7 @@ impl LocalRun<'_> {
             let run_id = run_id.clone();
             let workflow_id = workflow_id.clone();
             let store = store.clone();
+            let admitted = admitted.clone();
             let liveness = liveness.as_ref().map(RunLiveness::track);
             async move {
                 let _liveness = liveness;
@@ -420,8 +441,11 @@ impl LocalRun<'_> {
                 // this run id. Without this, that record is stuck at
                 // `running` forever, since nothing else ever reconciles it.
                 if let Err(err) = &outcome {
-                    let mut record =
-                        crate::workflows::new_run_record(&run_id, &workflow_id, started_at);
+                    // Rebuilt from the admission record rather than from
+                    // scratch, so a refused run still says what it was asked to
+                    // do and who asked. Reconstructing a bare record here used
+                    // to discard exactly the fields that explain the refusal.
+                    let mut record = admitted;
                     record.status = crate::workflows::RunStatus::Failed;
                     record.error = Some(err.to_string());
                     record.finished_at = Some(crate::clock::now_millis() as u64);

@@ -38,6 +38,13 @@ pub struct McpSession {
     pub(crate) workflow_mutations: tokio::sync::Mutex<()>,
     /// Detached workflow runs that keep this stdio server alive.
     pub(crate) run_liveness: crate::workflows::local::RunLiveness,
+    /// Who this server is serving, stamped onto every run it starts.
+    ///
+    /// `None` for a session started without an origin in its environment — an
+    /// in-process test, or a server spawned by something other than a harness
+    /// Medulla launched. Runs then record no origin, which is what they did
+    /// before this existed.
+    pub(crate) origin: Option<crate::workflows::RunOrigin>,
 }
 
 impl McpSession {
@@ -59,7 +66,14 @@ impl McpSession {
             notifications: None,
             workflow_mutations: tokio::sync::Mutex::new(()),
             run_liveness: crate::workflows::local::RunLiveness::default(),
+            origin: None,
         }
+    }
+
+    /// Attribute every run this session starts to `origin`.
+    pub(super) fn with_origin(mut self, origin: Option<crate::workflows::RunOrigin>) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// Attach a fleet, taking the families from whatever grant it redeemed.

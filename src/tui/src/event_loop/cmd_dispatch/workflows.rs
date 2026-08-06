@@ -170,6 +170,13 @@ async fn run(
         .watching(progress),
         sink,
         step_snapshot: None,
+        // Started from the Workflows pane by the person looking at it, which is
+        // what tells this run apart from the ones a session in the Agents rail
+        // kicked off behind their back.
+        origin: Some(
+            medulla::workflows::RunOrigin::of_kind(medulla::workflows::RunOrigin::OPERATOR)
+                .labelled("Workflows pane"),
+        ),
     };
 
     let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await;

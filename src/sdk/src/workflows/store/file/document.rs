@@ -158,6 +158,13 @@ pub fn new_run_record(id: &str, workflow_id: &str, started_at: u64) -> RunRecord
         steps: Vec::new(),
         pending_approvals: Vec::new(),
         error: None,
+        // Supplied by the caller through `RunRecord::with_inputs` and
+        // `with_origin`, which every real door does. A record built without
+        // them is still honest — it simply says nothing about what it was
+        // started with, which is what an older record says too.
+        inputs: serde_json::Map::new(),
+        trigger: None,
+        origin: None,
         // Both are evidence about a run that has ended, so a run that has only
         // just started has neither. They are filled in when it settles.
         summary: None,

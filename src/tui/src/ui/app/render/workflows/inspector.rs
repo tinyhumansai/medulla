@@ -12,7 +12,9 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use medulla::ui::workflows::{find_node_in, node_detail, note_rows, proposal_detail, RunOverlay};
+use medulla::ui::workflows::{
+    find_node_in, node_detail, note_rows, proposal_detail, run_overview, RunOverlay,
+};
 
 use crate::ui::util::clip;
 
@@ -84,6 +86,23 @@ impl App {
             lines.truncate(inner.height as usize);
             f.render_widget(Paragraph::new(Text::from(lines)), inner);
             return;
+        }
+
+        // The run in full, above the node's declaration. This screen is the
+        // exhaustive one, and “what was this run” — its inputs, who started it,
+        // how long it took, what its diagnosis found — had no exhaustive view
+        // at all: the rail label carried a status and a step count, and every
+        // other field on the record was reachable only through the CLI.
+        if let Some(run) = self.selected_workflow_run() {
+            lines.push(TLine::from(Span::styled("  Run", dim)));
+            for row in run_overview(run) {
+                lines.push(TLine::from(vec![
+                    Span::styled(format!("{:>16}  ", row.label), dim),
+                    Span::raw(clip(&row.value, width.saturating_sub(18))),
+                ]));
+            }
+            lines.push(TLine::from(""));
+            lines.push(TLine::from(Span::styled("  Step", dim)));
         }
 
         // Open: the declaration in full, from the graph rather than the layout —

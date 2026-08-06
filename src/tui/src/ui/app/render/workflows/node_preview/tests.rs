@@ -5,7 +5,7 @@ use serde_json::json;
 
 use medulla::workflows::{RunRecord, RunStatus, RunStep};
 
-use super::{kind_lines, run_lines, AgentDefaults};
+use super::{kind_lines, run_header, run_lines, AgentDefaults};
 
 /// Flatten styled lines into the text an operator reads.
 fn text(lines: Vec<Line<'static>>) -> String {
@@ -363,6 +363,9 @@ fn agent_run_detail_shows_the_resolved_prompt_and_plain_reply() {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     };
@@ -398,6 +401,9 @@ fn older_agent_run_labels_missing_evidence_as_output() {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     };
@@ -537,4 +543,54 @@ fn a_condition_whose_field_contains_then_is_not_cut_mid_identifier() {
         "{preview}"
     );
     assert!(!preview.contains("${if au}"), "{preview}");
+}
+
+#[test]
+fn the_run_header_says_what_the_run_was_given_and_who_asked_for_it() {
+    // The step's own evidence cannot say any of this, and without it the pane
+    // answered "what did this step do" while leaving "in aid of what" open.
+    let mut record = medulla::workflows::new_run_record("run-abc-1234abcd", "sweep", 1_000)
+        .with_inputs(
+            &json!({ "repo": "acme/api" }).as_object().cloned().unwrap(),
+            &json!({}),
+        )
+        .with_origin(Some(medulla::workflows::RunOrigin::session(
+            "pty-0000-feedface",
+        )));
+    record.status = RunStatus::Succeeded;
+    record.finished_at = Some(1_000 + 95_000);
+    record.summary = Some("Reviewed acme/api.".into());
+
+    let header = text(run_header(&record));
+    assert!(
+        header.contains("1234abcd · succeeded · 1m 35s · 0 steps"),
+        "{header}"
+    );
+    assert!(header.contains("repo=acme/api"), "{header}");
+    assert!(header.contains("feedface"), "{header}");
+    assert!(header.contains("Reviewed acme/api."), "{header}");
+}
+
+#[test]
+fn the_run_header_of_a_workflow_with_no_arguments_omits_the_inputs_line() {
+    let record = medulla::workflows::new_run_record("run-1", "sweep", 1_000);
+    let header = text(run_header(&record));
+    assert!(header.contains("running"), "{header}");
+    assert!(!header.contains("\nin   "), "nothing to show: {header}");
+    assert!(!header.contains("\nfrom "), "nobody claimed it: {header}");
+}
+
+#[test]
+fn a_multi_line_input_is_flattened_into_the_header_digest() {
+    // The header is one line per fact; an input carrying a pasted paragraph
+    // must not turn it into ten.
+    let record = medulla::workflows::new_run_record("run-1", "sweep", 1_000).with_inputs(
+        &json!({ "note": "first line\nsecond line" })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        &json!({}),
+    );
+    let header = text(run_header(&record));
+    assert!(header.contains("note=first line second line"), "{header}");
 }

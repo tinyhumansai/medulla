@@ -283,6 +283,13 @@ impl DaemonRuntime {
             },
             sink,
             step_snapshot: None,
+            // A fleet dispatch: this run exists because a peer sent a task
+            // frame, and the address it came from is the only thing that can
+            // say which one.
+            origin: Some(
+                crate::workflows::RunOrigin::of_kind("dispatch")
+                    .labelled(format!("task {} from {from}", frame.task_id)),
+            ),
         };
 
         // The frame's task id becomes the run id, so the orchestrator's existing

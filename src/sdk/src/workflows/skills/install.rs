@@ -35,6 +35,21 @@ use super::{FileAction, FileOutcome, InstallOptions, InstallReport, InstalledSki
 /// [`FileAction::SkippedUnmanaged`] or [`FileAction::SlugCollision`] so one bad
 /// path does not abort the rest.
 pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Result<InstallReport> {
+    install_over(workflows, opts, &BTreeSet::new())
+}
+
+/// [`install`], told which paths a prune in the same pass has just emptied.
+///
+/// Only a dry run needs telling: a real prune has already deleted the file, so
+/// the write sees an absent path by itself. Under `dry_run` nothing was removed
+/// and the stale marker is still on disk, and reading it would report a
+/// [`FileAction::SlugCollision`] for a write the real run performs — the one
+/// thing a dry run must never do is disagree with the run it predicts.
+fn install_over(
+    workflows: &[WorkflowSummary],
+    opts: &InstallOptions,
+    cleared: &BTreeSet<PathBuf>,
+) -> io::Result<InstallReport> {
     let mut report = InstallReport::default();
     // Which workflow has already claimed each path in *this* run. Without it a
     // dry run would report two `Created`s where the real run writes one file

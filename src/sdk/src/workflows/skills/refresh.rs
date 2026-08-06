@@ -24,19 +24,32 @@
 //! * **It prunes.** A deleted or disabled workflow's skill is removed, which is
 //!   the half an operator cannot do by re-running `install`.
 //! * **It only touches Medulla's own root.** The managed scope is
-//!   `<medulla home>/<harness>-skills`, never the operator's `~/.claude`, so an
-//!   automatic write here cannot disturb a file they wrote themselves.
+//!   `<medulla home>/skills/scopes/<workspace>/<harness>-skills`, never the
+//!   operator's `~/.claude`, so an automatic write here cannot disturb a file
+//!   they wrote themselves.
+//!
+//! Two spawns can happen at once — a worker and a harness pane come up
+//! together, or the operator opens two sessions — so the pass is made safe
+//! against itself in two ways. The root is scoped to the workspace, because the
+//! catalog is: `FileWorkflowStore::discover` layers `<cwd>/.medulla/workflows`
+//! under the user-global directory, so a shared root would hand a session
+//! another project's skills and let either project's prune delete the other's.
+//! And within one workspace the whole load-write-prune pass runs under a
+//! cross-process file lock, so a stale listing cannot prune a skill a newer
+//! pass has just written.
 
 use std::collections::HashMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use fs2::FileExt;
 
 use crate::protocol::HarnessProvider;
 use crate::workflows::store::FileWorkflowStore;
 use crate::workflows::types::WorkflowRecord;
 
 use super::install::sync;
-use super::targets::{managed_root, spawn_args};
+use super::targets::{legacy_managed_root, managed_root, spawn_args};
 use super::{InstallOptions, InstallReport, SkillScope, SkillTarget};
 
 /// Bring the managed skills up to date and return the argv that points a

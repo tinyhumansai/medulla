@@ -168,7 +168,7 @@ fn retire_unscoped(
 /// exactly what two passes can disagree about. It sits at the managed root,
 /// above the `<harness>-skills` directories the scan walks, so it is never
 /// mistaken for a skill.
-struct RefreshLock {
+pub(super) struct RefreshLock {
     file: std::fs::File,
     path: PathBuf,
 }

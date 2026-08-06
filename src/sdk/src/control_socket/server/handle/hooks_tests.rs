@@ -3,8 +3,9 @@ use std::sync::Mutex;
 use serde_json::json;
 
 use crate::control_socket::grants::Grant;
-use crate::control_socket::types::{FleetWorker, RunError, TaskOutcome, TaskRequest, WorkflowAdvert};
+use crate::control_socket::types::FleetWorker;
 use crate::harness_hooks::HookReport;
+use crate::hub::{RunError, TaskOutcome, TaskRequest};
 
 use super::hook_report;
 

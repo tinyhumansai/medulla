@@ -8,7 +8,8 @@
 //! `src/sdk/src/mcp/tests/run_mode.rs` check the allow-list against the tool
 //! table; this checks the two things a skill actually depends on — that
 //! `tools/list` shows exactly the six read/run verbs, and that `workflow_run`
-//! comes back with a run record.
+//! reaches a run record, whether the skill follows the run id it is handed or
+//! asks to wait for the whole thing.
 //!
 //! Offline and deterministic: the store is a tempdir, the workflow is one
 //! `transform` node so no coding-agent process is ever spawned, and provider
@@ -156,8 +157,24 @@ async fn a_trigger_only_session_lists_exactly_the_six_read_and_run_verbs() {
     assert!(store.get("double").expect("store reads").is_some());
 }
 
+/// Poll `run_id` through the session until it settles.
+///
+/// What a skill does with the run id it is handed. Bounded so a run that never
+/// settles fails the test rather than hanging it.
+async fn settled(session: &McpSession, run_id: &str) -> Value {
+    for _ in 0..200 {
+        let (run, is_error) = call(session, "workflow_run_get", json!({ "runId": run_id })).await;
+        assert!(!is_error, "{run}");
+        if run["status"] != json!("running") {
+            return run;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("run '{run_id}' never settled");
+}
+
 #[tokio::test]
-async fn workflow_run_answers_a_trigger_only_session_with_a_finished_run_record() {
+async fn workflow_run_hands_a_trigger_only_session_a_run_id_it_can_follow() {
     let _serial = SERIAL.lock().await;
     let home = tempfile::tempdir().expect("a scratch home");
     pin_process_env(home.path());
@@ -172,27 +189,57 @@ async fn workflow_run_answers_a_trigger_only_session_with_a_finished_run_record(
     )
     .await;
 
+    // The default is async, because a skill triggers real workflows and a real
+    // workflow outlives the harness's idle ceiling. `ok` here says the run
+    // started, and the answer says so in words as well.
     assert!(!is_error, "{result}");
     assert_eq!(result["ok"], json!(true), "{result}");
-    let run = &result["run"];
-    assert_eq!(run["workflowId"], json!("double"), "{result}");
-    assert_eq!(run["status"], json!("succeeded"), "{result}");
-    let run_id = run["id"].as_str().expect("a run id").to_string();
+    assert_eq!(result["status"], json!("running"), "{result}");
+    assert_eq!(result["workflowId"], json!("double"), "{result}");
+    let run_id = result["runId"].as_str().expect("a run id").to_string();
 
-    // The record is not just returned, it is recorded: the two reading verbs a
-    // skill falls back on find the same run.
+    // The run is recorded from the moment it is admitted, so the two reading
+    // verbs a skill falls back on find it immediately.
     let (runs, is_error) = call(&session, "workflow_runs", json!({ "id": "double" })).await;
     assert!(!is_error, "{runs}");
     assert_eq!(runs["runs"][0]["id"], json!(run_id), "{runs}");
 
-    let (fetched, is_error) = call(&session, "workflow_run_get", json!({ "runId": run_id })).await;
-    assert!(!is_error, "{fetched}");
-    // `workflow_run_get` answers with the record itself, unwrapped.
+    let fetched = settled(&session, &run_id).await;
     assert_eq!(fetched["id"], json!(run_id), "{fetched}");
     assert_eq!(fetched["status"], json!("succeeded"), "{fetched}");
     assert_eq!(
         fetched["steps"][0]["output"][0]["json"]["doubled"],
         json!(42),
         "the declared input reached the graph: {fetched}"
+    );
+}
+
+#[tokio::test]
+async fn workflow_run_still_answers_with_the_whole_record_when_asked_to_wait() {
+    let _serial = SERIAL.lock().await;
+    let home = tempfile::tempdir().expect("a scratch home");
+    pin_process_env(home.path());
+    let (_root, store) = store();
+    ops::create(&store, &arithmetic_workflow("double"), "double").expect("installs");
+    let session = session(&store);
+
+    // The opt-in, for a workflow this small: arithmetic on a trigger payload
+    // settles long before any client would give up on it.
+    let (result, is_error) = call(
+        &session,
+        "workflow_run",
+        json!({ "id": "double", "inputs": { "count": 21 }, "wait": true }),
+    )
+    .await;
+
+    assert!(!is_error, "{result}");
+    assert_eq!(result["ok"], json!(true), "{result}");
+    let run = &result["run"];
+    assert_eq!(run["workflowId"], json!("double"), "{result}");
+    assert_eq!(run["status"], json!("succeeded"), "{result}");
+    assert_eq!(
+        run["steps"][0]["output"][0]["json"]["doubled"],
+        json!(42),
+        "the declared input reached the graph: {result}"
     );
 }

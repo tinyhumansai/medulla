@@ -202,8 +202,9 @@ fn install_writes_the_skill_tree_and_a_repeat_changes_nothing() {
     );
     let body = std::fs::read_to_string(workspace.skill_path("babysit")).unwrap();
     assert!(
-        body.starts_with("<!-- medulla:managed workflow=babysit"),
-        "the managed marker is what every later run reads: {body}"
+        body.starts_with("---\n# medulla:managed workflow=babysit"),
+        "the managed marker is what every later run reads, and it sits inside the \
+         frontmatter so the harness still parses it: {body}"
     );
     assert!(
         body.contains("mcp__medulla__workflow_run"),

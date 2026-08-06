@@ -51,7 +51,6 @@ impl App {
             workspace_choices: Vec::new(),
             workspace_index: 0,
             workspace_picked: false,
-            managed: true,
         });
         self.set_status("New agent · pick a harness type · Enter workspace · Esc cancel");
     }
@@ -112,6 +111,10 @@ impl App {
             Ok(declarations) => {
                 self.loaded.config.fleet.agent_declarations = declarations;
                 self.select_agent_row(&agent_id);
+                // And on the Hosts page, whose cursor is its own. Landing on the
+                // new agent is what makes "declare it, then say what it is for"
+                // one movement: its role toggles are one `→` away.
+                self.select_host_agent_row(&agent_id);
                 self.set_status(format!(
                     "Declared {agent_id} · {harness} in {workspace} · ^T opens a session"
                 ));

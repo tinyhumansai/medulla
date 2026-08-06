@@ -10,7 +10,7 @@ use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
+    RP_HOOKS, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
 
 impl App {
@@ -58,6 +58,7 @@ impl App {
             RP_TEMPLATES => self.templates_key(code),
             RP_ADD_HOST => self.add_host_key(code),
             RP_HARNESSES => self.harnesses_key(code),
+            RP_HOOKS => self.hooks_key(code),
             RP_STRATEGIES => self.strategies_key(code),
             _ => RoutingKey::Unhandled,
         }
@@ -189,13 +190,16 @@ impl App {
             ));
             return;
         }
-        match crate::ui::app::TABS.iter().position(|tab| *tab == "Agents") {
-            Some(index) => {
-                self.tab_index = index;
-                self.set_status(format!("New agent on {} · pick a harness type", host.label));
-            }
-            None => self.set_status("Declare a new agent from the Agents tab"),
-        }
+        // Declared here rather than by sending the operator to the Agents tab.
+        // Roles are assigned on *this* page and nowhere else, so a flow that
+        // ended on another tab meant declaring an agent and then navigating back
+        // to say what it is for — with the new row's place in the tree, and the
+        // toggles beside it, both out of sight at the moment the operator had
+        // just decided them.
+        //
+        // The picker is an overlay rather than a page (`visible_overlays`), so
+        // it draws and takes keys over whatever is behind it.
+        self.open_new_agent_picker();
     }
 
     /// Remove what the cursor is on: one agent, or the whole host it sits under.
@@ -370,6 +374,37 @@ impl App {
             }
             KeyCode::Char('d') => {
                 self.remove_selected_workspace();
+                RoutingKey::Handled(None)
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Declare, edit, and withdraw the hooks every launched harness carries.
+    fn hooks_key(&mut self, code: KeyCode) -> RoutingKey {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_hook_selection(true);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_hook_selection(false);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.open_add_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('e') | KeyCode::Enter => {
+                self.open_edit_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') | KeyCode::Char('x') => {
+                self.delete_selected_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('b') => {
+                self.toggle_builtin_hooks();
                 RoutingKey::Handled(None)
             }
             _ => RoutingKey::Unhandled,

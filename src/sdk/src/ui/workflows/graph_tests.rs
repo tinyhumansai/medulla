@@ -146,6 +146,67 @@ fn a_cycle_still_lays_out_instead_of_hanging() {
 }
 
 #[test]
+fn a_loop_is_as_deep_as_its_body_not_as_deep_as_the_relaxation_ran() {
+    // A trigger into a five-step loop: the plan is six columns deep, and the
+    // arm that closes the loop says nothing about depth.
+    let body = ["one", "two", "three", "four", "five"];
+    let mut nodes = vec![node(
+        "start",
+        NodeKind::Trigger,
+        json!({"trigger_kind":"manual"}),
+    )];
+    nodes.extend(body.iter().map(|id| node(id, NodeKind::Agent, json!({}))));
+    let mut edges = vec![edge("start", "main", "one")];
+    edges.extend(
+        body.windows(2)
+            .map(|pair| edge(pair[0], "main", pair[1]))
+            // …and back to the top of the body, which is the loop.
+            .chain(std::iter::once(edge("five", "main", "one"))),
+    );
+
+    let layout = GraphLayout::build(&WorkflowGraph {
+        nodes,
+        edges,
+        ..Default::default()
+    });
+
+    // Six, not "however far one relaxation pass per node pushed the cycle".
+    // Left in, the closing arm advanced every member of the loop on every pass
+    // and this came out at 26 layers — a fold of mostly empty bands, each of
+    // which the renderer then had to find room for.
+    assert_eq!(layout.layers, 6, "{:?}", layout.nodes);
+    assert_eq!(
+        layout.nodes.iter().map(|node| node.layer).max(),
+        Some(5),
+        "no node sits past the last column"
+    );
+}
+
+#[test]
+fn every_node_of_a_pure_cycle_still_gets_a_distinct_layer() {
+    // No root at all, so the walk has to start somewhere arbitrary. Exactly one
+    // edge is removed either way, which is what keeps the ring from collapsing
+    // into a single column.
+    let ring = ["a", "b", "c"];
+    let layout = GraphLayout::build(&WorkflowGraph {
+        nodes: ring
+            .iter()
+            .map(|id| node(id, NodeKind::Agent, json!({})))
+            .collect(),
+        edges: vec![
+            edge("a", "main", "b"),
+            edge("b", "main", "c"),
+            edge("c", "main", "a"),
+        ],
+        ..Default::default()
+    });
+
+    assert_eq!(layout.layers, 3, "{:?}", layout.nodes);
+    let layers: Vec<usize> = layout.nodes.iter().map(|node| node.layer).collect();
+    assert_eq!(layers, vec![0, 1, 2]);
+}
+
+#[test]
 fn a_self_edge_does_not_run_the_relaxation_to_its_limit() {
     let graph = WorkflowGraph {
         nodes: vec![node("a", NodeKind::Agent, json!({}))],

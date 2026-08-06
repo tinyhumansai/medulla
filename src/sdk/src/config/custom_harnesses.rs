@@ -48,7 +48,8 @@ pub struct CustomHarnessConfig {
     /// Optional cheaper model used for Claude Code's Sonnet/Haiku tiers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_model: Option<String>,
-    /// Optional Claude Code auto-compaction threshold.
+    /// Optional context window, in tokens: Claude Code's auto-compaction
+    /// threshold, and the window a `codexOverrides` preset declares to Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
     /// Fleet host id exposing this preset.
@@ -62,6 +63,16 @@ pub struct CustomHarnessConfig {
     /// Explicit endpoint override. Empty selects the base-harness default.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub base_url: String,
+    /// Whether a Codex preset spawns with Medulla's Codex config overrides.
+    ///
+    /// Off by default because it changes which account a Codex run authenticates
+    /// as. See [`crate::codex_overrides`] for what it injects and why an
+    /// endpoint override alone does not get a non-OpenAI model answering.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub codex_overrides: bool,
+    /// Reasoning effort declared to Codex when `codexOverrides` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 fn default_key_env() -> String {
@@ -81,6 +92,11 @@ impl CustomHarnessConfig {
         self.host_id = self.host_id.trim().to_string();
         self.api_key_env = self.api_key_env.trim().to_string();
         self.base_url = self.base_url.trim().to_string();
+        self.reasoning_effort = self
+            .reasoning_effort
+            .take()
+            .map(|effort| effort.trim().to_string())
+            .filter(|effort| !effort.is_empty());
         self.fast_model = self
             .fast_model
             .take()
@@ -140,9 +156,17 @@ impl CustomHarnessConfig {
     /// Non-secret environment overrides needed by the reused coding harness.
     ///
     /// Claude Code has internal model tiers, so mapping all of them is what
-    /// keeps sub-agents on OpenRouter too. Codex and OpenCode receive their model
-    /// through an existing argument (`-m`) and need no additional variables.
+    /// keeps sub-agents on OpenRouter too. OpenCode receives its model through an
+    /// existing argument (`-m`) and needs no additional variables.
+    ///
+    /// Codex takes its model the same way, but a preset with `codexOverrides`
+    /// also carries its Codex knobs here, because the environment is what every
+    /// spawn seam already hands the child unchanged — see
+    /// [`crate::codex_overrides`], which reads them back at the seam.
     pub fn harness_env(&self) -> Vec<(String, String)> {
+        if self.base_harness == HarnessProvider::Codex {
+            return self.codex_env();
+        }
         if self.base_harness != HarnessProvider::Claude {
             return Vec::new();
         }
@@ -155,6 +179,41 @@ impl CustomHarnessConfig {
         ];
         if let Some(window) = self.context_window {
             env.push(("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), window.to_string()));
+        }
+        env
+    }
+
+    /// The Codex knobs this preset publishes into a run's environment.
+    ///
+    /// Empty unless the preset opted in: an ordinary Codex preset keeps Codex's
+    /// own defaults, and this must not quietly change which account it uses.
+    fn codex_env(&self) -> Vec<(String, String)> {
+        if !self.codex_overrides {
+            return Vec::new();
+        }
+        let mut env = vec![
+            (crate::codex_overrides::OVERRIDES_ENV.into(), "1".into()),
+            (
+                crate::codex_overrides::DISPLAY_NAME_ENV.into(),
+                self.name.clone(),
+            ),
+        ];
+        if let Some(effort) = self
+            .reasoning_effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|effort| !effort.is_empty())
+        {
+            env.push((
+                crate::codex_overrides::EFFORT_ENV.into(),
+                effort.to_string(),
+            ));
+        }
+        if let Some(window) = self.context_window {
+            env.push((
+                crate::codex_overrides::CONTEXT_WINDOW_ENV.into(),
+                window.to_string(),
+            ));
         }
         env
     }
@@ -202,6 +261,11 @@ impl CustomHarnessConfig {
             default: false,
             api_key_env: default_key_env(),
             base_url: String::new(),
+            // The compact line has no room for the Codex knobs; a preset that
+            // wants them is written in the config file, which is also where the
+            // account-changing decision belongs.
+            codex_overrides: false,
+            reasoning_effort: None,
         }
         .normalize()
     }

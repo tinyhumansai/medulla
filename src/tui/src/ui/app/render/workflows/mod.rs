@@ -59,10 +59,12 @@ pub(in crate::ui::app) const MAX_NODE_WIDTH: usize = 24;
 /// Columns between one node's label and the next column's, for the wire routed
 /// through the gap and the port name written along it.
 ///
-/// Nine rather than the four a wire needs, because a branch's port name
+/// Ten rather than the four a wire needs, because a branch's port name
 /// (`false`) is written there — and a truncated port name tells a reader nothing
-/// about which arm they are following.
-pub(in crate::ui::app) const GUTTER_SPAN: usize = 9;
+/// about which arm they are following. Ten and not nine because the arrowhead
+/// needs a cell of its own at the far end: at nine a five-letter name ran right
+/// over it, and `╰false ⚒ Let CI catch up` reads as a wire that never arrived.
+pub(in crate::ui::app) const GUTTER_SPAN: usize = 10;
 
 /// Height of one node, in rows. A marker and its label are one line.
 pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
@@ -70,6 +72,14 @@ pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
 /// Rows from one lane's top edge to the next: a node plus a blank row, so the
 /// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
+
+/// Cells past a node's trailing edge that its outgoing wires turn down in.
+///
+/// Near the source side, leaving the rest of the gutter for the port label —
+/// which is written on the *incoming* run rather than the outgoing one, because
+/// every edge out of one node shares that node's exit row and two labels there
+/// would overwrite each other.
+pub(in crate::ui::app) const GUTTER_GAP: usize = 2;
 
 /// Columns kept clear down the left of the canvas.
 ///

@@ -72,9 +72,9 @@ async fn fleet_tools_off_binds_nothing_at_all() {
     let server = start(
         &env(&[]),
         &config(root.path(), false),
-        true,
         HubSlot::default(),
         None,
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;
@@ -83,23 +83,29 @@ async fn fleet_tools_off_binds_nothing_at_all() {
     assert!(!root.path().join("control.sock").exists());
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn a_hub_that_did_not_start_gets_no_control_plane() {
+async fn a_hub_that_has_not_started_still_gets_a_control_plane() {
+    // A login-less or hub-less launch still has locally launched harnesses
+    // whose lifecycle hooks need somewhere to report — see `start`'s doc
+    // comment. An empty `HubSlot` must not block the bind.
     let root = tempfile::tempdir().unwrap();
+    let _home = ScratchHome::install(root.path());
     let logs = medulla_tui::log::LogBuffer::new();
 
     let server = start(
         &env(&[]),
         &config(root.path(), true),
-        false,
         HubSlot::default(),
-        None,
+        Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
-    .await;
+    .await
+    .expect("the socket should bind even with no hub session");
 
-    assert!(server.is_none());
-    assert!(!root.path().join("control.sock").exists());
+    assert!(root.path().join("control.sock").exists());
+    drop(server);
 }
 
 /// A bind sweeps the config files a *previous* run left behind, and does it
@@ -131,9 +137,9 @@ async fn binding_sweeps_a_previous_runs_leftover_config_file() {
     let server = start(
         &env(&[]),
         &config(root.path(), true),
-        true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -157,9 +163,9 @@ async fn binding_serves_and_cleans_up_after_itself() {
     let server = start(
         &env(&[]),
         &config(root.path(), true),
-        true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -190,9 +196,9 @@ async fn a_second_instance_does_not_take_a_live_address() {
     let _first = start(
         &env(&[]),
         &config(root.path(), true),
-        true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await
@@ -201,9 +207,9 @@ async fn a_second_instance_does_not_take_a_live_address() {
     let second = start(
         &env(&[]),
         &config(root.path(), true),
-        true,
         HubSlot::default(),
         Some("this-device".into()),
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;
@@ -233,9 +239,9 @@ async fn an_environment_socket_path_does_not_bypass_parent_security() {
     let server = start(
         &env(&[(CONTROL_SOCKET_ENV, &env_socket_string)]),
         &config(root.path(), true),
-        true,
         HubSlot::default(),
         None,
+        medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
     .await;

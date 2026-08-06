@@ -46,12 +46,49 @@ use crate::workflows::types::{
 use dirs::catalog_identity;
 pub(super) use dirs::definition_state_dir;
 use document::{read_workflow, to_document};
-use paths::{is_json, stage_atomic, write_atomic};
+pub(crate) use paths::write_atomic;
+use paths::{is_json, stage_atomic};
 // Re-exported within the crate rather than merely imported: the identifier
 // guard is the one piece of this module worth asserting on from outside it.
 pub(crate) use paths::safe_component;
 
 use super::{ProposalDecisionGuard, WorkflowStore};
+
+/// The host-state directory this environment and working directory resolve to.
+///
+/// Everything a host records *about* workflows rather than as part of them —
+/// runs, journal notes, proposals, copilot transcripts — hangs off this one
+/// path, scoped to the workspace so two checkouts of the same repository do not
+/// read each other's history. Exposed rather than left inside
+/// [`FileWorkflowStore::discover`] because the transcript store
+/// ([`crate::workflows::copilot::Transcripts`]) has to land in the same place,
+/// and a second copy of this derivation is a second thing to keep in step.
+pub fn workspace_state_dir(env: &HashMap<String, String>, cwd: &Path) -> PathBuf {
+    workspace_state_dir_under(&medulla_home(env), cwd)
+}
+
+/// The same path, for a caller that already knows the Medulla home.
+///
+/// The TUI does: it resolved the home once at startup and holds it, and
+/// re-deriving it from the process environment would ignore a `--home` the
+/// operator passed — and, in tests, would write a fixture's conversations into
+/// the developer's own state directory.
+pub fn workspace_state_dir_under(home: &Path, cwd: &Path) -> PathBuf {
+    scoped_state_dir(&home.join("state").join("workflows"), cwd)
+}
+
+/// `state_dir` narrowed to one workspace, by a digest of its canonical path.
+///
+/// Canonical rather than literal so `.` and a symlinked checkout resolve to the
+/// same scope; truncated to sixteen hex characters because this is a directory
+/// name a person occasionally has to read, and collision here would need a
+/// deliberate preimage attack on a path nobody else chooses.
+fn scoped_state_dir(state_dir: &Path, workspace: &Path) -> PathBuf {
+    let identity = std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
+    let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
+    let scope = format!("{digest:x}");
+    state_dir.join("scopes").join(&scope[..16])
+}
 
 /// A file-backed proposal decision claim released when dropped.
 struct FileProposalDecisionGuard {
@@ -186,15 +223,7 @@ impl FileWorkflowStore {
 
     /// A store whose host state is isolated to one workspace.
     pub fn with_workspace_state(dirs: Vec<PathBuf>, state_dir: &Path, workspace: &Path) -> Self {
-        let identity =
-            std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
-        let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
-        let scope = format!("{digest:x}");
-        Self::with_state_roots(
-            dirs,
-            &state_dir.join("scopes").join(&scope[..16]),
-            state_dir,
-        )
+        Self::with_state_roots(dirs, &scoped_state_dir(state_dir, workspace), state_dir)
     }
 
     /// A store over the conventional locations for this environment and working

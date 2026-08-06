@@ -478,6 +478,28 @@ pub fn local_fleet_grant(
     Some((plane.socket.clone(), plane.grants.mint(grant)))
 }
 
+/// Mint a hook-only credential for `session`'s built-in lifecycle hooks, if
+/// this process serves a control plane for them to report to.
+///
+/// Unlike [`local_fleet_grant`], the result of this is meant to be written
+/// straight into the harness's own environment — see
+/// [`crate::control_socket::HOOK_SOCKET_ENV`] for why that is safe for this
+/// grant and not for the fleet one. Minted under the *same* `session` key so
+/// [`revoke_session`] gives back both this and any fleet grant with one call:
+/// [`crate::control_socket::grants::GrantRegistry::revoke`] drops every grant
+/// recorded under a session, not just one token's worth.
+///
+/// Never withheld for the reasons [`attach_cli`] withholds a fleet grant — an
+/// overridden provider binary or a provider `supports_cli_attach` has not
+/// verified — because a hook-only grant carries nothing an untrusted binary
+/// could turn into a capability beyond filing reports under a session it
+/// already runs as.
+pub fn local_hook_grant(session: &str) -> Option<(PathBuf, String)> {
+    let plane = crate::control_socket::active()?;
+    let grant = crate::control_socket::Grant::hook_only(session);
+    Some((plane.socket.clone(), plane.grants.mint(grant)))
+}
+
 /// Give back a session's grant once that session is over, and remove the
 /// `--mcp-config` file it may have been minted into.
 ///
@@ -499,6 +521,38 @@ pub fn revoke_session(session: &str) {
     }
 }
 
+/// An explicit path to the binary that serves Medulla's MCP tools.
+///
+/// Normally there is nothing to set: the server is *this* program run as
+/// `medulla mcp`, and [`std::env::current_exe`] names it. That assumption holds
+/// for the TUI, the daemon, and the CLI, and breaks for anything that links the
+/// SDK without being the Medulla binary — most visibly a `cargo test` harness,
+/// where `current_exe` is `target/debug/deps/<suite>-<hash>` and running it with
+/// `mcp` on its argv serves nothing at all. The result is not an error but an
+/// agent with no tools, which is the failure this whole module is trying to make
+/// impossible; an integration test that wants a *real* tool surface points this
+/// at a built `medulla`.
+///
+/// Untrusted configuration, per `AGENTS.md`: whatever it names is executed. It
+/// is honoured only when it points at an existing file, and it never widens what
+/// a session is served — the grant still decides that.
+pub const SERVER_COMMAND_ENV: &str = "MEDULLA_MCP_COMMAND";
+
+/// The binary a spawned tool server runs.
+///
+/// `None` when neither the override nor this process's own path resolves, which
+/// leaves the caller no command to register — see [`server_spec`], which
+/// attaches nothing rather than a registration the harness would fail to start.
+pub fn server_command() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(SERVER_COMMAND_ENV) {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    std::env::current_exe().ok()
+}
+
 /// The server to offer a session, or `None` when no family would be served.
 ///
 /// `fleet` is the grant the caller resolved — locally minted
@@ -518,7 +572,7 @@ pub fn server_spec(
     if !workflows_enabled && fleet.is_none() {
         return None;
     }
-    let command = std::env::current_exe().ok()?;
+    let command = server_command()?;
     let mut spec = ServerSpec {
         name: super::SERVER_NAME,
         command,

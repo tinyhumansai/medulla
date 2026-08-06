@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use medulla::protocol::HarnessProvider;
 
 /// Write `body` as a config file and load it the way the app does.
-fn load(body: &str) -> medulla::config::LoadedConfig {
+fn load_raw(body: &str) -> medulla::config::LoadedConfig {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let path = dir.path().join("medulla.tui.toml");
     std::fs::write(&path, body).expect("the config is writable");
@@ -23,6 +23,18 @@ fn load(body: &str) -> medulla::config::LoadedConfig {
         dir.path(),
     )
     .expect("the config loads")
+}
+
+/// Load `body` with Medulla's own reporting hooks switched off.
+///
+/// Those built-ins are resolved into the same list at load (see
+/// [`medulla::harness_hooks::builtin`]), and every case below is about the
+/// *operator's* `[[hooks]]` section arriving intact — asserting on absolute
+/// positions in a document Medulla also writes into would pin the built-in set
+/// rather than the documentation. The two together are covered by
+/// [`medullas_own_hooks_do_not_displace_the_operators`].
+fn load(body: &str) -> medulla::config::LoadedConfig {
+    load_raw(&format!("[hookDefaults]\nenabled = false\n{body}"))
 }
 
 /// The `--settings` document Claude Code would be launched with.
@@ -187,6 +199,51 @@ harnesses = ["claude"]
         session_start["timeout"], 30,
         "a documented key that never reached the harness would be a lie: {settings}"
     );
+}
+
+/// The operator's section and Medulla's own reporting hooks share one document,
+/// and the operator's half must survive the join: same command, same bucket, and
+/// after the report rather than in place of it.
+#[test]
+fn medullas_own_hooks_do_not_displace_the_operators() {
+    let loaded = load_raw(
+        r#"
+[[hooks]]
+event = "PostToolUse"
+matcher = "Edit|Write"
+type = "command"
+command = "just fmt"
+"#,
+    );
+
+    // The config file's own contents are the operator's half alone — a built-in
+    // must never be mistaken for something they declared.
+    let operator = loaded.config.hooks.operator_hooks();
+    assert_eq!(operator.len(), 1);
+    assert_eq!(operator[0].command(), "just fmt");
+    assert!(loaded
+        .config
+        .hooks
+        .hooks
+        .iter()
+        .any(|hook| hook.builtin && hook.event == medulla::harness_hooks::HookEvent::PostToolUse));
+
+    let settings = claude_settings(&loaded.config.hooks);
+    let entries = settings["hooks"]["PostToolUse"]
+        .as_array()
+        .expect("one bucket, shared with Medulla's own report");
+    assert_eq!(entries.len(), 2, "both reach the harness: {settings}");
+    // Medulla's report is installed ahead of the operator's hook, so a hook that
+    // decides sees the event with the report already on its way.
+    assert!(
+        entries[0]["hooks"][0]["command"]
+            .as_str()
+            .expect("a command string")
+            .contains("hook PostToolUse"),
+        "Medulla's own report goes first: {settings}"
+    );
+    assert_eq!(entries[1]["matcher"], "Edit|Write");
+    assert_eq!(entries[1]["hooks"][0]["command"], "just fmt");
 }
 
 /// An event name that is neither spelling fails the load with the offending

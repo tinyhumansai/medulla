@@ -21,8 +21,14 @@ mod tests;
 
 pub use file::{
     mint_note_id, mint_proposal_id, new_run_record, parse_workflow, validate_graph, workflow_dirs,
-    FileWorkflowStore, LoadReport, MAX_NOTES, MAX_REVISIONS,
+    workspace_state_dir, workspace_state_dir_under, FileWorkflowStore, LoadReport, MAX_NOTES,
+    MAX_REVISIONS,
 };
+// The filename guard and the atomic write are how *every* file-backed piece of
+// workflow state lands on disk. The copilot transcripts are one such piece and
+// live outside this module, so both are visible in-crate rather than each
+// keeping a second copy that could disagree about what a safe name is.
+pub(crate) use file::{safe_component, write_atomic};
 
 use crate::workflows::types::{
     RunId, RunRecord, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision,

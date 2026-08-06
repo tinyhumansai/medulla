@@ -48,6 +48,13 @@ pub enum Command {
     /// Generate harness-native skills that trigger saved workflows
     /// (`list`/`install`/`sync`/`uninstall`).
     Skills,
+    /// Report one harness lifecycle event (`hook <Event>`).
+    ///
+    /// Not for a human to run either. Medulla installs this as a hook into the
+    /// harnesses it launches; the harness runs it, pipes its native hook payload
+    /// to it, and it files a one-line report on the control socket the same
+    /// spawn was handed.
+    Hook,
 }
 
 /// The `medulla skills` action.
@@ -250,6 +257,13 @@ pub enum WorkflowAction {
     AddNote(String),
     /// `evolve <id>` — review a workflow against its own history.
     Evolve(String),
+    /// `author [id]` — run one copilot turn; `--text` carries the instruction.
+    ///
+    /// With an id it revises that workflow, without one it builds a new one.
+    /// The same turn the Workflows pane runs, reachable without a terminal —
+    /// which is what makes "does the harness actually get its tools?" a
+    /// question a test can ask.
+    Author(Option<String>),
     /// `proposals <id>` — changes proposed for a workflow.
     Proposals(String),
     /// `accept <proposal-id>` — apply a proposal to the saved graph.

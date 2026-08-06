@@ -77,6 +77,14 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
         let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
     }
     draw(&mut app);
+    // Under the orchestrator for the instant before the chord, so that attaching
+    // *takes* the session — which is what makes releasing it raise the hand-back
+    // question these tests paste into. A session the operator started themselves
+    // is released without one.
+    app.local_sessions()
+        .expect("sessions")
+        .clone()
+        .set_control(id, medulla_tui::worker::pty::SessionControl::Orchestrator);
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char(']'),
         KeyModifiers::CONTROL,

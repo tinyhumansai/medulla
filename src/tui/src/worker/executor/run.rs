@@ -275,24 +275,58 @@ impl PtySessionExecutor {
         outcome
     }
 
-    /// Settle executor ownership without destroying a session the operator took.
+    /// Settle executor ownership without destroying the session.
     ///
-    /// Bounded task sessions normally die with their reply. Operator takeover
-    /// changes that lifetime: the PTY is now an interactive workspace, so the
-    /// executor may release its busy claim but must not close the process.
+    /// A bounded task session used to die with its reply. It is *retained*
+    /// instead: the PTY stays up, so the pane keeps showing the work the task
+    /// actually did rather than falling through to the transcript the moment it
+    /// finishes — which read as a finished task vanishing.
+    ///
+    /// Retention is not takeover. The session stays the orchestrator's, because
+    /// [`checkout_writer`](Self::checkout_writer) counts any user-held session
+    /// in a directory as the writer holding that checkout: marking these `User`
+    /// would make the first task to finish in a workspace queue every task
+    /// behind it until their budgets ran out. It is instead flagged retained,
+    /// which `try_claim` refuses, so no later task lands in a transcript that
+    /// has already answered someone else.
+    ///
+    /// Operator takeover keeps its own path: a session someone took is theirs,
+    /// and was never a candidate for closing.
     fn finish_turn(&self, id: &str, class: SessionClass, settled: bool) {
         let control = self.sessions.control(id);
         let running = self
             .sessions
             .row(id)
             .is_some_and(|row| row.state.is_running());
-        if !retains_workspace_context(class, control, running) {
+        // Only a turn that actually answered is worth keeping. A bounded turn
+        // that failed never got its prompt in — the harness is wedged on a modal
+        // the injection could not clear — so retaining it would leave a stuck
+        // process standing with nothing on its screen worth reading, which is
+        // the leak the close was there to prevent.
+        let retain =
+            settled && class == SessionClass::Bounded && control != Some(SessionControl::User);
+        // A retained session can serve the operator a later turn, so its mapper
+        // state outlives the task the same way a taken session's does.
+        if !retain && !retains_workspace_context(class, control, running) {
             self.workspace_context
                 .lock()
                 .expect("workspace context lock poisoned")
                 .remove(id);
         }
-        if class == SessionClass::Bounded && control != Some(SessionControl::User) {
+        let bounded_for_the_orchestrator =
+            class == SessionClass::Bounded && control != Some(SessionControl::User);
+        if retain {
+            self.sessions.retain(id);
+            // Freed as well as retained: the turn is over, and a session left
+            // busy would read as working forever in every surface that asks.
+            self.sessions.release(id);
+        } else if bounded_for_the_orchestrator {
+            // A bounded turn that never answered. There is nothing to keep, and
+            // the harness is most likely still sitting on whatever stopped the
+            // injection — so this stays a close, exactly as it was before
+            // retention existed. Handing it over instead would strand a wedged
+            // process *and* make it hold the checkout against the tasks behind
+            // it, which is the failure retention is careful to avoid.
             self.sessions.close(id);
         } else {
             // Free it for the operator or this peer's next turn. Released on
@@ -422,6 +456,9 @@ impl PtySessionExecutor {
             &mut extra_args,
             self.log.as_ref(),
         );
+        // The managed skills that name the workflows those tools can start,
+        // on the same terms the headless executor already hands them over.
+        super::super::pty::launch::attach_skills(options.provider, &env, &mut extra_args);
         Ok(SessionPlan::Launch(Box::new(LaunchSpec {
             provider: options.provider,
             preset: None,
@@ -546,6 +583,14 @@ impl PtySessionExecutor {
             }
             extra_args.extend(injection.args);
         }
+        // Codex needs more than an endpoint before a routed model will answer:
+        // a provider block, an API-key auth preference, and a catalog entry it
+        // is willing to describe. Read from `env`, which now holds both the
+        // preset's opt-in knobs and the endpoint the routing above wrote.
+        extra_args.extend(
+            medulla::codex_overrides::launch_args(options.provider, options.model.as_deref(), &env)
+                .map_err(|error| error.to_string())?,
+        );
         Ok((env, extra_args))
     }
 

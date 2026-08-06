@@ -56,21 +56,31 @@ pub(super) fn diamond(id: &str) -> WorkflowRecord {
 /// An app pointed at a temporary home holding `workflows`, already loaded.
 pub(super) fn app_with(workflows: &[WorkflowRecord]) -> (tempfile::TempDir, App) {
     let home = tempfile::tempdir().expect("tempdir");
+    let app = app_with_home(home.path(), workflows);
+    (home, app)
+}
+
+/// An app over an existing Medulla home.
+///
+/// The seam a restart is tested through: building a second app over the home a
+/// first one wrote is what the next `medulla` invocation does, so anything the
+/// second one can see came off disk rather than out of the first's memory.
+pub(super) fn app_with_home(home: &std::path::Path, workflows: &[WorkflowRecord]) -> App {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
-    app.set_medulla_home(home.path().to_path_buf());
+    app.set_medulla_home(home.to_path_buf());
     // Only the temp directory, so the catalogue is exactly what this test
     // installed rather than that plus whatever the checkout happens to hold.
     let store: Arc<dyn WorkflowStore> = Arc::new(medulla::workflows::FileWorkflowStore::new(
-        vec![home.path().join("workflows")],
-        home.path().join("runs"),
+        vec![home.join("workflows")],
+        home.join("runs"),
     ));
     app.set_workflow_store(store.clone());
     for workflow in workflows {
         store.save(workflow).expect("save");
     }
     app.reload_workflows();
-    (home, app)
+    app
 }
 
 #[test]
@@ -251,8 +261,11 @@ fn each_workflow_keeps_its_own_copilot_thread() {
     app.copilot_mut().unwrap().ask("first");
     app.move_workflow_rail(false);
 
+    // Selecting a workflow seeds its thread from disk, so the second one has a
+    // thread — an empty one. What must not happen is the first workflow's turn
+    // showing up under it.
     assert!(
-        app.copilot().is_none(),
+        app.copilot().expect("a thread").turns.is_empty(),
         "the second workflow has not been asked anything"
     );
     app.move_workflow_rail(true);
@@ -487,7 +500,41 @@ fn progress_for_a_workflow_with_no_thread_is_dropped_rather_than_creating_one() 
 
     app.copilot_status("someone-elses-workflow", "hello".into());
 
-    assert!(app.copilot().is_none());
+    // The selected workflow's own thread exists (selection seeds it) and is
+    // untouched: a stray frame addressed to a thread this app does not have
+    // must not land on whichever one happens to be on screen.
+    assert!(app.copilot().expect("a thread").turns.is_empty());
+}
+
+#[test]
+fn an_empty_catalogue_starts_on_the_new_row_so_the_copilot_is_reachable() {
+    let (_home, app) = app_with(&[]);
+
+    assert!(
+        app.wf.creating,
+        "the New row is the only row on an empty host, so it is the selection"
+    );
+    // And the thread that row addresses exists, which is what the pane needs to
+    // offer a composer rather than 'select a workflow first' — advice an
+    // operator with no workflows cannot follow.
+    assert!(app.copilot().is_some());
+}
+
+#[test]
+fn installing_the_first_workflow_moves_the_cursor_off_the_new_row() {
+    let (home, mut app) = app_with(&[]);
+    assert!(app.wf.creating);
+
+    app.workflow_store().save(&diamond("sweep")).expect("save");
+    app.reload_workflows();
+    // Still on New: reload alone must not move a cursor the operator placed.
+    assert!(app.wf.creating);
+    app.move_workflow_rail(true);
+
+    assert!(!app.wf.creating, "up from New lands on the workflow");
+    assert_eq!(app.selected_workflow().expect("selected").id, "sweep");
+    drop(home);
 }
 
 mod creation;
+mod transcripts;

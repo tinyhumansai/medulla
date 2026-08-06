@@ -68,12 +68,22 @@ fn the_local_host_offers_agent_creation_and_a_remote_does_not() {
         app.status()
     );
 
-    // On the local host it points at the flow that declares one.
+    // On the local host it reaches the declare flow instead of refusing. This
+    // fixture hosts nothing, so the flow's own answer is that there is no host
+    // here to declare on — which is the point: what the local host must never
+    // say is that this end is a read-only view of somebody else's fleet. The
+    // flow opening on a hosting device is covered by
+    // `a_local_host_declares_its_agent_without_leaving_the_page`.
     let _ = app.on_event(key(KeyCode::Up));
     assert!(app.on_event(key(KeyCode::Char('n'))).is_none());
     assert!(
-        app.status().contains("New agent"),
-        "status: {}",
+        !app.status().contains("read-only"),
+        "the local host is not read-only: {}",
+        app.status()
+    );
+    assert!(
+        app.status().contains("declare"),
+        "and the answer is about declaring: {}",
         app.status()
     );
 }

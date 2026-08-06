@@ -329,12 +329,23 @@ impl App {
             .count()
     }
 
-    /// The sessions on this device that no dispatched task already describes.
+    /// The sessions on this device the operator can act on directly.
     ///
-    /// A dispatched session reaches the rail through its task, folded from the
-    /// event stream; listing it here as well would show one session twice. What
-    /// is left is the operator's own — started by them, or taken from the
-    /// orchestrator — which nothing else on this device can see.
+    /// A dispatched session reaches the rail through its task while that task is
+    /// running, folded from the event stream, so listing it here as well would
+    /// show one session twice. What is left is the operator's own — started by
+    /// them, or taken from the orchestrator — plus the *retained* ones, which
+    /// are dispatched sessions whose task has finished.
+    ///
+    /// Retained sessions have to be here, and the task row is not a substitute.
+    /// A task row carries no local session (`local: None`), so the cursor on one
+    /// resolves no pty: the pane cannot draw the live screen and there is
+    /// nothing to attach the keyboard to. The task's own screen stops arriving
+    /// at the same moment for the same reason — `session_for_task` resolves
+    /// through the daemon's *running* map, and the admission guard drops that
+    /// record when the task settles. So a finished task's harness is alive and
+    /// reachable by nothing until it is listed here, which is the whole point of
+    /// having kept it.
     ///
     /// Exited ones stay listed: the last screen is often the reason it exited,
     /// and a row that vanishes on failure is a row that hides the failure. They
@@ -348,7 +359,9 @@ impl App {
             .rows()
             .into_iter()
             .filter(|row| {
-                row.origin.is_user() || row.control == crate::worker::pty::SessionControl::User
+                row.origin.is_user()
+                    || row.control == crate::worker::pty::SessionControl::User
+                    || row.retained
             })
             .collect();
         rows.sort_by_key(|row| row.started_at);

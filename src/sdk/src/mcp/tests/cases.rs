@@ -68,7 +68,11 @@ pub(super) fn session_with(
         // behind it is not a state production can reach.
         families: crate::control_socket::ToolFamilies::workflows_only(),
         fleet: Arc::new(crate::mcp::OfflineFleet),
+        // No transport behind an in-process session, so nowhere to send a
+        // progress notification even if a call asked for one.
+        notifications: None,
         workflow_mutations: tokio::sync::Mutex::new(()),
+        run_liveness: crate::workflows::local::RunLiveness::default(),
     }
 }
 
@@ -463,60 +467,4 @@ async fn history_and_delete_are_reachable_over_the_tool_surface() {
     let (deleted, is_error) = call(&store, "workflow_delete", json!({ "id": "sweep" })).await;
     assert!(!is_error, "{deleted}");
     assert_eq!(deleted["deleted"], json!("sweep"));
-}
-
-#[tokio::test]
-async fn running_a_workflow_is_on_the_belt_but_cancelling_one_is_not() {
-    // `workflow_run` is here deliberately: a copilot that can only simulate
-    // cannot answer "does this work", and a dry run is structurally blind to
-    // the steps most worth checking — a `code` node's script, an `agent`
-    // node's real reply.
-    assert!(TOOL_NAMES.contains(&"workflow_run"));
-
-    // Cancelling is still not. A copilot that started a run is awaiting it; the
-    // operator cancels from the pane, where they can see it.
-    for forbidden in ["workflow_cancel", "workflow_cancel_run", "workflow_resume"] {
-        assert!(
-            !TOOL_NAMES.contains(&forbidden),
-            "{forbidden} must not be on the authoring belt"
-        );
-    }
-}
-
-#[tokio::test]
-async fn running_a_workflow_that_is_disabled_is_refused_rather_than_silently_skipped() {
-    // Hermetic despite `workflow_run` building its `env`/`cwd` from the real
-    // process (`tools::call`'s `workflow_run` arm) rather than injected temp
-    // values: `local::run_here` checks `workflow.enabled` *before* it ever
-    // reads `env` (via `medulla_home`) or starts a `LocalWorkflowHost` — see
-    // that ordering's own comment. A workflow saved disabled here is refused
-    // on that first check, so this test never touches the developer's real
-    // Medulla home or spawns a daemon, whatever the process environment holds.
-    let (_root, store) = store();
-    let disabled = json!({
-        "id": "paused", "name": "Paused", "enabled": false,
-        "nodes": [{ "id": "t", "kind": "trigger", "name": "start",
-                    "config": { "trigger_kind": "manual" } }],
-        "edges": []
-    })
-    .to_string();
-    call(
-        &store,
-        "workflow_create",
-        json!({ "id": "paused", "document": disabled }),
-    )
-    .await;
-
-    let (result, is_error) = call(&store, "workflow_run", json!({ "id": "paused" })).await;
-
-    // The operator's own off switch. Reporting a skipped run as a successful
-    // one would be the worst possible reading of it.
-    assert!(is_error, "{result}");
-    assert!(
-        result["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("disabled"),
-        "{result}"
-    );
 }

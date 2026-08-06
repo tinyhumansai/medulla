@@ -105,7 +105,14 @@ Medulla drives Claude Code and Codex over [ACP](https://github.com/tinyhumansai/
 as a *client*, so it cannot hand them tools directly — it offers them. Every ACP
 session gets an MCP server (`medulla workflow mcp`, the same binary) exposing the
 catalogue, `workflow_create`, `workflow_apply_ops` / `workflow_preview_ops`,
-`workflow_validate`, `workflow_dry_run`, and `workflow_runs`.
+`workflow_validate`, `workflow_dry_run`, `workflow_run`, and `workflow_runs`.
+
+`workflow_run` starts the run and answers with its id rather than waiting for
+it. A real workflow outlives any client's idle ceiling — a measured three-pass
+babysit ran 35 minutes, one step of it 20 — so a call that waits is reported as
+a failure while the run carries on succeeding. `workflow_run_get` says how far
+it has got and, once it settles, what it did. `wait: true` and `waitMs` are
+there for the short ones.
 
 `workflow_apply_ops` is the one that matters for editing. Rewriting a whole
 document loses whatever the model misremembered; a patch is checked op by op, and

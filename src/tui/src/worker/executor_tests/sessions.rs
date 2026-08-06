@@ -335,8 +335,7 @@ async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
         first.reply, second.reply,
         "each task must be answered on its own terms, not handed the other's answer"
     );
-    // Two rows, not one. A closed session keeps its row so its last screen
-    // stays readable, so this counts sessions *opened*: one each. With the old
+    // Two rows, not one: this counts sessions *opened*, one each. With the old
     // inference the second task reclaimed the first's idle session and this was
     // 1 — the leak, stated as a number.
     let rows = sessions.rows();
@@ -345,10 +344,16 @@ async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
         2,
         "each bounded task must open its own session, not inherit the last one"
     );
+    // Both are still standing, and that is the point: a session is retained when
+    // its task answers so the work stays readable. What keeps the second task
+    // out of the first's session is the retention flag, not the teardown that
+    // used to do it — so the isolation above holds without destroying either.
     assert!(
-        !rows.iter().any(|row| row.state.is_running()),
-        "a bounded task closes its session when it replies: {:?}",
-        rows.iter().map(|r| r.state).collect::<Vec<_>>()
+        rows.iter().all(|row| row.retained),
+        "a bounded task retains its session when it replies: {:?}",
+        rows.iter()
+            .map(|r| (r.retained, r.state))
+            .collect::<Vec<_>>()
     );
     sessions.shutdown();
 }

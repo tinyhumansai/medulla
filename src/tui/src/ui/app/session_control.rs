@@ -25,6 +25,7 @@ use crate::worker::pty::SessionControl;
 
 use super::types::{
     tab_pos, AgentPicker, AgentPickerStep, App, Cmd, HandbackPolicy, HandbackPrompt, PickerPurpose,
+    TakeOrigin,
 };
 
 impl App {
@@ -42,7 +43,7 @@ impl App {
         match provider.and_then(HarnessProvider::from_wire) {
             Some(provider) => {
                 let cwd = path.unwrap_or("").to_string();
-                self.spawn_session(HarnessChoice::native(provider), &cwd, false);
+                self.spawn_session(HarnessChoice::native(provider), &cwd);
             }
             None => {
                 let choices = harnesses.choices();
@@ -62,7 +63,6 @@ impl App {
                     workspace_choices: Vec::new(),
                     workspace_index: 0,
                     workspace_picked: false,
-                    managed: true,
                 });
             }
         }
@@ -75,10 +75,17 @@ impl App {
 
     /// Start a session the operator owns and move the cursor onto it.
     ///
+    /// Always unmanaged, and not as a default the operator can override: a
+    /// session started by hand is one somebody intends to type into, and the
+    /// orchestrator starts its own managed without being asked. Spawning one
+    /// into dispatch would mean the very next thing the operator does — press
+    /// Enter on the row they just created — is a request to take it back off
+    /// the orchestrator it was handed to a keystroke earlier.
+    ///
     /// Selecting the new row matters more than it sounds: a session that
     /// appears somewhere below the fold, with the pane still showing whatever
     /// was selected before, reads as "nothing happened".
-    pub(super) fn spawn_session(&mut self, choice: HarnessChoice, cwd: &str, managed: bool) {
+    pub(super) fn spawn_session(&mut self, choice: HarnessChoice, cwd: &str) {
         let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions to start");
             return;
@@ -89,22 +96,16 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Agents");
                 self.select_session_row(&id);
-                let label = if managed { "managed" } else { "unmanaged" };
+                // "unmanaged" and not a friendlier synonym: it is the word the
+                // rail badge uses for the same session, and a status line that
+                // renamed the state would leave the operator matching two
+                // vocabularies for one fact.
                 let mut status = format!(
-                    "Started {} · {label}, the orchestrator will{} use it",
+                    "Started {} · unmanaged, the orchestrator will not use it",
                     choice.display_name(),
-                    if managed { "" } else { " not" }
                 );
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
-                }
-                // Hand back first, then say what happened. `hand_back_session`
-                // sets its own status, so setting ours before it would show the
-                // operator "Handed back …" for a session they just started —
-                // losing the name, the managed/unmanaged confirmation, and any
-                // workspace-remember error this message carries.
-                if managed {
-                    self.hand_back_session(&id, None);
                 }
                 self.set_status(status);
                 // The quick path always leaves a declared agent behind if the
@@ -122,15 +123,40 @@ impl App {
 
     /// Take the selected session from the orchestrator.
     pub(crate) fn take_session_control(&mut self) {
-        let Some((harnesses, session)) = self.selected_session() else {
+        let Some((_, session)) = self.selected_session() else {
             return;
         };
-        if harnesses.control(&session) == Some(SessionControl::User) {
-            self.set_status("You already have this session");
+        self.take_session(&session, TakeOrigin::Explicit);
+    }
+
+    /// Take one named session from the orchestrator, recording how.
+    ///
+    /// Named rather than cursor-resolved because most callers already know
+    /// which session they mean — the prompt they are answering, the row that
+    /// was clicked — and re-deriving it from the rail invites the two to
+    /// disagree about which session the operator is moving.
+    pub(super) fn take_session(&mut self, session: &str, origin: TakeOrigin) {
+        let Some(harnesses) = self.local_sessions.clone() else {
+            self.set_status("This device is not hosting, so it has no sessions");
             return;
+        };
+        match harnesses.control(session) {
+            Some(SessionControl::User) => {
+                self.set_status("You already have this session");
+                return;
+            }
+            // A session that has gone is not taken. Setting control on a corpse
+            // would report success and leave the operator waiting to type into
+            // a pane that is never coming back.
+            None => {
+                self.set_status("That session is gone");
+                return;
+            }
+            Some(SessionControl::Orchestrator) => {}
         }
-        harnesses.set_control(&session, SessionControl::User);
-        if let Some(cwd) = harnesses.sessions.row(&session).map(|row| row.cwd) {
+        harnesses.set_control(session, SessionControl::User);
+        self.sessions_taken.insert(session.to_string(), origin);
+        if let Some(cwd) = harnesses.sessions.row(session).map(|row| row.cwd) {
             self.pending_cmds.push_back(Cmd::HoldSession {
                 workspace: cwd,
                 reason: None,
@@ -151,50 +177,52 @@ impl App {
         self.hand_back_session(&session, note);
     }
 
-    /// Toggle who holds the selected session — the `Ctrl-G` shortcut.
+    /// Toggle who holds the session `/handoff` would mean — the `Ctrl-G` shortcut.
     ///
     /// One key for both directions because the rail row and the pane title both
     /// say which way it will go, so a single "grab or give" is less to remember
     /// than two chords that each do nothing half the time.
+    ///
+    /// Resolved through [`handoff_target`](Self::handoff_target) rather than
+    /// through the rail cursor alone, because `Ctrl-G` is a *global* chord: it
+    /// fires on every tab, and on every tab but Agents the cursor resolves no
+    /// session at all. That made the chord report "no session on this row" while
+    /// the operator was attached to one and looking straight at it.
     pub(crate) fn toggle_session_control(&mut self) {
-        let Some((harnesses, session)) = self.selected_session() else {
+        let Some((harnesses, session)) = self.handoff_target() else {
             return;
         };
         match harnesses.control(&session) {
             Some(SessionControl::User) => self.hand_back_session(&session, None),
-            Some(SessionControl::Orchestrator) => self.take_session_control(),
+            Some(SessionControl::Orchestrator) => self.take_session(&session, TakeOrigin::Explicit),
             None => self.set_status("That session is gone"),
         }
     }
 
-    /// Open the take-control or hand-back prompt depending on who holds the session.
+    /// Enter (or a click) on a session row: go in, asking first only if going in
+    /// would take the session off the orchestrator.
     ///
-    /// Enter on a session row used to attach immediately, which is a control
-    /// change made by a navigation key: an operator walking the rail with the
-    /// arrows and pressing Enter to "look closer" took the session out from
-    /// under the orchestrator without being asked. The question is the same one
-    /// either way — which side of the handover is this? — so it reuses the
-    /// hand-back prompt with the sentence turned around.
+    /// The two cases are not symmetric, and treating them as though they were is
+    /// what made this flow confusing.
+    ///
+    /// A session the operator already holds has nothing to negotiate. Enter
+    /// means "let me type in this", so it attaches, full stop. It used to raise
+    /// the hand-back question instead — answering a request to go *in* with an
+    /// offer to give the session *away*, over the pane the operator was aiming
+    /// at, whose only useful answer was Escape. With operator-started sessions
+    /// now unmanaged by default, that was every session on the rail.
+    ///
+    /// A session the orchestrator holds is the case worth a question: typing
+    /// into it takes it out from under dispatch, and Enter is a navigation key —
+    /// an operator walking the rail to look closer should not silently lock the
+    /// orchestrator out of a workspace. `Ctrl-]` remains the deliberate spelling
+    /// and still attaches outright.
     pub(crate) fn open_session_enter_prompt(&mut self) {
         let Some((harnesses, session)) = self.selected_session() else {
             return;
         };
         match harnesses.control(&session) {
-            // The operator already holds it, so the only decision left is
-            // whether to give it back. `took_control` is read, not assumed:
-            // a hold can begin implicitly (focusing in under a `Never` handback
-            // policy), and hardcoding `false` would claim an explicit decision
-            // the operator never made — the same field `begin_session_release`
-            // resolves the same way.
-            Some(SessionControl::User) => {
-                self.handback_prompt = Some(HandbackPrompt {
-                    session,
-                    took_control: self.took_control_by_attach,
-                    note: Draft::default(),
-                    editing_note: false,
-                    is_takeover: false,
-                });
-            }
+            Some(SessionControl::User) => self.attach_to_pane_session(),
             // The orchestrator holds it: typing into it means taking it first.
             Some(SessionControl::Orchestrator) => {
                 self.handback_prompt = Some(HandbackPrompt {
@@ -231,6 +259,21 @@ impl App {
         };
         if let Some(session) = self.harness_focus.attached_to() {
             return Some((harnesses, session.to_string()));
+        }
+        // A remote row is a session the cursor is genuinely on — it is just not
+        // one this machine can hand over (§E7). Refused here rather than fallen
+        // through, because the fallbacks below would then resolve to *something
+        // else*: with the cursor on a remote row `pane_session` is empty, so the
+        // single-held-session rule would hand back an unrelated local session
+        // the operator was not even looking at. That is the exact "handed back
+        // the wrong one" failure this function exists to prevent, and it is
+        // worse than the refusal because it is silent.
+        if let Some(agent) = self.pane_remote_session.clone() {
+            self.set_status(format!(
+                "{agent} runs on another host — you can watch this session, but \
+                 taking control is local-only for now"
+            ));
+            return None;
         }
         if let Some(session) = self.pane_session.clone() {
             return Some((harnesses, session));
@@ -318,10 +361,46 @@ impl App {
                 );
                 true
             }
+            // Ask about sessions the orchestrator has a claim on, not about
+            // ones that were always yours. A session the operator started is
+            // theirs by construction, so stepping out of it is just stepping
+            // out of it — offering to hand it to an orchestrator that never had
+            // it turns every `Ctrl-]` into a question with an obvious answer,
+            // and questions with obvious answers get dismissed without being
+            // read. `/handoff` is still there for the operator who does want to
+            // give one away.
+            //
+            // The claim is read from three places, because no one of them is
+            // sufficient — and the two that were tried alone each had a hole:
+            //
+            // - [`SessionOrigin`]: dispatch created the session, so walking away
+            //   still user-held locks dispatch out of it. This does not depend
+            //   on *how* the operator came to hold it, which matters because the
+            //   executor hands a failed reusable turn straight to the operator
+            //   (`worker::executor::run`) without passing through
+            //   [`take_session`](Self::take_session).
+            // - `orchestrator_claimed`: origin under-counts in the other
+            //   direction. A session the operator started stays origin `User`
+            //   forever, but once handed over it is genuinely dispatchable
+            //   (`SessionHandle::serves_label` adopts it), so the same failed
+            //   turn can hand it back user-held with origin `User` and no take
+            //   recorded. Without this set that released in silence too.
+            // - `sessions_taken`: catches a take that has not been released yet,
+            //   and is what decides the *wording* below.
             HandbackPolicy::Ask => {
+                let taken = self.sessions_taken.get(session).copied();
+                let orchestrator_originated = self
+                    .local_sessions
+                    .as_ref()
+                    .and_then(|sessions| sessions.sessions.row(session))
+                    .is_some_and(|row| row.origin.is_orchestrator());
+                let claimed = self.orchestrator_claimed.contains(session);
+                if taken.is_none() && !orchestrator_originated && !claimed {
+                    return true;
+                }
                 self.handback_prompt = Some(HandbackPrompt {
                     session: session.to_string(),
-                    took_control: self.took_control_by_attach,
+                    took_control: taken == Some(TakeOrigin::Focus),
                     note: Draft::default(),
                     editing_note: false,
                     is_takeover: false,
@@ -416,7 +495,15 @@ impl App {
             .tail_lines(session, medulla::hub::handoff::TRANSCRIPT_LINES);
 
         harnesses.set_control(session, SessionControl::Orchestrator);
-        self.took_control_by_attach = false;
+        // Only this session's take is settled. Clearing the whole map here is
+        // what a single flag amounted to, and it silently forgave every *other*
+        // session the operator was still holding on the orchestrator's behalf.
+        self.sessions_taken.remove(session);
+        // Remembered past the handback, and never cleared: from here the
+        // orchestrator can dispatch into this session, so if it ever comes back
+        // to the operator — including by the executor handing a failed turn over
+        // directly — letting go of it again is worth a question.
+        self.orchestrator_claimed.insert(session.to_string());
 
         let brief = medulla::hub::handoff::normalize(
             medulla::hub::HarnessHandoff {
@@ -457,10 +544,6 @@ impl App {
             .as_ref()
             .map(|picker| picker.step)
             .unwrap_or(AgentPickerStep::Harness);
-        if step == AgentPickerStep::Decision {
-            self.handle_harness_decision_key(event);
-            return;
-        }
         if step == AgentPickerStep::Workspace {
             self.handle_harness_workspace_key(event);
             return;
@@ -484,49 +567,7 @@ impl App {
                 self.open_harness_workspace_step(true);
             }
             KeyCode::Enter => {
-                // Go straight to workspace selection; managed/unmanaged comes after.
                 self.open_harness_workspace_step(false);
-            }
-            _ => {}
-        }
-    }
-
-    /// Route a key while choosing managed or unmanaged control.
-    fn handle_harness_decision_key(&mut self, event: KeyEvent) {
-        match event.code {
-            // One step back, not two. Decision is reached *after* the workspace
-            // is chosen, so returning to the harness-type list would discard a
-            // workspace the operator never changed and make them reselect both.
-            // Reuses the forward entry point so the hint text and the completion
-            // list are the same ones the step normally opens with.
-            KeyCode::Esc => {
-                self.open_harness_workspace_step(false);
-            }
-            KeyCode::Up | KeyCode::Down => {
-                if let Some(picker) = &mut self.agent_picker {
-                    picker.managed = !picker.managed;
-                }
-            }
-            KeyCode::Enter => {
-                let Some(workspace) = self.selected_picker_workspace() else {
-                    self.set_status("Choose a workspace first");
-                    return;
-                };
-                let choice = self
-                    .agent_picker
-                    .as_ref()
-                    .and_then(|picker| picker.choices.get(picker.index).cloned());
-                let managed = self
-                    .agent_picker
-                    .as_ref()
-                    .map(|p| p.managed)
-                    .unwrap_or(false);
-                let Some(choice) = choice else {
-                    self.set_status("Choose a harness type first");
-                    return;
-                };
-                self.agent_picker = None;
-                self.spawn_session(choice, &workspace, managed);
             }
             _ => {}
         }
@@ -573,6 +614,9 @@ impl App {
                 }
                 self.refresh_harness_workspace_choices();
             }
+            // The last step, and it says so in its own title: Enter finishes the
+            // picker. It used to lead to a control question instead, which the
+            // hint text never mentioned and which had one sensible answer.
             KeyCode::Enter => {
                 let Some(workspace) = self.selected_picker_workspace() else {
                     self.set_status("Choose an existing directory");
@@ -583,26 +627,23 @@ impl App {
                     .as_ref()
                     .map(|picker| picker.purpose.clone())
                     .unwrap_or(PickerPurpose::Spawn);
-                // Declaring is finished by naming, not by choosing an owner:
-                // nothing starts, so there is nobody to own it yet.
+                let Some(choice) = self
+                    .agent_picker
+                    .as_ref()
+                    .and_then(|picker| picker.choices.get(picker.index).cloned())
+                else {
+                    self.set_status("Choose a harness type first");
+                    return;
+                };
+                self.agent_picker = None;
+                // Declaring is finished by naming, not by starting: nothing runs
+                // yet, so there is nobody to hand control to.
                 if purpose == PickerPurpose::DeclareAgent {
-                    let harness = self
-                        .agent_picker
-                        .as_ref()
-                        .and_then(|picker| picker.choices.get(picker.index))
-                        .map(|choice| choice.id().to_string());
-                    let Some(harness) = harness else {
-                        self.set_status("Choose a harness type first");
-                        return;
-                    };
-                    self.agent_picker = None;
+                    let harness = choice.id().to_string();
                     self.prompt_agent_name(&harness, &workspace);
                     return;
                 }
-                if let Some(picker) = &mut self.agent_picker {
-                    picker.step = AgentPickerStep::Decision;
-                    picker.managed = true;
-                }
+                self.spawn_session(choice, &workspace);
             }
             _ => {}
         }
@@ -621,11 +662,18 @@ impl App {
         // operator is not holding the session yet, so the only two answers are
         // "take it and start typing" and "leave it alone".
         if prompt.is_takeover {
+            // The prompt's own session, not the rail's. The two agree today
+            // because the question owns the keyboard and the pointer while it is
+            // up, but resolving through the cursor makes "which session does `y`
+            // move?" depend on what the last frame happened to draw — and the
+            // failure it invites is moving control of a session the operator
+            // never pointed at.
+            let session = prompt.session.clone();
             match code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.handback_prompt = None;
-                    self.take_session_control();
-                    self.attach_to_pane_session();
+                    self.take_session(&session, TakeOrigin::Explicit);
+                    self.attach_to_session(&session);
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.handback_prompt = None;

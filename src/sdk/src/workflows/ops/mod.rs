@@ -32,7 +32,8 @@ use tinyflows::graph_ops::GraphOp;
 use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, WorkflowStore};
 
 pub use evolve::{
-    accept_proposal, add_note, evolve, notes, proposals, propose, reject_proposal, verify_proposal,
+    accept_proposal, add_note, author, evolve, notes, proposals, propose, reject_proposal,
+    verify_proposal,
 };
 #[cfg(test)]
 pub(crate) use graph::set_defaults_observed;
@@ -40,7 +41,9 @@ pub use graph::{
     apply_ops, catalog, create, delete, get, host_facts, list, preview_ops, set_defaults, validate,
     HostPolicy,
 };
-pub use runs::{cancel_run, dry_run, get_run, list_history, list_runs, rollback, run, undo};
+pub use runs::{
+    cancel_run, dry_run, get_run, list_history, list_runs, rollback, run, undo, StepDetail, Wait,
+};
 
 /// The store every operation reads and writes, discovered for this environment.
 pub fn discover_store(env: &HashMap<String, String>, cwd: &Path) -> Arc<dyn WorkflowStore> {

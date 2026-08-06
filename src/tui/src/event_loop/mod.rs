@@ -46,6 +46,7 @@ pub(crate) async fn run(
         local_hosts,
         startup_status,
         config_path,
+        hooks_config_path,
         medulla_home,
         account,
         mut sharing,
@@ -53,9 +54,11 @@ pub(crate) async fn run(
         link_obs,
         host,
         local_sessions,
+        hook_log,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
+    app.set_hooks_config_path(hooks_config_path);
     app.set_medulla_home(medulla_home);
     app.set_account(account);
     if let Some(obs) = link_obs {
@@ -67,6 +70,7 @@ pub(crate) async fn run(
     if let Some(sessions) = local_sessions {
         app.set_local_sessions(sessions);
     }
+    app.set_hook_log(hook_log);
     if let Some(status) = startup_status {
         app.set_status(status);
     }
@@ -176,6 +180,10 @@ pub(crate) async fn run(
                         // daemon and its harness processes alive for it.
                         if removed {
                             cmd_dispatch::close_copilot_host(&workflow);
+                            // And the saved conversation with it: kept, it
+                            // would be handed wholesale to the next workflow
+                            // that reused the id.
+                            app.forget_copilot(&workflow);
                         }
                         // A queued follow-up comes back as a command to run:
                         // the drain happens after the catalogue refresh, so it

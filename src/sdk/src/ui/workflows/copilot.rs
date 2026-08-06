@@ -11,7 +11,13 @@
 //! judgement about what a turn *is*.
 
 /// Who or what produced a line of the transcript.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serialized because a transcript outlives the process drawing it (see
+/// [`crate::workflows::copilot::Transcripts`]); the wire names are the variant
+/// names in `snake_case`, and renaming one silently drops every saved turn that
+/// used it — so add rather than rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TurnRole {
     /// The operator's instruction.
     User,
@@ -73,13 +79,18 @@ impl TurnRole {
 }
 
 /// One line of the copilot transcript.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CopilotTurn {
     /// What produced it.
     pub role: TurnRole,
     /// The text, unwrapped — the renderer knows the pane width, this does not.
     pub text: String,
     /// Provider tool-call identity used only to correlate settlement in place.
+    ///
+    /// Never restored as meaningful across processes — the provider that minted
+    /// it is gone — but kept in the file so a round trip is lossless and a
+    /// reloaded row still renders as the tool call it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
 }
 

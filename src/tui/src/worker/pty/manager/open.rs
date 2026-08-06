@@ -257,6 +257,10 @@ impl PtyManager {
                     Ok(n) => {
                         handle.process(&buf[..n]);
                         handle.mark_output(manager.now());
+                        // Checked here rather than on a timer: a copy is only
+                        // worth anything promptly, and this is the one place
+                        // that knows the child just spoke.
+                        manager.forward_clipboard(&handle);
                         if n == BUF_LEN {
                             std::thread::yield_now();
                         }

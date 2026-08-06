@@ -147,9 +147,11 @@ fn authoring_a_workflow_and_installing_its_skill_writes_a_harness_readable_file(
 
     let skill = fs::read_to_string(home.path().join(".claude/skills/medulla-babysit/SKILL.md"))
         .expect("the claude skill is readable");
-    // The marker is what every later write checks before touching this file.
+    // The marker is what every later write checks before touching this file —
+    // carried as a YAML comment inside the frontmatter, so the frontmatter
+    // still opens on line 1 and the harness actually parses it.
     assert!(
-        skill.starts_with("<!-- medulla:managed workflow=babysit rev="),
+        skill.starts_with("---\n# medulla:managed workflow=babysit rev="),
         "{skill}"
     );
     assert!(skill.contains("name: medulla-babysit"), "{skill}");

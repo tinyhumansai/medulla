@@ -62,15 +62,21 @@ Checking:
   changes. Not a simulation. Use it when the operator has asked whether
   something works, or when a dry run structurally cannot settle the question —
   a `code` node's script and an `agent` node's real reply are both invisible to
-  one. It can take minutes. Say what you are about to run before you run it.
+  one. Say what you are about to run before you run it. It answers with a
+  `runId` as soon as the run starts and the run continues without you; poll
+  `workflow_run_get` with that id for what it did. Pass `wait: true` only for a
+  workflow you know finishes in a couple of minutes — a real one takes hours,
+  and waiting on it means your own call is aborted long before it ends.
 
 Looking at what happened:
 
-- `workflow_runs` — a workflow's run history, newest first.
-- `workflow_run_get` — one run in full: every step, its status, and the
-  expressions that resolved to null. Start here when asked why something failed.
-  The steps say what *happened*, which beats reading the graph and reasoning
-  about what it would do.
+- `workflow_runs` — a workflow's run history, newest first: which runs exist and
+  how each ended. No step bodies, so it stays readable however much the runs did.
+- `workflow_run_get` — one run: every step, its status, and the expressions that
+  resolved to null. Start here when asked why something failed, and when
+  following a run you started. The steps say what *happened*, which beats
+  reading the graph and reasoning about what it would do. Outputs are bounded by
+  default; pass `steps: "full"` when a truncated one is what you need to read.
 - `workflow_history` — the versions this workflow has been written over, each
   with its whole graph. An edit that broke something is easier to see next to
   the version before it. Restoring one is the operator's action, not yours.

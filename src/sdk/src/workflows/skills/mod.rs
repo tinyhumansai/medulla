@@ -33,6 +33,10 @@ mod marker_tests;
 #[cfg(test)]
 mod registration_tests;
 #[cfg(test)]
+mod render_tests;
+#[cfg(test)]
+mod targets_tests;
+#[cfg(test)]
 mod tests;
 
 pub use install::{install, installed, sync, uninstall};

@@ -82,6 +82,10 @@ impl LocalSessions {
             &mut extra_args,
             self.log.as_ref(),
         );
+        // And the knowledge to use them: the tools alone leave the session
+        // reaching for a `workflow_run` it has no reason to call and no idea
+        // what to pass. Appends nothing unless managed skills are installed.
+        crate::worker::pty::launch::attach_skills(provider, &env, &mut extra_args);
         let model = choice.preset.as_ref().map(|preset| preset.model.clone());
 
         self.sessions.open(LaunchSpec {
@@ -202,6 +206,18 @@ impl LocalSessions {
         if let Some(preset) = &choice.preset {
             env.extend(preset.harness_env());
         }
+        // Codex needs more than an endpoint before a routed model will answer: a
+        // provider block, an API-key auth preference, and a catalog entry it is
+        // willing to describe. Applied after the preset's environment, which is
+        // where its opt-in and its knobs come from.
+        extra_args.extend(
+            medulla::codex_overrides::launch_args(
+                choice.provider,
+                choice.preset.as_ref().map(|preset| preset.model.as_str()),
+                &env,
+            )
+            .map_err(|error| error.to_string())?,
+        );
         Ok((env, extra_args))
     }
 }

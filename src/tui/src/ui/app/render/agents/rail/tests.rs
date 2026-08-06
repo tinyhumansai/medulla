@@ -178,6 +178,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         busy: false,
         control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
+        retained: false,
         name: None,
         attention: None,
     }

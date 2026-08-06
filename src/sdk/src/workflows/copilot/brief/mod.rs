@@ -115,6 +115,17 @@ pub struct CopilotRequest<'a> {
     pub notes: &'a [WorkflowNote],
     /// Recent runs, newest first.
     pub runs: &'a [RunRecord],
+    /// What was said on this thread before the harness session this turn runs
+    /// in existed.
+    ///
+    /// Empty on every turn of a live conversation, because the session
+    /// *remembers* those turns and restating them would have the agent read its
+    /// own last reply as new instruction. Populated only when a saved
+    /// transcript is being resumed into a fresh session — after a restart, or
+    /// once the host cache has evicted the thread — which is the case where the
+    /// agent would otherwise answer "now do the same to the other node" from
+    /// nothing.
+    pub recap: Option<&'a str>,
 }
 
 /// What is known about the run a [`Mode::Repair`] turn is fixing.
@@ -224,6 +235,17 @@ impl CopilotRequest<'_> {
         if !self.runs.is_empty() {
             prompt.push_str("\n\n## Recent runs\n\n");
             prompt.push_str(&runs_section(self.runs));
+        }
+
+        if let Some(recap) = self.recap.map(str::trim).filter(|recap| !recap.is_empty()) {
+            prompt.push_str("\n\n## Earlier in this conversation\n\n");
+            prompt.push_str(
+                "You have said these things to this operator about this workflow before, in a \
+                 session that has since ended. Continue from here rather than starting over. The \
+                 graph above is what the store holds *now* and is authoritative where this \
+                 disagrees with it.\n\n",
+            );
+            prompt.push_str(recap);
         }
 
         prompt.push_str("\n\n## The instruction\n\n");

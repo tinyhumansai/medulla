@@ -10,6 +10,7 @@
 //! the harness processes are the real ones. The only difference from a
 //! distributed run is that both ends are in this process.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,6 +74,47 @@ const ORCHESTRATOR_ADDRESS: &str = "workflow-runner";
 /// name no `agent_ref` dispatch here.
 pub const LOCAL_WORKER_ADDRESS: &str = "workflow-local-worker";
 
+/// Keeps an MCP server alive while runs it admitted continue in the background.
+#[derive(Clone, Default)]
+pub struct RunLiveness {
+    inner: Arc<RunLivenessInner>,
+}
+
+#[derive(Default)]
+struct RunLivenessInner {
+    active: AtomicUsize,
+    settled: tokio::sync::Notify,
+}
+
+impl RunLiveness {
+    /// Mark one admitted run as active until its returned guard is dropped.
+    fn track(&self) -> RunLivenessGuard {
+        self.inner.active.fetch_add(1, Ordering::Relaxed);
+        RunLivenessGuard(self.clone())
+    }
+
+    /// Wait until every run admitted through this tracker has settled.
+    pub async fn wait_for_all(&self) {
+        loop {
+            let notified = self.inner.settled.notified();
+            if self.inner.active.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+struct RunLivenessGuard(RunLiveness);
+
+impl Drop for RunLivenessGuard {
+    fn drop(&mut self) {
+        if self.0.inner.active.fetch_sub(1, Ordering::Release) == 1 {
+            self.0.inner.settled.notify_waiters();
+        }
+    }
+}
+
 /// A loopback host: an embedded daemon plus the dispatch that reaches it.
 ///
 /// Held for the lifetime of the runs it serves. Dropping it unbinds both
@@ -120,101 +162,366 @@ impl LocalWorkflowHost {
     }
 }
 
-/// Run the workflow `id` on this machine, start to finish.
+/// One local run, described before it starts.
 ///
-/// Everything a caller needs assembled in one place: settings from config, a
-/// loopback host for `agent` nodes to dispatch to, and the run itself. The
-/// `medulla workflow run` command builds its own because it has more to say
-/// about run ids and progress; this is for callers that want the plain thing —
-/// today the copilot's `workflow_run` tool.
+/// A struct rather than a parameter list because starting a run needs seven
+/// distinct things and two of them are string-ish: assembled by name, a caller
+/// cannot silently transpose `cwd` and `workflow_id`.
 ///
-/// The host is held for the whole run and dropped with it, which unbinds the
-/// loopback endpoints so a later run can bind them again.
+/// `input` carries both halves of what a caller supplies — the free-form
+/// trigger payload and the values for the workflow's declared inputs — as the
+/// engine's own [`RunInput`](tinyflows::engine::RunInput), because they are one
+/// idea.
+pub struct LocalRun<'a> {
+    /// The store the definition comes from and the run record goes to.
+    pub store: Arc<dyn crate::workflows::WorkflowStore>,
+    /// The host's workflow settings.
+    pub config: &'a crate::config::WorkflowsConfig,
+    /// The custom harness presets this machine has configured.
+    pub custom_harnesses: &'a [crate::config::CustomHarnessConfig],
+    /// The environment the embedded daemon and its harnesses inherit.
+    pub env: &'a std::collections::HashMap<String, String>,
+    /// The workspace the run executes in.
+    pub cwd: &'a std::path::Path,
+    /// The workflow to run.
+    pub workflow_id: &'a str,
+    /// The trigger payload and declared-input values.
+    pub input: tinyflows::engine::RunInput,
+    /// Where progress events go, when someone is watching.
+    ///
+    /// `None` folds them into a snapshot nobody reads, which is what a caller
+    /// that only wants the final record needs.
+    pub sink: Option<crate::flow_engine::WorkEventSink>,
+    /// Keeps an MCP server alive after a detached call returns.
+    pub liveness: Option<RunLiveness>,
+}
+
+/// A run that has been admitted and is executing in the background.
+///
+/// The run id is available *before* the run settles, which is the whole point:
+/// a caller that cannot hold a request open for an hour can hand the id back
+/// and let the operator (or the model) poll `workflow_run_get`.
+pub struct StartedRun {
+    /// The run's id, already written to the store as a `running` record.
+    pub run_id: String,
+    /// The workflow this run is of.
+    pub workflow_id: String,
+    /// The detached task executing it.
+    ///
+    /// Dropping this does *not* stop the run — a `JoinHandle` detaches on drop,
+    /// which is exactly the durability this shape exists to give. Cancelling
+    /// goes through [`crate::workflows::run::cancel`].
+    join: tokio::task::JoinHandle<
+        Result<crate::workflows::RunRecord, crate::workflows::WorkflowError>,
+    >,
+}
+
+impl StartedRun {
+    /// Wait for the run to settle and answer with its record.
+    ///
+    /// # Errors
+    ///
+    /// The run's own error, or a report that the executing task went away
+    /// without producing one (a panic, or a runtime shutting down under it).
+    pub async fn settled(
+        self,
+    ) -> Result<crate::workflows::RunRecord, crate::workflows::WorkflowError> {
+        let run_id = self.run_id.clone();
+        joined(run_id, self.join.await)
+    }
+
+    /// Wait up to `budget` for the run to settle.
+    ///
+    /// `Ok(None)` means the budget expired and the run is still going — not a
+    /// failure, and deliberately not phrased as one. The run continues; the
+    /// caller still holds its id.
+    ///
+    /// # Errors
+    ///
+    /// As [`settled`](Self::settled), for a run that did finish, badly.
+    pub async fn settled_within(
+        mut self,
+        budget: std::time::Duration,
+    ) -> Result<Option<crate::workflows::RunRecord>, crate::workflows::WorkflowError> {
+        match tokio::time::timeout(budget, &mut self.join).await {
+            Ok(result) => joined(self.run_id.clone(), result).map(Some),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+/// Unwrap a join result, turning a task that vanished into a readable error.
+fn joined(
+    run_id: String,
+    result: Result<
+        Result<crate::workflows::RunRecord, crate::workflows::WorkflowError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<crate::workflows::RunRecord, crate::workflows::WorkflowError> {
+    match result {
+        Ok(outcome) => outcome,
+        // The record itself is still readable — `RunFinalizer` reconciles it on
+        // drop — so point at it rather than leaving the caller with nothing.
+        Err(err) => Err(crate::workflows::WorkflowError::Engine(format!(
+            "the task executing run '{run_id}' stopped without settling it ({err}); read the run \
+             record for what it managed to do"
+        ))),
+    }
+}
+
+impl LocalRun<'_> {
+    /// Start the run and return as soon as it is admitted.
+    ///
+    /// Everything that can be refused cheaply is refused *here*, before the
+    /// task detaches: workflows turned off, an unknown or disabled workflow, a
+    /// host that cannot start. A caller therefore learns about those the way it
+    /// always did — as an error from the call — and only a run that genuinely
+    /// began comes back as a run id.
+    ///
+    /// The `running` record is written before the task is spawned rather than
+    /// by the task itself: the caller is handed this id and may poll it in its
+    /// very next breath, and a task the runtime has not polled yet would answer
+    /// that poll with `NotFound`.
+    ///
+    /// The host is moved into the task, so it lives exactly as long as the run
+    /// and its loopback endpoints are unbound when the run ends.
+    ///
+    /// # Errors
+    ///
+    /// Fails when no coding-agent CLI is installed, when the workflow or the
+    /// host is disabled, or when the run record cannot be written.
+    pub async fn start(self) -> Result<StartedRun, crate::workflows::WorkflowError> {
+        use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
+        use crate::workflows::{RunContext, StoreWorkflowResolver};
+
+        let LocalRun {
+            store,
+            config,
+            custom_harnesses,
+            env,
+            cwd,
+            workflow_id,
+            input,
+            sink,
+            liveness,
+        } = self;
+
+        // Checked before the host, not after: starting a host requires a
+        // coding-agent CLI on `PATH`, a cost a disabled workflow (or a host with
+        // workflows turned off) should never pay just to be told no. Every path
+        // here still runs `run_workflow`'s own checks too — this is an early exit
+        // for the common refusal, not a replacement for the authoritative one.
+        if !config.enabled {
+            return Err(crate::workflows::WorkflowError::Engine(
+                "workflows are disabled on this host (workflows.enabled = false)".to_string(),
+            ));
+        }
+        let workflow = crate::workflows::store::require(store.as_ref(), workflow_id)?;
+        if !workflow.enabled {
+            return Err(crate::workflows::WorkflowError::Engine(format!(
+                "workflow '{workflow_id}' is disabled"
+            )));
+        }
+        tinyflows::model::resolve_inputs(&workflow.graph.inputs, &input.inputs)
+            .map_err(|err| crate::workflows::WorkflowError::Engine(err.to_string()))?;
+
+        let home = crate::home::medulla_home(env);
+        let mut settings = CapabilitySettings::from_config(config, &home);
+        settings.workspace = cwd.to_string_lossy().to_string();
+        if settings.default_worker_address.trim().is_empty() {
+            settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
+        }
+        let (host_env, fleet_depth) = nested_harness_env(env).await?;
+        settings.fleet_depth = fleet_depth;
+
+        let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
+            workspace: cwd.to_string_lossy().to_string(),
+            default_provider: config.default_provider,
+            model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+            // Without these, a workflow whose `agent` node selects a custom
+            // harness preset would run onto an embedded daemon with an empty
+            // preset list and be refused as "not configured on this host" even
+            // though the operator has it configured right here.
+            custom_harnesses: custom_harnesses.to_vec(),
+            env: host_env,
+            ..Default::default()
+        })
+        .map_err(crate::workflows::WorkflowError::Engine)?;
+
+        let sink = sink.unwrap_or_else(|| folding_sink().0);
+        let max_loop_iterations = settings.max_loop_iterations;
+        let run_id = format!("run-{}", uuid::Uuid::new_v4());
+        let started_at = crate::clock::now_millis() as u64;
+        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at);
+        store.record_run(&admitted)?;
+        let snapshot_store = store.clone();
+        let snapshot_run_id = run_id.clone();
+        let context = RunContext {
+            store: store.clone(),
+            settings: Arc::new(settings),
+            services: HostServices {
+                dispatch: host.dispatch(),
+                resolver: Arc::new(StoreWorkflowResolver::new(
+                    store.clone(),
+                    max_loop_iterations,
+                )),
+                http_credentials: std::collections::HashMap::new(),
+            },
+            sink,
+            step_snapshot: Some(Arc::new(move |steps| {
+                match snapshot_store.get_run(&snapshot_run_id) {
+                    Ok(Some(mut record))
+                        if record.status == crate::workflows::RunStatus::Running =>
+                    {
+                        record.steps = steps.to_vec();
+                        if let Err(error) = snapshot_store.record_run(&record) {
+                            tracing::warn!(run = %snapshot_run_id, "could not persist run step snapshot: {error}");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::warn!(run = %snapshot_run_id, "could not read run for step snapshot: {error}")
+                    }
+                }
+            })),
+        };
+
+        let workflow_id = workflow_id.to_string();
+        let join = tokio::spawn({
+            let run_id = run_id.clone();
+            let workflow_id = workflow_id.clone();
+            let store = store.clone();
+            let liveness = liveness.as_ref().map(RunLiveness::track);
+            async move {
+                let _liveness = liveness;
+                // Held for the whole run and dropped with it, which unbinds the
+                // loopback endpoints so a later run can bind them again.
+                let _host = host;
+                let outcome = crate::workflows::run_workflow(
+                    context,
+                    &workflow_id,
+                    &run_id,
+                    input.trigger,
+                    input.inputs,
+                )
+                .await;
+                // `run_workflow` can refuse the run (bad inputs, a disabled
+                // workflow, a claim conflict) before it ever writes its own
+                // record — the admission record above is all that exists for
+                // this run id. Without this, that record is stuck at
+                // `running` forever, since nothing else ever reconciles it.
+                if let Err(err) = &outcome {
+                    let mut record =
+                        crate::workflows::new_run_record(&run_id, &workflow_id, started_at);
+                    record.status = crate::workflows::RunStatus::Failed;
+                    record.error = Some(err.to_string());
+                    record.finished_at = Some(crate::clock::now_millis() as u64);
+                    if let Err(store_err) = store.record_run(&record) {
+                        tracing::warn!(
+                            run = %run_id,
+                            "could not finalize admitted run record: {store_err}"
+                        );
+                    }
+                }
+                outcome
+            }
+        });
+
+        Ok(StartedRun {
+            run_id,
+            workflow_id,
+            join,
+        })
+    }
+}
+
+/// Run one copilot authoring turn on this machine, with no TUI involved.
+///
+/// The headless counterpart to the Workflows pane. It exists for two reasons
+/// beyond convenience: a copilot turn was previously reachable *only* through
+/// the pane, so nothing outside a running terminal could prove the harness
+/// actually receives its `workflow_*` tools — and when it does not, the failure
+/// is a confident reply and an unchanged graph, which reads as success. This is
+/// what the live test in `src/sdk/tests/live_copilot.rs` drives, and what an
+/// operator runs to find out whether authoring works on their machine at all.
+///
+/// `target` names the workflow to revise; `None` is a create turn. `status`
+/// receives the harness's progress frames — the same ones the pane draws — and
+/// may be dropped to ignore them.
+///
+/// Forces ACP and preflights the MCP server for the same reason the pane does:
+/// the legacy provider transport cannot attach an MCP server, so a turn that
+/// silently fell back to it would produce an agent that can only discuss the
+/// graph.
 ///
 /// # Errors
 ///
-/// `run_input` carries both halves of what a caller supplies for this run — the
-/// free-form trigger payload and the values for the workflow's declared inputs.
-/// They travel as the engine's own [`RunInput`](tinyflows::engine::RunInput)
-/// rather than two parameters because they are one idea, and because this
-/// function already takes as many distinct arguments as it usefully can.
-///
-/// # Errors
-///
-/// Fails when no coding-agent CLI is installed, when the workflow or the host
-/// is disabled, or when the run itself does.
-pub async fn run_here(
+/// Fails when workflows are disabled on this host, when the MCP preflight
+/// fails, when the embedded host cannot start (no coding-agent CLI on `PATH`),
+/// or when the turn itself does. A refused *edit* is not an error: the tool
+/// told the agent why, and it says so in the reply.
+pub async fn author_here(
     store: Arc<dyn crate::workflows::WorkflowStore>,
     config: &crate::config::WorkflowsConfig,
-    custom_harnesses: &[crate::config::CustomHarnessConfig],
-    env: &std::collections::HashMap<String, String>,
     cwd: &std::path::Path,
-    id: &str,
-    run_input: tinyflows::engine::RunInput,
-) -> Result<crate::workflows::RunRecord, crate::workflows::WorkflowError> {
-    use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
-    use crate::workflows::{RunContext, StoreWorkflowResolver};
+    target: Option<&str>,
+    instruction: &str,
+    status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<crate::workflows::CopilotOutcome, crate::workflows::WorkflowError> {
+    use crate::workflows::CopilotSession;
 
-    // Checked before the host, not after: starting a host requires a
-    // coding-agent CLI on `PATH`, a cost a disabled workflow (or a host with
-    // workflows turned off) should never pay just to be told no. Every path
-    // here still runs `run_workflow`'s own checks too — this is an early exit
-    // for the common refusal, not a replacement for the authoritative one.
     if !config.enabled {
         return Err(crate::workflows::WorkflowError::Engine(
             "workflows are disabled on this host (workflows.enabled = false)".to_string(),
         ));
     }
-    let workflow = crate::workflows::store::require(store.as_ref(), id)?;
-    if !workflow.enabled {
-        return Err(crate::workflows::WorkflowError::Engine(format!(
-            "workflow '{id}' is disabled"
-        )));
+    // Checked before the host starts, for the same reason `run_here` checks
+    // `enabled`: standing up an embedded daemon needs a coding-agent CLI on
+    // `PATH`, and revising a workflow that does not exist should not cost that.
+    if let Some(id) = target {
+        crate::workflows::store::require(store.as_ref(), id)?;
     }
 
-    let home = crate::home::medulla_home(env);
-    let mut settings = CapabilitySettings::from_config(config, &home);
-    settings.workspace = cwd.to_string_lossy().to_string();
-    if settings.default_worker_address.trim().is_empty() {
-        settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
-    }
-    let (host_env, fleet_depth) = nested_harness_env(env).await?;
-    settings.fleet_depth = fleet_depth;
+    let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    env.insert(
+        crate::daemon::providers::HARNESS_PROTOCOL_ENV.to_string(),
+        "acp".to_string(),
+    );
+    crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
 
     let host = LocalWorkflowHost::start(EmbeddedDaemonOptions {
         workspace: cwd.to_string_lossy().to_string(),
         default_provider: config.default_provider,
         model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
-        // Without these, a workflow whose `agent` node selects a custom
-        // harness preset would run onto an embedded daemon with an empty
-        // preset list and be refused as "not configured on this host" even
-        // though the operator has it configured right here.
-        custom_harnesses: custom_harnesses.to_vec(),
-        env: host_env,
+        env,
         ..Default::default()
     })
     .map_err(crate::workflows::WorkflowError::Engine)?;
 
-    let (sink, _fold) = folding_sink();
-    let max_loop_iterations = settings.max_loop_iterations;
-    let context = RunContext {
-        store: store.clone(),
-        settings: Arc::new(settings),
-        services: HostServices {
-            dispatch: host.dispatch(),
-            resolver: Arc::new(StoreWorkflowResolver::new(store, max_loop_iterations)),
-            http_credentials: std::collections::HashMap::new(),
-        },
-        sink,
+    let session = CopilotSession {
+        store,
+        dispatch: host.dispatch(),
+        worker_address: LOCAL_WORKER_ADDRESS.to_string(),
+        provider: config.default_provider,
+        model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
+        // One-shot: a CLI invocation has no pane to be continuous with, and a
+        // shared key would have each invocation inherit the last one's context
+        // whether or not that is wanted.
+        conversation: format!("author-{}", uuid::Uuid::new_v4()),
+        // A one-shot invocation is not resuming a pane's thread. Passing a
+        // recap here would mean deciding *which* pane's, and there is no
+        // answer to that from a command line.
+        recap: None,
     };
-
-    let run_id = format!("run-{}", uuid::Uuid::new_v4());
-    crate::workflows::run_workflow(context, id, &run_id, run_input.trigger, run_input.inputs).await
+    match target {
+        Some(id) => session.turn(id, instruction, status).await,
+        None => session.create(instruction, status).await,
+    }
 }
 
 /// Review a workflow against its own history, on this machine.
 ///
-/// The evolution counterpart to [`run_here`], and it starts the same embedded
+/// The evolution counterpart to [`LocalRun`], and it starts the same embedded
 /// host for the same reason: a review is a harness turn, and the CLI has no
 /// daemon to borrow one from.
 ///
@@ -245,7 +552,7 @@ pub async fn evolve_here(
             "workflow evolution is disabled on this host".to_string(),
         ));
     }
-    // Checked before the host starts, for the same reason `run_here` checks
+    // Checked before the host starts, for the same reason `LocalRun::start` checks
     // `enabled`: standing up an embedded daemon needs a coding-agent CLI on
     // `PATH`, and a workflow that does not exist should not cost that.
     let workflow = crate::workflows::store::require(store.as_ref(), id)?;

@@ -141,6 +141,29 @@ impl App {
         tree.get(row.host)?.agents.get(row.agent?).cloned()
     }
 
+    /// Whether the create-agent flow is on screen.
+    /// Test/inspection seam.
+    pub fn agent_picker_open(&self) -> bool {
+        self.agent_picker.is_some()
+    }
+
+    /// Put the Hosts cursor on `agent_id`, if the tree has a row for it.
+    ///
+    /// The page keeps its own cursor (`host_index`) over its own flattening, so
+    /// this is not the rail's [`select_agent_row`](App::select_agent_row) — the
+    /// two indices count different rows and are not interchangeable.
+    pub(in crate::ui::app) fn select_host_agent_row(&mut self, agent_id: &str) {
+        let (_, rows, _) = self.hosts_view();
+        let tree = self.host_tree();
+        if let Some(index) = rows.iter().position(|row| {
+            row.agent
+                .and_then(|at| tree.get(row.host)?.agents.get(at))
+                .is_some_and(|agent| agent.agent_id.trim() == agent_id.trim())
+        }) {
+            self.host_index = index;
+        }
+    }
+
     /// Whether the preview's role toggles hold the arrows.
     ///
     /// The Hosts page has two cursors on one screen — the tree and the toggle

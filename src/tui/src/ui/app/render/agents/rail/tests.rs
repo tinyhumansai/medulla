@@ -132,7 +132,9 @@ fn a_title_that_slugs_to_nothing_is_not_a_lane_title() {
     // the lane, would mask an older task that does advertise a real title.
     assert_eq!(lane_title("---"), None);
     assert_eq!(lane_title("\u{1b}[2J\n\t"), None);
-    assert_eq!(lane_title("okay so the"), None, "pure filler names nothing");
+    // All-filler input is a different case: slug names it badly-but-stably
+    // rather than emptily, so the lane keeps showing it.
+    assert_eq!(lane_title("okay so the"), Some("okay-so-the".to_string()));
 
     assert_eq!(
         lane_title("Fix session titles"),

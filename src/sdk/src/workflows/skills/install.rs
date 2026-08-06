@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::workflows::WorkflowSummary;
 
-use super::render::{parse_marker, render, render_command};
+use super::render::{parse_marker, render, render_command, slug_for, SLUG_PREFIX};
 use super::targets::{
     command_path, commands_dir, dedupe_by_skills_dir, legacy_codex_skills_dir, skill_path,
     skills_dir, target_root,

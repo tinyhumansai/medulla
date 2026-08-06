@@ -139,6 +139,18 @@ fn slug_treats_punctuation_and_control_bytes_as_word_breaks() {
 }
 
 #[test]
+fn slug_keeps_a_contraction_whole_rather_than_leaving_its_tail_behind() {
+    // Splitting on the apostrophe would filter `let`/`i` and keep the orphan
+    // `s`/`m`, naming the session `s-fix-flaky` and `m-seeing-an`.
+    assert_eq!(slug("let's fix the flaky test"), "fix-flaky-test");
+    assert_eq!(slug("I'm seeing an error"), "seeing-error");
+    // The typographic apostrophe an editor substitutes behaves the same.
+    assert_eq!(slug("let\u{2019}s fix the flaky test"), "fix-flaky-test");
+    // A contraction that is not filler survives as one word.
+    assert_eq!(slug("the runner's cache broke"), "runners-cache-broke");
+}
+
+#[test]
 fn slug_bounds_total_length() {
     let long = format!("{} {} {}", "a".repeat(30), "b".repeat(30), "c".repeat(30));
     let out = slug(&long);

@@ -76,9 +76,9 @@ pub(crate) fn legacy_managed_root(env: &HashMap<String, String>) -> PathBuf {
 /// it is for, since it appears verbatim in the operator's session transcript.
 ///
 /// Laid out inside like a project root, so Claude finds
-/// `<medulla home>/claude-skills/.claude/skills/<slug>/SKILL.md`.
-pub fn managed_dir(target: SkillTarget, env: &HashMap<String, String>) -> PathBuf {
-    managed_root(env).join(format!("{}-skills", target.as_str()))
+/// `<managed root>/claude-skills/.claude/skills/<slug>/SKILL.md`.
+pub fn managed_dir(target: SkillTarget, env: &HashMap<String, String>, cwd: &Path) -> PathBuf {
+    managed_root(env, cwd).join(format!("{}-skills", target.as_str()))
 }
 
 /// The root one target actually writes under, given the scope.

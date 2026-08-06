@@ -233,7 +233,7 @@ pub fn persist_custom_harnesses(
 /// survive `[hookDefaults] enabled = false` as a set of hooks the operator never
 /// wrote and cannot recognize.
 pub fn persist_hooks(path: &Path, hooks: &[crate::harness_hooks::HookSpec]) -> anyhow::Result<()> {
-    debug_assert!(
+    anyhow::ensure!(
         !hooks.iter().any(|hook| hook.builtin),
         "built-in hooks must never be written to an operator's config file"
     );

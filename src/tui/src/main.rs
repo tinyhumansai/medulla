@@ -39,7 +39,20 @@ mod worker_loop;
 /// place able to source the values from it rather than restating them.
 fn main() -> anyhow::Result<()> {
     install_crypto_provider();
-    medulla::tokio_tuning::build_runtime()?.block_on(async_main())
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    // The hook shim runs inside an operator's live turn under a 3-5 second
+    // harness deadline (see `commands::hook`'s module docs), so it gets a
+    // single-thread runtime rather than paying to spin up the multi-thread,
+    // 16 MiB-per-worker-stack runtime every other command needs to host an
+    // agent turn.
+    if matches!(parse_command(&raw), Command::Hook) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async_main(raw))
+    } else {
+        medulla::tokio_tuning::build_runtime()?.block_on(async_main(raw))
+    }
 }
 
 /// Pick the TLS backend before anything opens a connection.

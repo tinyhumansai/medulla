@@ -216,6 +216,7 @@ pub(crate) async fn call(
                     sink: progress
                         .clone()
                         .map(|progress| run_progress::sink(progress, id)),
+                    liveness: Some(session.run_liveness.clone()),
                 },
                 wait,
             )

@@ -36,6 +36,8 @@ pub struct McpSession {
     /// Definition edits remain read-modify-write operations, however, and must
     /// not read the same base then overwrite one another within this session.
     pub(crate) workflow_mutations: tokio::sync::Mutex<()>,
+    /// Detached workflow runs that keep this stdio server alive.
+    pub(crate) run_liveness: crate::workflows::local::RunLiveness,
 }
 
 impl McpSession {
@@ -56,6 +58,7 @@ impl McpSession {
             fleet: Arc::new(OfflineFleet),
             notifications: None,
             workflow_mutations: tokio::sync::Mutex::new(()),
+            run_liveness: crate::workflows::local::RunLiveness::default(),
         }
     }
 

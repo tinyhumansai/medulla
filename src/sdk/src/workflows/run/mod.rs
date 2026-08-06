@@ -60,6 +60,8 @@ pub struct RunContext {
     pub services: HostServices,
     /// Where progress events go.
     pub sink: WorkEventSink,
+    /// Persists completed-step snapshots while the run is still executing.
+    pub(crate) step_snapshot: Option<Arc<dyn Fn(&[RunStep]) + Send + Sync>>,
 }
 
 /// Write a terminal status onto a run record unless a settled path already did.
@@ -211,7 +213,7 @@ async fn run_workflow_inner(
         workflow_id,
         &workflow.graph,
         context.sink,
-    ));
+    ).with_step_snapshot(context.step_snapshot));
     let agent_evidence = Arc::new(agent_evidence::AgentEvidence::default());
     let capabilities = build_capabilities_with_agent_evidence(
         settings.clone(),
@@ -508,7 +510,7 @@ pub async fn resume_workflow(
         &record.workflow_id,
         &workflow.graph,
         context.sink,
-    ));
+    ).with_step_snapshot(context.step_snapshot));
     let agent_evidence = Arc::new(agent_evidence::AgentEvidence::default());
     let capabilities = build_capabilities_with_agent_evidence(
         settings.clone(),

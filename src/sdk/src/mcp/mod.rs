@@ -412,6 +412,9 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
             }
         }
     }
+    // A default `workflow_run` has already answered by this point, but the
+    // server still owns its detached work after stdin closes.
+    session.run_liveness.wait_for_all().await;
     // Both senders, in order. The session holds one so a tool call can report
     // progress; leaving it alive here would keep the channel open, the writer
     // waiting on a message that can never arrive, and this function blocked on

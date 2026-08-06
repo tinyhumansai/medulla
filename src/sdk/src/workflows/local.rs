@@ -10,6 +10,7 @@
 //! the harness processes are the real ones. The only difference from a
 //! distributed run is that both ends are in this process.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -72,6 +73,47 @@ const ORCHESTRATOR_ADDRESS: &str = "workflow-runner";
 /// The bridge address the embedded worker listens on. Workflows whose nodes
 /// name no `agent_ref` dispatch here.
 pub const LOCAL_WORKER_ADDRESS: &str = "workflow-local-worker";
+
+/// Keeps an MCP server alive while runs it admitted continue in the background.
+#[derive(Clone, Default)]
+pub struct RunLiveness {
+    inner: Arc<RunLivenessInner>,
+}
+
+#[derive(Default)]
+struct RunLivenessInner {
+    active: AtomicUsize,
+    settled: tokio::sync::Notify,
+}
+
+impl RunLiveness {
+    /// Mark one admitted run as active until its returned guard is dropped.
+    fn track(&self) -> RunLivenessGuard {
+        self.inner.active.fetch_add(1, Ordering::Relaxed);
+        RunLivenessGuard(self.clone())
+    }
+
+    /// Wait until every run admitted through this tracker has settled.
+    pub async fn wait_for_all(&self) {
+        loop {
+            let notified = self.inner.settled.notified();
+            if self.inner.active.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+struct RunLivenessGuard(RunLiveness);
+
+impl Drop for RunLivenessGuard {
+    fn drop(&mut self) {
+        if self.0.inner.active.fetch_sub(1, Ordering::Release) == 1 {
+            self.0.inner.settled.notify_waiters();
+        }
+    }
+}
 
 /// A loopback host: an embedded daemon plus the dispatch that reaches it.
 ///
@@ -150,6 +192,8 @@ pub struct LocalRun<'a> {
     /// `None` folds them into a snapshot nobody reads, which is what a caller
     /// that only wants the final record needs.
     pub sink: Option<crate::flow_engine::WorkEventSink>,
+    /// Keeps an MCP server alive after a detached call returns.
+    pub liveness: Option<RunLiveness>,
 }
 
 /// A run that has been admitted and is executing in the background.
@@ -259,6 +303,7 @@ impl LocalRun<'_> {
             workflow_id,
             input,
             sink,
+            liveness,
         } = self;
 
         // Checked before the host, not after: starting a host requires a
@@ -277,6 +322,8 @@ impl LocalRun<'_> {
                 "workflow '{workflow_id}' is disabled"
             )));
         }
+        tinyflows::model::resolve_inputs(&workflow.graph.inputs, &input.inputs)
+            .map_err(|err| crate::workflows::WorkflowError::Engine(err.to_string()))?;
 
         let home = crate::home::medulla_home(env);
         let mut settings = CapabilitySettings::from_config(config, &home);
@@ -303,6 +350,12 @@ impl LocalRun<'_> {
 
         let sink = sink.unwrap_or_else(|| folding_sink().0);
         let max_loop_iterations = settings.max_loop_iterations;
+        let run_id = format!("run-{}", uuid::Uuid::new_v4());
+        let started_at = crate::clock::now_millis() as u64;
+        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at);
+        store.record_run(&admitted)?;
+        let snapshot_store = store.clone();
+        let snapshot_run_id = run_id.clone();
         let context = RunContext {
             store: store.clone(),
             settings: Arc::new(settings),
@@ -315,19 +368,28 @@ impl LocalRun<'_> {
                 http_credentials: std::collections::HashMap::new(),
             },
             sink,
+            step_snapshot: Some(Arc::new(move |steps| {
+                match snapshot_store.get_run(&snapshot_run_id) {
+                    Ok(Some(mut record)) if record.status == crate::workflows::RunStatus::Running => {
+                        record.steps = steps.to_vec();
+                        if let Err(error) = snapshot_store.record_run(&record) {
+                            tracing::warn!(run = %snapshot_run_id, "could not persist run step snapshot: {error}");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(run = %snapshot_run_id, "could not read run for step snapshot: {error}"),
+                }
+            })),
         };
-
-        let run_id = format!("run-{}", uuid::Uuid::new_v4());
-        let started_at = crate::clock::now_millis() as u64;
-        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at);
-        store.record_run(&admitted)?;
 
         let workflow_id = workflow_id.to_string();
         let join = tokio::spawn({
             let run_id = run_id.clone();
             let workflow_id = workflow_id.clone();
             let store = store.clone();
+            let liveness = liveness.as_ref().map(RunLiveness::track);
             async move {
+                let _liveness = liveness;
                 // Held for the whole run and dropped with it, which unbinds the
                 // loopback endpoints so a later run can bind them again.
                 let _host = host;

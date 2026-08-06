@@ -72,6 +72,7 @@ pub(super) fn session_with(
         // progress notification even if a call asked for one.
         notifications: None,
         workflow_mutations: tokio::sync::Mutex::new(()),
+        run_liveness: crate::workflows::local::RunLiveness::default(),
     }
 }
 

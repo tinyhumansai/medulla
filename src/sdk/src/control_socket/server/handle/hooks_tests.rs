@@ -68,7 +68,10 @@ fn a_summary_with_control_bytes_is_sanitized_before_it_is_recorded() {
     assert_eq!(response, json!({ "recorded": true }));
 
     let recorded = fleet.recorded.lock().unwrap();
-    let summary = &recorded.as_ref().expect("hook_report always records").summary;
+    let summary = &recorded
+        .as_ref()
+        .expect("hook_report always records")
+        .summary;
     assert_eq!(summary, "clear[2Jscreenbell");
     assert!(
         !summary.chars().any(|c| c.is_control()),

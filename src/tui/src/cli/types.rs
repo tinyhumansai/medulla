@@ -48,6 +48,13 @@ pub enum Command {
     /// Generate harness-native skills that trigger saved workflows
     /// (`list`/`install`/`sync`/`uninstall`).
     Skills,
+    /// Report one harness lifecycle event (`hook <Event>`).
+    ///
+    /// Not for a human to run either. Medulla installs this as a hook into the
+    /// harnesses it launches; the harness runs it, pipes its native hook payload
+    /// to it, and it files a one-line report on the control socket the same
+    /// spawn was handed.
+    Hook,
 }
 
 /// The `medulla skills` action.

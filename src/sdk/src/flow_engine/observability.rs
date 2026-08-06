@@ -40,6 +40,9 @@ use crate::harness_work::kinds;
 /// observer should not have to know which.
 pub type WorkEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
+/// A best-effort durable copy of the completed steps in a still-running run.
+pub type StepSnapshot = Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>;
+
 /// A sink that discards everything, for runs nobody is watching.
 pub fn null_sink() -> WorkEventSink {
     Arc::new(|_, _| {})
@@ -96,6 +99,8 @@ pub struct WorkflowRunObserver {
     summary: Mutex<Option<String>>,
     /// The workflow this run belongs to, used only for event context.
     workflow_id: String,
+    /// Optional durable mirror for steps that finish before the run settles.
+    step_snapshot: Option<StepSnapshot>,
 }
 
 impl WorkflowRunObserver {
@@ -126,7 +131,14 @@ impl WorkflowRunObserver {
             raw: Mutex::new(Vec::new()),
             summary: Mutex::new(None),
             workflow_id: workflow_id.into(),
+            step_snapshot: None,
         }
+    }
+
+    /// Add a sink for completed-step snapshots.
+    pub(crate) fn with_step_snapshot(mut self, snapshot: Option<StepSnapshot>) -> Self {
+        self.step_snapshot = snapshot;
+        self
     }
 
     /// The steps recorded so far, in completion order.
@@ -203,6 +215,10 @@ impl RunObserver for WorkflowRunObserver {
                 diagnostics: diagnostics.clone(),
             });
         self.raw.lock().expect("raw steps lock").push(step.clone());
+        if let Some(snapshot) = &self.step_snapshot {
+            let steps = self.steps();
+            snapshot(&steps);
+        }
 
         // A null-resolving expression is almost always a wiring mistake the
         // author wants to hear about, but never a reason to fail a run the

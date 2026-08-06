@@ -46,6 +46,7 @@ pub(crate) async fn run(
         local_hosts,
         startup_status,
         config_path,
+        hooks_config_path,
         medulla_home,
         account,
         mut sharing,
@@ -54,9 +55,11 @@ pub(crate) async fn run(
         host,
         local_sessions,
         harness_runs,
+        hook_log,
     } = wiring;
     let mut app = App::new(runtime.clone(), loaded);
     app.set_config_path(config_path);
+    app.set_hooks_config_path(hooks_config_path);
     app.set_medulla_home(medulla_home);
     app.set_account(account);
     if let Some(obs) = link_obs {
@@ -69,6 +72,7 @@ pub(crate) async fn run(
         app.set_local_sessions(sessions);
     }
     app.set_harness_runs(harness_runs);
+    app.set_hook_log(hook_log);
     if let Some(status) = startup_status {
         app.set_status(status);
     }

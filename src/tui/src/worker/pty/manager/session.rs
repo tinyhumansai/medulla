@@ -210,6 +210,19 @@ impl PtyManager {
         true
     }
 
+    /// Keep a finished task's session standing instead of closing it.
+    ///
+    /// Answers `false` for an id the manager no longer knows, exactly as
+    /// [`close`](Self::close) does, so a caller cannot tell "retained" from
+    /// "already gone" by anything other than the return value.
+    pub fn retain(&self, id: &str) -> bool {
+        let Some(session) = self.handle(id) else {
+            return false;
+        };
+        session.retain();
+        true
+    }
+
     /// Interrupt and close a session only if the operator has not taken it.
     pub fn stop_if_orchestrator(&self, id: &str) -> bool {
         self.handle(id)

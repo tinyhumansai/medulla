@@ -109,10 +109,15 @@ impl App {
     /// Where a node sits on the unscrolled canvas, in cells.
     ///
     /// This is the fold: layers run across the pane until one would leave it,
-    /// then the graph continues on a band below. Alternate bands run *backwards*
-    /// — boustrophedon, the way an ox ploughs a field — so a chain that wraps
-    /// picks up directly under where it left off instead of throwing a wire all
-    /// the way back across the pane to start again at the left margin.
+    /// then the graph continues on a band below, starting again at the left
+    /// margin. Every band runs the same way, so the graph reads like text.
+    ///
+    /// Alternate bands used to run backwards — boustrophedon, the way an ox
+    /// ploughs a field — which made the fold itself a short hop rather than a
+    /// wire back across the pane. It cost more than it bought: half the bands
+    /// read right to left, every wire in them had to mirror which end of a node
+    /// it left and arrived at, and a reader had to work out which way a band
+    /// went before they could follow it. One direction is worth the return wire.
     ///
     /// Shared with the renderer so navigation and drawing can never disagree
     /// about where a node is.
@@ -126,16 +131,6 @@ impl App {
     /// The band a layer folds onto.
     pub(in crate::ui::app) fn band_of(&self, layer: usize) -> usize {
         layer / self.layers_per_band()
-    }
-
-    /// Whether a band runs right to left.
-    pub(in crate::ui::app) fn band_reversed(&self, band: usize) -> bool {
-        band % 2 == 1
-    }
-
-    /// Whether the layer at `layer` sits on a band that runs right to left.
-    pub(in crate::ui::app) fn layer_reversed(&self, layer: usize) -> bool {
-        self.band_reversed(self.band_of(layer))
     }
 
     /// The row each band starts on.
@@ -180,6 +175,14 @@ impl App {
     /// measured exactly the way the layout measures it; everything left of the
     /// panel's own borders is canvas, because the content pane now holds one
     /// view rather than sharing the row with a copilot column.
+    ///
+    /// Only the left margin comes off. Reserving one on the right too — for the
+    /// gutter the last column of a forward band folds down in — is the tidier
+    /// geometry, but five columns is most of a whole extra layer per band on a
+    /// narrow pane, and a graph that folds after every single step to keep its
+    /// corners clear is far harder to read than one whose last fold turns
+    /// against the frame. So the renderer clamps that wire to the canvas instead
+    /// (see `paint_edges`), and the width is spent on the plan.
     pub(in crate::ui::app) fn canvas_width(&self) -> usize {
         const BORDERS: usize = 2;
         let rail = self.workflow_sidebar_width(self.area.width);
@@ -239,39 +242,21 @@ impl App {
 
     /// The left edge of a layer's column, relative to the canvas.
     ///
-    /// Forward bands are laid from the left; reversed ones are laid from the
-    /// right, so both end flush against the edge the fold between them turns
-    /// at. Sizing each column to its own label and then packing the band this
-    /// way is what keeps the connectors short: a wire only ever crosses the
-    /// gutter, never the padding of a column sized for some other step's name.
+    /// Every band is laid from the left. Sizing each column to its own label and
+    /// then packing the band tight is what keeps the connectors short: a wire
+    /// only ever crosses the gutter, never the padding of a column sized for
+    /// some other step's name.
     fn column_x(&self, layer: usize) -> usize {
         let (per_band, widths) = self.column_layout();
-        let band = layer / per_band;
         let members = widths
             .chunks(per_band)
-            .nth(band)
+            .nth(layer / per_band)
             .unwrap_or(&widths[..1.min(widths.len())]);
-        let index = layer % per_band;
-        let before: usize = members
+        members
             .iter()
-            .take(index)
+            .take(layer % per_band)
             .map(|width| width + GUTTER_SPAN)
-            .sum();
-        if !self.band_reversed(band) {
-            return before;
-        }
-        // Right to left, ending at the same edge every reversed band ends at:
-        // the widest band's. A band laid out within its own extent would start
-        // wherever its own columns happened to reach — a short last band well
-        // to the left of the one above it, turning a fold that should be a hop
-        // straight down into a run back across the pane, and a band wider than
-        // that extent overlapping its own labels.
-        let extent = widths
-            .chunks(per_band)
-            .map(band_width)
-            .max()
-            .unwrap_or_else(|| band_width(members));
-        extent.saturating_sub(before + members.get(index).copied().unwrap_or(0))
+            .sum()
     }
 
     /// How many rows of canvas the graph panel has.

@@ -127,6 +127,7 @@ impl Harness {
                 http_credentials: HashMap::new(),
             },
             sink: null_sink(),
+            step_snapshot: None,
         }
     }
 }

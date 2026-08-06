@@ -18,6 +18,8 @@ fn hook(event: HookEvent, matcher: &str, command: &str) -> HookSpec {
             timeout: None,
         },
         harnesses: Vec::new(),
+        label: None,
+        builtin: false,
     }
 }
 

@@ -251,8 +251,13 @@ to anyone running a Codex profile. An install retires a managed skill an
 earlier release left in `.codex/skills`, because Codex scans both and silently
 drops a `$name` mention that resolves to two skills.
 
-Generated files carry a `medulla:managed` marker line, and nothing
-without that marker is ever overwritten or deleted — a collision is reported and
+Generated files carry a `medulla:managed` marker line — a YAML comment on the
+first line inside the frontmatter, where the harness's own parser discards it;
+above the frontmatter, as releases up to 0.7 wrote it, it stopped the
+frontmatter being read at all and the skill was listed with the marker in place
+of its description. Files written the old way are still recognised and are
+rewritten on the next install. Nothing without a marker is ever overwritten or
+deleted — a collision is reported and
 skipped, which means that workflow is *not* installed, and the command exits
 non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
 counts as someone else's for the same reason; remove it by hand to let Medulla
@@ -292,6 +297,11 @@ documented exception to `--add-dir` being a file-access grant, and the reason
 this works at all; the `permissions.additionalDirectories` *setting* grants
 access without loading skills. The flag is added only once the root actually
 holds skills, so an install nobody ran changes no argv.
+
+Every direct-spawn door adds it: the headless executor, the Workers pane's own
+sessions, and the task frames opened on a pseudo-terminal. A session that had
+the tools but not the skills could call `workflow_run` and had no way to know
+which workflows it could name.
 
 Two things this deliberately does not do. It does not relocate the harness's
 config directory: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move credentials and
@@ -407,7 +417,26 @@ them tools directly — it offers them. Every ACP session gets an MCP server
 | `workflow_apply_ops` / `workflow_preview_ops` | edit by graph patch |
 | `workflow_validate` | check a saved or unsaved graph |
 | `workflow_dry_run` | simulate without dispatching |
+| `workflow_run` | run it for real; answers with a run id |
+| `workflow_run_get` | one run, summarized or in full |
 | `workflow_runs` | run history |
+
+`workflow_run` starts the run and returns as soon as it is admitted, with the
+run id to follow it by. It does not wait, because a real workflow outlives any
+client's idle ceiling — a measured three-pass babysit ran 35 minutes, one step
+of it 20 — and a client that gives up at 30 minutes reports a failure for a run
+that is still going and about to succeed. The run record exists from the moment
+the run starts, so `workflow_run_get` answers "how far has it got" and "what did
+it do" with the same call.
+
+Waiting is still available where it is honest: `wait: true` blocks until the run
+settles, and `waitMs` blocks for a budget and then hands back the run id rather
+than erroring. A caller that does wait gets an MCP progress notification per
+step, which is what keeps its idle timer from firing mid-run.
+
+Reads are summarized by default, for the same reason: `workflow_runs` carries no
+step bodies at all, and `workflow_run_get` bounds each step's output. Pass
+`steps: "full"` when the elided half is the thing you need.
 
 `workflow_apply_ops` is the one that matters for editing. Rewriting a whole
 document loses whatever the model misremembered; a patch is checked op by op, and

@@ -478,6 +478,28 @@ pub fn local_fleet_grant(
     Some((plane.socket.clone(), plane.grants.mint(grant)))
 }
 
+/// Mint a hook-only credential for `session`'s built-in lifecycle hooks, if
+/// this process serves a control plane for them to report to.
+///
+/// Unlike [`local_fleet_grant`], the result of this is meant to be written
+/// straight into the harness's own environment — see
+/// [`crate::control_socket::HOOK_SOCKET_ENV`] for why that is safe for this
+/// grant and not for the fleet one. Minted under the *same* `session` key so
+/// [`revoke_session`] gives back both this and any fleet grant with one call:
+/// [`crate::control_socket::grants::GrantRegistry::revoke`] drops every grant
+/// recorded under a session, not just one token's worth.
+///
+/// Never withheld for the reasons [`attach_cli`] withholds a fleet grant — an
+/// overridden provider binary or a provider `supports_cli_attach` has not
+/// verified — because a hook-only grant carries nothing an untrusted binary
+/// could turn into a capability beyond filing reports under a session it
+/// already runs as.
+pub fn local_hook_grant(session: &str) -> Option<(PathBuf, String)> {
+    let plane = crate::control_socket::active()?;
+    let grant = crate::control_socket::Grant::hook_only(session);
+    Some((plane.socket.clone(), plane.grants.mint(grant)))
+}
+
 /// Give back a session's grant once that session is over, and remove the
 /// `--mcp-config` file it may have been minted into.
 ///

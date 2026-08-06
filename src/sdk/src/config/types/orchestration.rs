@@ -197,6 +197,31 @@ impl Default for AttributionConfig {
     }
 }
 
+/// The `hookDefaults` section: whether Medulla installs its own lifecycle
+/// reporting hooks into the harnesses it launches.
+///
+/// On by default, and for the same reason attribution is: a harness Medulla
+/// started should be one Medulla can see. The built-ins only report — they
+/// never deny a tool call or rewrite an input (see
+/// [`crate::harness_hooks::builtin`]) — so leaving them on changes what Medulla
+/// knows, not what the session does.
+///
+/// Turn them off with `[hookDefaults] enabled = false`, which leaves the
+/// operator's own `[[hooks]]` untouched.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HookDefaultsConfig {
+    /// Whether Medulla's own reporting hooks are installed.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+}
+
+impl Default for HookDefaultsConfig {
+    fn default() -> Self {
+        HookDefaultsConfig { enabled: true }
+    }
+}
+
 /// The `harness` section: how harnesses the operator starts themselves behave.
 ///
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*

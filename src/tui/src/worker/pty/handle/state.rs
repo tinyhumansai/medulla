@@ -144,6 +144,7 @@ impl SessionHandle {
             busy: self.is_busy(),
             control: self.control(),
             origin: self.meta.origin,
+            retained: self.is_retained(),
             name: cold.name.clone(),
             attention: lock(&self.attention).cue.clone(),
             mcp_grant_session: self.meta.mcp_grant_session.clone(),

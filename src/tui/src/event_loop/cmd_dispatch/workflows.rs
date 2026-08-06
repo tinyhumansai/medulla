@@ -34,11 +34,12 @@ pub(super) fn spawn_run(
     inputs: serde_json::Map<String, serde_json::Value>,
     workflows_config: medulla::config::WorkflowsConfig,
     custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
+    hooks: medulla::harness_hooks::HooksConfig,
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) {
     let tx = msg_tx.clone();
     tokio::spawn(async move {
-        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses, &tx).await;
+        let outcome = run(&id, inputs, &workflows_config, &custom_harnesses, &tx, &hooks).await;
         let (status, failed) = match outcome {
             Ok((summary, failed)) => (summary, failed),
             Err(err) => (format!("workflow '{id}' failed: {err}"), None),
@@ -69,6 +70,7 @@ async fn run(
     workflows_config: &medulla::config::WorkflowsConfig,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
     tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+    hooks: &medulla::harness_hooks::HooksConfig,
 ) -> anyhow::Result<(String, Option<String>)> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -93,6 +95,10 @@ async fn run(
         // custom harness preset does not fail with "not configured on this
         // host" purely because this one-shot daemon started with none.
         custom_harnesses: custom_harnesses.to_vec(),
+        // Same reasoning as `custom_harnesses` above: this one-shot daemon
+        // should install the same built-in and operator lifecycle hooks the
+        // session's primary host resolved, not start with none.
+        hooks: hooks.clone(),
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;
@@ -133,6 +139,7 @@ async fn run(
         )
         .watching(progress),
         sink,
+        step_snapshot: None,
     };
 
     let record = run_workflow(context, id, &run_id, serde_json::json!({}), inputs).await;

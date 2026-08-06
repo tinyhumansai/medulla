@@ -34,7 +34,7 @@ pub use note::{NoteId, NoteKind, NoteSource, WorkflowNote};
 pub use proposal::{
     fingerprint, ProposalId, ProposalStatus, ProposalVerification, WorkflowProposal,
 };
-pub(crate) use run::bounded_evidence;
+pub(crate) use run::{bounded_evidence, bounded_within};
 pub use run::{RunId, RunRecord, RunStatus, RunStep};
 pub use workflow::{
     record_fingerprint, WorkflowDefaults, WorkflowId, WorkflowRecord, WorkflowRevision,

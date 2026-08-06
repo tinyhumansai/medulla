@@ -17,8 +17,9 @@
 //!
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
-//! other caller reads, [`screen`] is the emulator surface the UI renders, and
-//! [`attention`] keeps each row's "this harness wants you" flag current.
+//! other caller reads, [`screen`] is the emulator surface the UI renders,
+//! [`attention`] keeps each row's "this harness wants you" flag current, and
+//! [`clipboard`] carries a harness's own copies out to the operator's terminal.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -99,6 +100,9 @@ impl Drop for Inner {
             // until this process exits.
             session.reap(now);
         }
+        // Wake the clipboard worker thread so it exits rather than blocking on
+        // its condvar forever.
+        self.clipboard.close();
     }
 }
 
@@ -116,17 +120,61 @@ impl PtyManager {
 
     /// Override the clock (tests).
     pub fn with_now(now: NowFn) -> Self {
+        PtyManager::with_now_and_clipboard(now, clipboard::default_sink())
+    }
+
+    /// Override the clock and where forwarded clipboard writes go (tests).
+    ///
+    /// The default sink writes escape sequences to this process's terminal and
+    /// shells out to `tmux`/`pbcopy`; a test wants neither, and wants to assert
+    /// on what a harness asked to copy.
+    ///
+    /// `clipboard` is driven by a single dedicated worker thread rather than one
+    /// spawned per copy: a harness that emits two OSC 52 sequences close
+    /// together previously raced two independent threads against `tmux`/
+    /// `pbcopy`, and whichever happened to finish last — not whichever copied
+    /// last — is what ended up in the operator's clipboard. The handoff is a
+    /// single coalescing slot rather than a queue: clipboard semantics are
+    /// last-write-wins, so a harness emitting OSC 52 repeatedly (buggy or
+    /// hostile) only ever leaves the worker its newest copy to write, instead
+    /// of growing a backlog of stale ones without bound while the worker sits
+    /// blocked in `tmux`/`pbcopy`.
+    pub fn with_now_and_clipboard(now: NowFn, clipboard: ClipboardSink) -> Self {
+        let queue = Arc::new(ClipboardQueue::new());
+        let worker_queue = Arc::clone(&queue);
+        std::thread::spawn(move || {
+            while let Some(text) = worker_queue.take_blocking() {
+                clipboard(&text);
+            }
+        });
         PtyManager {
             inner: Arc::new(Inner {
                 sessions: RwLock::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 now,
+                clipboard: queue,
             }),
         }
     }
 
     fn now(&self) -> i64 {
         (self.inner.now)()
+    }
+
+    /// Hand on whatever `handle`'s child last asked to copy, if anything.
+    ///
+    /// Called by the reader thread after every drain. Handed off to the
+    /// clipboard worker thread rather than run inline, because the sink waits
+    /// on `tmux`/`pbcopy` children — seconds, in the pathological case, during
+    /// which the reader must keep draining or the harness blocks on its own
+    /// output. The handoff replaces whatever copy was still pending rather than
+    /// queueing alongside it — see [`ClipboardQueue`] — so this never blocks the
+    /// reader even if the worker is mid-write.
+    pub(super) fn forward_clipboard(&self, handle: &SessionHandle) {
+        let Some(text) = handle.take_clipboard() else {
+            return;
+        };
+        self.inner.clipboard.set(text);
     }
 
     /// The handle for `id`, if there is one.
@@ -149,6 +197,7 @@ impl PtyManager {
 }
 
 mod attention;
+mod clipboard;
 mod open;
 mod screen;
 mod session;
@@ -158,6 +207,5 @@ mod tests;
 pub use screen::{ScreenCell, ScreenSnapshot};
 
 mod types;
-use types::Inner;
-pub use types::NowFn;
-pub use types::PtyManager;
+use types::{ClipboardQueue, Inner};
+pub use types::{ClipboardSink, NowFn, PtyManager};

@@ -291,6 +291,7 @@ fn row(
         busy: false,
         control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
+        retained: false,
         name: None,
         attention: None,
     }

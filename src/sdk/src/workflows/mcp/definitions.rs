@@ -183,13 +183,18 @@ pub(crate) fn definitions() -> Vec<Value> {
                  simulation — prefer workflow_dry_run while you are still wiring, and use this \
                  when the operator has asked whether it works, or when a dry run cannot settle \
                  the question (a `code` node's script and an `agent` node's real reply are both \
-                 invisible to one). Returns the whole run record: every step, its status, and \
-                 anything that resolved to null. Can take minutes.",
+                 invisible to one). Starts the run and answers immediately with its runId; the \
+                 run keeps going without this call. Poll workflow_run_get with that id for its \
+                 status and, once it is settled, what it did. A real workflow takes minutes to \
+                 hours — a single `agent` step is a whole coding session — so do not wait on one \
+                 unless you know it is short.",
             "inputSchema": schema(
                 json!({
                     "id": { "type": "string", "description": "The workflow to run." },
                     "input": { "description": "Optional trigger payload; defaults to {}." },
-                    "inputs": { "type": "object", "description": "Values for the workflow's declared inputs, keyed by name. Read the declarations from workflow_get / workflow_list; a missing required value, a wrong type, or a name the workflow does not declare is rejected and nothing runs." }
+                    "inputs": { "type": "object", "description": "Values for the workflow's declared inputs, keyed by name. Read the declarations from workflow_get / workflow_list; a missing required value, a wrong type, or a name the workflow does not declare is rejected and nothing runs." },
+                    "wait": { "type": "boolean", "description": "Hold this call open until the run settles and answer with the whole run record. Only for workflows you know finish in a couple of minutes; anything longer will be aborted by your own idle timeout while the run carries on regardless." },
+                    "waitMs": { "type": "integer", "description": "Wait up to this many milliseconds, then answer with the runId if the run is still going. Takes precedence over `wait`, and is the safe way to wait: a run that outlives the budget is reported as running, not as a failure." }
                 }),
                 &["id"],
             ),
@@ -197,22 +202,32 @@ pub(crate) fn definitions() -> Vec<Value> {
         json!({
             "name": "workflow_runs",
             "description":
-                "The run history for a workflow, newest first — status, steps, and anything a \
-                 run is waiting for approval on.",
+                "The run history for a workflow, newest first — status, timestamps, step count, \
+                 and anything a run is waiting for approval on. Step inputs and outputs are not \
+                 inlined: this answers which runs exist and how each ended, and workflow_run_get \
+                 answers what one of them did.",
             "inputSchema": schema(
-                json!({ "id": { "type": "string", "description": "The workflow id." } }),
+                json!({
+                    "id": { "type": "string", "description": "The workflow id." },
+                    "steps": { "type": "string", "enum": ["counts", "summary", "full"], "description": "How much of each run's steps to include. Defaults to 'counts' — no steps at all. 'full' inlines every prompt and output for every run and is rarely what you want here." }
+                }),
                 &["id"],
             ),
         }),
         json!({
             "name": "workflow_run_get",
             "description":
-                "One run in full, by run id: every step, its status, its duration, and the \
+                "One run by id: its status, every step, each step's duration, and the \
                  expressions that resolved to null on the way. Where to start when asked why a \
                  workflow failed — the steps say what actually happened, which is more reliable \
-                 than reading the graph and reasoning about what it would do.",
+                 than reading the graph and reasoning about what it would do. Also how you \
+                 follow a run you started: the record exists from the moment the run is \
+                 admitted, so calling this while it is still `running` shows how far it has got.",
             "inputSchema": schema(
-                json!({ "runId": { "type": "string", "description": "The run id." } }),
+                json!({
+                    "runId": { "type": "string", "description": "The run id." },
+                    "steps": { "type": "string", "enum": ["summary", "full", "counts"], "description": "How much of each step to include. Defaults to 'summary' — node, status, duration, diagnostics, and a bounded preview of the output. Ask for 'full' when a truncated output is the thing you need to read; it can be very large." }
+                }),
                 &["runId"],
             ),
         }),

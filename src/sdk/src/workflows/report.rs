@@ -1,7 +1,7 @@
 //! Reporting a run back to the Medulla that granted this process its tools.
 //!
 //! A `workflow_run` tool call executes the whole run inside the MCP subprocess
-//! (see [`crate::workflows::local::run_here`]). The operator's Medulla is a
+//! (see [`crate::workflows::local::LocalRun`]). The operator's Medulla is a
 //! different process, and until the run record lands on disk it has no idea any
 //! of it is happening — so a harness that sets a twenty-minute workflow going
 //! looked, from the rail, exactly like a harness sitting idle.

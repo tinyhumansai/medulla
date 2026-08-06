@@ -179,6 +179,56 @@ fn a_dispatched_session_and_an_operator_session_are_the_same_row_type() {
     harnesses.sessions.shutdown();
 }
 
+// Unix-only for the same reason as the test below: a real child on a real pty.
+#[cfg(unix)]
+#[test]
+fn a_finished_tasks_session_is_still_there_to_work_in() {
+    // The point of retaining a task's session: when the task is done the harness
+    // is still running, and the operator can put the cursor on it and carry on
+    // in the context it built.
+    //
+    // The task's own row cannot serve that. It carries no local session, so it
+    // resolves no pty — nothing to draw a live screen from and nothing to attach
+    // the keyboard to — and the streamed screen stops arriving the moment the
+    // task settles, because that lookup goes through the daemon's *running* map.
+    // Without a row here, a retained session is alive and reachable by nothing.
+    let mut app = hosting_app();
+    app.loaded.config.fleet.agent_declarations =
+        vec![AgentDeclaration::new("shell", "", "codex", "/")];
+    let harnesses = app.local_sessions().expect("hosting").clone();
+    let choice = harnesses
+        .choices()
+        .into_iter()
+        .find(|choice| choice.provider == HarnessProvider::Codex)
+        .expect("codex is configured");
+    // Dispatched, not operator-started: this is the session a task ran in.
+    let id = harnesses
+        .open_unmanaged(&choice, "/", false)
+        .expect("a /bin/sh session starts");
+    harnesses
+        .sessions
+        .set_control(&id, crate::worker::pty::SessionControl::Orchestrator);
+
+    // Its task answers, so the executor retains rather than closes it.
+    assert!(harnesses.sessions.retain(&id));
+
+    let row = app
+        .rail_rows()
+        .into_iter()
+        .find_map(|row| match row {
+            RailRow::Session(session) if session.session_id() == Some(id.as_str()) => Some(session),
+            _ => None,
+        })
+        .expect("a retained session must have a row to put the cursor on");
+    assert_eq!(
+        row.session_id(),
+        Some(id.as_str()),
+        "the row must resolve the pty, or the pane cannot draw it and the \
+         keyboard has nothing to attach to"
+    );
+    harnesses.sessions.shutdown();
+}
+
 // Unix-only: starts a real child on a real pseudo-terminal via `/bin/sh`,
 // which Windows has no equivalent of. The row model under test is
 // portable; only this way of standing a session up is not.

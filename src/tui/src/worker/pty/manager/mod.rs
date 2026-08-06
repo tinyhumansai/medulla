@@ -133,13 +133,17 @@ impl PtyManager {
     /// spawned per copy: a harness that emits two OSC 52 sequences close
     /// together previously raced two independent threads against `tmux`/
     /// `pbcopy`, and whichever happened to finish last — not whichever copied
-    /// last — is what ended up in the operator's clipboard. Draining one
-    /// channel in submission order makes "last copy wins" actually mean the
-    /// last one the harness sent.
+    /// last — is what ended up in the operator's clipboard. The handoff is a
+    /// single coalescing slot rather than a queue: clipboard semantics are
+    /// last-write-wins, so a harness emitting OSC 52 repeatedly (buggy or
+    /// hostile) only ever leaves the worker its newest copy to write, instead
+    /// of growing a backlog of stale ones without bound while the worker sits
+    /// blocked in `tmux`/`pbcopy`.
     pub fn with_now_and_clipboard(now: NowFn, clipboard: ClipboardSink) -> Self {
-        let (clipboard_tx, clipboard_rx) = std::sync::mpsc::channel::<String>();
+        let queue = Arc::new(ClipboardQueue::new());
+        let worker_queue = Arc::clone(&queue);
         std::thread::spawn(move || {
-            while let Ok(text) = clipboard_rx.recv() {
+            while let Some(text) = worker_queue.take_blocking() {
                 clipboard(&text);
             }
         });
@@ -148,7 +152,7 @@ impl PtyManager {
                 sessions: RwLock::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 now,
-                clipboard_tx: std::sync::Mutex::new(clipboard_tx),
+                clipboard: queue,
             }),
         }
     }

@@ -1,7 +1,7 @@
 //! Runtime, prompt, clipboard, slash-command, and settings command dispatch.
 
-use crate::ui::agents::{AgentRow, TaskState};
-use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform, OSC_52};
+use crate::ui::agents::TaskState;
+use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform};
 use crate::ui::command::{self, CopyScope, SlashCommand};
 use crate::ui::composer::Draft;
 use medulla::runtime::WorkerOp;

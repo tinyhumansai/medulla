@@ -128,11 +128,7 @@ fn input_rows(run: &RunRecord) -> Vec<DetailRow> {
     rows
 }
 
-/// A JSON value as a person reads it.
-///
-/// A string is shown as its text — quoting `"main"` into `"\"main\""` is the
-/// kind of literalism that makes a pane look like a debugger. Everything else is
-/// compact JSON, which is what a number, a flag, or a small list wants.
+/// A JSON value as a person reads it, cut to what a detail row has room for.
 fn render_value(value: &serde_json::Value) -> String {
     truncate(&value_text(value), INPUT_VALUE_CHARS)
 }

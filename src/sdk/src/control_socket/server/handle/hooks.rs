@@ -82,3 +82,7 @@ fn truncate_to(value: &str, max_chars: usize) -> String {
     let clipped: String = value.chars().take(max_chars - 1).collect();
     format!("{clipped}…")
 }
+
+#[cfg(test)]
+#[path = "hooks_tests.rs"]
+mod tests;

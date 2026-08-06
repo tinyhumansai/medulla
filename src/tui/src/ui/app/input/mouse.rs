@@ -46,7 +46,7 @@ impl App {
     /// Handle scroll and left-click mouse events for the active tab.
     pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
         if self.kill_armed.take().is_some() {
-            self.set_status("Harness kill cancelled");
+            self.set_status("Session kill cancelled");
         }
         // Ahead of every other rule, including the modal one below: a button
         // that went down in a harness has to come back up in it. The grab is
@@ -78,13 +78,21 @@ impl App {
             }
             // Everything else the question is over is still swallowed, below.
         }
+        // The picker's rows are click targets too, and its list takes the wheel.
+        // Same reasoning as the question above: it is opened from a rail row the
+        // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive
+        // with a hand on the mouse — and a modal that then refuses the pointer
+        // entirely reads as a frozen screen rather than as a keyboard-only step.
+        if self.agent_picker.is_some() && self.route_agent_picker_pointer(&m) {
+            return None;
+        }
         // A modal swallows the mouse, the same way it swallows the keyboard.
         // Pickers and the hand-back question are modal: a click that navigated
         // the rail behind one would leave an overlay describing a row nobody
-        // was pointing at. In particular, do not let a second harness click
+        // was pointing at. In particular, do not let a second session click
         // replace the session named by an already-visible hand-back prompt.
         if self.resume_picker.is_some()
-            || self.harness_picker.is_some()
+            || self.agent_picker.is_some()
             || self.handback_prompt.is_some()
         {
             return None;
@@ -105,7 +113,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
                     let inside_attached_pane =
-                        self.hit_harness.as_ref().is_some_and(|(rect, id)| {
+                        self.hit_session.as_ref().is_some_and(|(rect, id)| {
                             id == &session && rect.contains((m.column, m.row).into())
                         });
                     // Only the attached harness's own rail row is not a
@@ -128,10 +136,10 @@ impl App {
                         // focus as Ctrl-]. Settle the configured hand-back policy
                         // before changing the selected tab or rail row; otherwise
                         // an Ask prompt would refer to a pane already hidden.
-                        if !self.begin_harness_release(&session) {
+                        if !self.begin_session_release(&session) {
                             return None;
                         }
-                        self.release_harness();
+                        self.release_session();
                     }
                 }
                 self.drag_anchor = Some((m.column, m.row));
@@ -149,6 +157,70 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    /// Route a pointer event that belongs to the open "start a session" picker.
+    ///
+    /// Returns `true` when the event was consumed. Everything else over the
+    /// picker falls through to the blanket modal swallow — including a click
+    /// outside its box, which deliberately does *not* cancel: the workspace step
+    /// holds a query the operator has typed, and losing it to a stray click a
+    /// few cells wide of the border is worse than a click that does nothing.
+    ///
+    /// Both gestures replay the keystroke they stand for rather than editing the
+    /// picker themselves. A click is Enter on the row it lands on and a notch is
+    /// an arrow, so the pointer cannot come to disagree with the keyboard about
+    /// what selecting a row does — and the workspace step's Enter *starts a
+    /// session*, which is exactly the divergence worth designing out.
+    fn route_agent_picker_pointer(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let Some((area, rows)) = self.hit_agent_picker.clone() else {
+            return false;
+        };
+        let at = (m.column, m.row).into();
+        if !area.contains(at) {
+            return false;
+        }
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        match m.kind {
+            MouseEventKind::ScrollUp => {
+                self.handle_agent_picker_key(key(KeyCode::Up));
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_agent_picker_key(key(KeyCode::Down));
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some(index) = rows
+                    .iter()
+                    .find(|(rect, _)| rect.contains(at))
+                    .map(|(_, index)| *index)
+                else {
+                    // Inside the box but not on a row — a title, a hint, the
+                    // search line. Consumed so it cannot reach the rail behind,
+                    // but it selects nothing.
+                    return true;
+                };
+                let Some(picker) = self.agent_picker.as_mut() else {
+                    return true;
+                };
+                match picker.step {
+                    super::super::types::AgentPickerStep::Harness => picker.index = index,
+                    super::super::types::AgentPickerStep::Workspace => {
+                        picker.workspace_index = index;
+                        // The click *is* the operator choosing this completion
+                        // over whatever they had typed, which is precisely what
+                        // this flag records for `selected_picker_workspace`.
+                        picker.workspace_picked = true;
+                    }
+                }
+                self.handle_agent_picker_key(key(KeyCode::Enter));
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The harness session named by the rail row under `(x, y)`, if any.
@@ -180,7 +252,7 @@ impl App {
     /// of where the pointer is inside the screen it believes it owns — a release
     /// at a negative offset would wrap to the far side of the pane instead.
     fn deliver_pointer_grab(&mut self, m: &crossterm::event::MouseEvent) -> bool {
-        let Some(grab) = self.harness_pointer_grab.clone() else {
+        let Some(grab) = self.pointer_grab.clone() else {
             return false;
         };
         let Some((button, motion)) = pointer_report(m.kind) else {
@@ -194,9 +266,9 @@ impl App {
             return false;
         }
         if motion == Motion::Release {
-            self.harness_pointer_grab = None;
+            self.pointer_grab = None;
         }
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             return true;
         };
         let rect = grab.rect;
@@ -236,7 +308,7 @@ impl App {
         let Some(session) = self.harness_focus.attached_to().map(str::to_string) else {
             return false;
         };
-        let Some((rect, id)) = self.hit_harness.clone() else {
+        let Some((rect, id)) = self.hit_session.clone() else {
             return false;
         };
         if id != session || !rect.contains((m.column, m.row).into()) {
@@ -245,7 +317,7 @@ impl App {
         let Some((button, motion)) = pointer_report(m.kind) else {
             return false;
         };
-        let Some(harnesses) = self.harnesses.clone() else {
+        let Some(harnesses) = self.local_sessions.clone() else {
             return false;
         };
         if !harnesses.takes_mouse(&session) {
@@ -257,20 +329,20 @@ impl App {
         harnesses.mouse_button(&session, m.column - rect.x, m.row - rect.y, button, motion);
         // The press opens the grab that owns the rest of the gesture. Recorded
         // even for a child in press-only mode, whose release
-        // [`mouse_button`](crate::ui::harness_pane::LocalHarnesses::mouse_button)
+        // [`mouse_button`](crate::ui::harness_pane::LocalSessions::mouse_button)
         // will drop: the grab is about *routing*, and a release routed to the
         // harness and then dropped by its protocol is right, while the same
         // release re-routed to our own drag-selection is not.
         match motion {
             crate::ui::harness_pane::mouse::Motion::Press => {
-                self.harness_pointer_grab = Some(PointerGrab {
+                self.pointer_grab = Some(PointerGrab {
                     session,
                     button,
                     rect,
                 });
             }
             crate::ui::harness_pane::mouse::Motion::Release => {
-                self.harness_pointer_grab = None;
+                self.pointer_grab = None;
             }
             crate::ui::harness_pane::mouse::Motion::Drag => {}
         }
@@ -289,9 +361,9 @@ impl App {
         // being attached: reading back through a harness's output is the most
         // common thing to want from one, and making it cost a chord first would
         // be the wrapper getting in the way.
-        if let Some((rect, session)) = self.hit_harness.clone() {
+        if let Some((rect, session)) = self.hit_session.clone() {
             if rect.contains((x, y).into()) {
-                if let Some(harnesses) = self.harnesses.clone() {
+                if let Some(harnesses) = self.local_sessions.clone() {
                     // Pane-relative: the child believes its screen starts at its
                     // own origin, and reporting our absolute position would put
                     // the event somewhere else entirely on it.
@@ -423,6 +495,23 @@ impl App {
             return None;
         }
         if tab == "Agents" {
+            // §A7: clicking an entry of the orchestrator's "sessions started"
+            // block opens that session — the rail selection follows, which is
+            // what makes the pane show its conversation. Checked before the rail
+            // because the block lives in the pane beside it.
+            if let Some((rect, tasks)) = self.hit_started_sessions.clone() {
+                if rect.contains((x, y).into()) {
+                    // Only the rows that *are* entries answer; a click on the
+                    // conversation between them falls through to the rail's own
+                    // hit test, exactly as a click above the block used to.
+                    if let Some(task_id) = tasks.get((y - rect.y) as usize).and_then(Option::as_ref)
+                    {
+                        let task_id = task_id.clone();
+                        self.focus_session_for_task(&task_id);
+                        return self.retarget_watch();
+                    }
+                }
+            }
             // The rail stacks two hit boxes — threads above lanes — so both are
             // tried; an `else if` here would leave the strip unclickable.
             if let Some((rect, window_start)) = self.hit_threads {
@@ -460,9 +549,22 @@ impl App {
                             // requiring a second keystroke to confirm what was
                             // already aimed at is the friction it exists to
                             // remove.
-                            if row.is_new_harness() {
-                                self.open_harness_picker();
-                                return None;
+                            //
+                            // Both action branches return the retarget rather
+                            // than nothing, for the same reason the overflow and
+                            // harness branches below do: an action row watches
+                            // no task, so a click arriving from one that did has
+                            // to stop that stream — and neither open method
+                            // clears `watching` on its own.
+                            if row.is_new_agent() {
+                                self.open_new_agent_picker();
+                                return self.retarget_watch();
+                            }
+                            // Same rule for the per-agent action: a click on
+                            // `+ new session` opens the flow it names.
+                            if let Some(agent_id) = row.new_session_agent().map(str::to_string) {
+                                self.open_new_session(&agent_id);
+                                return self.retarget_watch();
                             }
                             // So is a lane's `+N more`: the click that lands on
                             // it is the request to see what it is counting.
@@ -483,20 +585,20 @@ impl App {
                                 // over the pane the operator was mid-sentence
                                 // in, whose only useful answer was Esc.
                                 if self.harness_focus.is_attached_to(session) {
-                                    self.harness_pane_session = Some(session.to_string());
+                                    self.pane_session = Some(session.to_string());
                                     return None;
                                 }
                                 // Point the prompt at the row that was clicked,
                                 // not at whatever the last render left behind.
-                                // `harness_pane_session` is written during the
+                                // `pane_session` is written during the
                                 // draw, and no draw happens between the cursor
                                 // move above and this call — so without this the
                                 // prompt would offer to hand over the previously
                                 // visible harness, and confirming it would
                                 // transfer control of one the operator never
                                 // pointed at.
-                                self.harness_pane_session = Some(session.to_string());
-                                self.open_harness_enter_prompt();
+                                self.pane_session = Some(session.to_string());
+                                self.open_session_enter_prompt();
                                 // Drop whatever task the previous row was
                                 // watching, exactly as the fall-through below
                                 // does for every other row. This branch returns
@@ -514,14 +616,22 @@ impl App {
                 }
             }
             // A click inside the embedded terminal means "type here", the same
-            // as `Ctrl-]`. Checked after the rail so a click that changes rows
-            // is a navigation, not an attach to whatever the last frame showed.
-            if let Some((rect, session)) = self.hit_harness.clone() {
+            // as Enter on its rail row. Checked after the rail so a click that
+            // changes rows is a navigation, not an attach to whatever the last
+            // frame showed.
+            //
+            // Routed through the same entry point Enter uses rather than
+            // attaching outright, because the pointer and the keyboard must not
+            // disagree about who ends up holding a session. Clicking straight
+            // into an orchestrator-held pane used to take it silently — the very
+            // thing the Enter question exists to prevent, reachable by the
+            // gesture an operator is most likely to make first.
+            if let Some((rect, session)) = self.hit_session.clone() {
                 if rect.contains((x, y).into())
-                    && self.harness_pane_session.as_deref() == Some(session.as_str())
+                    && self.pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.attach_to_pane_harness();
+                    self.open_session_enter_prompt();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

@@ -54,7 +54,8 @@ mod types;
 mod tests;
 
 pub use attach::{
-    attach_cli, config_dir_for_socket, revoke_session, sweep_stale_config_files, ServerSpec,
+    attach_cli, config_dir_for_socket, local_hook_grant, revoke_session, server_command,
+    sweep_stale_config_files, ServerSpec, SERVER_COMMAND_ENV,
 };
 pub use backend::{FleetBackend, OfflineFleet};
 pub use tools::{
@@ -105,9 +106,13 @@ pub const SERVER_NAME: &str = "medulla";
 
 /// Check that a harness session would actually be handed these tools.
 ///
-/// The three ways they silently do not arrive, all of which leave a session that
+/// The ways they silently do not arrive, all of which leave a session that
 /// starts fine and can do nothing: workflows turned off, a binary whose own path
-/// cannot be resolved, and the `workflows` feature compiled out.
+/// cannot be resolved, the `workflows` feature compiled out — and a resolved
+/// path that is not a Medulla binary at all, which is the one that used to get
+/// through. [`attach::server_command`] normally names this process, and that is
+/// right for the TUI, the daemon, and the CLI; anything else that links the SDK
+/// resolves to a program for which `mcp` on the argv means nothing.
 ///
 /// For a *workflow run* that is survivable — an `agent` node dispatches an
 /// instruction and needs no workflow tools to carry it out. For an *authoring*
@@ -115,6 +120,12 @@ pub const SERVER_NAME: &str = "medulla";
 /// without them the prompt tells a model to call things that are not there, and
 /// the operator gets a confident reply and an unchanged graph. So the copilot
 /// asks first rather than finding out from the silence.
+///
+/// The last check *runs* the server and asks it what it serves, because nothing
+/// cheaper distinguishes "a path exists" from "that path speaks MCP". It is
+/// done once per process and remembered: the binary does not change underneath
+/// a running Medulla, and paying a subprocess spawn per turn to re-learn the
+/// same answer would be a cost on every instruction an operator types.
 ///
 /// # Errors
 ///
@@ -132,14 +143,102 @@ pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String
                 .to_string(),
         );
     }
-    if std::env::current_exe().is_err() {
+    let Some(command) = attach::server_command() else {
         return Err(
             "cannot determine this binary's own path, so the workflow tool server cannot be \
              started for the harness"
                 .to_string(),
         );
-    }
-    Ok(())
+    };
+    static SERVES: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    SERVES
+        .get_or_init(|| serves_workflow_tools(&command))
+        .clone()
+}
+
+/// Whether running `command mcp` yields a server that lists the workflow tools.
+///
+/// One `tools/list` over the same stdio transport a harness would use. A
+/// mismatch, a crash, or silence all mean the same thing to the caller — the
+/// tools will not arrive — so all three become one message that names the path,
+/// which is the piece an operator needs to see to recognise a stale or wrapped
+/// binary.
+fn serves_workflow_tools(command: &Path) -> Result<(), String> {
+    use std::io::{BufRead, BufReader, Write};
+
+    let blame = |reason: &str| {
+        format!(
+            "the workflow tool server at {} does not serve Medulla's tools ({reason}), so an \
+             authoring turn would start a harness that cannot edit anything. Set {} to a built \
+             `medulla` binary if this program is not one.",
+            command.display(),
+            attach::SERVER_COMMAND_ENV,
+        )
+    };
+
+    let mut child = std::process::Command::new(command)
+        .arg("mcp")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|err| blame(&format!("it could not be started: {err}")))?;
+
+    // Killed however this ends, including on an early return: the probe owns
+    // this process and an orphan holding a pipe would outlive the check.
+    let result = (|| {
+        let mut stdin = child.stdin.take().ok_or_else(|| blame("no stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| blame("no stdout"))?;
+        writeln!(
+            stdin,
+            "{}",
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": PROTOCOL_VERSION },
+            })
+        )
+        .and_then(|()| {
+            writeln!(
+                stdin,
+                "{}",
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} })
+            )
+        })
+        .map_err(|err| blame(&format!("it closed its input: {err}")))?;
+
+        let mut reader = BufReader::new(stdout);
+        for _ in 0..2 {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => return Err(blame("it exited without answering")),
+                Ok(_) => {}
+                Err(err) => return Err(blame(&format!("it could not be read: {err}"))),
+            }
+            let Ok(response) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let names = response
+                .pointer("/result/tools")
+                .and_then(Value::as_array)
+                .map(|tools| {
+                    tools
+                        .iter()
+                        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+                        .any(|name| name.starts_with("workflow_"))
+                });
+            if names == Some(true) {
+                return Ok(());
+            }
+            if names == Some(false) {
+                return Err(blame("it lists no workflow tools"));
+            }
+        }
+        Err(blame("it never answered tools/list"))
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    result
 }
 
 /// Handle one JSON-RPC request, returning the response to write back.

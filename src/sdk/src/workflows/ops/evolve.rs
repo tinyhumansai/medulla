@@ -315,3 +315,42 @@ pub async fn evolve(
         "proposals": outcome.proposals,
     }))
 }
+
+/// Run one copilot authoring turn against this host, headlessly.
+///
+/// The operation behind `medulla workflow author`. `target` names the workflow
+/// to revise; `None` builds a new one. Progress frames are forwarded to
+/// `status` so a caller with somewhere to put them — a terminal, a test
+/// assertion — can watch a turn that takes minutes rather than staring at
+/// nothing.
+///
+/// Reports what the *store* holds afterwards rather than what the agent said it
+/// did, because those are different claims and only one of them is checkable.
+///
+/// # Errors
+///
+/// As [`crate::workflows::local::author_here`].
+pub async fn author(
+    store: &Arc<dyn WorkflowStore>,
+    config: &crate::config::WorkflowsConfig,
+    cwd: &std::path::Path,
+    target: Option<&str>,
+    instruction: &str,
+    status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<Value, WorkflowError> {
+    let outcome = crate::workflows::local::author_here(
+        store.clone(),
+        config,
+        cwd,
+        target,
+        instruction,
+        status,
+    )
+    .await?;
+    Ok(json!({
+        "reply": outcome.reply,
+        "changes": outcome.changes,
+        "created": outcome.created,
+        "removed": outcome.removed,
+    }))
+}

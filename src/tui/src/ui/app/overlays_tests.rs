@@ -18,8 +18,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
 use super::types::{
-    tab_pos, App, HandbackPrompt, HarnessPicker, HarnessPickerStep, Overlay, PromptKind,
-    ResumePicker, RP_TEMPLATES,
+    tab_pos, AgentPicker, AgentPickerStep, App, HandbackPrompt, Overlay, PromptKind, ResumePicker,
+    RP_TEMPLATES,
 };
 use crate::ui::composer::{Draft, TextPrompt};
 
@@ -39,17 +39,17 @@ fn raise(app: &mut App, overlay: Overlay) {
             app.tab_index = tab_pos("Hosts");
             app.routing_index = RP_TEMPLATES;
         }
-        Overlay::HarnessPicker => {
-            app.harness_picker = Some(HarnessPicker {
+        Overlay::AgentPicker => {
+            app.agent_picker = Some(AgentPicker {
+                purpose: super::types::PickerPurpose::Spawn,
                 choices: Vec::new(),
                 index: 0,
-                step: HarnessPickerStep::Harness,
+                step: AgentPickerStep::Harness,
                 cwd: "/".into(),
                 workspace_query: String::new(),
                 workspace_choices: Vec::new(),
                 workspace_index: 0,
                 workspace_picked: false,
-                managed: true,
             })
         }
         Overlay::HandbackPrompt => {
@@ -77,7 +77,7 @@ fn raise(app: &mut App, overlay: Overlay) {
 const EVERY_OVERLAY: [Overlay; 6] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
-    Overlay::HarnessPicker,
+    Overlay::AgentPicker,
     Overlay::HandbackPrompt,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,
@@ -198,7 +198,7 @@ fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
     // The list is iterated to paint, so its order is the stacking order: the
     // hand-back question is asked over the picker that may have opened it.
     let mut app = app();
-    raise(&mut app, Overlay::HarnessPicker);
+    raise(&mut app, Overlay::AgentPicker);
     raise(&mut app, Overlay::HandbackPrompt);
     raise(&mut app, Overlay::Decisions);
 
@@ -206,7 +206,7 @@ fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
         app.visible_overlays(),
         vec![
             Overlay::Decisions,
-            Overlay::HarnessPicker,
+            Overlay::AgentPicker,
             Overlay::HandbackPrompt
         ]
     );

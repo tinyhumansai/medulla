@@ -5,7 +5,7 @@
 //! about a row that is thirty-six columns wide and shares those columns between
 //! five fields, so "branch on line 2" is not a question anyone can answer in the
 //! abstract — they have to see what it does to the path. It renders through the
-//! same [`own_harness_lines`](crate::ui::app::App::own_harness_lines) the rail
+//! same [`own_session_lines`](crate::ui::app::App::own_session_lines) the rail
 //! itself uses, against sample sessions, so it cannot drift from the real row.
 
 use ratatui::layout::Rect;
@@ -18,7 +18,7 @@ use unicode_width::UnicodeWidthStr;
 use medulla::protocol::HarnessProvider;
 
 use crate::ui::app::render::agents::RAIL_MAX_CONTENT;
-use crate::worker::pty::{HarnessControl, PtyState, SessionRow};
+use crate::worker::pty::{PtyState, SessionControl, SessionRow};
 
 use super::super::super::status_line::{STATUS_LINE_ROWS, STATUS_LINE_ROW_COUNT};
 use super::super::super::types::App;
@@ -126,7 +126,7 @@ impl App {
             }
             let row = sample();
             for (offset, line) in self
-                .own_harness_lines(&row, *active, width, medulla::clock::now_millis())
+                .own_session_lines(&row, *active, width, medulla::clock::now_millis())
                 .into_iter()
                 .enumerate()
             {
@@ -156,6 +156,7 @@ fn sample_selected() -> SessionRow {
         id: "preview".into(),
         label: "preview".into(),
         provider: HarnessProvider::Claude,
+        preset: None,
         state: PtyState::Running,
         cwd: "/home/you/work/tinyhumans/medulla-public".into(),
         branch: Some("feat/status-line".into()),
@@ -168,8 +169,9 @@ fn sample_selected() -> SessionRow {
         last_output_at: 0,
         last_error: None,
         busy: false,
-        control: HarnessControl::User,
+        control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
+        retained: false,
         name: None,
         attention: None,
     }
@@ -180,10 +182,11 @@ fn sample_selected() -> SessionRow {
 fn sample_orchestrator() -> SessionRow {
     SessionRow {
         provider: HarnessProvider::Codex,
+        preset: None,
         state: PtyState::Exited { code: Some(0) },
         cwd: "/tmp/scratch".into(),
         branch: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         ..sample_selected()
     }
 }
@@ -192,7 +195,7 @@ fn sample_orchestrator() -> SessionRow {
 fn sample_alerting() -> SessionRow {
     SessionRow {
         state: PtyState::Failed,
-        last_error: Some("harness exited unexpectedly".into()),
+        last_error: Some("session exited unexpectedly".into()),
         ..sample_selected()
     }
 }

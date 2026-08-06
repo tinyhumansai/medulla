@@ -63,84 +63,36 @@ pub(crate) fn host_address(config: &HostSection) -> String {
     config.effective_address()
 }
 
-/// Every device-local address a host could bind, running or not.
+/// Every host this device declares, running or not — its bus address and its
+/// name.
 ///
 /// Known without starting anything, because it comes from the config rather
 /// than from a started host — and it is needed in exactly the case where none
 /// started, to recognise remembered local roster entries and drop them.
-pub(crate) fn all_host_addresses(primary: &HostSection, extras: &[HostSection]) -> Vec<String> {
-    std::iter::once(host_address(primary))
-        .chain(
-            extras
-                .iter()
-                .enumerate()
-                .map(|(index, extra)| extra_host_address(extra, index)),
-        )
-        .collect()
+///
+/// The name rides along because the hub advertises this same list as the
+/// `hosts[]` block, where a host with an id and nothing to call it reads as a
+/// machine nobody named.
+pub(crate) fn all_local_hosts(
+    primary: &HostSection,
+    extras: &[HostSection],
+) -> Vec<medulla::config::LocalHostRef> {
+    medulla::config::local_hosts(primary, extras)
 }
 
-/// The bus address for an extra host, derived from its name when it declared
-/// none of its own.
-///
-/// Two hosts cannot share an address — the second `bind` fails — so an operator
-/// who adds `[[hosts]]` without thinking about addressing would otherwise get
-/// one working host and one startup error. Deriving from the name means the
-/// field is optional in the common case and explicit when it matters.
+/// The bus address for an extra host — see
+/// [`local_host_address`](medulla::config::local_host_address), which the Hosts
+/// tab reads too so the list and the binder cannot disagree about which address
+/// a section will bind.
 fn extra_host_address(config: &HostSection, fallback_index: usize) -> String {
-    // The section default counts as unchosen, not as a choice. `[[hosts]]`
-    // shares `HostSection`, so an entry that names no address inherits the
-    // primary's — and two hosts on one address means the second never binds.
-    // An operator who *typed* the primary's address has made the same mistake,
-    // so both are treated the same way.
-    let chosen = config.address.trim();
-    let chosen = if chosen == HostSection::default().address {
-        ""
-    } else {
-        chosen
-    };
-    match chosen {
-        "" => {
-            let slug = slug_of(&config.name);
-            if slug.is_empty() {
-                format!("local-host-{}", fallback_index + 1)
-            } else {
-                format!("local-{slug}")
-            }
-        }
-        value => value.to_string(),
-    }
+    medulla::config::local_host_address(config, fallback_index)
 }
 
-/// A lowercase, hyphenated form of `name`, safe to use as a bus address.
-fn slug_of(name: &str) -> String {
-    let mut out = String::new();
-    let mut hyphen = false;
-    for ch in name.trim().chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            hyphen = false;
-        } else if !out.is_empty() && !hyphen {
-            out.push('-');
-            hyphen = true;
-        }
-    }
-    out.trim_end_matches('-').to_string()
-}
-
-/// What to call a host that named itself nothing.
-///
-/// The primary is "this device" — it is the machine the operator is looking at.
-/// An extra is named for the directory it works in, because that is the only
-/// thing distinguishing it from the primary.
+/// What to call a host that named itself nothing — see
+/// [`local_host_name`](medulla::config::local_host_name). Shared with the Hosts
+/// tab, which names the same hosts before any of them has started.
 pub(crate) fn display_name(config: &HostSection, workspace: &str, primary: bool) -> String {
-    match config.name.trim() {
-        "" if primary => "this device".to_string(),
-        "" => std::path::Path::new(workspace)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| workspace.to_string()),
-        value => value.to_string(),
-    }
+    medulla::config::local_host_name(config, workspace, primary)
 }
 
 /// Translate the `[host]` section into the SDK's start-up options.
@@ -519,110 +471,25 @@ pub(crate) fn start(
     .map(Some)
 }
 
-/// Starts a host on this device after the app is already running.
+/// The custom harnesses this device's hosting configuration declares.
 ///
-/// Everything a host needs to exist — the in-process bus, the session manager,
-/// the daemon options — is built once at launch and owned by the app loop. A
-/// host declared later has no way to reach any of it, which is why adding one
-/// used to mean restarting. This carries exactly those pieces to wherever the
-/// command is handled.
+/// What is left of a larger type. It used to start a host on this device after
+/// launch, for the Add Host wizard's "local" kind — a harness plus a directory,
+/// which is what an *agent* is now, declared from the host tree instead. Only
+/// one reader outlived that: a workflow's `agent` step may name a custom
+/// harness, and it resolves the name against this list.
 ///
-/// Cheap to clone: every field is already shared.
+/// Cheap to clone: the options behind it are already shared.
 #[derive(Clone)]
-pub(crate) struct LocalHostSpawner {
-    /// The bus the hub dispatches over.
-    network: LocalBridgeNetwork,
-    /// The session manager the UI reads screens from and types into. Shared, so
-    /// a host started now is as watchable as one started at launch.
-    sessions: PtyManager,
-    /// The primary's options, used as the template every extra inherits.
+pub(crate) struct LocalHostHarnesses {
+    /// The primary host's options, which carry the declared custom harnesses.
     options: EmbeddedDaemonOptions,
-    /// The process environment, for provider detection and the host switch.
-    env: HashMap<String, String>,
-    /// The runtimes the harness pane resolves tasks against. A new host's
-    /// runtime is pushed here or its screen would never be found.
-    runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
-    /// The started hosts, kept alive for the session. Dropping a `LocalHost`
-    /// stops it, so a spawner that did not hold them would start a host and
-    /// immediately kill it.
-    started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
-    /// The agent declarations a newly started host reads its roster entries
-    /// from. Carried rather than re-read so a host started now and one started
-    /// at launch are built from the same list.
-    declared: Vec<AgentDeclaration>,
-    /// Every device-local address, shared with the hub's roster filter. A host
-    /// bound here must be appended or the roster sink will persist it as a
-    /// remote entry.
-    addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
-impl LocalHostSpawner {
-    /// Build a spawner over the pieces the app loop owns.
-    ///
-    /// Long by construction: every argument is a distinct piece of process-wide
-    /// state the app loop owns and a host started later has no other way to
-    /// reach. Grouping them into a struct would only rename the same list.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        network: LocalBridgeNetwork,
-        sessions: PtyManager,
-        options: EmbeddedDaemonOptions,
-        env: HashMap<String, String>,
-        runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
-        started: std::sync::Arc<std::sync::Mutex<Vec<LocalHost>>>,
-        addresses: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        declared: Vec<AgentDeclaration>,
-    ) -> Self {
-        Self {
-            network,
-            sessions,
-            options,
-            env,
-            runtimes,
-            started,
-            addresses,
-            declared,
-        }
-    }
-
-    /// Start `config` now and return the roster entries describing its declared
-    /// agents — one per agent, so a host is registered as everything it runs
-    /// rather than as one entry standing in for all of them.
-    ///
-    /// `index` is the entry's position within `[[hosts]]`, which is the basis
-    /// [`all_host_addresses`] and [`start_all`] derive an unnamed host's address
-    /// from. It is passed in rather than counted here for exactly that reason:
-    /// counting *started* hosts includes the primary, so a first unnamed extra
-    /// bound `local-host-2` this run and `local-host-1` on the next launch —
-    /// an address the roster remembered that nothing would ever bind again.
-    pub(crate) fn spawn(
-        &self,
-        config: &HostSection,
-        index: usize,
-    ) -> Result<Vec<WorkerSpec>, String> {
-        let host = start_at(
-            config,
-            &self.env,
-            &self.network,
-            extra_options(&self.options, config)?,
-            self.sessions.clone(),
-            extra_host_address(config, index),
-            false,
-            &self.declared,
-        )?;
-        let specs = host.specs().to_vec();
-        // Before the roster entry exists, so the hub's save filter already knows
-        // this address is device-local by the time registration triggers one.
-        self.addresses
-            .lock()
-            .expect("host addresses")
-            .push(host.address().to_string());
-        self.runtimes
-            .lock()
-            .expect("local harness runtimes")
-            .push(host.runtime());
-        self.started.lock().expect("started hosts").push(host);
-        Ok(specs)
+impl LocalHostHarnesses {
+    /// Hold a host's options for the sake of the harnesses they declare.
+    pub(crate) fn new(options: EmbeddedDaemonOptions) -> Self {
+        Self { options }
     }
 
     /// The custom-harness presets this device's primary host was started with.
@@ -633,6 +500,15 @@ impl LocalHostSpawner {
     /// rejecting a step that names one.
     pub(crate) fn custom_harnesses(&self) -> &[medulla::config::CustomHarnessConfig] {
         &self.options.custom_harnesses
+    }
+
+    /// The resolved `[[hooks]]` this device's primary host was started with.
+    ///
+    /// Exposed for the same reason as [`Self::custom_harnesses`]: a one-shot
+    /// embedded daemon started elsewhere for the same session should install
+    /// the same built-in and operator hooks rather than starting with none.
+    pub(crate) fn hooks(&self) -> &medulla::harness_hooks::HooksConfig {
+        &self.options.hooks
     }
 }
 

@@ -197,6 +197,31 @@ impl Default for AttributionConfig {
     }
 }
 
+/// The `hookDefaults` section: whether Medulla installs its own lifecycle
+/// reporting hooks into the harnesses it launches.
+///
+/// On by default, and for the same reason attribution is: a harness Medulla
+/// started should be one Medulla can see. The built-ins only report — they
+/// never deny a tool call or rewrite an input (see
+/// [`crate::harness_hooks::builtin`]) — so leaving them on changes what Medulla
+/// knows, not what the session does.
+///
+/// Turn them off with `[hookDefaults] enabled = false`, which leaves the
+/// operator's own `[[hooks]]` untouched.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HookDefaultsConfig {
+    /// Whether Medulla's own reporting hooks are installed.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+}
+
+impl Default for HookDefaultsConfig {
+    fn default() -> Self {
+        HookDefaultsConfig { enabled: true }
+    }
+}
+
 /// The `harness` section: how harnesses the operator starts themselves behave.
 ///
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*
@@ -375,6 +400,24 @@ pub struct WorkflowsConfig {
     /// it grants a workflow author the daemon's own privileges.
     #[serde(default = "d_true")]
     pub allow_code: bool,
+    /// The interpreter a `shell` script runs under.
+    ///
+    /// Empty keeps `bash`, which is what an existing workflow's scripts were
+    /// written against. `"user"` follows the operator's login shell (`$SHELL`),
+    /// and any other value names a program on `PATH` or an absolute path.
+    ///
+    /// Set this when a step needs the operator's own shell environment rather
+    /// than the daemon's — their functions and `~/bin` on `PATH` — and pair it
+    /// with `shellArgs: ["-l"]`, since a script is otherwise run non-login and
+    /// non-interactive and sources none of their startup files.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shell: String,
+    /// Arguments passed to `shell` before the script's path.
+    ///
+    /// `["-l"]` for a login shell — `PATH` and exported functions. Add `"-i"`
+    /// as well for aliases, which are never exported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shell_args: Vec<String>,
     /// Tool slugs a `tool_call` node may invoke, beyond the built-in
     /// `medulla:` operations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -494,6 +537,8 @@ impl Default for WorkflowsConfig {
             default_provider: None,
             default_model: String::new(),
             allow_code: true,
+            shell: String::new(),
+            shell_args: Vec::new(),
             tool_allowlist: Vec::new(),
             http_allowlist: Vec::new(),
             run_timeout_secs: d_run_timeout_secs(),

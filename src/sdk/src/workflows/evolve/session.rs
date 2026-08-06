@@ -122,6 +122,11 @@ impl EvolveSession {
             run: self.failed_run(workflow_id, &trigger)?,
             notes: &briefed_notes,
             runs: &runs,
+            // A review is grounded in the journal and the run history, which
+            // are durable and already in the brief. Whatever an operator and
+            // the copilot said to each other in a pane is neither, and is not
+            // evidence a review should reason from.
+            recap: None,
         }
         .render();
 

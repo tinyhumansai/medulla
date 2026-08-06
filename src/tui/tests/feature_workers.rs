@@ -14,6 +14,9 @@ mod helpers;
 #[path = "feature_workers/list.rs"]
 mod list;
 
+#[path = "feature_workers/roles.rs"]
+mod roles;
+
 #[path = "feature_workers/routing.rs"]
 mod routing;
 
@@ -25,3 +28,6 @@ mod fleet;
 
 #[path = "feature_workers/workspaces.rs"]
 mod workspaces;
+
+#[path = "feature_workers/hooks.rs"]
+mod hooks;

@@ -109,6 +109,44 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
             let config = load_workflows_config(&parsed, &env, &cwd)?;
             ops::evolve(&store, &config, &cwd, id, parsed.run_id.as_deref()).await?
         }
+        WorkflowAction::Author(id) => {
+            if let Some(path) = parsed.config.as_deref() {
+                std::env::set_var(medulla::config::CONFIG_PATH_ENV, path);
+            }
+            let config = load_workflows_config(&parsed, &env, &cwd)?;
+            let instruction = parsed.text.as_deref().unwrap_or_default();
+            if instruction.trim().is_empty() {
+                anyhow::bail!("author needs an instruction: pass it with --text \"<what to do>\"");
+            }
+            // Progress goes to stderr, never stdout: stdout is the JSON result
+            // a caller parses, and interleaving a harness's chatter into it
+            // would break every consumer of this command.
+            let (status_tx, mut status_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let forward = tokio::spawn(async move {
+                while let Some(line) = status_rx.recv().await {
+                    // Classified rather than printed raw, for the same reason
+                    // the pane classifies it: a frame carries the provider's
+                    // call id after an invisible separator, so echoing it
+                    // whole prints `workflow_listtoolu_01Vu…` and reads as a
+                    // corrupted tool name.
+                    eprintln!("{}", progress_line(&line));
+                }
+            });
+            let result = ops::author(
+                &store,
+                &config,
+                &cwd,
+                id.as_deref(),
+                instruction,
+                Some(status_tx),
+            )
+            .await;
+            // The sender is dropped with the turn, so this ends on its own;
+            // awaiting it keeps a trailing progress line from landing after
+            // the result.
+            let _ = forward.await;
+            result?
+        }
         WorkflowAction::Mcp => unreachable!("handled above, before stdout is claimed"),
     };
 
@@ -364,4 +402,31 @@ fn load_workflows_config(
             .config
             .workflows,
     )
+}
+
+/// One harness progress frame, as a line for a terminal.
+///
+/// The pane draws these as coloured rows with a glyph per kind; a terminal gets
+/// the same distinctions as ASCII markers. Shares
+/// [`classify_progress`](medulla::ui::workflows::classify_progress) with the
+/// pane so the two cannot come to disagree about what counts as a tool call.
+fn progress_line(frame: &str) -> String {
+    use medulla::ui::workflows::{classify_progress, Progress};
+
+    match classify_progress(frame) {
+        Progress::Tool { text, .. } => format!("↻ {text}"),
+        Progress::ToolResult { failed, detail, .. } => {
+            let mark = if failed { "✗" } else { "✓" };
+            if detail.is_empty() {
+                mark.to_string()
+            } else {
+                format!("{mark} {detail}")
+            }
+        }
+        // Reasoning streams in fragments and would otherwise scroll a terminal
+        // off its own output; the pane keeps one updating row, which a stream
+        // of lines cannot do, so it is summarised to the fact that it happened.
+        Progress::Thinking(_) => "· thinking".to_string(),
+        Progress::Status(text) => format!("· {text}"),
+    }
 }

@@ -21,9 +21,11 @@
 
 mod brief;
 mod diff;
+mod transcript;
 
 pub use brief::{CopilotRequest, FailedRun, Mode};
 pub use diff::describe as describe_changes;
+pub use transcript::{Thread, Transcript, Transcripts};
 
 use std::sync::Arc;
 
@@ -85,6 +87,20 @@ pub struct CopilotSession {
     /// separate conversations — which is what the operator means by having two
     /// panes.
     pub conversation: String,
+    /// What was said on this thread before this process existed.
+    ///
+    /// Set by a caller that has just reloaded a saved transcript
+    /// ([`Transcripts`]) into a pane whose harness session is *new* — after a
+    /// restart, or once the host cache evicted the thread. `None` on a
+    /// continuing conversation, where the session remembers its own turns and
+    /// restating them would have the agent read its last reply as fresh
+    /// instruction.
+    ///
+    /// Carried on the session rather than passed per turn because it is a
+    /// property of *this* session's ignorance, not of any one instruction: it
+    /// belongs on every turn the session runs, and a caller that had to
+    /// remember to pass it each time would eventually not.
+    pub recap: Option<String>,
 }
 
 impl CopilotSession {
@@ -148,6 +164,7 @@ impl CopilotSession {
             run,
             notes: &[],
             runs: &[],
+            recap: self.recap.as_deref(),
         }
         .render();
 
@@ -230,6 +247,7 @@ impl CopilotSession {
                 run: None,
                 notes: &[],
                 runs: &[],
+                recap: self.recap.as_deref(),
             }
             .render(),
             worker_address: self.worker_address.clone(),

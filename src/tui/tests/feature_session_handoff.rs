@@ -1,9 +1,9 @@
-//! Handing a harness back *with a brief*.
+//! Handing a session back *with a brief*.
 //!
-//! Kept apart from `feature_harness_control`, which is about who may dispatch
-//! into a harness. This is about what the orchestrator is told when a person
+//! Kept apart from `feature_session_control`, which is about who may dispatch
+//! into a session. This is about what the orchestrator is told when a person
 //! stops working in one — the note they leave, the pane output that goes with
-//! it, and which harness `/handoff` means when the cursor is somewhere else.
+//! it, and which session `/handoff` means when the cursor is somewhere else.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,8 +15,8 @@ use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::{App, Cmd, TABS};
-use medulla_tui::ui::harness_pane::LocalHarnesses;
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -59,7 +59,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
-    app.set_local_harnesses(LocalHarnesses {
+    app.set_local_sessions(LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions,
@@ -100,7 +100,7 @@ fn render(app: &mut App) {
 fn select_harness_row(app: &mut App) {
     for _ in 0..64 {
         render(app);
-        if app.harness_pane_session_for_test().is_some() {
+        if app.pane_session_for_test().is_some() {
             return;
         }
         let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
@@ -129,6 +129,7 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
     let id = sessions
         .open(LaunchSpec {
             provider: HarnessProvider::Codex,
+            preset: None,
             bin: "/bin/sh".to_string(),
             cwd: cwd.to_string(),
             env,
@@ -140,7 +141,7 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
             label: "you:codex".to_string(),
             model: None,
             session_id: None,
-            control: HarnessControl::User,
+            control: SessionControl::User,
             origin: medulla_tui::worker::pty::SessionOrigin::User,
             name: None,
             mcp_grant_session: None,
@@ -160,7 +161,7 @@ fn user_session_in(sessions: &PtyManager, cwd: &str) -> String {
 /// The queued handoff brief, if the last event raised one.
 fn queued_brief(app: &mut App) -> Option<medulla::hub::HarnessHandoff> {
     while let Some(cmd) = app.take_pending_cmd() {
-        if let Cmd::HandOffHarness(brief) = cmd {
+        if let Cmd::HandOffSession(brief) = cmd {
             return Some(*brief);
         }
     }
@@ -193,7 +194,7 @@ fn handoff_with_a_note_queues_a_brief_carrying_it() {
     // And the local flag moved, so dispatch can use it again immediately.
     assert_eq!(
         sessions.control(&id),
-        Some(HarnessControl::Orchestrator),
+        Some(SessionControl::Orchestrator),
         "control flips locally without waiting for the brief to send"
     );
 
@@ -218,7 +219,7 @@ fn handoff_without_a_note_still_queues_a_brief() {
 
 #[test]
 fn handoff_resolves_the_held_harness_with_no_frame_rendered() {
-    // The regression. `harness_pane_session` is written inside the Agents draw
+    // The regression. `pane_session` is written inside the Agents draw
     // and cleared at the top of every frame, so `/handoff` used to depend on
     // what the *previous* render happened to resolve — reporting "no harness on
     // this row" while the operator was plainly holding one, and throwing away
@@ -227,7 +228,7 @@ fn handoff_resolves_the_held_harness_with_no_frame_rendered() {
     let id = user_session_in(&sessions, "/");
     let mut app = app_with_harnesses(sessions.clone());
     assert!(
-        app.harness_pane_session_for_test().is_none(),
+        app.pane_session_for_test().is_none(),
         "this test is only about anything while no frame has resolved a harness"
     );
 
@@ -261,10 +262,10 @@ fn handoff_with_two_held_harnesses_asks_rather_than_guessing() {
     );
     assert_eq!(
         sessions.control(&first),
-        Some(HarnessControl::User),
+        Some(SessionControl::User),
         "neither harness may be handed back on a guess"
     );
-    assert_eq!(sessions.control(&second), Some(HarnessControl::User));
+    assert_eq!(sessions.control(&second), Some(SessionControl::User));
 
     sessions.close(&first);
     sessions.close(&second);
@@ -285,7 +286,7 @@ fn ctrl_g_handback_queues_a_brief_too() {
     let brief = queued_brief(&mut app).expect("Ctrl-G handback must send a brief");
     assert_eq!(brief.session_id, id);
     assert_eq!(brief.note, None, "the shortcut has nowhere to type a note");
-    assert_eq!(sessions.control(&id), Some(HarnessControl::Orchestrator));
+    assert_eq!(sessions.control(&id), Some(SessionControl::Orchestrator));
 
     sessions.close(&id);
 }
@@ -297,7 +298,7 @@ fn taking_a_harness_tells_the_orchestrator_the_workspace_is_occupied() {
     // being refused, one task at a time.
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
-    sessions.set_control(&id, HarnessControl::Orchestrator);
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 
@@ -305,12 +306,12 @@ fn taking_a_harness_tells_the_orchestrator_the_workspace_is_occupied() {
 
     let mut held = None;
     while let Some(cmd) = app.take_pending_cmd() {
-        if let Cmd::HoldHarness { workspace, .. } = cmd {
+        if let Cmd::HoldSession { workspace, .. } = cmd {
             held = Some(workspace);
         }
     }
     assert_eq!(held.as_deref(), Some("/"));
-    assert_eq!(sessions.control(&id), Some(HarnessControl::User));
+    assert_eq!(sessions.control(&id), Some(SessionControl::User));
 
     sessions.close(&id);
 }
@@ -322,6 +323,12 @@ fn the_ask_modal_takes_a_note_with_e_and_commits_it_on_enter() {
     // the note; `y` still answers the question.
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Under the orchestrator to begin with, because that is what makes the
+    // question worth asking: attaching takes the harness off dispatch, and
+    // walking away without answering leaves it locked out. A session the
+    // operator started is never asked about — see
+    // `releasing_a_harness_you_started_yourself_asks_nothing`.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 
@@ -375,6 +382,8 @@ fn the_ask_modal_takes_a_note_with_e_and_commits_it_on_enter() {
 fn keeping_the_harness_sends_nothing() {
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Taken from the orchestrator, so releasing owes it a question.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 
@@ -392,7 +401,7 @@ fn keeping_the_harness_sends_nothing() {
         queued_brief(&mut app).is_none(),
         "keeping a harness is not a handoff"
     );
-    assert_eq!(sessions.control(&id), Some(HarnessControl::User));
+    assert_eq!(sessions.control(&id), Some(SessionControl::User));
 
     sessions.close(&id);
 }
@@ -403,6 +412,8 @@ fn escape_leaves_the_note_intact_and_y_then_sends_it() {
     // an operator who loses a paragraph to a stray key does not write another.
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Taken from the orchestrator, so releasing owes it a question.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 

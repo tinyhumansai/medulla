@@ -473,6 +473,62 @@ fn daemon_master_roster_persists_public_peer_data_without_identity_secrets() {
     assert!(!text.contains("token"));
 }
 
+/// The P2 Codex found on this branch: `persist_hooks` went straight through
+/// `read_document`/`write_document`, which always parse and render TOML, so
+/// saving from the Hooks page against a JSON config (`medulla.tui.json`, or
+/// any extensionless config the loader treats as JSON) failed to parse the
+/// operator's own document as TOML and lost their edit.
+#[test]
+fn persist_hooks_preserves_a_json_config_and_its_unrelated_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(&path, r#"{"theme":{"primary":"cyan"}}"#).unwrap();
+    let hook = crate::harness_hooks::HookSpec {
+        event: crate::harness_hooks::HookEvent::PostToolUse,
+        matcher: "Edit".to_string(),
+        handler: crate::harness_hooks::HookHandler::Command {
+            command: "just fmt".to_string(),
+            timeout: None,
+        },
+        harnesses: Vec::new(),
+        label: None,
+        builtin: false,
+    };
+
+    super::persist_hooks(&path, &[hook]).expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["theme"]["primary"], "cyan", "unrelated section lost");
+    assert_eq!(parsed["hooks"][0]["event"], "PostToolUse");
+    assert_eq!(parsed["hooks"][0]["command"], "just fmt");
+}
+
+/// The empty-list branch clears the key entirely rather than leaving an empty
+/// array behind (see [`super::persist_hooks`]'s own docs on why); this pins
+/// that behavior for a JSON config too, alongside the TOML case the writer was
+/// already exercised against.
+#[test]
+fn persist_hooks_removes_the_key_from_a_json_config_when_the_last_hook_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.tui.json");
+    std::fs::write(
+        &path,
+        r#"{"theme":{"primary":"cyan"},"hooks":[{"event":"Stop","command":"notify"}]}"#,
+    )
+    .unwrap();
+
+    super::persist_hooks(&path, &[]).expect("write");
+
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let parsed: serde_json::Value = serde_json::from_str(&saved).expect("JSON remains valid");
+    assert_eq!(parsed["theme"]["primary"], "cyan");
+    assert!(
+        parsed.get("hooks").is_none(),
+        "the empty list must clear the key: {parsed}"
+    );
+}
+
 #[test]
 fn a_local_host_that_named_no_address_is_written_without_one() {
     // Loading fills `address` from the section default, so persisting the

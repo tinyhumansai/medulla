@@ -171,6 +171,19 @@ pub fn build_resumed_run_args(
                 args.push(model.to_string());
             }
             args.extend(extra_args.iter().cloned());
+            // End option parsing before the prompt. Claude Code has variadic
+            // options - `--add-dir <directories...>` is one, and it is what
+            // `workflows::skills::spawn_args` appends so a session can see its
+            // managed skills - and a variadic sitting last in `extra_args`
+            // swallows the prompt as one more value. The harness then exits 1
+            // with "Input must be provided either through stdin or as a prompt
+            // argument", which reads like a Medulla bug in building the prompt
+            // rather than one in where it was placed.
+            //
+            // `--` is the fix rather than an ordering rule, because ordering
+            // only holds while the last extra arg happens to be bounded: the
+            // next variadic option added anywhere reintroduces this silently.
+            args.push("--".to_string());
             args.push(prompt);
         }
         HarnessProvider::Codex => {
@@ -181,6 +194,21 @@ pub fn build_resumed_run_args(
                 args.push(resume.to_string());
             }
             args.push("--json".to_string());
+            // Codex defaults to `workspace-write`: writable root is the cwd and
+            // the network is off. A daemon task cannot live inside that. The
+            // git directory of a linked worktree is *outside* the worktree -
+            // for a submodule checkout it is several levels up, under the
+            // superproject's `.git/modules/<name>/worktrees/<id>` - so `git
+            // commit` cannot write its refs, and with no DNS `git push` and
+            // `gh` fail outright. A task that can edit and verify but never
+            // land the result is worse than one that refuses to start.
+            //
+            // Gated on the same operator setting that gives Claude
+            // `--dangerously-skip-permissions` above: one consent flag, honoured
+            // by every harness, rather than a per-provider surprise.
+            if skip_permissions {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+            }
             if let Some(model) = model {
                 args.push("-m".to_string());
                 args.push(model.to_string());

@@ -23,7 +23,7 @@ pub(super) fn run_handoff_cmd(
     msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
 ) -> Option<Box<Cmd>> {
     match cmd {
-        Cmd::HandOffHarness(brief) => {
+        Cmd::HandOffSession(brief) => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();
             tokio::spawn(async move {
@@ -52,7 +52,7 @@ pub(super) fn run_handoff_cmd(
             });
             None
         }
-        Cmd::HoldHarness { workspace, reason } => {
+        Cmd::HoldSession { workspace, reason } => {
             let rt = runtime.clone();
             let tx = msg_tx.clone();
             tokio::spawn(async move {

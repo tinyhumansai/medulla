@@ -106,15 +106,21 @@ pub(crate) enum SessionExit {
 pub(crate) struct SessionWiring {
     /// The loaded configuration for this session.
     pub loaded: medulla::config::LoadedConfig,
-    /// Starts a host on this device after launch. `None` when this device is
-    /// not hosting — there is then no bus binding or session manager to hand a
-    /// new host, and the command says so rather than half-starting one.
-    pub local_hosts: Option<crate::local_host::LocalHostSpawner>,
+    /// The custom harnesses this device's primary host declares, for a
+    /// workflow `agent` step to resolve a harness name against. `None` when this
+    /// device is not hosting — there are then no host options to read them from.
+    pub local_hosts: Option<crate::local_host::LocalHostHarnesses>,
     /// A note to show on the status line at startup, if any.
     pub startup_status: Option<String>,
     /// The tiny.place presence observation, when that service is running.
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
+    /// Where hook edits are persisted — see `App::hooks_config_path` (in
+    /// `medulla_tui::ui::app`) for why this can differ from
+    /// [`Self::config_path`]: a project-local config is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from, so a hook saved
+    /// against it would be silently ignored on the next launch.
+    pub hooks_config_path: std::path::PathBuf,
     /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
     /// The account the embedded core is signed in as, when it is.
@@ -135,12 +141,18 @@ pub(crate) struct SessionWiring {
     /// A read-only view of the host running on this device, when one is. `None`
     /// means this machine orchestrates but does not run the work itself.
     pub host: Option<medulla::daemon::embedded::HostObservation>,
-    /// The live harness sessions this device is running, and the state machine
+    /// The live sessions this device is running, and the state machine
     /// that says which task each one serves.
     ///
-    /// `None` when this machine does not host: there are no local harnesses to
+    /// `None` when this machine does not host: there are no local sessions to
     /// show, and the Agents tab falls back to a remote worker's streamed screen
     /// or to the transcript. Shared with the host's executor — the sessions it
     /// opens are the ones rendered here.
-    pub harnesses: Option<medulla_tui::ui::harness_pane::LocalHarnesses>,
+    pub local_sessions: Option<medulla_tui::ui::harness_pane::LocalSessions>,
+    /// Lifecycle reports from the harnesses this Medulla launched, as their
+    /// hooks file them.
+    ///
+    /// The same log the control socket writes into, shared rather than copied:
+    /// the Hooks page renders what is arriving right now.
+    pub hook_log: medulla::harness_hooks::HookEventLog,
 }

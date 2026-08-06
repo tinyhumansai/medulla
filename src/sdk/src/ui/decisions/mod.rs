@@ -1,4 +1,4 @@
-//! Prepared operator decisions derived from harness escalations and pending
+//! Prepared operator decisions derived from agent escalations and pending
 //! worker questions. The fold is UI-agnostic so terminal and future hosts share
 //! stable ids, ordering, deduplication, and answer routing.
 

@@ -18,6 +18,8 @@ fn hook(event: HookEvent, matcher: &str, command: &str) -> HookSpec {
             timeout: None,
         },
         harnesses: Vec::new(),
+        label: None,
+        builtin: false,
     }
 }
 
@@ -32,6 +34,53 @@ fn event_wire_names_round_trip() {
     }
     assert_eq!(HookEvent::from_wire("pre_tool_use"), None);
     assert_eq!(HookEvent::from_wire("Nope"), None);
+}
+
+/// Every event accepts its camelCase spelling in config, because that is the
+/// spelling every *other* key in `medulla.tui.toml` teaches — and getting it
+/// wrong used to fail the whole config load, not just the hook.
+///
+/// Derived from `as_str` rather than listed by hand: a list would be one more
+/// thing to forget when a variant is added, and the point of the alias is that
+/// no variant is missing one.
+#[test]
+fn every_event_deserializes_from_its_camel_case_spelling() {
+    for event in HookEvent::ALL {
+        let pascal = event.as_str();
+        let mut chars = pascal.chars();
+        let camel: String = chars
+            .next()
+            .map(|first| first.to_ascii_lowercase().to_string() + chars.as_str())
+            .expect("no event name is empty");
+
+        let parsed: HookEvent = serde_json::from_value(serde_json::json!(camel))
+            .unwrap_or_else(|err| panic!("`{camel}` must deserialize to {event:?}: {err}"));
+        assert_eq!(parsed, event);
+
+        // The canonical spelling keeps working, and stays the one written back
+        // out — the harnesses only answer to it.
+        let parsed: HookEvent = serde_json::from_value(serde_json::json!(pascal))
+            .unwrap_or_else(|err| panic!("`{pascal}` must still deserialize: {err}"));
+        assert_eq!(parsed, event);
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!(pascal)
+        );
+    }
+}
+
+/// The aliases widen the vocabulary by exactly one spelling per event, not into
+/// a free-for-all: a name that is neither spelling is still refused, so a typo
+/// is still reported rather than silently dropping a hook the operator believes
+/// is installed.
+#[test]
+fn a_misspelled_event_is_still_refused() {
+    for bad in ["pre_tool_use", "POSTTOOLUSE", "postToolUsage", "Nope", ""] {
+        assert!(
+            serde_json::from_value::<HookEvent>(serde_json::json!(bad)).is_err(),
+            "{bad:?} is not an event and must not parse"
+        );
+    }
 }
 
 #[test]

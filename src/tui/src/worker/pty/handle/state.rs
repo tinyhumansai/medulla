@@ -129,6 +129,7 @@ impl SessionHandle {
             id: self.meta.id.clone(),
             label: cold.label.clone(),
             provider: self.meta.provider,
+            preset: self.meta.preset.clone(),
             state: self.state(),
             cwd: self.meta.cwd.clone(),
             branch: self.meta.branch.clone(),
@@ -143,6 +144,7 @@ impl SessionHandle {
             busy: self.is_busy(),
             control: self.control(),
             origin: self.meta.origin,
+            retained: self.is_retained(),
             name: cold.name.clone(),
             attention: lock(&self.attention).cue.clone(),
         }

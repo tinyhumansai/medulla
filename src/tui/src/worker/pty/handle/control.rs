@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use super::super::attention;
 use super::super::sync::lock;
-use super::super::types::HarnessControl;
+use super::super::types::SessionControl;
 use super::super::AttentionKind;
 use super::SessionHandle;
 
@@ -13,11 +13,11 @@ const COMPLETION_CHIME_GRACE: std::time::Duration = std::time::Duration::from_mi
 
 impl SessionHandle {
     /// Who holds this session right now.
-    pub fn control(&self) -> HarnessControl {
+    pub fn control(&self) -> SessionControl {
         if self.operator_held.load(Ordering::Acquire) {
-            HarnessControl::User
+            SessionControl::User
         } else {
-            HarnessControl::Orchestrator
+            SessionControl::Orchestrator
         }
     }
 
@@ -28,10 +28,37 @@ impl SessionHandle {
     /// allowed to start one" — and a session taken over mid-turn is still
     /// running that turn. Clearing `busy` on handback would advertise a harness
     /// as free while it was still finishing someone else's work.
-    pub(in super::super) fn set_control(&self, control: HarnessControl) {
+    pub(in super::super) fn set_control(&self, control: SessionControl) {
         let _cold = lock(&self.cold);
         self.operator_held
-            .store(control == HarnessControl::User, Ordering::Release);
+            .store(control == SessionControl::User, Ordering::Release);
+        // Taking a retained session ends the retention: it is no longer the
+        // leftover screen of finished work, it is the operator's session. Left
+        // set, it would keep claiming a workspace nobody is waiting on and read
+        // as "done" in a rail row someone is actively typing in.
+        if control == SessionControl::User {
+            self.retained.store(false, Ordering::Release);
+        }
+    }
+
+    /// Whether this session is a finished task's, kept for the operator to read.
+    pub fn is_retained(&self) -> bool {
+        self.retained.load(Ordering::Acquire)
+    }
+
+    /// Keep this session standing now that the task it served is done.
+    ///
+    /// The alternative — closing it, which is what this replaced — destroys the
+    /// PTY the moment the reply is sent, so the pane behind it falls through to
+    /// the transcript and a finished task reads as one that disappeared.
+    ///
+    /// Retention says nothing about who holds the session: it stays the
+    /// orchestrator's on paper so it never counts as a checkout writer, and
+    /// [`try_claim`](Self::try_claim) refuses it so no later task can land in a
+    /// transcript that already answered someone else.
+    pub(in super::super) fn retain(&self) {
+        let _cold = lock(&self.cold);
+        self.retained.store(true, Ordering::Release);
     }
 
     /// Interrupt and close only while orchestration still owns the session.
@@ -88,8 +115,14 @@ impl SessionHandle {
     /// back if it changed: an operator who takes a harness in the window between
     /// the two must win it, because the alternative is a prompt pasted into
     /// their composer a moment after they started typing.
+    ///
+    /// A retained session is refused for the same class of reason: its
+    /// transcript is a finished task's answer, and reusing it would put a second
+    /// task's prompt under a conversation that has already concluded. Bounded
+    /// dispatches never reach here at all — they do not consult the idle pool —
+    /// so this is the guard that keeps that true if they ever do.
     pub(in super::super) fn try_claim(&self) -> bool {
-        if !self.is_running() || !self.control().is_orchestrator() {
+        if !self.is_running() || !self.control().is_orchestrator() || self.is_retained() {
             return false;
         }
         self.finish_completion_grace();

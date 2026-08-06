@@ -50,6 +50,7 @@ fn revise<'a>(record: &'a WorkflowRecord, instruction: &'a str) -> String {
         run: None,
         notes: &[],
         runs: &[],
+        recap: None,
     }
     .render()
 }
@@ -136,6 +137,7 @@ fn a_create_turn_names_no_existing_workflow() {
         run: None,
         notes: &[],
         runs: &[],
+        recap: None,
     }
     .render();
 
@@ -158,6 +160,7 @@ fn a_repair_turn_carries_the_run_the_error_and_the_failing_nodes() {
         }),
         notes: &[],
         runs: &[],
+        recap: None,
     }
     .render();
 
@@ -180,6 +183,7 @@ fn a_repair_turn_says_a_cause_the_graph_cannot_fix_is_not_a_graph_edit() {
         }),
         notes: &[],
         runs: &[],
+        recap: None,
     }
     .render();
 
@@ -201,6 +205,7 @@ fn a_repair_turn_with_no_recorded_error_still_names_the_run() {
         }),
         notes: &[],
         runs: &[],
+        recap: None,
     }
     .render();
 

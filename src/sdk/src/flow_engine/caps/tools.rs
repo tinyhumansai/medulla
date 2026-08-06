@@ -18,7 +18,7 @@ use tinyflows::error::{EngineError, Result};
 
 use crate::flow_engine::settings::CapabilitySettings;
 
-use super::script::{run_script, ScriptLanguage, ScriptRequest, ScriptSource};
+use super::script::{run_script, Interpreter, ScriptLanguage, ScriptRequest, ScriptSource};
 use super::script_policy::{read_env, ScriptPolicy};
 
 /// The prefix marking a slug this host implements natively.
@@ -86,6 +86,15 @@ impl MedullaToolInvoker {
     /// to the inherited environment. All three are author-supplied strings that
     /// reach the operating system, so all three go through
     /// [`super::script_policy`] first.
+    ///
+    /// `args.shell` and `args.shell_args` override the interpreter for this one
+    /// step — `{"shell": "zsh", "shell_args": ["-l"]}` runs it under a login
+    /// zsh, so the operator's `PATH` and shell functions are in scope where the
+    /// default non-login `bash` would see neither. `args.shell` takes the same
+    /// values `workflows.shell` does, including
+    /// [`USER_SHELL`](super::script::USER_SHELL) for the operator's login
+    /// shell. They apply to `language: "shell"` only, and go through
+    /// [`Interpreter::resolve`].
     async fn shell(&self, args: Value) -> Result<Value> {
         if !self.settings.allow_code {
             return Err(EngineError::Capability(
@@ -127,7 +136,8 @@ impl MedullaToolInvoker {
         // Defaults to shell because that is what the slug says; naming another
         // language is how a step runs a short node or python program in the
         // workspace rather than in a `code` node's temporary directory.
-        let language = match args.get("language").and_then(Value::as_str) {
+        let spelling = args.get("language").and_then(Value::as_str);
+        let language = match spelling {
             Some(name) => ScriptLanguage::parse(name).ok_or_else(|| {
                 EngineError::Capability(format!(
                     "medulla:shell: unknown language '{name}'; known: {}",
@@ -142,8 +152,59 @@ impl MedullaToolInvoker {
             .transpose()?;
         let env = read_env(args.get("env"))?;
 
+        // A node may name its own interpreter, which is how one step reaches
+        // the operator's login shell without every step paying for it. Absent,
+        // the host's `workflows.shell` decides — `bash` unless configured.
+        //
+        // Shell only: `language: "python"` names its interpreter *as* the
+        // language, and quietly handing a `.py` file to a shell because the
+        // host configured one would be the worst kind of surprise.
+        let named = non_empty_str(&args, "shell", "a program name or absolute path")?;
+        let shell_args = read_shell_args(args.get("shell_args"))?;
+        if language != ScriptLanguage::Shell && (named.is_some() || !shell_args.is_empty()) {
+            return Err(EngineError::Capability(format!(
+                "medulla:shell: `args.shell` and `args.shell_args` only apply to \
+                 language \"shell\", not \"{}\"",
+                language.as_str()
+            )));
+        }
+        // What this step runs under when it names no interpreter of its own.
+        // `language: "bash"` / `"sh"` is an author naming a specific shell —
+        // and they could only have written it before `workflows.shell` existed,
+        // so honouring the host setting there would re-point existing
+        // bash-specific steps at a different shell the moment an operator
+        // configures one. Only the generic `"shell"` follows the host.
+        let standing = match spelling {
+            Some(name) if ScriptLanguage::pins_interpreter(name) => Interpreter::default_shell(),
+            _ => self.settings.shell.clone(),
+        };
+
+        let chosen = match (language, named) {
+            // `resolve` rather than `validated`, so a step spells the login
+            // shell the same way the operator's config does: `"user"` here
+            // means `$SHELL`, not a program named `user`. Anything else is a
+            // program name, exactly as before.
+            (ScriptLanguage::Shell, Some(program)) => Some(Interpreter::resolve(
+                program,
+                &shell_args,
+                Interpreter::login_shell().as_deref(),
+            )?),
+            // Arguments with no program still mean "not the plain default":
+            // `shell_args: ["-l"]` alone asks for the standing shell, as a
+            // login shell. Dropping them would run the script non-login and
+            // look like the flag did nothing.
+            (ScriptLanguage::Shell, None) if !shell_args.is_empty() => {
+                Some(Interpreter::validated(&standing.program, &shell_args)?)
+            }
+            // The standing shell: the host's configured one, unless the step
+            // spelled its language as a specific interpreter.
+            (ScriptLanguage::Shell, None) => Some(standing),
+            _ => None,
+        };
+
         let output = run_script(ScriptRequest {
             language,
+            interpreter: chosen.as_ref(),
             source,
             input: args.get("input").unwrap_or(&Value::Null),
             timeout: self.settings.script_timeout(),
@@ -160,6 +221,38 @@ impl MedullaToolInvoker {
             "stderr": output.stderr,
         }))
     }
+}
+
+/// Reads an optional `args.shell_args` array into interpreter arguments.
+///
+/// Strings only, for the same reason `args.env` takes only strings: coercing a
+/// number would make what the interpreter actually receives depend on JSON
+/// formatting rather than on what the author wrote.
+///
+/// # Errors
+/// Refuses a non-array and a non-string element.
+fn read_shell_args(value: Option<&Value>) -> Result<Vec<String>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let array = value.as_array().ok_or_else(|| {
+        EngineError::Capability(
+            "medulla:shell: `args.shell_args` must be an array of strings".to_string(),
+        )
+    })?;
+    array
+        .iter()
+        .map(|element| {
+            element.as_str().map(str::to_string).ok_or_else(|| {
+                EngineError::Capability(
+                    "medulla:shell: every `args.shell_args` element must be a string".to_string(),
+                )
+            })
+        })
+        .collect()
 }
 
 /// Reads an optional string argument, refusing a present-but-unusable one.

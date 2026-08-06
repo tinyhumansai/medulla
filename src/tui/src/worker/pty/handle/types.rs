@@ -140,6 +140,13 @@ pub(crate) struct SessionMeta {
     pub(crate) id: String,
     /// Which harness is running.
     pub(crate) provider: HarnessProvider,
+    /// The custom preset it was launched from, when it was one — see
+    /// [`LaunchSpec::preset`](super::super::types::LaunchSpec::preset).
+    ///
+    /// Immutable like the rest of the meta: which preset ran is a fact about
+    /// this session's birth, and it is half of the harness id the rail matches
+    /// a session to its agent by.
+    pub(crate) preset: Option<String>,
     /// The working directory the child runs in.
     pub(crate) cwd: String,
     /// Git branch resolved from the working directory when the session opened.
@@ -216,11 +223,31 @@ pub struct SessionHandle {
     pub(super) busy: AtomicBool,
     /// Whether the operator, rather than the orchestrator, holds this session.
     ///
-    /// [`HarnessControl`](super::super::types::HarnessControl) as one bit, for
+    /// [`SessionControl`](super::super::types::SessionControl) as one bit, for
     /// the same reason `busy` is: `claim_idle` tests it for every session on
     /// every dispatch, and it is the gate that stops a task prompt landing in a
     /// composer a person is typing in.
     pub(super) operator_held: AtomicBool,
+    /// Whether this session has finished the task it was opened for and is being
+    /// kept for the operator to read.
+    ///
+    /// A lifecycle fact, deliberately *not* a
+    /// [`SessionControl`](super::super::types::SessionControl) variant. Control
+    /// answers "who may type here", and a retained session has no one typing in
+    /// it yet — it is the last screen of finished work, left standing because
+    /// closing it is what made a completed task look like it had vanished.
+    ///
+    /// The distinction is load-bearing rather than cosmetic. Marking these
+    /// sessions `User` instead would have been the smaller change and would have
+    /// deadlocked dispatch: `checkout_writer` reads any user-held session in a
+    /// directory as the writer holding that checkout, so the first task to
+    /// finish in a workspace would have queued every task after it until their
+    /// budgets expired.
+    ///
+    /// An atomic beside `busy` and `operator_held` for the same reason those
+    /// are: [`try_claim`](super::SessionHandle::try_claim) tests it per session
+    /// on every dispatch.
+    pub(super) retained: AtomicBool,
     /// How many bytes sit in [`SessionIo::writes`] still unwritten.
     ///
     /// The budget a caller is admitted against, so a child that never drains its

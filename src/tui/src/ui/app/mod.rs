@@ -8,10 +8,14 @@
 //! [`feedback`] the feedback-board subpage's actions and setters,
 //! [`settings_edit`] the Config subpage's editable settings, [`account`] the
 //! logout action, [`templates`] the agent-template store's install/reload
-//! actions, and [`render`] the ratatui draw for each view. Public items
+//! actions, [`hosts`] the Hosts page's `Host → Agents` tree and its edits,
+//! and [`render`] the ratatui draw for each view. Public items
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
+mod agent_control;
+#[cfg(test)]
+mod agent_control_tests;
 mod appearance;
 mod changes;
 mod commands;
@@ -19,12 +23,11 @@ mod credentials;
 mod custom_harnesses;
 mod decisions;
 mod feedback;
-mod harness_control;
-#[cfg(test)]
-mod harness_control_tests;
 mod harness_workspace;
 #[cfg(test)]
 mod harness_workspace_tests;
+mod hooks;
+mod hosts;
 mod input;
 mod keys;
 mod overlays;
@@ -33,8 +36,16 @@ mod overlays_tests;
 mod rail;
 mod render;
 mod routing_options;
+mod session_control;
+#[cfg(test)]
+mod session_control_tests;
+mod session_focus;
+#[cfg(test)]
+mod session_focus_tests;
 mod settings_edit;
 mod state;
+#[cfg(test)]
+mod state_tests;
 mod status_line;
 mod templates;
 mod types;
@@ -47,3 +58,8 @@ mod tests;
 
 pub use crate::ui::util::SPINNER;
 pub use types::{App, Cmd, SETTINGS_SUBPAGES, TABS};
+// The pane keys its threads by workflow id with one sentinel for the workflow
+// that does not exist yet; the dispatch that runs a turn needs the same mapping
+// to find that thread's saved transcript.
+#[cfg(feature = "workflows")]
+pub use workflows::copilot_thread_of;

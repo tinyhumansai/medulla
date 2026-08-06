@@ -63,6 +63,27 @@ pub const CAPACITY_REJECTION_PREFIX: &str = "daemon at capacity";
 /// person is finished with it.
 pub const HARNESS_HELD_PREFIX: &str = "harness held by operator";
 
+/// The leading text of the `status` frame a worker sends when an operator takes
+/// a session that is *already running a task*.
+///
+/// A wire format in practice, like [`CAPACITY_REJECTION_PREFIX`]: the requesting
+/// hub matches on it to pause its no-progress watchdog for the duration of the
+/// hold (`crate::hub::runner`). A person reading their session is not a crashed
+/// worker, and a 30-minute hold must not be reaped as one — but the window must
+/// *pause* rather than be switched off, so a worker that dies while holding is
+/// still given up on once the session is handed back.
+///
+/// Distinct from [`HARNESS_HELD_PREFIX`], which is a *terminal* refusal ("I did
+/// not attempt this"). This one says the opposite: the task is alive, retained,
+/// and waiting on a human.
+pub const SESSION_HELD_STATUS_PREFIX: &str = "session held by operator";
+
+/// The leading text of the `status` frame that ends a hold.
+///
+/// Sent when control returns to the orchestrator and the hand-back turn starts,
+/// so the watchdog resumes on exactly the frame that says work has restarted.
+pub const SESSION_RESUMED_STATUS_PREFIX: &str = "session handed back";
+
 /// A lock-serialized encrypted send: `(to, body) -> ()`. Errors are handled by
 /// the transport (logged), so the runtime never observes a send failure.
 pub type SendFn =
@@ -291,14 +312,8 @@ pub struct DaemonRuntime {
 
 /// Optional payloads a task frame can carry beyond its text.
 ///
-/// Grouped into one value rather than threaded as parameters because the list
-/// grows with the protocol: token usage was the first, the child harness's work
-/// snapshot the second, and every addition would otherwise widen four call
-/// signatures.
-#[derive(Debug, Clone, Default)]
-pub(super) struct FrameAttachments {
-    /// Token counts the child harness reported, on reply frames.
-    pub(super) usage: Option<crate::protocol::TokenUsage>,
-    /// What the child harness is working on as of this frame.
-    pub(super) work: Option<crate::harness_work::WorkSnapshot>,
-}
+/// The protocol's own type rather than a daemon-local copy of it: the list grows
+/// with the protocol (token usage was the first, the child harness's work
+/// snapshot the second, the serving session the third), and a parallel struct
+/// here would only be a second place to forget an addition.
+pub(super) use crate::protocol::FrameAttachments;

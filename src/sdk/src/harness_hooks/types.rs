@@ -19,31 +19,57 @@ use crate::protocol::HarnessProvider;
 /// serialized form is that shared wire spelling.
 ///
 /// Where the two disagree, [`HookEvent::supported_by`] is the record of it.
+///
+/// # Two accepted spellings in config
+///
+/// The `PascalCase` name is canonical and is what gets serialized, because it
+/// is what the harnesses themselves answer to. Config *also* accepts the
+/// `camelCase` spelling of each name, via `serde(alias)`.
+///
+/// That is not indulgence, it is the rest of the file: every other key an
+/// operator writes in `medulla.tui.toml` is camelCase (`baseUrl`,
+/// `fleetTools`, `maxParallelAgents`), so `event = "postToolUse"` is the
+/// spelling the surrounding config teaches. Rejecting it failed the *whole*
+/// config load — one hook typo and Medulla refuses to start, naming a variant
+/// list rather than the one-character fix. Accepting both costs a `serde`
+/// attribute and removes a trap the config's own conventions set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HookEvent {
     /// Before a tool runs. Can deny the call or rewrite its input.
+    #[serde(alias = "preToolUse")]
     PreToolUse,
     /// After a tool returns. Observation and feedback only.
+    #[serde(alias = "postToolUse")]
     PostToolUse,
     /// When the harness would ask the operator to approve something.
+    #[serde(alias = "permissionRequest")]
     PermissionRequest,
     /// A prompt was submitted, before the model sees it.
+    #[serde(alias = "userPromptSubmit")]
     UserPromptSubmit,
     /// The main agent finished its turn.
+    #[serde(alias = "stop")]
     Stop,
     /// A delegated sub-agent started.
+    #[serde(alias = "subagentStart")]
     SubagentStart,
     /// A delegated sub-agent finished.
+    #[serde(alias = "subagentStop")]
     SubagentStop,
     /// Before the transcript is compacted.
+    #[serde(alias = "preCompact")]
     PreCompact,
     /// After the transcript is compacted.
+    #[serde(alias = "postCompact")]
     PostCompact,
     /// A session began.
+    #[serde(alias = "sessionStart")]
     SessionStart,
     /// A session ended.
+    #[serde(alias = "sessionEnd")]
     SessionEnd,
     /// The harness surfaced a notification to the operator.
+    #[serde(alias = "notification")]
     Notification,
 }
 
@@ -147,6 +173,17 @@ pub struct HookSpec {
     /// harness that supports the event.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessProvider>,
+    /// Operator-facing name, shown on the Hooks page in place of the command
+    /// line. Absent means the page falls back to the command itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Whether Medulla supplied this hook itself (see [`super::builtin`]).
+    ///
+    /// Never read from or written to a config file: it is decided at load, and
+    /// it is what keeps a built-in out of the file when the Hooks page saves
+    /// the operator's own hooks back.
+    #[serde(skip)]
+    pub builtin: bool,
 }
 
 fn match_all() -> String {
@@ -176,7 +213,102 @@ impl HookSpec {
             HookHandler::Command { timeout, .. } => *timeout,
         }
     }
+
+    /// What the Hooks page shows for this hook: its label, or its command.
+    pub fn display_name(&self) -> &str {
+        self.label.as_deref().unwrap_or_else(|| self.command())
+    }
+
+    /// Render this hook as the Hooks page's one-line editor form.
+    ///
+    /// The inverse of [`HookSpec::from_editor_line`]; see it for the format and
+    /// why the matcher is written with commas here.
+    pub fn editor_line(&self) -> String {
+        let harnesses = self
+            .harnesses
+            .iter()
+            .map(|provider| provider.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{} | {} | {} | {} | {}",
+            self.event.as_str(),
+            self.matcher.replace('|', ","),
+            harnesses,
+            self.timeout().map(|t| t.to_string()).unwrap_or_default(),
+            self.command(),
+        )
+    }
+
+    /// Parse the Hooks page's one-line editor form.
+    ///
+    /// `Event | matcher | harnesses | timeout | command`, where every field but
+    /// the event and the command may be empty:
+    ///
+    /// ```text
+    /// PostToolUse | Edit,Write | claude | 30 | ./bin/auto-commit
+    /// Stop |  |  |  | notify-send "turn done"
+    /// ```
+    ///
+    /// The command is everything after the fourth separator, so a shell pipeline
+    /// needs no escaping — which is also why the *matcher* is written with
+    /// commas and translated to the harnesses' `|` alternation here. A matcher
+    /// that had to carry a literal pipe would make the one field operators write
+    /// most often the one they cannot type.
+    pub fn from_editor_line(line: &str) -> Result<Self, String> {
+        let fields: Vec<&str> = line.splitn(5, '|').collect();
+        if fields.len() != 5 {
+            return Err(EDITOR_LINE_FORMAT.into());
+        }
+        let event = HookEvent::from_wire(fields[0].trim()).ok_or_else(|| {
+            format!(
+                "'{}' is not a lifecycle event; one of: {}",
+                fields[0].trim(),
+                HookEvent::ALL
+                    .iter()
+                    .map(|event| event.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+        let matcher = match fields[1].trim() {
+            "" => match_all(),
+            matcher => matcher.replace(',', "|"),
+        };
+        let harnesses = fields[2]
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                HarnessProvider::from_wire(name)
+                    .ok_or_else(|| format!("'{name}' is not a harness Medulla launches"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let timeout = match fields[3].trim() {
+            "" => None,
+            value => Some(
+                value
+                    .parse::<u64>()
+                    .map_err(|_| format!("'{value}' is not a number of seconds"))?,
+            ),
+        };
+        let command = fields[4].trim().to_string();
+        if command.is_empty() {
+            return Err("a hook needs a command to run".into());
+        }
+        Ok(HookSpec {
+            event,
+            matcher,
+            handler: HookHandler::Command { command, timeout },
+            harnesses,
+            label: None,
+            builtin: false,
+        })
+    }
 }
+
+/// The editor form, quoted back at an operator who mistyped it.
+const EDITOR_LINE_FORMAT: &str = "Event | matcher | harnesses | timeout | command";
 
 /// The `[[hooks]]` config section: every hook Medulla installs into the
 /// harnesses it launches.
@@ -200,6 +332,31 @@ impl HooksConfig {
             .iter()
             .filter(|hook| hook.applies_to(provider))
             .collect()
+    }
+
+    /// Only the hooks an operator declared, in config order.
+    ///
+    /// The set a config file should contain: built-ins are resolved at load and
+    /// writing them back would freeze today's defaults into the operator's file,
+    /// where a later Medulla could neither update nor withdraw them.
+    pub fn operator_hooks(&self) -> Vec<HookSpec> {
+        self.hooks
+            .iter()
+            .filter(|hook| !hook.builtin)
+            .cloned()
+            .collect()
+    }
+
+    /// Put `builtin` ahead of the operator's own hooks.
+    ///
+    /// Ahead rather than behind because a built-in only observes: it reports
+    /// what happened and never decides, so an operator hook that *does* decide
+    /// should see the event with the report already on its way. Existing
+    /// built-ins are replaced, so resolving twice is not additive.
+    pub fn with_builtin(&self, builtin: Vec<HookSpec>) -> HooksConfig {
+        let mut hooks = builtin;
+        hooks.extend(self.operator_hooks());
+        HooksConfig { hooks }
     }
 }
 

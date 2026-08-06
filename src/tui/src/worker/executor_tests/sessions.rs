@@ -335,8 +335,7 @@ async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
         first.reply, second.reply,
         "each task must be answered on its own terms, not handed the other's answer"
     );
-    // Two rows, not one. A closed session keeps its row so its last screen
-    // stays readable, so this counts sessions *opened*: one each. With the old
+    // Two rows, not one: this counts sessions *opened*, one each. With the old
     // inference the second task reclaimed the first's idle session and this was
     // 1 — the leak, stated as a number.
     let rows = sessions.rows();
@@ -345,135 +344,22 @@ async fn sequential_task_frames_from_one_sender_do_not_share_a_session() {
         2,
         "each bounded task must open its own session, not inherit the last one"
     );
+    // Both are still standing, and that is the point: a session is retained when
+    // its task answers so the work stays readable. What keeps the second task
+    // out of the first's session is the retention flag, not the teardown that
+    // used to do it — so the isolation above holds without destroying either.
     assert!(
-        !rows.iter().any(|row| row.state.is_running()),
-        "a bounded task closes its session when it replies: {:?}",
-        rows.iter().map(|r| r.state).collect::<Vec<_>>()
+        rows.iter().all(|row| row.retained),
+        "a bounded task retains its session when it replies: {:?}",
+        rows.iter()
+            .map(|r| (r.retained, r.state))
+            .collect::<Vec<_>>()
     );
     sessions.shutdown();
 }
 
-#[tokio::test]
-async fn a_dispatch_into_a_workspace_the_operator_holds_is_refused() {
-    // The bug this closes: taking over the only harness in a workspace did not
-    // stop the orchestrator working there — `session_for` fell through the reuse
-    // branch and simply OPENED A SECOND HARNESS in the same folder. Two agents,
-    // one working tree, no mutual exclusion. So the assertion that matters here
-    // is not just that the task is refused; it is that nothing new was spawned.
-    use super::super::pty::{HarnessControl, LaunchSpec};
-
-    let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path().to_string_lossy().into_owned();
-    let rollout = dir.path().join("rollout-held.jsonl");
-    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "unreachable");
-
-    let (executor, env) = harness(dir.path(), &cwd);
-    let sessions = executor.sessions_for_test();
-
-    // The operator starts a harness here and keeps it.
-    let held = sessions
-        .open(LaunchSpec {
-            provider: HarnessProvider::Codex,
-            bin: "/bin/sh".to_string(),
-            cwd: cwd.clone(),
-            env: HashMap::new(),
-            extra_args: vec!["-c".to_string(), "sleep 30".to_string()],
-            skip_permissions: false,
-            label: "you:codex".to_string(),
-            model: None,
-            session_id: None,
-            control: HarnessControl::User,
-            origin: crate::worker::pty::SessionOrigin::User,
-            name: None,
-            mcp_grant_session: None,
-        })
-        .expect("the operator's harness must start");
-    let before = sessions.rows().len();
-
-    let error = tokio::time::timeout(
-        Duration::from_secs(30),
-        executor
-            .clone()
-            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
-    )
-    .await
-    .expect("must settle")
-    .expect_err("a workspace an operator holds must refuse the task");
-
-    assert!(
-        error.starts_with(medulla::daemon::HARNESS_HELD_PREFIX),
-        "the refusal must carry the shared prefix so the hub can settle it as \
-         Held rather than as an ordinary worker error — got: {error}"
-    );
-    assert_eq!(
-        sessions.rows().len(),
-        before,
-        "refusing the task must not leave a rival harness running in the \
-         operator's working tree"
-    );
-
-    sessions.close(&held);
-    sessions.shutdown();
-}
-
-#[tokio::test]
-async fn a_dispatch_runs_again_once_the_harness_is_handed_back() {
-    // The other half: the hold is a pause, not a wall. Handing back must make
-    // the workspace usable again without the operator restarting anything.
-    use super::super::pty::{HarnessControl, LaunchSpec};
-
-    let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path().to_string_lossy().into_owned();
-    let rollout = dir.path().join("rollout-handback.jsonl");
-    let script = fake_harness_script(&rollout.to_string_lossy(), &cwd, "picked it up");
-
-    let (executor, env) = harness(dir.path(), &cwd);
-    let sessions = executor.sessions_for_test();
-
-    // The operator's harness runs the fake agent, not a bare shell: after the
-    // handback the executor REUSES this very process, so it has to be something
-    // that can actually serve the turn.
-    let held = sessions
-        .open(LaunchSpec {
-            provider: HarnessProvider::Codex,
-            bin: "/bin/sh".to_string(),
-            cwd: cwd.clone(),
-            env: env.clone(),
-            extra_args: vec!["-c".to_string(), script.clone()],
-            skip_permissions: false,
-            label: "you:codex".to_string(),
-            model: None,
-            session_id: None,
-            control: HarnessControl::User,
-            origin: crate::worker::pty::SessionOrigin::User,
-            name: None,
-            mcp_grant_session: None,
-        })
-        .expect("the operator's harness must start");
-
-    assert!(tokio::time::timeout(
-        Duration::from_secs(30),
-        executor
-            .clone()
-            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
-    )
-    .await
-    .expect("must settle")
-    .is_err());
-
-    // The operator hands it back.
-    assert!(sessions.set_control(&held, HarnessControl::Orchestrator));
-
-    let reply = tokio::time::timeout(
-        Duration::from_secs(30),
-        executor
-            .clone()
-            .run_for_test(options(&env, "peer-bob", &script, &cwd)),
-    )
-    .await
-    .expect("must settle")
-    .expect("a handed-back workspace must accept work again");
-    assert!(reply.reply.contains("picked it up"), "got: {reply:?}");
-
-    sessions.shutdown();
-}
+// Dispatch into a checkout an operator is working in is covered by
+// [`super::control`], which owns the whole control model: a held session is not
+// a dispatch candidate, a dispatch with nothing else available queues rather
+// than failing, and a queue that outlives its budget ends in a real error. The
+// two tests that used to live here asserted the refusal those replaced.

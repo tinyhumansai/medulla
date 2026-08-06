@@ -17,6 +17,8 @@ fn preset(id: &str, host_id: &str) -> CustomHarnessConfig {
         default: false,
         api_key_env: "OPENROUTER_API_KEY".to_string(),
         base_url: String::new(),
+        codex_overrides: false,
+        reasoning_effort: None,
     }
 }
 

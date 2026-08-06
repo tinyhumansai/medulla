@@ -38,6 +38,65 @@ fn codex_uses_the_openai_endpoint_and_no_claude_tier_environment() {
 }
 
 #[test]
+fn a_codex_preset_publishes_its_knobs_only_when_it_opts_in() {
+    let mut preset = CustomHarnessConfig::from_editor_line(
+        "deepseek-codex | DeepSeek via Codex | codex | deepseek/deepseek-v4-pro | | host-2",
+    )
+    .unwrap();
+    // Opting in is what changes which account Codex authenticates as, so an
+    // ordinary Codex preset must stay silent — see `crate::codex_overrides`.
+    assert!(preset.harness_env().is_empty());
+
+    preset.codex_overrides = true;
+    preset.reasoning_effort = Some(" medium ".into());
+    preset.context_window = Some(128_000);
+    let preset = preset.normalize().unwrap();
+    let env: HashMap<String, String> = preset.harness_env().into_iter().collect();
+    assert_eq!(env.get(crate::codex_overrides::OVERRIDES_ENV).unwrap(), "1");
+    assert_eq!(
+        env.get(crate::codex_overrides::EFFORT_ENV).unwrap(),
+        "medium"
+    );
+    assert_eq!(
+        env.get(crate::codex_overrides::CONTEXT_WINDOW_ENV).unwrap(),
+        "128000"
+    );
+    assert_eq!(
+        env.get(crate::codex_overrides::DISPLAY_NAME_ENV).unwrap(),
+        "DeepSeek via Codex"
+    );
+    // The Claude tier variables belong to Claude Code alone.
+    assert!(!env.contains_key("ANTHROPIC_DEFAULT_OPUS_MODEL"));
+}
+
+#[test]
+fn an_opted_in_preset_without_optional_knobs_publishes_only_activation_and_name() {
+    // The previous test only covered the enabled path with both optional
+    // values (`reasoningEffort`, `contextWindow`) present. A preset that opts
+    // in without naming either must still publish activation and the display
+    // name, and nothing else — `codex_overrides::launch_args` supplies its own
+    // defaults for the rest.
+    let mut preset = CustomHarnessConfig::from_editor_line(
+        "deepseek-codex | DeepSeek via Codex | codex | deepseek/deepseek-v4-pro | | host-2",
+    )
+    .unwrap();
+    preset.codex_overrides = true;
+    // Blank, not absent: normalize() must still treat it as unset.
+    preset.reasoning_effort = Some("   ".into());
+    let preset = preset.normalize().unwrap();
+
+    let env: HashMap<String, String> = preset.harness_env().into_iter().collect();
+    assert_eq!(env.get(crate::codex_overrides::OVERRIDES_ENV).unwrap(), "1");
+    assert_eq!(
+        env.get(crate::codex_overrides::DISPLAY_NAME_ENV).unwrap(),
+        "DeepSeek via Codex"
+    );
+    assert!(!env.contains_key(crate::codex_overrides::EFFORT_ENV));
+    assert!(!env.contains_key(crate::codex_overrides::CONTEXT_WINDOW_ENV));
+    assert_eq!(env.len(), 2, "{env:?}");
+}
+
+#[test]
 fn opencode_presets_are_accepted_so_its_traffic_is_attributed_too() {
     // OpenCode was excluded while presets were only an endpoint adapter, since it
     // reaches OpenRouter natively. That native path is the one that bypasses

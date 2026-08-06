@@ -32,7 +32,8 @@ use tinyflows::graph_ops::GraphOp;
 use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, WorkflowStore};
 
 pub use evolve::{
-    accept_proposal, add_note, evolve, notes, proposals, propose, reject_proposal, verify_proposal,
+    accept_proposal, add_note, author, evolve, notes, proposals, propose, reject_proposal,
+    verify_proposal,
 };
 #[cfg(test)]
 pub(crate) use graph::set_defaults_observed;

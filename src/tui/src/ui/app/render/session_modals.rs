@@ -13,23 +13,22 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use super::super::types::{App, HarnessPickerStep};
+use super::super::types::{AgentPickerStep, App};
 
 const HARNESS_TRAILER_LINES: usize = 3;
 
 impl App {
-    /// Draw the "start a harness" picker.
+    /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {
-        let Some(picker) = &self.harness_picker else {
+        let Some(picker) = &self.agent_picker else {
             return;
         };
         let (rows, title) = match picker.step {
-            HarnessPickerStep::Harness => (
+            AgentPickerStep::Harness => (
                 picker.choices.len(),
-                "Choose harness — ↑/↓ · Enter workspace · Esc cancel",
+                "Choose a harness type — ↑/↓ · Enter workspace · Esc cancel",
             ),
-            HarnessPickerStep::Decision => (2, "Choose control — ↑/↓ · Enter confirm · Esc back"),
-            HarnessPickerStep::Workspace => (
+            AgentPickerStep::Workspace => (
                 picker.workspace_choices.len(),
                 "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
             ),
@@ -52,9 +51,32 @@ impl App {
         f.render_widget(Clear, area);
         f.render_widget(block, area);
 
+        // Where each offered row lands, and which entry of the step's own list
+        // it stands for. Recorded here rather than recomputed at click time
+        // because the harness step *windows* a long list: the third row on
+        // screen is not the third provider, and a pointer that assumed it was
+        // would start the wrong CLI in the operator's workspace.
+        let mut hits: Vec<(Rect, usize)> = Vec::new();
+        // Rows are full-width, so aiming anywhere on the line works — a target
+        // clipped to the label would make the short names hard to hit and leave
+        // dead gaps between them.
+        let row_hit = |index: usize, line: usize, hits: &mut Vec<(Rect, usize)>| {
+            let y = inner.y + line as u16;
+            if y < inner.bottom() {
+                hits.push((
+                    Rect {
+                        x: inner.x,
+                        y,
+                        width: inner.width,
+                        height: 1,
+                    },
+                    index,
+                ));
+            }
+        };
         let mut lines =
             match picker.step {
-                HarnessPickerStep::Harness => {
+                AgentPickerStep::Harness => {
                     let capacity = (inner.height as usize).saturating_sub(HARNESS_TRAILER_LINES);
                     let range = harness_choice_window(picker.choices.len(), picker.index, capacity);
                     picker.choices[range.clone()]
@@ -62,6 +84,7 @@ impl App {
                         .enumerate()
                         .map(|(offset, choice)| {
                             let index = range.start + offset;
+                            row_hit(index, offset, &mut hits);
                             let marker = if index == picker.index { "❯ " } else { "  " };
                             let style = if index == picker.index {
                                 self.theme.selection()
@@ -75,74 +98,15 @@ impl App {
                         })
                         .collect()
                 }
-                HarnessPickerStep::Decision => {
-                    let selected = picker
-                        .choices
-                        .get(picker.index)
-                        .map(|choice| choice.display_name())
-                        .unwrap_or("harness");
-                    let managed = picker.managed;
-                    // The workspace was chosen on the previous step, so name it
-                    // here: this is the last screen before the harness starts,
-                    // and "in which directory" is the fact the operator has to
-                    // be sure of before answering.
-                    let ws_display = picker
-                        .workspace_choices
-                        .get(picker.workspace_index)
-                        .map(|choice| choice.path.as_str())
-                        .unwrap_or("(none)");
-                    vec![
-                        TLine::from(Span::styled(
-                            format!("  {selected}"),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )),
-                        TLine::from(Span::styled(
-                            // Clipped from the left like the workspace list
-                            // itself: the leaf directory is what identifies a
-                            // path, and it is the end that a plain truncation
-                            // throws away.
-                            format!("  in {}", medulla::ui::util::clip_left(ws_display, 52)),
-                            Style::default().add_modifier(Modifier::DIM),
-                        )),
-                        TLine::from(""),
-                        TLine::from(Span::styled(
-                            format!(
-                                "{}Managed · orchestrator can dispatch into it",
-                                if managed { "❯ " } else { "  " }
-                            ),
-                            if managed {
-                                self.theme.selection()
-                            } else {
-                                Style::default()
-                            },
-                        )),
-                        TLine::from(Span::styled(
-                            format!(
-                                "{}Unmanaged · you hold it, orchestrator won't dispatch",
-                                if !managed { "❯ " } else { "  " }
-                            ),
-                            if !managed {
-                                self.theme.selection()
-                            } else {
-                                Style::default()
-                            },
-                        )),
-                        TLine::from(""),
-                        TLine::from(Span::styled(
-                            "  Enter confirm · Esc back",
-                            Style::default().add_modifier(Modifier::DIM),
-                        )),
-                    ]
-                }
-                HarnessPickerStep::Workspace => {
-                    let selected_harness = picker
+                AgentPickerStep::Workspace => {
+                    let selected_session = picker
                         .choices
                         .get(picker.index)
                         .map(|choice| choice.display_name())
                         .unwrap_or("harness");
                     let mut lines = vec![
                         TLine::from(Span::styled(
-                            format!("  {selected_harness}"),
+                            format!("  {selected_session}"),
                             Style::default().add_modifier(Modifier::BOLD),
                         )),
                         TLine::from(format!(
@@ -157,8 +121,14 @@ impl App {
                             Style::default().add_modifier(Modifier::DIM),
                         )));
                     }
+                    // The completions begin below the header lines already
+                    // pushed, so the offset is taken from the vector rather
+                    // than written as a constant that the next edit here would
+                    // silently make wrong.
+                    let first = lines.len();
                     lines.extend(picker.workspace_choices.iter().enumerate().map(
                         |(index, choice)| {
+                            row_hit(index, first + index, &mut hits);
                             let marker = if index == picker.workspace_index {
                                 "❯ "
                             } else {
@@ -187,7 +157,9 @@ impl App {
                     lines
                 }
             };
-        if picker.step == HarnessPickerStep::Harness {
+        self.hit_agent_picker = Some((area, hits));
+        let picker = self.agent_picker.as_ref().expect("picker is present");
+        if picker.step == AgentPickerStep::Harness {
             lines.push(TLine::from(""));
             lines.push(TLine::from(Span::styled(
                 "  Next: choose a workspace",
@@ -195,14 +167,13 @@ impl App {
             )));
         }
         // Said here as well as in the status line, because it is the one fact
-        // that makes this different from every other way to start a harness.
-        // Skip on the Decision step — it already shows both options inline.
-        if picker.step != HarnessPickerStep::Decision {
-            lines.push(TLine::from(Span::styled(
-                "  unmanaged · the orchestrator will not dispatch into it",
-                Style::default().add_modifier(Modifier::DIM),
-            )));
-        }
+        // that makes this different from every other way to start a session —
+        // and it is now a statement rather than a question, so it is said on
+        // both steps and never asked.
+        lines.push(TLine::from(Span::styled(
+            "  unmanaged · the orchestrator will not dispatch into it",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 
@@ -263,9 +234,9 @@ impl App {
         };
         let area = centered(area, 72, 12);
         let title = if prompt.is_takeover {
-            "Take control of this harness"
+            "Take control of this session"
         } else {
-            "You still have this harness"
+            "You still have this session"
         };
         let block = Block::default()
             .borders(Borders::ALL)
@@ -294,7 +265,7 @@ impl App {
                 ],
             );
             let lines = vec![
-                TLine::from("The orchestrator is using this harness."),
+                TLine::from("The orchestrator is using this session."),
                 TLine::from("Take control to type into it."),
                 TLine::from(""),
                 hint,
@@ -307,9 +278,9 @@ impl App {
         // focused in may not know they are holding anything. The sentence says
         // which of the two happened rather than implying the second.
         let how = if prompt.took_control {
-            "You took this harness when you focused in."
+            "You took this session when you focused in."
         } else {
-            "You asked for this harness."
+            "You asked for this session."
         };
         // The note line shows a caret only while it is being edited, so the
         // operator can tell at a glance whether `y` will answer or type.

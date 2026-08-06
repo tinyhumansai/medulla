@@ -76,7 +76,7 @@ fn folder_completion_keeps_only_the_best_bounded_set() {
 /// An Agents-tab app with a picker parked on its workspace step, whose default
 /// workspace is `workspace`.
 fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
-    use super::types::{App, HarnessPicker, HarnessPickerStep};
+    use super::types::{AgentPicker, AgentPickerStep, App};
 
     let mut loaded = medulla::config::LoadedConfig::defaults("medulla.tui.json".into());
     loaded.config.link = Some(medulla::config::LinkConfig::default());
@@ -84,7 +84,7 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         std::sync::Arc::new(medulla::runtime::mock::MockRuntime::empty()),
         loaded,
     );
-    app.set_local_harnesses(crate::ui::harness_pane::LocalHarnesses {
+    app.set_local_sessions(crate::ui::harness_pane::LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
         log: None,
         sessions: crate::worker::pty::PtyManager::new(),
@@ -97,16 +97,16 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         router: None,
         attribution: true,
     });
-    app.harness_picker = Some(HarnessPicker {
+    app.agent_picker = Some(AgentPicker {
+        purpose: super::types::PickerPurpose::Spawn,
         choices: Vec::new(),
         index: 0,
-        step: HarnessPickerStep::Workspace,
+        step: AgentPickerStep::Workspace,
         cwd: workspace.to_string_lossy().into_owned(),
         workspace_query: String::new(),
         workspace_choices: Vec::new(),
         workspace_index: 0,
         workspace_picked: false,
-        managed: true,
     });
     app
 }
@@ -126,7 +126,7 @@ fn a_pasted_directory_starts_there_rather_than_in_its_first_child() {
     app.on_event(crossterm::event::Event::Paste(pasted));
 
     assert!(
-        !app.harness_picker
+        !app.agent_picker
             .as_ref()
             .unwrap()
             .workspace_choices
@@ -134,7 +134,7 @@ fn a_pasted_directory_starts_there_rather_than_in_its_first_child() {
         "the children are still offered as completions"
     );
     assert_eq!(
-        app.selected_harness_workspace()
+        app.selected_picker_workspace()
             .map(std::path::PathBuf::from),
         Some(root.path().to_path_buf()),
         "but Enter starts in the directory that was actually pasted"
@@ -159,7 +159,7 @@ fn arrowing_onto_a_completion_still_wins_over_the_typed_query() {
     ));
 
     assert_eq!(
-        app.selected_harness_workspace()
+        app.selected_picker_workspace()
             .map(std::path::PathBuf::from),
         Some(root.path().join("alpha")),
         "a deliberately chosen completion is still what Enter uses"

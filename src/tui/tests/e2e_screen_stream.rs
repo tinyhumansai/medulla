@@ -27,7 +27,7 @@ use medulla::hub::ScreenStore;
 use medulla::protocol::{
     parse_screen_message, ApplyOutcome, HarnessProvider, ScreenMessage, TaskFrameKind,
 };
-use medulla_tui::worker::pty::{HarnessControl, LaunchSpec, PtyManager};
+use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 use medulla_tui::worker::stream::{send_fn, ScreenRouter};
 
 /// How long to allow for a child to paint and a frame to be sampled.
@@ -49,6 +49,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     LaunchSpec {
         provider: HarnessProvider::Codex,
+        preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
         env,
@@ -57,7 +58,7 @@ fn sh(script: &str, label: &str) -> LaunchSpec {
         label: label.to_string(),
         session_id: None,
         model: None,
-        control: HarnessControl::Orchestrator,
+        control: SessionControl::Orchestrator,
         origin: medulla_tui::worker::pty::SessionOrigin::Orchestrator,
         name: None,
         mcp_grant_session: None,

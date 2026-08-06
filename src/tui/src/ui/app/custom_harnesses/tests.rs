@@ -45,6 +45,40 @@ fn adds_edits_and_deletes_a_preset_without_persisting_the_key_value() {
 }
 
 #[test]
+fn editing_a_codex_preset_keeps_its_codex_overrides_and_reasoning_effort() {
+    // Regression test: the compact editor line has no room for the two Codex
+    // knobs (see `CustomHarnessConfig::from_editor_line`), so a naive save
+    // through the TUI editor silently turned `codexOverrides` back off and
+    // dropped `reasoningEffort` on every edit of an existing preset.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    let mut app = app_with_config(&path);
+
+    app.save_custom_harness(
+        None,
+        "deepseek-codex | DeepSeek via Codex | codex | deepseek/deepseek-chat | | this-device",
+    );
+    assert_eq!(app.custom_harnesses.len(), 1);
+    app.custom_harnesses[0].codex_overrides = true;
+    app.custom_harnesses[0].reasoning_effort = Some("high".to_string());
+
+    // Edit the preset through the same compact-line path a real TUI edit uses,
+    // changing only the display name.
+    app.save_custom_harness(
+        Some("deepseek-codex"),
+        "deepseek-codex | DeepSeek via Codex (v2) | codex | deepseek/deepseek-chat | | this-device",
+    );
+
+    assert_eq!(app.custom_harnesses.len(), 1);
+    assert_eq!(app.custom_harnesses[0].name, "DeepSeek via Codex (v2)");
+    assert!(app.custom_harnesses[0].codex_overrides);
+    assert_eq!(
+        app.custom_harnesses[0].reasoning_effort.as_deref(),
+        Some("high")
+    );
+}
+
+#[test]
 fn duplicate_ids_are_rejected_without_overwriting_the_existing_preset() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");

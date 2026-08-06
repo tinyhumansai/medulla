@@ -37,7 +37,7 @@ impl App {
     /// [`agents_panes`](crate::ui::app::render) lays out from, so the keyboard
     /// and the screen cannot disagree about whether there is somewhere to type.
     pub fn agents_composer_shown(&self) -> bool {
-        self.on_orchestrator_lane() && self.harness_pane_session.is_none()
+        self.on_orchestrator_lane() && self.pane_session.is_none()
     }
 
     /// Whether the Agents rail currently holds the keyboard.
@@ -51,11 +51,19 @@ impl App {
         self.agents_focus == AgentsFocus::Rail || !self.agents_composer_shown()
     }
 
-    /// Whether the rail cursor sits on the `+ New session` action row.
-    pub(in crate::ui::app) fn on_new_harness_row(&self) -> bool {
+    /// Whether the rail cursor sits on the `+ New agent` action row.
+    pub(in crate::ui::app) fn on_new_agent_row(&self) -> bool {
         let rows = self.rail_rows();
         rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
-            .is_some_and(|row| row.is_new_harness())
+            .is_some_and(|row| row.is_new_agent())
+    }
+
+    /// The agent whose `+ new session` action row the cursor sits on, if it does.
+    pub(in crate::ui::app) fn on_new_session_row(&self) -> Option<String> {
+        let rows = self.rail_rows();
+        rows.get(self.agent_index.min(rows.len().saturating_sub(1)))
+            .and_then(|row| row.new_session_agent())
+            .map(str::to_string)
     }
 
     /// Move the keyboard to the rail. Nothing else about the draft changes, so
@@ -86,14 +94,14 @@ impl App {
             // its diff rather than making the operator tab across and rely on
             // the Changes view to remember which of several harnesses they had
             // selected. When no harness is shown, `d` remains ordinary typing.
-            KeyCode::Char('d') if !ctrl && !alt && self.harness_pane_session.is_some() => {
+            KeyCode::Char('d') if !ctrl && !alt && self.pane_session.is_some() => {
                 AgentsKey::Handled(self.open_selected_harness_changes())
             }
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
                 } else {
-                    self.set_status("Select a running harness task first");
+                    self.set_status("Select a running session first");
                 }
                 AgentsKey::Handled(None)
             }
@@ -106,12 +114,19 @@ impl App {
                 AgentsKey::Handled(self.retarget_watch())
             }
             // Enter is "I have found the row I wanted; let me type" — except on
-            // the rows that are themselves an action: the harness starter, and a
-            // lane's `+N more`, where it pages the hidden sublanes into view. A
-            // visible harness consumes it earlier and takes the keyboard instead.
+            // the rows that are themselves an action: `+ New agent`, an agent's
+            // `+ new session`, and a lane's `+N more`, where it pages the hidden
+            // sessions into view. A visible session pane consumes it earlier and
+            // takes the keyboard instead.
             KeyCode::Enter => {
-                if self.on_new_harness_row() {
-                    self.open_harness_picker();
+                if self.on_new_agent_row() {
+                    self.open_new_agent_picker();
+                } else if let Some(agent_id) = self.on_new_session_row() {
+                    // The same flow `Ctrl-T` opens on an agent row: the name
+                    // prompt, then a session in that agent's declared harness
+                    // and directory. Enter is how a row that *is* an action is
+                    // taken, so the two doors lead to one place.
+                    self.open_new_session(&agent_id);
                 } else if !self.page_subtasks() {
                     self.focus_agents_composer();
                 }

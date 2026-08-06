@@ -192,6 +192,7 @@ impl PtyManager {
             SessionMeta {
                 id: id.clone(),
                 provider: spec.provider,
+                preset: spec.preset,
                 cwd: spec.cwd,
                 branch,
                 gh_repo_is_set: spec.env.contains_key("GH_REPO"),

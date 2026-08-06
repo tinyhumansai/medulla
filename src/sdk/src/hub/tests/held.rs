@@ -1,4 +1,12 @@
-//! Refusing a task because a person is working in the workspace.
+//! Deferring a task because a person is working in the checkout.
+//!
+//! Narrower than it was. A dispatch no longer refuses on meeting a person —
+//! their session is simply not a candidate, and a dispatch with nothing else to
+//! run in queues behind the checkout's writer. `RunError::Held` is what that
+//! queue reports when it outlives the caller's budget, which is the one path
+//! left to it and the reason the shape below is unchanged: the backend already
+//! reads `harnessHeld` as retryable, and a task that was never attempted must
+//! not come back as one that failed.
 //!
 //! Two halves, and they have to agree. The daemon can only say so in the text of
 //! an `error` frame, so [`settle`](super::super::runner) has to recognise that
@@ -95,6 +103,7 @@ fn a_successful_task_reports_its_reply_and_usage() {
                 output_tokens: 5,
             },
             harness: None,
+            session_id: None,
         }),
     );
 
@@ -103,4 +112,61 @@ fn a_successful_task_reports_its_reply_and_usage() {
     assert_eq!(frame["usage"]["inputTokens"], 3);
     assert_eq!(frame["usage"]["outputTokens"], 5);
     assert!(frame.get("retryable").is_none());
+}
+
+/// The half of C2 that costs nothing on the backend: the result names the
+/// session that served the task, so a manager's ledger can record *where* the
+/// work happened. Additive — the backend's result handler validates nothing
+/// beyond `taskId` — and the slot it lands in already exists.
+#[test]
+fn a_result_reports_the_session_that_served_the_task() {
+    let frame = result_frame(
+        "t1",
+        &Ok(TaskOutcome {
+            reply: "done".to_string(),
+            usage: crate::protocol::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            harness: None,
+            session_id: Some("sess-42".to_string()),
+        }),
+    );
+
+    assert_eq!(frame["sessionId"], "sess-42");
+}
+
+/// A worker that reported no session — one that predates the key, or a workflow
+/// run, which is a graph rather than one session — leaves the key absent. Blank
+/// counts as absent too: `""` would be recorded as a session id nothing can
+/// resume.
+#[test]
+fn a_result_claims_no_session_the_worker_did_not_report() {
+    let outcome = |session_id: Option<&str>| {
+        Ok(TaskOutcome {
+            reply: "done".to_string(),
+            usage: crate::protocol::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            harness: None,
+            session_id: session_id.map(str::to_string),
+        })
+    };
+
+    assert!(result_frame("t1", &outcome(None))
+        .get("sessionId")
+        .is_none());
+    assert!(result_frame("t1", &outcome(Some("   ")))
+        .get("sessionId")
+        .is_none());
+}
+
+/// A failure has no session to attach: the frame keeps exactly the shape it had,
+/// so nothing downstream starts reading a key that is only ever there on the
+/// success path.
+#[test]
+fn a_failed_result_carries_no_session() {
+    let frame = result_frame("t1", &Err(RunError::Worker("boom".into())));
+    assert!(frame.get("sessionId").is_none());
 }

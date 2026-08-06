@@ -53,24 +53,7 @@ fn persist_json_setting(
     key: &str,
     value: toml::Value,
 ) -> anyhow::Result<()> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(anyhow::anyhow!("Cannot read {}: {error}", path.display()));
-        }
-    };
-    let mut doc = if text.trim().is_empty() {
-        serde_json::Map::new()
-    } else {
-        serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
-            .as_object()
-            .cloned()
-            .ok_or_else(|| {
-                anyhow::anyhow!("Cannot parse {}: root must be an object", path.display())
-            })?
-    };
+    let mut doc = read_json_document(path)?;
     let mut table = doc
         .get(section)
         .and_then(serde_json::Value::as_object)
@@ -82,11 +65,7 @@ fn persist_json_setting(
             .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
     );
     doc.insert(section.to_string(), serde_json::Value::Object(table));
-    let mut rendered = serde_json::to_vec_pretty(&doc)
-        .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?;
-    rendered.push(b'\n');
-    crate::persistence::write_atomic(path, &rendered)
-        .map_err(|error| anyhow::anyhow!("Cannot write {}: {error}", path.display()))
+    write_json_document(path, &doc)
 }
 
 /// Match the loader: only `.toml` selects TOML; every other path selects JSON.
@@ -103,8 +82,33 @@ fn uses_json_format(path: &Path) -> bool {
 /// array-of-tables such as `[[hosts]]` is a root-level value, and nesting it
 /// under a section would silently produce a key nothing reads.
 pub fn persist_root_setting(path: &Path, key: &str, value: toml::Value) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        let mut doc = read_json_document(path)?;
+        doc.insert(
+            key.to_string(),
+            serde_json::to_value(value)
+                .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
+        );
+        return write_json_document(path, &doc);
+    }
     let mut doc = read_document(path)?;
     doc.insert(key.to_string(), value);
+    write_document(path, &doc)
+}
+
+/// Remove a top-level key entirely, preserving every other key and section.
+///
+/// The counterpart to [`persist_root_setting`] for a caller — such as
+/// [`persist_hooks`] — whose empty state is "the key is absent" rather than
+/// "the key holds an empty array".
+fn clear_root_setting(path: &Path, key: &str) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        let mut doc = read_json_document(path)?;
+        doc.remove(key);
+        return write_json_document(path, &doc);
+    }
+    let mut doc = read_document(path)?;
+    doc.remove(key);
     write_document(path, &doc)
 }
 
@@ -123,6 +127,18 @@ pub fn persist_section(path: &Path, section: &str, values: toml::Table) -> anyho
 
 /// Replace a complete section in a JSON config document.
 fn persist_json_section(path: &Path, section: &str, values: toml::Table) -> anyhow::Result<()> {
+    let mut doc = read_json_document(path)?;
+    doc.insert(
+        section.to_string(),
+        serde_json::to_value(values)
+            .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
+    );
+    write_json_document(path, &doc)
+}
+
+/// Parse `path` into a JSON object, treating an absent or blank file as an
+/// empty document — matching [`read_document`]'s tolerance for the TOML side.
+fn read_json_document(path: &Path) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -130,23 +146,23 @@ fn persist_json_section(path: &Path, section: &str, values: toml::Table) -> anyh
             return Err(anyhow::anyhow!("Cannot read {}: {error}", path.display()));
         }
     };
-    let mut doc = if text.trim().is_empty() {
-        serde_json::Map::new()
-    } else {
-        serde_json::from_str::<serde_json::Value>(&text)
-            .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
-            .as_object()
-            .cloned()
-            .ok_or_else(|| {
-                anyhow::anyhow!("Cannot parse {}: root must be an object", path.display())
-            })?
-    };
-    doc.insert(
-        section.to_string(),
-        serde_json::to_value(values)
-            .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?,
-    );
-    let mut rendered = serde_json::to_vec_pretty(&doc)
+    if text.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|error| anyhow::anyhow!("Cannot parse {}: {error}", path.display()))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Cannot parse {}: root must be an object", path.display()))
+}
+
+/// Render a JSON document and atomically write it to `path`, matching
+/// [`write_document`]'s TOML rendering.
+fn write_json_document(
+    path: &Path,
+    doc: &serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<()> {
+    let mut rendered = serde_json::to_vec_pretty(doc)
         .map_err(|error| anyhow::anyhow!("Cannot serialize config: {error}"))?;
     rendered.push(b'\n');
     crate::persistence::write_atomic(path, &rendered)
@@ -205,6 +221,38 @@ pub fn persist_custom_harnesses(
         .map_err(|error| anyhow::anyhow!("Cannot serialize custom harnesses: {error}"))?;
     doc.insert("customHarnesses".to_string(), value);
     write_document(path, &doc)
+}
+
+/// Replace the top-level `hooks` array while preserving all unrelated
+/// configuration.
+///
+/// `hooks` must be the operator's own hooks only — see
+/// [`HooksConfig::operator_hooks`](crate::harness_hooks::HooksConfig::operator_hooks).
+/// Writing Medulla's built-ins here would freeze one release's defaults into the
+/// operator's file, where nothing could later fix or withdraw them, and would
+/// survive `[hookDefaults] enabled = false` as a set of hooks the operator never
+/// wrote and cannot recognize.
+pub fn persist_hooks(path: &Path, hooks: &[crate::harness_hooks::HookSpec]) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !hooks.iter().any(|hook| hook.builtin),
+        "built-in hooks must never be written to an operator's config file"
+    );
+    if hooks.is_empty() {
+        return clear_root_setting(path, "hooks");
+    }
+    let value = toml::Value::try_from(hooks)
+        .map_err(|error| anyhow::anyhow!("Cannot serialize hooks: {error}"))?;
+    persist_root_setting(path, "hooks", value)
+}
+
+/// Turn Medulla's own reporting hooks on or off (`[hookDefaults] enabled`).
+pub fn persist_hook_defaults(path: &Path, enabled: bool) -> anyhow::Result<()> {
+    persist_setting(
+        path,
+        "hookDefaults",
+        "enabled",
+        toml::Value::Boolean(enabled),
+    )
 }
 
 /// Parse `path` into a TOML table, treating an absent file as an empty document.

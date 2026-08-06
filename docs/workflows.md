@@ -1,11 +1,11 @@
 # Workflows
 
-A Medulla task is one instruction handed to one harness. A **workflow** is a
+A Medulla task is one instruction handed to one agent. A **workflow** is a
 saved, multi-step plan: a directed graph whose `agent` steps each run as a real
-coding-harness session — Claude Code, Codex, or OpenCode — in the order and with
-the parallelism the graph declares. The graph is usually acyclic, but it may
-contain a **bounded loop**: a `loop` node repeats a section until its
-`max_iterations` cap or its `condition` says stop.
+agent session — on Claude Code, Codex, or OpenCode — in the order and with the
+parallelism the graph declares. The graph is usually acyclic, but it may contain
+a **bounded loop**: a `loop` node repeats a section until its `max_iterations`
+cap or its `condition` says stop.
 
 The engine is [`tinyflows`](https://github.com/tinyhumansai/tinyflows), vendored
 under `vendor/tinyflows` (see [vendoring.md](vendoring.md)). Medulla supplies the
@@ -160,7 +160,7 @@ is meaningless, or wrong, on another. Name both when you mean both.
 
 A harness that is not one of the three built-in CLIs is taken as a custom
 harness preset id — the ones this machine has configured are listed by
-`workflow_host` and in the TUI's Routing → Harnesses screen. Whether the *worker*
+`workflow_host` and in the TUI's Routing → Harness Types screen. Whether the *worker*
 that runs the step exposes that preset is only answered when it runs.
 
 `harness` must be written plainly, never as a `=`-expression. Which binary and
@@ -251,8 +251,13 @@ to anyone running a Codex profile. An install retires a managed skill an
 earlier release left in `.codex/skills`, because Codex scans both and silently
 drops a `$name` mention that resolves to two skills.
 
-Generated files carry a `medulla:managed` marker line, and nothing
-without that marker is ever overwritten or deleted — a collision is reported and
+Generated files carry a `medulla:managed` marker line — a YAML comment on the
+first line inside the frontmatter, where the harness's own parser discards it;
+above the frontmatter, as releases up to 0.7 wrote it, it stopped the
+frontmatter being read at all and the skill was listed with the marker in place
+of its description. Files written the old way are still recognised and are
+rewritten on the next install. Nothing without a marker is ever overwritten or
+deleted — a collision is reported and
 skipped, which means that workflow is *not* installed, and the command exits
 non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
 counts as someone else's for the same reason; remove it by hand to let Medulla
@@ -292,6 +297,11 @@ documented exception to `--add-dir` being a file-access grant, and the reason
 this works at all; the `permissions.additionalDirectories` *setting* grants
 access without loading skills. The flag is added only once the root actually
 holds skills, so an install nobody ran changes no argv.
+
+Every direct-spawn door adds it: the headless executor, the Workers pane's own
+sessions, and the task frames opened on a pseudo-terminal. A session that had
+the tools but not the skills could call `workflow_run` and had no way to know
+which workflows it could name.
 
 Two things this deliberately does not do. It does not relocate the harness's
 config directory: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move credentials and
@@ -384,7 +394,7 @@ Workflows is a top-level tab: a sidebar, a canvas, and a copilot.
   it never reached are dimmed, and the inspector shows the node's duration and
   any diagnostics.
 - **The copilot** (`c`) is a conversation that edits the graph. Ask for a change
-  in plain words; a real harness session makes it with the MCP tools below, and
+  in plain words; a real agent session makes it with the MCP tools below, and
   the graph is then re-read from the store so the transcript reports what
   actually changed rather than whatever the agent said it did.
 
@@ -423,7 +433,7 @@ compatible:
 - A worker's capability probe now advertises `workflows` — the ids it has
   installed, with names, descriptions, and step counts.
 - A task frame may carry a `workflow` field. Naming one makes the worker run that
-  saved graph instead of handing the frame's `text` to a harness; the text
+  saved graph instead of handing the frame's `text` to an agent; the text
   becomes the trigger payload. The ack, the reply, the correlation, and the
   work-snapshot attachment are all the ordinary ones, so an orchestrator that
   knows nothing about workflows still sees a task it dispatched and a task that
@@ -457,7 +467,7 @@ request that changes what this host holds.
 Everything is served from the same layered store the Workflows tab, the
 `medulla workflow` subcommand and the MCP tools read — a socket `get` and
 `medulla workflow get` are one implementation, so they cannot drift. `copilot` is
-not a read: it is a whole authoring turn on this machine's own harness, with the
+not a read: it is a whole authoring turn on this machine's own agent, with the
 `medulla-workflows` tools attached, and its result is derived from re-reading the
 store afterwards rather than from what the model said it did.
 
@@ -486,7 +496,7 @@ Three properties are load-bearing rather than incidental:
 A run reports itself in the *existing* `harness_work` vocabulary — a
 `plan_update` naming every node, `todo_update` as steps settle, `subagent_start`
 per agent node, and a `run_result`. So a workflow renders through the same pane
-that shows a harness's own todo list, with no rendering code of its own.
+that shows an agent's own todo list, with no rendering code of its own.
 
 ## Configuration
 

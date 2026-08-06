@@ -167,7 +167,7 @@ impl App {
         f.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: false })
-                .block(self.panel("Harnesses")),
+                .block(self.panel("Harness Types")),
             area,
         );
     }

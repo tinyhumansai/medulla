@@ -103,6 +103,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         super::socket::HarnessWiring {
             roster: roster.clone(),
             catalog: catalog.clone(),
+            local_hosts: config.local_hosts.clone(),
             runner: runner.clone(),
             subscription_strategy: subscription_strategy.clone(),
             log: config.log.clone(),
@@ -122,6 +123,7 @@ pub async fn start_hub(config: HubConfig) -> anyhow::Result<HubSession> {
         address: hub_address,
         relay,
         catalog,
+        local_hosts: config.local_hosts.clone(),
         runner: runner.clone(),
         log: config.log.clone(),
         persist: config.persist.clone(),

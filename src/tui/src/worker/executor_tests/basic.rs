@@ -28,8 +28,14 @@ async fn a_task_runs_in_a_live_session_and_returns_what_the_harness_said() {
 }
 
 #[tokio::test]
-async fn an_unattributed_task_is_bounded_and_leaves_no_session_behind() {
-    // No sender means discrete work: one session, one turn, gone on reply.
+async fn an_unattributed_task_is_bounded_and_retains_its_session() {
+    // No sender means discrete work: one session, one turn, and — since
+    // retention landed — that session kept afterwards rather than torn down, so
+    // the operator can read what it did and take it if they want to continue.
+    //
+    // What "bounded" buys is unchanged and is the point of the assertion below:
+    // the session is retained, which bars it from serving anyone else's turn.
+    // It used to be barred by no longer existing.
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();
     let rollout = dir.path().join("rollout-bounded.jsonl");
@@ -47,10 +53,16 @@ async fn an_unattributed_task_is_bounded_and_leaves_no_session_behind() {
     .expect("must settle")
     .expect("must succeed");
 
+    let rows = sessions.rows();
+    assert_eq!(rows.len(), 1, "one session for one discrete task");
     assert!(
-        sessions.rows().iter().all(|row| !row.state.is_running()),
-        "a bounded task must not leave a live session behind"
+        rows.iter().all(|row| row.retained),
+        "a bounded task must retain the session it answered on: {:?}",
+        rows.iter()
+            .map(|r| (r.retained, r.state))
+            .collect::<Vec<_>>()
     );
+    sessions.shutdown();
 }
 
 #[tokio::test]
@@ -121,7 +133,7 @@ async fn an_aborted_task_stops_waiting_and_says_so() {
     );
     assert!(
         sessions.rows().iter().any(|row| {
-            row.attention.is_some() && row.control == super::super::pty::HarnessControl::User
+            row.attention.is_some() && row.control == super::super::pty::SessionControl::User
         }),
         "the failed prompt must be handed to the operator before its task binding disappears"
     );
@@ -236,7 +248,7 @@ async fn a_session_opened_to_serve_a_task_is_orchestrator_originated() {
     assert_eq!(rows[0].name, None, "a dispatch never names a session");
 
     let id = rows[0].id.clone();
-    sessions.set_control(&id, super::super::pty::HarnessControl::User);
+    sessions.set_control(&id, super::super::pty::SessionControl::User);
     assert!(
         sessions.row(&id).unwrap().origin.is_orchestrator(),
         "taking it over is a control change, not a change of provenance"

@@ -82,6 +82,7 @@ impl HarnessDispatch for StubHarness {
                 output_tokens: 0,
             },
             harness: None,
+            session_id: None,
         })
     }
 
@@ -199,5 +200,6 @@ pub(super) fn session(
         provider: None,
         model: None,
         conversation: "pane-1".into(),
+        recap: None,
     }
 }

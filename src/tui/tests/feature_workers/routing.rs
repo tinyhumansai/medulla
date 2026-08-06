@@ -14,6 +14,7 @@ fn routing_nav_exposes_every_subpage() {
     for page in [
         "Hosts",
         "Harness Types",
+        "Hooks",
         "Agent Template",
         "Add Host",
         "Strategies",

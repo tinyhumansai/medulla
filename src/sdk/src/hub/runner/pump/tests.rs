@@ -33,14 +33,6 @@ impl Relay for Recorder {
         Vec::new()
     }
 
-    async fn contact_accepted(&self, _peer: &str) -> bool {
-        true
-    }
-
-    async fn request_contact(&self, _peer: &str) -> Result<(), String> {
-        Ok(())
-    }
-
     async fn reset_session(&self, _peer: &str) {}
 }
 

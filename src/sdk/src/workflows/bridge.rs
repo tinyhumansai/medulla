@@ -21,7 +21,7 @@
 //! saved graph instead of handing its text to a harness, with the *task id as
 //! the run id* — which is what makes the orchestrator's ordinary abort cancel
 //! the run, since every node the run dispatches carries that id as its
-//! `abort_id`. That contract is `docs/workflows.md`'s, written for tiny.place
+//! `abort_id`. That contract is `docs/workflows.md`'s, written for the host link
 //! peers; [`run_task_workflow`] reuses it verbatim for the cloud plane rather
 //! than inventing a second one.
 

@@ -5,10 +5,10 @@
 //! trait asks for collapses, because a state-synchronising link does not have
 //! the problems a store-and-forward relay had:
 //!
-//! - **No handshake.** [`request_contact`](Bridge::request_contact) succeeds
-//!   without doing anything and [`contact_accepted`](Bridge::contact_accepted)
-//!   is always true: enrollment already established the pair key, so the first
-//!   datagram is the first message.
+//! - **No handshake.** Enrollment already established the pair key, so the first
+//!   datagram is the first message. There is no contact edge to request and none
+//!   to wait on; [`send`](Bridge::send) refuses an address no enrolled peer
+//!   answers to, which is the only check there was.
 //! - **No addresses to resolve.** A worker's address *is* its node name, issued
 //!   at enrollment and stable, so [`resolve_handle`](Bridge::resolve_handle)
 //!   answers from the peer table rather than a directory lookup.
@@ -398,32 +398,10 @@ impl Bridge for LinkBridge {
         }
     }
 
-    /// No-op: enrollment is the only handshake the link has.
-    ///
-    /// The relay refused a message between non-contacts, so a sender had to ask
-    /// first and wait. Here the pair key established at enrollment *is* the
-    /// permission, and there is no edge to create.
-    async fn request_contact(&self, peer: &str) -> Result<(), String> {
-        self.resolve_handle(peer)
-            .await
-            .map(|_| ())
-            .ok_or_else(|| format!("no link peer is enrolled for address: {peer}"))
-    }
-
     /// A node name is already the address, so this only checks it is enrolled.
     async fn resolve_handle(&self, name: &str) -> Option<String> {
         let name = name.trim().trim_start_matches('@');
         self.inner.ids.contains_key(name).then(|| name.to_string())
-    }
-
-    /// True when the address belongs to an enrolled peer.
-    ///
-    /// Note this says nothing about whether the peer is *up* — that is
-    /// [`liveness`](Bridge::liveness), and the two must not be conflated. A peer
-    /// that is offline is still a peer we are permitted (and still trying) to
-    /// send to.
-    async fn contact_accepted(&self, peer: &str) -> bool {
-        self.resolve_handle(peer).await.is_some()
     }
 
     /// No-op, deliberately.

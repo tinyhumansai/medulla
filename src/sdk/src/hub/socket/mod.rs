@@ -2,7 +2,7 @@
 //!
 //! Connects to the backend's harness plane, advertises the shared worker roster
 //! (`medulla:register_agents`), and for every `medulla:task_run` the brain emits
-//! it dispatches through the [`TaskRunner`] over tiny.place and streams the
+//! it dispatches through the [`TaskRunner`] over the host link and streams the
 //! result back (`medulla:task_result`, with `medulla:task_envelope` progress).
 //! The roster is shared with the [`HubHandle`](super::HubHandle), so a worker
 //! added at runtime is targetable and re-advertised immediately.
@@ -231,7 +231,7 @@ pub(super) async fn connect_harness(
             }
             .boxed()
         })
-        // A delegated task: relay it to the worker over tiny.place, reply up.
+        // A delegated task: relay it to the worker over the host link, reply up.
         //
         // CRITICAL: spawn rather than await here. A task can run for minutes, and
         // awaiting it inside the callback starves engine.io's ping/pong — the
@@ -290,10 +290,10 @@ pub(super) async fn connect_harness(
             .boxed()
         })
         // Capability probe: answer from the roster facts, decorated with the
-        // worker's live budgets/readiness probed over tiny.place.
+        // worker's live budgets/readiness probed over the host link.
         //
         // CRITICAL: spawn rather than await, for the same reason as `task_run`.
-        // The live probe hops to the worker over tiny.place and can take tens of
+        // The live probe hops to the worker over the host link and can take tens of
         // seconds (its harness readiness probe); awaiting it inside the callback
         // starves engine.io's ping/pong and the server drops the hub, failing
         // every later delegation while this process still looks alive.

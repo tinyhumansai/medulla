@@ -37,10 +37,9 @@ cargo fmt --check                       # run `cargo fmt` to apply
 
 The e2e suites spin up in-process stand-ins so they are safe anywhere: a mock
 HTTP/SSE backend (`src/sdk/tests/support/mock_backend.rs`), a mock core
-Unix-socket server (`mock_core.rs`), a mock tiny.place API server
-(`mock_tinyplace.rs`), and mock `claude`/`codex`/`opencode` CLIs that emit
+Unix-socket server (`mock_core.rs`), mock harness servers, and mock `claude`/`codex`/`opencode` CLIs that emit
 realistic provider stream-JSONL (`mock_harness.rs`, selected via the
-`TINYPLACE_*_BIN` overrides). See [Architecture › Testing philosophy](architecture.md#testing-philosophy).
+`MEDULLA_*_BIN` overrides). See [Architecture › Testing philosophy](architecture.md#testing-philosophy).
 
 ## Coverage
 

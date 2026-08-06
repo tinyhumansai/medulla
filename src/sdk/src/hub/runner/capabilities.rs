@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use crate::protocol::{encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind};
 
 use super::types::CapabilityProbeGuard;
-use super::{RunError, TaskRunner, CONTACT_POLL, CONTACT_WAIT, MAX_RESETS};
+use super::{RunError, TaskRunner, MAX_RESETS};
 
 impl Drop for CapabilityProbeGuard {
     fn drop(&mut self) {
@@ -29,12 +29,6 @@ impl TaskRunner {
         // A failed refresh must not leave support advertised by an older worker
         // that previously occupied this address.
         self.capabilities.lock().await.remove(address);
-        if !self.relay.contact_accepted(address).await {
-            let _ = self.relay.request_contact(address).await;
-            return Err(RunError::Worker(
-                "worker has not accepted this hub contact yet".into(),
-            ));
-        }
         let mut attempt = 0;
         loop {
             let correlation_id = format!(
@@ -118,27 +112,6 @@ impl TaskRunner {
             .lock()
             .expect("aborts lock")
             .insert(abort_id.to_string(), abort.clone());
-        if !self.relay.contact_accepted(address).await {
-            let _ = self.relay.request_contact(address).await;
-            let deadline = std::time::Instant::now() + CONTACT_WAIT;
-            while std::time::Instant::now() < deadline
-                && !self.relay.contact_accepted(address).await
-            {
-                tokio::select! {
-                    biased;
-                    _ = abort.notified() => {
-                        let mut aborts = self.aborts.lock().expect("aborts lock");
-                        if aborts.get(abort_id).is_some_and(|current| {
-                            std::sync::Arc::ptr_eq(current, &abort)
-                        }) {
-                            aborts.remove(abort_id);
-                        }
-                        return (Err(RunError::Aborted), abort);
-                    },
-                    _ = tokio::time::sleep(CONTACT_POLL) => {}
-                }
-            }
-        }
         tokio::select! {
             biased;
             _ = abort.notified() => {

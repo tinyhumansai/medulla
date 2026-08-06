@@ -129,29 +129,11 @@ async fn concurrent_dispatches_are_routed_by_correlation_id() {
 async fn surfaces_a_transport_error_when_the_send_fails() {
     // The relay's send fails outright (e.g. the address can't be decoded): the
     // runner drops the waiter and returns a Transport error, not a hang.
-    let worker = FakeWorker::with(Mode::Reply("unused".to_string()), true, 0);
+    let worker = FakeWorker::with(Mode::Reply("unused".to_string()), true);
     let runner = TaskRunner::start(worker, Duration::from_millis(5));
 
     let err = runner.run(req("x"), None).await.expect_err("send fails");
     assert_eq!(err, RunError::Transport("send boom".to_string()));
-}
-
-#[tokio::test]
-async fn waits_for_contact_acceptance_before_dispatching() {
-    // The peer isn't a contact yet: the runner requests one and polls until the
-    // auto-accepter settles (here, on the third check) before it sends the task.
-    let worker = FakeWorker::with(Mode::Reply("hi".to_string()), false, 2);
-    let runner = TaskRunner::start(worker.clone(), Duration::from_millis(5));
-
-    let outcome = runner
-        .run(req("x"), None)
-        .await
-        .expect("dispatches once accepted");
-    assert_eq!(outcome.reply, "hi");
-    assert!(
-        worker.contact_checks.load(Ordering::Relaxed) >= 2,
-        "the runner should have polled contact status until acceptance"
-    );
 }
 
 #[tokio::test]
@@ -193,19 +175,6 @@ fn run_error_display_is_human_readable_per_variant() {
         "transport error: no route"
     );
 }
-
-// ------------------------------------------------------- contact on add ---
-
-/// Adding a peer opens the contact edge; re-adding retries it.
-///
-/// Deferring the request to first dispatch — which is what used to happen —
-/// makes adding a worker look like nothing happened: the peer's operator sees no
-/// approval to give, and when one finally appears it is attached to a task
-/// already blocked on it. Re-adding is then the natural way to retry a request
-/// the peer missed.
-///
-/// The decision is tested here; the socket plumbing around it belongs to the
-/// live staging E2E, as the rest of `HubHandle` does.
 
 #[tokio::test]
 async fn every_inbound_worker_frame_is_narrated_with_its_payload() {
@@ -431,37 +400,6 @@ async fn the_pump_skips_an_undecodable_frame_and_keeps_going() {
 }
 
 #[tokio::test]
-async fn an_abort_during_contact_negotiation_is_honored() {
-    // A first-time worker isn't a contact yet, so `run` polls for acceptance
-    // (up to CONTACT_WAIT) before dispatching. An abort that arrives in that
-    // window must still be honored — the abort signal is registered BEFORE the
-    // wait, so it is not silently dropped — and it must bail before any task
-    // frame reaches the worker. `accept_after` is set high so acceptance never
-    // settles on its own; only the abort can end this run.
-    let worker = FakeWorker::with(Mode::Reply("unused".to_string()), false, 10_000);
-    let runner = Arc::new(TaskRunner::start(worker.clone(), Duration::from_millis(2)));
-
-    let r = runner.clone();
-    let handle = tokio::spawn(async move { r.run(req("x"), None).await });
-
-    loop {
-        runner.abort_task("t1");
-        if handle.is_finished() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-
-    let err = handle.await.unwrap().expect_err("aborted");
-    assert_eq!(err, RunError::Aborted);
-    // Nothing was dispatched — the abort bailed before the task frame was sent.
-    assert!(
-        worker.sent_kinds().await.is_empty(),
-        "no task should reach a worker aborted during contact negotiation"
-    );
-}
-
-#[tokio::test]
 async fn aborting_an_unknown_task_is_a_harmless_no_op() {
     // A `task_abort` for a task that already settled (or was never dispatched
     // here) must not panic or block — the registry simply has no entry.
@@ -476,7 +414,7 @@ async fn aborting_an_unknown_task_is_a_harmless_no_op() {
 
 #[tokio::test]
 async fn a_frame_from_another_peer_cannot_settle_a_dispatch() {
-    // The inbox is shared by every peer holding a contact edge with this
+    // The inbox is shared by every enrolled peer of this
     // identity, and a correlation id is not a secret. Without binding each
     // waiter to the worker it dispatched to, the first `reply` under the right
     // id won — whoever sent it — so any contact could settle another worker's

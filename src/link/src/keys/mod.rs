@@ -4,13 +4,13 @@
 //! mode `0600`, holding the node id, the role, the pair key, the forwarder key,
 //! the forwarder endpoint and the sequence reservation of §3.1.
 //!
-//! Acquisition mirrors the tiny.place identity bootstrap
+//! Acquisition mirrors the host-link identity bootstrap
 //! (`tinyplace::runtime::acquire_identity`): take an exclusive advisory lock on
 //! the identity directory, *then* load or mint. The lock matters more here than
 //! it does there. Two processes sharing a link identity would draw sequences
 //! from two independent counters under one AEAD key, which reuses nonces — so a
 //! busy identity is always an error and never a fan-out to a second slot. Unlike
-//! a tiny.place address, a node id is not interchangeable: the peer is talking
+//! a link address, a node id is not interchangeable: the peer is talking
 //! to *this* node.
 //!
 //! Nothing in this module performs enrollment. The caller supplies the state to

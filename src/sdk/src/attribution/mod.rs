@@ -85,7 +85,7 @@ pub fn attribution_trailer() -> String {
 /// [`crate::config::AttributionConfig`]. Returns an empty vector when
 /// attribution is off, or when the provider has no mechanism to retarget its
 /// trailer (Codex, Opencode). Callers prepend these to the child argv alongside
-/// `TINYPLACE_<P>_ARGS`.
+/// `MEDULLA_<P>_ARGS`.
 pub fn attribution_args(provider: HarnessProvider, enabled: bool) -> Vec<String> {
     if !enabled {
         return Vec::new();

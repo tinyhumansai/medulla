@@ -44,9 +44,9 @@ pub(super) fn agent_kind(provider: HarnessProvider) -> Option<SessionAgentKind> 
     }
 }
 
-/// The `TINYPLACE_<P>_BIN` env key, for the missing-binary error hint.
+/// The `MEDULLA_<P>_BIN` env key, for the missing-binary error hint.
 pub(super) fn provider_bin_env_key(provider: HarnessProvider) -> String {
-    format!("TINYPLACE_{}_BIN", provider.as_str().to_uppercase())
+    format!("MEDULLA_{}_BIN", provider.as_str().to_uppercase())
 }
 
 /// The owner this session forwards envelopes to: the central env chain, with the
@@ -209,7 +209,7 @@ pub(super) async fn build_bridge(
     let receive_from = tp_env::receive_from(config.provider, &config.env, recipient.as_deref());
     if recipient.is_none() && receive_from.is_none() {
         eprintln!(
-            "medulla wrapper: no link owner configured (set TINYPLACE_HARNESS_DM_TO or TINYPLACE_OPENHUMAN_OWNER) — running as a plain passthrough"
+            "medulla wrapper: no link owner configured (set MEDULLA_HARNESS_DM_TO or MEDULLA_OPENHUMAN_OWNER) — running as a plain passthrough"
         );
         return None;
     }

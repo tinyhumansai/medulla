@@ -57,7 +57,7 @@ fn app_with_harnesses(sessions: PtyManager) -> App {
         env.insert("PATH".to_string(), path);
     }
     env.insert("TERM".to_string(), "xterm-256color".to_string());
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     app.set_local_sessions(LocalSessions {
         hooks: medulla::harness_hooks::HooksConfig::default(),

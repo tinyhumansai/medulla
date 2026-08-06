@@ -20,7 +20,7 @@ fn dm_recipient_per_provider_beats_generic_beats_owner_fallbacks() {
 
     let e = env(&[
         ("OPENHUMAN_OWNER_AGENT", "legacy"),
-        ("TINYPLACE_OPENHUMAN_OWNER", "owner"),
+        ("MEDULLA_OPENHUMAN_OWNER", "owner"),
     ]);
     assert_eq!(
         dm_recipient(HarnessProvider::Codex, &e).as_deref(),
@@ -28,8 +28,8 @@ fn dm_recipient_per_provider_beats_generic_beats_owner_fallbacks() {
     );
 
     let e = env(&[
-        ("TINYPLACE_OPENHUMAN_OWNER", "owner"),
-        ("TINYPLACE_HARNESS_DM_TO", "harness"),
+        ("MEDULLA_OPENHUMAN_OWNER", "owner"),
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
     ]);
     assert_eq!(
         dm_recipient(HarnessProvider::Codex, &e).as_deref(),
@@ -37,8 +37,8 @@ fn dm_recipient_per_provider_beats_generic_beats_owner_fallbacks() {
     );
 
     let e = env(&[
-        ("TINYPLACE_HARNESS_DM_TO", "harness"),
-        ("TINYPLACE_CODEX_DM_TO", "codex"),
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
+        ("MEDULLA_CODEX_DM_TO", "codex"),
     ]);
     assert_eq!(
         dm_recipient(HarnessProvider::Codex, &e).as_deref(),
@@ -56,8 +56,8 @@ fn dm_recipient_per_provider_beats_generic_beats_owner_fallbacks() {
 #[test]
 fn empty_values_are_skipped() {
     let e = env(&[
-        ("TINYPLACE_CODEX_DM_TO", ""),
-        ("TINYPLACE_HARNESS_DM_TO", "harness"),
+        ("MEDULLA_CODEX_DM_TO", ""),
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
     ]);
     assert_eq!(
         dm_recipient(HarnessProvider::Codex, &e).as_deref(),
@@ -73,15 +73,15 @@ fn receive_from_falls_back_to_recipient() {
         Some("owner")
     );
     // Generic override wins over the recipient.
-    let e = env(&[("TINYPLACE_HARNESS_RECEIVE_FROM", "generic")]);
+    let e = env(&[("MEDULLA_HARNESS_RECEIVE_FROM", "generic")]);
     assert_eq!(
         receive_from(HarnessProvider::Codex, &e, Some("owner")).as_deref(),
         Some("generic")
     );
     // Per-provider beats generic.
     let e = env(&[
-        ("TINYPLACE_HARNESS_RECEIVE_FROM", "generic"),
-        ("TINYPLACE_CODEX_RECEIVE_FROM", "codex"),
+        ("MEDULLA_HARNESS_RECEIVE_FROM", "generic"),
+        ("MEDULLA_CODEX_RECEIVE_FROM", "codex"),
     ]);
     assert_eq!(
         receive_from(HarnessProvider::Codex, &e, Some("owner")).as_deref(),
@@ -95,18 +95,18 @@ fn receive_from_falls_back_to_recipient() {
 fn receive_enabled_default_on_and_explicit_off() {
     assert!(receive_enabled(HarnessProvider::Claude, &env(&[])));
     // Generic off.
-    let e = env(&[("TINYPLACE_HARNESS_RECEIVE", "0")]);
+    let e = env(&[("MEDULLA_HARNESS_RECEIVE", "0")]);
     assert!(!receive_enabled(HarnessProvider::Claude, &e));
     // Per-provider off beats a generic that is on.
     let e = env(&[
-        ("TINYPLACE_HARNESS_RECEIVE", "1"),
-        ("TINYPLACE_CLAUDE_RECEIVE", "0"),
+        ("MEDULLA_HARNESS_RECEIVE", "1"),
+        ("MEDULLA_CLAUDE_RECEIVE", "0"),
     ]);
     assert!(!receive_enabled(HarnessProvider::Claude, &e));
     // Per-provider on beats a generic that is off.
     let e = env(&[
-        ("TINYPLACE_HARNESS_RECEIVE", "0"),
-        ("TINYPLACE_CLAUDE_RECEIVE", "1"),
+        ("MEDULLA_HARNESS_RECEIVE", "0"),
+        ("MEDULLA_CLAUDE_RECEIVE", "1"),
     ]);
     assert!(receive_enabled(HarnessProvider::Claude, &e));
 }
@@ -114,16 +114,22 @@ fn receive_enabled_default_on_and_explicit_off() {
 #[test]
 fn provider_bin_override_and_default() {
     assert_eq!(provider_bin(HarnessProvider::Codex, &env(&[])), "codex");
-    let e = env(&[("TINYPLACE_CODEX_BIN", "/opt/codex")]);
+    let e = env(&[("MEDULLA_CODEX_BIN", "/opt/codex")]);
     assert_eq!(provider_bin(HarnessProvider::Codex, &e), "/opt/codex");
-    // Claude honors TINYVERSE_* before TINYPLACE_*, and trims.
+    // Ordering for claude is MEDULLA_ > the legacy TINYVERSE_ > the deprecated
+    // TINYPLACE_; values are trimmed.
     let e = env(&[
         ("TINYVERSE_CLAUDE_BIN", "  /opt/claude  "),
-        ("TINYPLACE_CLAUDE_BIN", "/other/claude"),
+        ("TINYPLACE_CLAUDE_BIN", "/oldest/claude"),
     ]);
     assert_eq!(provider_bin(HarnessProvider::Claude, &e), "/opt/claude");
+    let e = env(&[
+        ("MEDULLA_CLAUDE_BIN", "  /new/claude  "),
+        ("TINYVERSE_CLAUDE_BIN", "/opt/claude"),
+    ]);
+    assert_eq!(provider_bin(HarnessProvider::Claude, &e), "/new/claude");
     // Whitespace-only override falls back to the default.
-    let e = env(&[("TINYPLACE_CODEX_BIN", "   ")]);
+    let e = env(&[("MEDULLA_CODEX_BIN", "   ")]);
     assert_eq!(provider_bin(HarnessProvider::Codex, &e), "codex");
     assert_eq!(
         provider_bin(HarnessProvider::Openhuman, &env(&[])),
@@ -172,7 +178,7 @@ fn bin_is_overridden_only_when_the_resolved_binary_actually_differs() {
 #[test]
 fn provider_args_whitespace_split() {
     assert!(provider_args(HarnessProvider::Codex, &env(&[])).is_empty());
-    let e = env(&[("TINYPLACE_CODEX_ARGS", "  --foo   bar --baz ")]);
+    let e = env(&[("MEDULLA_CODEX_ARGS", "  --foo   bar --baz ")]);
     assert_eq!(
         provider_args(HarnessProvider::Codex, &e),
         vec!["--foo", "bar", "--baz"]
@@ -185,9 +191,9 @@ fn provider_args_whitespace_split() {
 fn sessions_dir_precedence() {
     // Per-provider beats TINYVERSE beats HARNESS.
     let e = env(&[
-        ("TINYPLACE_CLAUDE_SESSIONS_DIR", "/p"),
+        ("MEDULLA_CLAUDE_SESSIONS_DIR", "/p"),
         ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
-        ("TINYPLACE_HARNESS_SESSIONS_DIR", "/h"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
     ]);
     assert_eq!(
         sessions_dir(HarnessProvider::Claude, &e),
@@ -196,7 +202,7 @@ fn sessions_dir_precedence() {
 
     let e = env(&[
         ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
-        ("TINYPLACE_HARNESS_SESSIONS_DIR", "/h"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
     ]);
     assert_eq!(
         sessions_dir(HarnessProvider::Claude, &e),
@@ -206,7 +212,7 @@ fn sessions_dir_precedence() {
     // TINYVERSE is claude-only; codex ignores it and uses HARNESS.
     let e = env(&[
         ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
-        ("TINYPLACE_HARNESS_SESSIONS_DIR", "/h"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
     ]);
     assert_eq!(
         sessions_dir(HarnessProvider::Codex, &e),
@@ -228,8 +234,8 @@ fn timings_defaults_and_numeric_fallback() {
 
     // Per-provider beats generic.
     let e = env(&[
-        ("TINYPLACE_HARNESS_SESSION_POLL_MS", "800"),
-        ("TINYPLACE_CODEX_SESSION_POLL_MS", "250"),
+        ("MEDULLA_HARNESS_SESSION_POLL_MS", "800"),
+        ("MEDULLA_CODEX_SESSION_POLL_MS", "250"),
     ]);
     assert_eq!(session_poll_ms(HarnessProvider::Codex, &e), 250);
     // Generic applies when no per-provider key.
@@ -237,11 +243,11 @@ fn timings_defaults_and_numeric_fallback() {
 
     // Non-numeric / zero / negative → default silently.
     for bad in ["abc", "0", "-5", "  "] {
-        let e = env(&[("TINYPLACE_CODEX_RECEIVE_POLL_MS", bad)]);
+        let e = env(&[("MEDULLA_CODEX_RECEIVE_POLL_MS", bad)]);
         assert_eq!(receive_poll_ms(HarnessProvider::Codex, &e), 1_500);
     }
     // Whitespace-padded numeric parses.
-    let e = env(&[("TINYPLACE_CODEX_STATUS_IDLE_MS", " 12345 ")]);
+    let e = env(&[("MEDULLA_CODEX_STATUS_IDLE_MS", " 12345 ")]);
     assert_eq!(status_idle_ms(HarnessProvider::Codex, &e), 12_345);
 }
 
@@ -376,4 +382,98 @@ fn router_env_key_without_base_url_injects_nothing() {
     // routing here, so nothing is injected and the child keeps its own endpoint.
     let cfg = router(r#"{"apiKeyEnv":"K"}"#);
     assert!(router_env(HarnessProvider::Codex, &cfg).is_empty());
+}
+
+// ------------------------------------------- deprecated TINYPLACE_* names ---
+
+#[test]
+fn the_deprecated_tinyplace_names_still_resolve() {
+    // These are what deployed hosts and shell profiles already set. Dropping
+    // them would not fail loudly: a worker whose owner stopped resolving runs as
+    // a plain passthrough, serving nobody, which reads as a broken harness
+    // rather than as a config that needs renaming.
+    let e = env(&[("TINYPLACE_HARNESS_DM_TO", "old")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old")
+    );
+    let e = env(&[("TINYPLACE_CODEX_DM_TO", "old-codex")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-codex")
+    );
+    let e = env(&[("TINYPLACE_OPENHUMAN_OWNER", "old-owner")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-owner")
+    );
+
+    let e = env(&[("TINYPLACE_HARNESS_RECEIVE_FROM", "old")]);
+    assert_eq!(
+        receive_from(HarnessProvider::Codex, &e, None).as_deref(),
+        Some("old")
+    );
+    assert!(!receive_enabled(
+        HarnessProvider::Codex,
+        &env(&[("TINYPLACE_HARNESS_RECEIVE", "0")])
+    ));
+    assert_eq!(
+        provider_bin(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_BIN", "/old")])
+        ),
+        "/old"
+    );
+    assert_eq!(
+        provider_args(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_ARGS", "--a --b")])
+        ),
+        vec!["--a".to_string(), "--b".to_string()]
+    );
+    assert_eq!(
+        sessions_dir(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_SESSIONS_DIR", "/old")])
+        ),
+        PathBuf::from("/old")
+    );
+    assert_eq!(
+        session_poll_ms(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_SESSION_POLL_MS", "77")])
+        ),
+        77
+    );
+}
+
+#[test]
+fn the_medulla_name_wins_over_the_deprecated_one_at_every_tier() {
+    // Within a precedence tier the new spelling must win, or a host that set
+    // both during a migration would keep silently using the old value.
+    let e = env(&[
+        ("MEDULLA_HARNESS_DM_TO", "new"),
+        ("TINYPLACE_HARNESS_DM_TO", "old"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("new")
+    );
+
+    // ...and a per-provider *deprecated* name still beats a generic new one:
+    // the provider/generic split is the outer precedence, spelling the inner.
+    let e = env(&[
+        ("TINYPLACE_CODEX_DM_TO", "old-codex"),
+        ("MEDULLA_HARNESS_DM_TO", "new-generic"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-codex")
+    );
+
+    let e = env(&[
+        ("MEDULLA_CODEX_BIN", "/new"),
+        ("TINYPLACE_CODEX_BIN", "/old"),
+    ]);
+    assert_eq!(provider_bin(HarnessProvider::Codex, &e), "/new");
 }

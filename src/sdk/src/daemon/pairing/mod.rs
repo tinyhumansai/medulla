@@ -3,7 +3,7 @@
 //!
 //! Adding a host is a one-string problem. The orchestrator opens the channel and
 //! the daemon auto-accepts the contact, so nothing has to travel *to* the
-//! worker — only the worker's tiny.place address has to travel *back*. The
+//! worker — only the worker's link address has to travel *back*. The
 //! awkward part is that the worker is usually a box you are on over SSH, where
 //! selecting a base58 string out of scrollback is exactly the fiddly,
 //! error-prone step that makes people give up.

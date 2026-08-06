@@ -2,7 +2,7 @@
 //!
 //! This is the app-side half of [`medulla::wrapper::PtySpawner`]. The SDK needs
 //! a writable handle on the harness's input so it can inject messages arriving
-//! from tiny.place, but a full-screen TUI refuses to run with a pipe on stdin
+//! over the host link, but a full-screen TUI refuses to run with a pipe on stdin
 //! (Codex exits with `stdin is not a terminal`). Allocating a PTY satisfies
 //! both: the child sees a tty and drives the screen normally, while we keep the
 //! master side to write into.

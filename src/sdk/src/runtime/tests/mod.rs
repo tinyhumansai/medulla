@@ -29,7 +29,7 @@ fn agent_descriptor_round_trips_v314_placement_and_template_links() {
 
 #[test]
 fn worker_op_parse_add_classifies_handle_address_and_label() {
-    // A leading @ marks a tiny.place handle; the remainder is the label.
+    // A leading @ marks a link handle; the remainder is the label.
     match WorkerOp::parse_add("@alice friendly worker") {
         Some(WorkerOp::Add {
             address,

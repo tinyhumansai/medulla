@@ -5,9 +5,7 @@ use super::*;
 pub struct WorkerWiring {
     /// The session manager (shared with the daemon's inbound path).
     pub sessions: PtyManager,
-    /// The contact desk, when a tiny.place identity is configured.
-    pub contacts: Option<ContactDesk>,
-    /// This daemon's own tiny.place address.
+    /// This daemon's own link node name.
     pub agent_id: Option<String>,
     /// Harnesses detected on PATH.
     pub providers: Vec<HarnessProvider>,

@@ -23,7 +23,7 @@ fn render(screen: &mut OnboardingScreen) -> String {
 
 #[test]
 fn prefills_name_and_walks_to_identity() {
-    let mut s = OnboardingScreen::new("ada@box/10.0.0.4", None, "https://api.tiny.place");
+    let mut s = OnboardingScreen::new("ada@box/10.0.0.4", None, "https://api.tinyhumans.ai");
     let out = render(&mut s);
     assert!(out.contains("MEDULLA WORKER"), "branding: {out}");
     assert!(out.contains("ada@box/10.0.0.4"), "prefilled name: {out}");
@@ -36,7 +36,7 @@ fn prefills_name_and_walks_to_identity() {
             name: "ada@box/10.0.0.4".into()
         })
     );
-    assert!(render(&mut s).contains("setting up the tiny.place identity"));
+    assert!(render(&mut s).contains("setting up the host-link identity"));
 }
 
 #[test]

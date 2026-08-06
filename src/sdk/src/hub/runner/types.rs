@@ -38,7 +38,7 @@ pub(super) type Waiters = Arc<Mutex<HashMap<String, Waiter>>>;
 ///
 /// The address is carried, not just the channel, because a correlation id is not
 /// a secret: probe ids are predictable counters, and the inbox is shared by every
-/// peer this identity has a contact edge with. Binding the waiter to the address
+/// peer enrolled against this identity. Binding the waiter to the address
 /// the probe was sent to is what stops a peer that guesses an id from answering
 /// on another worker's behalf.
 pub(super) struct Probe<T> {

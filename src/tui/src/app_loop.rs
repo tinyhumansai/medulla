@@ -5,7 +5,7 @@
 //! [`run_tui`] selects a runtime — the embedded OpenHuman core, signing the
 //! operator in through the pre-app login screen when the core has no session —
 //! installs the panic-safe terminal guard, starts
-//! the optional tiny.place presence service, runs the event loop, and tears
+//! the optional host-link presence service, runs the event loop, and tears
 //! everything down on exit.
 
 use std::io::{self, IsTerminal};
@@ -193,7 +193,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let mut account: Option<medulla::core_host::auth::AuthState> = None;
 
     // Shared hub roster slot: filled after the hub connects, read by the
-    // runtime's worker surface so the Workers tab manages the hub's tiny.place
+    // runtime's worker surface so the Workers tab manages the hub's host-link
     // peers live.
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
     // Cloned before the core is consumed: a relogin rebuilds the runtime around
@@ -415,11 +415,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Optional background host-link service (observational only): keep per-peer
     // liveness current and surface it into the Overview panel and Agents lanes.
     let mut link_status: Option<String> = None;
-    let link_config = loaded
-        .config
-        .link
-        .clone()
-        .unwrap_or_else(|| medulla::config::default_link_config(&env));
+    let link_config = loaded.config.link.clone().unwrap_or_else(|| {
+        medulla::config::default_link_config(&env, &loaded.config.backend.base_url)
+    });
     let link_service = match medulla::protocol::service::LinkService::start(&link_config).await {
         Ok(service) => Some(service),
         Err(e) => {
@@ -601,7 +599,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Start the hub unconditionally. It used to be gated on an authenticated
     // cloud client; it reads its own credentials from the Medulla home and
     // returns `None` when there are none, so the gate only duplicated a check it
-    // already makes. The hub is tiny.place/harness wiring and stays TUI-side
+    // already makes. The hub is host-link/harness wiring and stays TUI-side
     // regardless of which runtime backs the session.
     // Held (not read) for the rest of this scope: dropping it early would tear
     // the hub session down. Whether it started is no longer a gate on the

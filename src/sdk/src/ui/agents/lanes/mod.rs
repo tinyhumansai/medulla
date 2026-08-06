@@ -519,7 +519,7 @@ fn ensure_lane(
     at: i64,
 ) {
     if !workers.contains(key) {
-        // The fallback is an agent id, which for a tiny.place peer *is* its
+        // The fallback is an agent id, which for a host-link peer *is* its
         // address — so it gets the same treatment as one.
         let mut lane = new_agent_lane(
             key.to_string(),

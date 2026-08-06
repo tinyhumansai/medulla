@@ -1,6 +1,6 @@
 //! The Medulla home directory and the early `.env` loader.
 //!
-//! Everything Medulla persists — credentials, TUI state, the tiny.place
+//! Everything Medulla persists — credentials, TUI state, the host-link
 //! identity, and the layered config file — lives under a single home directory
 //! resolved by [`medulla_home`].
 //!

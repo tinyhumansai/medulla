@@ -21,7 +21,7 @@ A worker is anything the orchestrator can delegate to. In practice that means on
 of three things.
 
 A **remote peer** is a machine registered on the fleet, reachable over
-[tiny.place](https://tiny.place) and addressable by handle or address. This is
+the host link and addressable by handle or address. This is
 what the TUI's Routing tab manages. A **local harness sandbox** is a configured
 `claude-code`, `codex`, or `opencode` instance rooted in a workspace and
 published into the roster. A **daemon machine** is `medulla daemon` offering a
@@ -66,7 +66,7 @@ Host  →  Harness  →  Workspace  →  Agent
 
 A **host** is a machine, with the cores, memory, and disk it declares. A
 **harness** is an agent CLI runtime installed on that host — `claude-code`,
-`codex`, `opencode`, `tinyplace`, `openhuman`, or something it names itself —
+`codex`, `opencode`, `openhuman`, or something it names itself —
 carrying its providers, its readiness, and its token **budgets**. A **workspace**
 is a folder that harness exposes, optionally with a parsed
 [`MEDULLA.md`](workspace-profiles.md) profile. An **agent** is a durable identity
@@ -135,14 +135,18 @@ sit alongside Medulla's model and harness routing.
 
 ### Admitting a peer
 
-A worker is a machine on the open [tiny.place](https://tiny.place) network, so
-who may send it work is a real security decision, not a formality. tiny.place
-refuses direct messages between peers that are not accepted contacts, which means
-accepting a contact is exactly what grants that peer the ability to hand your
-machine work. The default posture is manual review: incoming requests collect in
-a pending queue for you to accept, decline, or block, and blocking — being
-destructive — asks for confirmation. A relay hiccup surfaces as poller health
-rather than quietly emptying the queue.
+A worker is a machine reachable over the host link, so who may send it work is a
+real security decision, not a formality. **Enrollment is that decision, and it is
+the only one.** The pair key is generated on the orchestrator, carried to the
+host by hand, and stored in `<stateDir>/node.json`; a peer holding it may hand
+your machine work, and a peer without it cannot be addressed at all.
+
+There is no second approval step — no pending queue, no accept/decline/block.
+That model came from the tiny.place relay, which refused messages between peers
+that were not accepted contacts, so a contact edge had to be requested and
+granted on top of the transport. The host link has no such rule: it carries a
+datagram to whoever holds the matching key, so admission happens once, when you
+enroll the peer, and revocation means removing the key.
 
 ### How work reaches them
 

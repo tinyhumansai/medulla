@@ -22,7 +22,17 @@ use medulla::workflows::{
     run_workflow, LocalWorkflowHost, RunContext, StoreWorkflowResolver, LOCAL_WORKER_ADDRESS,
 };
 
+use super::super::types::PendingFrame;
 use super::AppMsg;
+
+/// How many harness progress frames may sit unread before new ones are dropped.
+///
+/// The pane draws a tail of a node's frames, so a frame with this many already
+/// queued ahead of it will have scrolled past before it is ever rendered.
+/// Matches the reporter's own `MAX_PENDING_PROGRESS` — the same trade in the
+/// cross-process direction — so a run watched locally and one watched over the
+/// control socket lose progress at the same point.
+pub(in crate::event_loop) const MAX_PENDING_FRAMES: usize = 64;
 
 /// Spawn a run of the workflow `id`, reporting the outcome on the status line.
 ///

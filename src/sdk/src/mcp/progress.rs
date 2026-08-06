@@ -16,7 +16,7 @@
 //! no token, a full channel, a client that went away — must never be allowed to
 //! affect the run it is describing.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -38,6 +38,14 @@ pub(crate) struct Progress {
     /// pretending to know how much of the work is done — a workflow's step
     /// count is known, but a step's own duration is not.
     sent: Arc<AtomicU64>,
+    /// Whether this token's call is still open.
+    ///
+    /// Shared with every clone, so the request handler can call
+    /// [`Self::deactivate`] once its own call has answered — a bounded wait
+    /// that gave up on the run, say — and the background task still holding a
+    /// clone stops emitting notifications the client has no open call to
+    /// correlate them with.
+    active: Arc<AtomicBool>,
 }
 
 impl Progress {

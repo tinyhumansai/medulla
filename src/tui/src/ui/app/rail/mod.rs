@@ -254,6 +254,36 @@ impl App {
         orphans
     }
 
+    /// The already-placed task row this device serves with `session_id`, if any.
+    ///
+    /// Matched through the daemon's running map rather than by name or
+    /// directory: `session_for_task` is the same lookup the harness pane
+    /// resolves a task's screen with, so the two surfaces cannot disagree about
+    /// which pty is serving a dispatch. Rows that already carry a local session
+    /// are skipped, so two live sessions never collapse onto one task.
+    ///
+    /// `None` once the task settles — the runtime drops the record then — which
+    /// is the right answer: a retained session outlives its task row and needs a
+    /// row of its own.
+    fn task_row_serving<'a>(
+        &self,
+        groups: &'a mut [&mut AgentGroup],
+        session_id: &str,
+    ) -> Option<&'a mut SessionRailRow> {
+        let local_sessions = self.local_sessions.as_ref()?;
+        groups
+            .iter_mut()
+            .flat_map(|group| group.sessions.iter_mut())
+            .find(|session| {
+                session.local.is_none()
+                    && session.task.as_ref().is_some_and(|task| {
+                        local_sessions
+                            .session_for_task(&task.task_id)
+                            .is_some_and(|served| served == session_id)
+                    })
+            })
+    }
+
     /// Flatten the tree into rows, wrapping agents in host rows when needed.
     fn flatten(
         &self,

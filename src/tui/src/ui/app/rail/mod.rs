@@ -353,6 +353,13 @@ impl App {
     /// Exited ones stay listed: the last screen is often the reason it exited,
     /// and a row that vanishes on failure is a row that hides the failure. They
     /// leave when the operator forgets them.
+    ///
+    /// And a dispatched session that started a workflow run is listed too, task
+    /// row or not. The task row carries `local: None`, so it has no grant to key
+    /// runs by ([`run_rows_under`]) — which meant the runs an orchestrator's own
+    /// harnesses start, the majority of them, were the ones the rail could not
+    /// show. A run is minutes-to-hours of work in another process; leaving it
+    /// invisible is the same failure retention exists to prevent.
     pub(super) fn own_session_rows(&self) -> Vec<SessionRow> {
         let Some(harnesses) = self.local_sessions.as_ref() else {
             return Vec::new();
@@ -365,6 +372,10 @@ impl App {
                 row.origin.is_user()
                     || row.control == crate::worker::pty::SessionControl::User
                     || row.retained
+                    || row
+                        .mcp_grant_session
+                        .as_deref()
+                        .is_some_and(|grant| self.harness_runs.any_for_session(grant))
             })
             .collect();
         rows.sort_by_key(|row| row.started_at);

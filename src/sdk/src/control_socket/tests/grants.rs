@@ -382,3 +382,26 @@ async fn settling_the_last_run_gives_the_reporting_grant_back() {
     .await;
     assert_eq!(response["ok"], json!(false));
 }
+
+#[test]
+fn narrowing_to_reporting_drops_the_sessions_hook_grant() {
+    let grants = GrantRegistry::new();
+    let fleet = grants.mint(Grant::new("session-a", 0, 3));
+    let hooks = grants.mint(Grant::hook_only("session-a"));
+    let other = grants.mint(Grant::hook_only("session-b"));
+
+    grants.restrict_to_reporting("session-a");
+
+    // The reporter keeps a token, stripped of every family and of dispatch.
+    let kept = grants.redeem(&fleet).expect("the reporter keeps its grant");
+    assert!(kept.report_only);
+    assert!(!kept.families.fleet);
+    assert!(!kept.families.workflows);
+    assert!(!kept.may_dispatch());
+    // The hook credential goes: its harness is what just exited, and a grant
+    // refused by both the hook-only and the report-only check is redeemable for
+    // nothing at all.
+    assert_eq!(grants.redeem(&hooks), None);
+    // And another session is untouched.
+    assert!(grants.redeem(&other).is_some());
+}

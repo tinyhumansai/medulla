@@ -85,6 +85,17 @@ fn timeout_for(event: HookEvent) -> u64 {
     }
 }
 
+/// [`timeout_for`], as the [`std::time::Duration`] the shim itself needs.
+///
+/// The one place `medulla-tui`'s `commands::hook` shim may read this crate's
+/// declared timeout from, rather than mirroring the literals: the shim's own
+/// deadline must never drift from the value actually installed on the hook,
+/// or its "give up quietly before the harness kills it" budget is built from
+/// the wrong number.
+pub fn declared_timeout(event: HookEvent) -> std::time::Duration {
+    std::time::Duration::from_secs(timeout_for(event))
+}
+
 /// The `medulla hook` subcommand name, shared with the CLI that implements it.
 pub const HOOK_SUBCOMMAND: &str = "hook";
 

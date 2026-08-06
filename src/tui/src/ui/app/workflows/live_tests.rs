@@ -59,3 +59,102 @@ fn starting_a_second_run_of_one_workflow_replaces_the_settled_picture() {
     assert!(!app.live_runs.contains_key("run-1"));
     assert!(app.live_runs.contains_key("run-2"));
 }
+
+#[test]
+fn starting_a_second_run_also_replaces_one_still_executing() {
+    let mut app = app();
+    app.workflow_run_started("review", "run-1");
+    app.workflow_run_output("run-1", "implement", "old work".into());
+    // No `workflow_run_finished`: run-1 is still going when run-2 starts.
+    app.workflow_run_started("review", "run-2");
+
+    // Both would otherwise be `running`, and `live_run_for_view` picks a
+    // running run out of a `HashMap` — so the pane could draw either one.
+    assert!(!app.live_runs.contains_key("run-1"));
+    assert_eq!(app.live_runs.len(), 1);
+    let run = app.live_runs.get("run-2").expect("the replacement run");
+    assert!(run.frames("implement").is_empty());
+}
+
+#[test]
+fn a_run_of_another_workflow_is_left_alone() {
+    let mut app = app();
+    app.workflow_run_started("review", "run-1");
+    app.workflow_run_started("release", "run-2");
+
+    assert!(app.live_runs.contains_key("run-1"));
+    assert!(app.live_runs.contains_key("run-2"));
+}
+
+#[test]
+fn a_node_keeps_only_its_newest_frames() {
+    let mut app = app();
+    app.workflow_run_started("review", "run-1");
+    let overshoot = 5;
+    for index in 0..super::live::MAX_FRAMES_PER_NODE + overshoot {
+        app.workflow_run_output("run-1", "implement", format!("frame {index}"));
+    }
+
+    let run = app.live_runs.get("run-1").expect("a tracked run");
+    let frames = run.frames("implement");
+    assert_eq!(frames.len(), super::live::MAX_FRAMES_PER_NODE);
+    // The window slid: the oldest frames went, the newest is the last one in.
+    assert_eq!(frames[0], format!("frame {overshoot}"));
+    assert_eq!(
+        frames.last().map(String::as_str),
+        Some(format!("frame {}", super::live::MAX_FRAMES_PER_NODE + overshoot - 1).as_str())
+    );
+}
+
+#[test]
+fn a_reported_run_becomes_the_same_shape_as_a_local_one() {
+    use medulla::control_socket::{HarnessRun, HarnessRunFrame, HarnessRunStatus};
+
+    let run = HarnessRun {
+        run_id: "run-remote".into(),
+        workflow_id: "review".into(),
+        status: HarnessRunStatus::Succeeded,
+        started_at: 0,
+        updated_at: 1,
+        detail: Some("done".into()),
+        frames: vec![
+            // No node: about the run itself, with no box on the graph to sit in.
+            HarnessRunFrame {
+                node: None,
+                text: "started".into(),
+            },
+            HarnessRunFrame {
+                node: Some("implement".into()),
+                text: "writing".into(),
+            },
+            HarnessRunFrame {
+                node: Some("implement".into()),
+                text: "still writing".into(),
+            },
+        ],
+    };
+
+    let view = super::live::LiveRun::from_reported(&run);
+    assert_eq!(view.workflow, "review");
+    // Terminal on the wire means not live here.
+    assert!(!view.running);
+    assert_eq!(view.frames("implement"), ["writing", "still writing"]);
+    assert!(view.frames("started").is_empty());
+}
+
+#[test]
+fn a_reported_run_that_is_still_going_reads_as_live() {
+    use medulla::control_socket::{HarnessRun, HarnessRunStatus};
+
+    let run = HarnessRun {
+        run_id: "run-remote".into(),
+        workflow_id: "review".into(),
+        status: HarnessRunStatus::Running,
+        started_at: 0,
+        updated_at: 1,
+        detail: None,
+        frames: Vec::new(),
+    };
+
+    assert!(super::live::LiveRun::from_reported(&run).running);
+}

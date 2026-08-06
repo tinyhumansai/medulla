@@ -140,6 +140,56 @@ async fn a_harness_with_no_medulla_to_report_to_still_succeeds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_blocking_env_file_does_not_delay_the_shim() {
+    // The workspace `.env` can be a FIFO (or a device): an unbounded read there
+    // would hang the process before `run_hook_cmd`'s own deadline starts, so
+    // the harness would kill the shim as a hung hook. Regression for the
+    // dotenv-before-dispatch ordering fixed on PR #192.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fifo = dir.path().join(".env");
+    let fifo_status = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("mkfifo is available on unix");
+    assert!(fifo_status.success(), "mkfifo failed");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        .args(["hook", "Stop"])
+        .current_dir(dir.path())
+        .env_remove("MEDULLA_HOOK_SOCKET")
+        .env_remove("MEDULLA_HOOK_GRANT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the shim starts");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"{}")
+        .expect("write the payload");
+
+    // A regression blocks forever on the FIFO; kill after the budget so the
+    // suite fails loudly instead of hanging. A healthy shim exits in moments.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("the shim blocked on the .env FIFO instead of exiting promptly");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        status.success(),
+        "a hook must never fail its harness's turn"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unknown_event_name_is_dropped_rather_than_recorded() {
     let dir = tempfile::tempdir().expect("tempdir");
     let log = HookEventLog::new();

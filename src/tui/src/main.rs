@@ -58,12 +58,22 @@ fn install_crypto_provider() {
 }
 
 async fn async_main() -> anyhow::Result<()> {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let command = parse_command(&raw);
+
     // Load a cwd `.env` into the process env before anything reads it (this is
     // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    medulla::home::load_dotenv_from_cwd();
+    //
+    // The hook shim is the exception: it runs inside the operator's live turn,
+    // with the harness waiting on this process under a hard deadline, and the
+    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
+    // read there would burn the shim's whole budget before `run_hook_cmd`'s
+    // own deadline even starts, so the harness would kill it as a hung hook.
+    if !matches!(&command, Command::Hook) {
+        medulla::home::load_dotenv_from_cwd();
+    }
 
-    let raw: Vec<String> = std::env::args().skip(1).collect();
-    match parse_command(&raw) {
+    match command {
         Command::Run => run_core(&raw[1..]).await,
         Command::Daemon if daemon_uses_tui(io::stdout().is_terminal(), &raw) => {
             run_worker_tui_command(&raw[1..]).await

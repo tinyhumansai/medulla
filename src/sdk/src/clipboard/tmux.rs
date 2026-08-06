@@ -113,19 +113,9 @@ impl Tmux {
 /// socket that just happens to belong to someone else on a shared box.
 fn is_socket_we_own(meta: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    meta.file_type().is_socket() && meta.uid() == current_uid()
-}
-
-/// The effective user id of this process, via `libc`-free `/proc` fallback
-/// where available and `nix`-free direct syscall otherwise.
-fn current_uid() -> u32 {
     // SAFETY: `getuid` takes no arguments and always succeeds.
-    unsafe { libc_getuid() }
-}
-
-extern "C" {
-    #[link_name = "getuid"]
-    fn libc_getuid() -> u32;
+    let uid = unsafe { libc::getuid() };
+    meta.file_type().is_socket() && meta.uid() == uid
 }
 
 /// Arguments for `tmux load-buffer`, reading the text from stdin.

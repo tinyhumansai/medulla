@@ -291,11 +291,17 @@ renamed, disabled, or deleted is reflected in the next session with no command
 to re-run. Previously this was install-time only, and a store that had moved
 since left the harness reading a catalog that no longer existed.
 
-The root is `<medulla home>/claude-skills/`, laid out like a project root
-(`.claude/skills/…`), and Medulla adds `--add-dir <that directory>` when it
-spawns Claude Code. Each harness gets its own `<harness>-skills` directory, so
-the path handed to one never exposes another's files, and the Medulla home is
-already per-account. Claude loads `.claude/skills/` from an added directory — a
+The root is `<medulla home>/skills/scopes/<workspace>/claude-skills/`, laid out
+like a project root (`.claude/skills/…`), and Medulla adds `--add-dir <that
+directory>` when it spawns Claude Code. Each harness gets its own
+`<harness>-skills` directory, so the path handed to one never exposes another's
+files, and the Medulla home is already per-account. The `<workspace>` segment —
+a digest of the session's working directory, the same one the store uses to
+scope its own state — is there because the catalog is per workspace too: a store
+discovered for a directory layers that directory's `.medulla/workflows` under
+the user-global one. Two projects therefore have two catalogs, and a single
+shared root would hand a session the other project's skills and let either
+project's prune delete the other's. Claude loads `.claude/skills/` from an added directory — a
 documented exception to `--add-dir` being a file-access grant, and the reason
 this works at all; the `permissions.additionalDirectories` *setting* grants
 access without loading skills. The flag is added only once the root actually

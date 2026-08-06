@@ -67,6 +67,7 @@ fn install_over(
                 &summary.id,
                 opts,
                 &mut claimed,
+                cleared,
             )?);
 
             // Codex reads its deprecated `.codex/skills` root as well as the

@@ -175,7 +175,10 @@ pub(crate) struct SessionMeta {
     pub(crate) origin: SessionOrigin,
     /// The key this session's MCP fleet grant was minted under, when one was.
     ///
-    /// Read once, when the child is reaped, to give the capability back.
+    /// Read twice over a session's life, at the two ends of the capability: on
+    /// reap, to give it back — or narrow it to reporting, if the session left a
+    /// workflow run executing — and again when the operator forgets the row, to
+    /// drop the runs that were drawn beneath it.
     pub(crate) mcp_grant_session: Option<String>,
 }
 

@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use crate::control_socket::grants::Grant;
+use crate::control_socket::grants::{Grant, GrantRegistry};
 use crate::control_socket::runs::{HarnessRunRegistry, HarnessRunStatus};
 use crate::control_socket::types::ErrorKind;
 
@@ -29,7 +29,8 @@ fn a_report_is_filed_under_the_grants_session_not_a_named_one() {
         // Ignored: attribution comes from the grant, never from the caller.
         "session": "somebody-else",
     });
-    run_report(&runs, &grant(), &params).expect("a well-formed report is accepted");
+    run_report(&GrantRegistry::new(), &runs, &grant(), &params)
+        .expect("a well-formed report is accepted");
 
     assert!(runs.for_session("somebody-else").is_empty());
     let recorded = runs.for_session("session-1");
@@ -51,8 +52,8 @@ fn an_oversized_identifier_is_refused_rather_than_retained() {
         });
         params[field] = json!("a".repeat(MAX_FIELD + 1));
 
-        let failure =
-            run_report(&runs, &grant(), &params).expect_err("an oversized {field} is refused");
+        let failure = run_report(&GrantRegistry::new(), &runs, &grant(), &params)
+            .expect_err("an oversized {field} is refused");
         assert_eq!(failure.kind, ErrorKind::BadRequest, "for {field}");
         assert!(failure.message.contains(field), "for {field}");
         // Refused means nothing was retained, not merely that the caller was
@@ -66,6 +67,7 @@ fn a_field_exactly_at_the_limit_is_still_accepted() {
     let runs = HarnessRunRegistry::new();
     let id = "a".repeat(MAX_FIELD);
     run_report(
+        &GrantRegistry::new(),
         &runs,
         &grant(),
         &json!({ "runId": id, "workflowId": "review", "status": "running" }),
@@ -79,6 +81,7 @@ fn a_detail_line_is_flattened_and_clipped_rather_than_refused() {
     let runs = HarnessRunRegistry::new();
     let noisy = format!("first\u{1b}[2Jline\n\nsecond {}", "x".repeat(4_000));
     run_report(
+        &GrantRegistry::new(),
         &runs,
         &grant(),
         &json!({
@@ -103,8 +106,13 @@ fn a_detail_line_is_flattened_and_clipped_rather_than_refused() {
 #[test]
 fn a_report_naming_no_run_is_refused() {
     let runs = HarnessRunRegistry::new();
-    let failure = run_report(&runs, &grant(), &json!({ "status": "running" }))
-        .expect_err("a report with no run id is refused");
+    let failure = run_report(
+        &GrantRegistry::new(),
+        &runs,
+        &grant(),
+        &json!({ "status": "running" }),
+    )
+    .expect_err("a report with no run id is refused");
     assert_eq!(failure.kind, ErrorKind::BadRequest);
     assert!(runs.for_session("session-1").is_empty());
 }

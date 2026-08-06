@@ -176,6 +176,18 @@ impl ToolFamilies {
         }
     }
 
+    /// Neither family — what a grant narrowed past every tool surface carries.
+    ///
+    /// Note that [`Default`] is the *opposite* of this: an ordinary grant
+    /// carries both families, so a narrowing case has to say so explicitly and
+    /// cannot get here by forgetting to set the field.
+    pub fn none() -> Self {
+        ToolFamilies {
+            workflows: false,
+            fleet: false,
+        }
+    }
+
     /// Only the fleet tools — what a fleet host serves when workflows are off.
     pub fn fleet_only() -> Self {
         ToolFamilies {

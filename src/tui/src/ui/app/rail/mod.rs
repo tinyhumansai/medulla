@@ -40,6 +40,11 @@ use crate::ui::agents::{AgentLane, AgentRole, AgentRow};
 use crate::worker::pty::SessionRow;
 
 pub(in crate::ui::app) mod resolve;
+// Kept apart from `tests` rather than nested inside it: the assembly rules and
+// the served-dispatch merge are separate responsibilities, and one file for
+// both had already grown past this repository's line ceiling.
+#[cfg(test)]
+mod merge_tests;
 #[cfg(test)]
 pub(in crate::ui::app) mod tests;
 mod types;

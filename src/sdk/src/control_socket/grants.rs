@@ -58,6 +58,18 @@ pub struct Grant {
     /// session and nothing more — see the control socket's request dispatch,
     /// which refuses every other op for it.
     pub hook_only: bool,
+    /// Whether this grant has been narrowed to `run.report` alone because the
+    /// harness it was minted for has exited.
+    ///
+    /// A default `workflow_run` is asynchronous, and the MCP subprocess that
+    /// executes it deliberately outlives its parent harness. Revoking the
+    /// grant outright when the harness exits would silence the run's own
+    /// progress reports for the rest of its life, so
+    /// [`GrantRegistry::restrict_to_reporting`] sets this instead: the holder
+    /// keeps saying how the run it already started is going and loses
+    /// everything else, including dispatch. Cleared only by giving the grant
+    /// back, which happens when the last run settles.
+    pub report_only: bool,
 }
 
 impl Grant {
@@ -71,6 +83,7 @@ impl Grant {
             max_in_flight: 4,
             tool_mode: None,
             hook_only: false,
+            report_only: false,
         }
     }
 
@@ -167,6 +180,35 @@ impl GrantRegistry {
     pub fn revoke(&self, session: &str) {
         if let Ok(mut grants) = self.inner.lock() {
             grants.retain(|_, grant| grant.session != session);
+        }
+    }
+
+    /// Narrow every grant minted for `session` to `run.report` alone.
+    ///
+    /// The half-measure between keeping a session's capability and revoking it,
+    /// for the one case that needs one: the harness has exited, but the MCP
+    /// subprocess it spawned is still executing a detached workflow run and is
+    /// the only thing that can say how that run ends. A full
+    /// [`revoke`](Self::revoke) here would leave the run executing with its
+    /// rail row frozen on whatever it last managed to report.
+    ///
+    /// What survives is deliberately the least it can be. Dispatch, task
+    /// lifecycle, worker discovery, and child grants are all refused for a
+    /// [`report_only`](Grant::report_only) grant by the control socket's
+    /// request dispatch, the same way they are for a
+    /// [`hook_only`](Grant::hook_only) one — so an MCP subprocess that outlives
+    /// its parent cannot start anything new, only finish narrating what it
+    /// already had. The grant itself goes when the run settles; see
+    /// [`HarnessRunRegistry::retire`](super::runs::HarnessRunRegistry::retire).
+    pub fn restrict_to_reporting(&self, session: &str) {
+        if let Ok(mut grants) = self.inner.lock() {
+            for grant in grants.values_mut() {
+                if grant.session == session {
+                    grant.report_only = true;
+                    grant.families = ToolFamilies::none();
+                    grant.max_in_flight = 1;
+                }
+            }
         }
     }
 

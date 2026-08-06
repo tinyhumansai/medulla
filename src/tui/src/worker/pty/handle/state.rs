@@ -84,6 +84,14 @@ impl SessionHandle {
         lock(&self.cold).session_id.clone()
     }
 
+    /// The key this session's MCP grant was minted under, when one was.
+    ///
+    /// Immutable, so it is readable without touching either lock — which is
+    /// what lets the manager reach the control plane after releasing its own.
+    pub(in super::super) fn grant_session(&self) -> Option<&str> {
+        self.meta.mcp_grant_session.as_deref()
+    }
+
     /// Whether this session's child environment selects a GitHub repository.
     pub(in super::super) fn gh_repo_is_set(&self) -> bool {
         self.meta.gh_repo_is_set

@@ -181,3 +181,128 @@ fn a_run_keeps_only_its_newest_frames() {
         Some(format!("frame {}", MAX_FRAMES_PER_RUN + overshoot - 1).as_str())
     );
 }
+
+#[test]
+fn a_session_that_left_a_run_executing_retires_rather_than_ending() {
+    let registry = HarnessRunRegistry::new();
+    registry.report(
+        "pty-1",
+        report(
+            "run-1",
+            "review",
+            HarnessRunStatus::Running,
+            Some("started"),
+        ),
+    );
+
+    // The harness exits while the run carries on in the MCP subprocess that
+    // outlived it. Retiring is what keeps that subprocess able to report.
+    assert!(registry.retire("pty-1"));
+    // And the rows stay: they are drawn under a PTY row whose screen outlives
+    // its child, so tearing them down here is exactly the disappearance this
+    // is meant to prevent.
+    assert_eq!(registry.for_session("pty-1").len(), 1);
+
+    // A report that arrives after the harness is gone still lands, and does not
+    // yet end the retirement.
+    assert!(!registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Running, Some("step 2")),
+    ));
+    assert_eq!(
+        registry.for_session("pty-1")[0].detail.as_deref(),
+        Some("step 2")
+    );
+
+    // Settling the run is what ends it, and says so exactly once.
+    assert!(registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Succeeded, Some("done")),
+    ));
+    assert!(!registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Succeeded, None),
+    ));
+    // The outcome survives: the whole point is that the operator gets to see
+    // how a run they started ended.
+    assert_eq!(
+        registry.for_session("pty-1")[0].status,
+        HarnessRunStatus::Succeeded
+    );
+}
+
+#[test]
+fn a_session_with_nothing_executing_does_not_retire() {
+    let registry = HarnessRunRegistry::new();
+    // Never started a run at all — the ordinary session.
+    assert!(!registry.retire("pty-1"));
+    // Started one and saw it finish before exiting.
+    registry.report(
+        "pty-2",
+        report("run-1", "review", HarnessRunStatus::Succeeded, None),
+    );
+    assert!(!registry.retire("pty-2"));
+    // So a later report cannot look like the end of a retirement that never
+    // began — nothing is holding a grant open for it.
+    assert!(!registry.report(
+        "pty-2",
+        report("run-1", "review", HarnessRunStatus::Failed, None),
+    ));
+}
+
+#[test]
+fn retirement_waits_for_every_run_the_session_left_behind() {
+    let registry = HarnessRunRegistry::new();
+    for run_id in ["run-1", "run-2"] {
+        registry.report(
+            "pty-1",
+            report(run_id, "review", HarnessRunStatus::Running, None),
+        );
+    }
+    assert!(registry.retire("pty-1"));
+
+    assert!(!registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Succeeded, None),
+    ));
+    assert!(registry.report(
+        "pty-1",
+        report("run-2", "review", HarnessRunStatus::Failed, None),
+    ));
+}
+
+#[test]
+fn a_run_parked_on_approval_keeps_the_session_retiring() {
+    let registry = HarnessRunRegistry::new();
+    registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::AwaitingApproval, None),
+    );
+    // The gate is answered in the subprocess still executing the run, so there
+    // is more to hear and the reporting side must stay reachable.
+    assert!(registry.retire("pty-1"));
+    assert!(registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Succeeded, None),
+    ));
+}
+
+#[test]
+fn forgetting_a_session_drops_its_rows_and_its_retirement() {
+    let registry = HarnessRunRegistry::new();
+    registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Running, None),
+    );
+    assert!(registry.retire("pty-1"));
+
+    registry.forget("pty-1");
+    assert!(registry.for_session("pty-1").is_empty());
+    assert!(!registry.any_for_session("pty-1"));
+    // A late report for a forgotten session starts a fresh row rather than
+    // completing a retirement that was thrown away with it.
+    assert!(!registry.report(
+        "pty-1",
+        report("run-1", "review", HarnessRunStatus::Succeeded, None),
+    ));
+}

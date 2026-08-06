@@ -10,6 +10,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::super::grants::{Grant, GrantRegistry};
+use super::super::runs::{HarnessRunRegistry, HarnessRunStatus};
 use super::super::server::{handle_control, SessionState, TaskRegistry};
 use super::super::types::{FleetOps, ToolFamilies, PROTOCOL_VERSION};
 use super::FakeFleet;
@@ -23,15 +24,32 @@ async fn call(
     op: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
+    let runs = HarnessRunRegistry::new();
+    call_with_runs(ops, grants, registry, &runs, token, op, params).await
+}
+
+/// As [`call`], against a caller-owned run registry.
+///
+/// Separate because retirement spans several calls: the run a session leaves
+/// executing has to still be there when the report that settles it arrives.
+#[allow(clippy::too_many_arguments)]
+async fn call_with_runs(
+    ops: &Arc<dyn FleetOps>,
+    grants: &GrantRegistry,
+    registry: &TaskRegistry,
+    runs: &HarnessRunRegistry,
+    token: &str,
+    op: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
     let mut session = SessionState::default();
     let hello = json!({
         "v": PROTOCOL_VERSION, "id": 1, "op": "hello",
         "params": { "protocol": PROTOCOL_VERSION, "token": token },
     });
-    let runs = crate::control_socket::runs::HarnessRunRegistry::new();
-    handle_control(ops, grants, registry, &runs, &mut session, &hello).await;
+    handle_control(ops, grants, registry, runs, &mut session, &hello).await;
     let request = json!({ "v": PROTOCOL_VERSION, "id": 2, "op": op, "params": params });
-    handle_control(ops, grants, registry, &runs, &mut session, &request).await
+    handle_control(ops, grants, registry, runs, &mut session, &request).await
 }
 
 #[test]
@@ -242,4 +260,125 @@ fn tool_families_gate_by_prefix() {
     // A name in neither family is not silently withheld by a check that predates
     // it — the families gate the two surfaces that exist, nothing more.
     assert!(workflows.allows("something_else"));
+}
+
+#[tokio::test]
+async fn a_reporting_only_grant_may_report_its_run_and_nothing_else() {
+    let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
+    let grants = GrantRegistry::new();
+    let registry = TaskRegistry::new();
+    let runs = HarnessRunRegistry::new();
+    let token = grants.mint(Grant::new("session-a", 0, 3));
+
+    let started = json!({ "runId": "run-1", "workflowId": "review", "status": "running" });
+    let response = call_with_runs(
+        &ops,
+        &grants,
+        &registry,
+        &runs,
+        &token,
+        "run.report",
+        started,
+    )
+    .await;
+    assert_eq!(response["ok"], json!(true));
+
+    // The harness exits with the run still going. This is the state
+    // `mcp::revoke_session` leaves behind rather than a full revoke.
+    assert!(runs.retire("session-a"));
+    grants.restrict_to_reporting("session-a");
+
+    // Reporting survives — the whole reason the grant was kept.
+    let progress = json!({
+        "runId": "run-1", "workflowId": "review",
+        "status": "running", "detail": "step 2",
+    });
+    let response = call_with_runs(
+        &ops,
+        &grants,
+        &registry,
+        &runs,
+        &token,
+        "run.report",
+        progress,
+    )
+    .await;
+    assert_eq!(response["ok"], json!(true));
+    assert_eq!(
+        runs.for_session("session-a")[0].detail.as_deref(),
+        Some("step 2")
+    );
+
+    // Nothing else does. A subprocess whose session is over must not be able to
+    // start work, poll work, or mint a child capability out of what it kept.
+    for op in ["task.dispatch", "task.list", "worker.list", "grant.child"] {
+        let response = call_with_runs(
+            &ops,
+            &grants,
+            &registry,
+            &runs,
+            &token,
+            op,
+            json!({ "instruction": "anything" }),
+        )
+        .await;
+        assert_eq!(response["ok"], json!(false), "{op} was served");
+        assert_eq!(
+            response["error"]["kind"],
+            json!("unauthenticated"),
+            "{op} was refused for the wrong reason"
+        );
+    }
+}
+
+#[tokio::test]
+async fn settling_the_last_run_gives_the_reporting_grant_back() {
+    let ops: Arc<dyn FleetOps> = Arc::new(FakeFleet::new());
+    let grants = GrantRegistry::new();
+    let registry = TaskRegistry::new();
+    let runs = HarnessRunRegistry::new();
+    let token = grants.mint(Grant::new("session-a", 0, 3));
+
+    call_with_runs(
+        &ops,
+        &grants,
+        &registry,
+        &runs,
+        &token,
+        "run.report",
+        json!({ "runId": "run-1", "workflowId": "review", "status": "running" }),
+    )
+    .await;
+    assert!(runs.retire("session-a"));
+    grants.restrict_to_reporting("session-a");
+
+    let response = call_with_runs(
+        &ops,
+        &grants,
+        &registry,
+        &runs,
+        &token,
+        "run.report",
+        json!({ "runId": "run-1", "workflowId": "review", "status": "succeeded" }),
+    )
+    .await;
+    assert_eq!(response["ok"], json!(true));
+    // The outcome is recorded, and the token that recorded it is gone: there is
+    // nothing further this session can ever say.
+    assert_eq!(
+        runs.for_session("session-a")[0].status,
+        HarnessRunStatus::Succeeded
+    );
+    assert!(grants.redeem(&token).is_none());
+    let response = call_with_runs(
+        &ops,
+        &grants,
+        &registry,
+        &runs,
+        &token,
+        "run.report",
+        json!({ "runId": "run-1", "workflowId": "review", "status": "running" }),
+    )
+    .await;
+    assert_eq!(response["ok"], json!(false));
 }

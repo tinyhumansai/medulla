@@ -9,7 +9,7 @@
 
 use serde_json::{json, Value};
 
-use super::super::super::grants::Grant;
+use super::super::super::grants::{Grant, GrantRegistry};
 use super::super::super::runs::{HarnessRunRegistry, HarnessRunStatus, RunReport};
 use super::super::super::types::{ControlFailure, ErrorKind};
 
@@ -36,10 +36,16 @@ const MAX_FIELD: usize = 256;
 /// happening elsewhere, and refusing a report would not stop the run, only hide
 /// it.
 ///
+/// Settling the last run of a *retired* session — one whose harness has already
+/// exited, leaving this grant narrowed to reporting so the detached run could
+/// finish narrating itself — gives that grant back here. This is the one place
+/// it can happen: nothing else in the process learns that the run ended.
+///
 /// # Errors
 ///
 /// [`ErrorKind::BadRequest`] when the report names no run or no workflow.
 pub(super) fn run_report(
+    grants: &GrantRegistry,
     runs: &HarnessRunRegistry,
     grant: &Grant,
     params: &Value,
@@ -62,7 +68,7 @@ pub(super) fn run_report(
         .map(str::to_string)
         .map(|node| clipped(node, "node"))
         .transpose()?;
-    runs.report(
+    let retired = runs.report(
         &grant.session,
         RunReport {
             run_id,
@@ -72,6 +78,9 @@ pub(super) fn run_report(
             node,
         },
     );
+    if retired {
+        grants.revoke(&grant.session);
+    }
     Ok(json!({ "recorded": true }))
 }
 

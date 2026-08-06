@@ -233,6 +233,12 @@ impl PtyManager {
     ///
     /// Refuses while the child is alive, so a forgotten session can never leave
     /// an orphaned process holding a PTY.
+    ///
+    /// This — not the reap — is where the workflow runs the session reported go
+    /// too. `revoke_session` deliberately keeps them when the child exits,
+    /// because a detached run carries on in an MCP subprocess that outlives its
+    /// parent and the rail still draws the exited row it belongs under. Once
+    /// the row itself is gone there is nothing left to draw them beneath.
     pub fn forget(&self, id: &str) -> bool {
         let mut sessions = write(&self.inner.sessions);
         let Some(index) = sessions
@@ -241,7 +247,17 @@ impl PtyManager {
         else {
             return false;
         };
-        sessions.remove(index);
+        let forgotten = sessions.remove(index);
+        // Released before reaching into the control plane: nothing there wants
+        // this lock, and holding one lock across another is how the freeze in
+        // `SessionHandle::reap` got written in the first place.
+        drop(sessions);
+        #[cfg(feature = "workflows")]
+        if let Some(session) = forgotten.grant_session() {
+            medulla::mcp::forget_session_runs(session);
+        }
+        #[cfg(not(feature = "workflows"))]
+        let _ = forgotten;
         true
     }
 

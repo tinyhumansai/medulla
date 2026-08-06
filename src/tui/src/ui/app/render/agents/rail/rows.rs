@@ -232,8 +232,7 @@ impl App {
                 .sessions
                 .row(&id)?
                 .thread_name
-                .as_deref()
-                .and_then(lane_title)
+                .and_then(|title| lane_title(&title))
         })
     }
 }

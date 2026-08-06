@@ -114,6 +114,18 @@ fn session_titles_are_slugged_and_bounded_before_rail_wrapping() {
 }
 
 #[test]
+fn session_titles_of_wide_characters_stay_within_the_rails_cell_budget() {
+    // 48 wide characters pass the slug's character ceiling untouched but would
+    // occupy 96 columns, so the rail clips them a second time by cell width.
+    let title = "界".repeat(48);
+
+    let displayed = display_session_title(&title);
+
+    assert!(UnicodeWidthStr::width(displayed.as_str()) <= 48);
+    assert!(displayed.ends_with('…'));
+}
+
+#[test]
 fn session_titles_keep_three_words_of_a_harness_sentence() {
     assert_eq!(
         display_session_title("Fix session handoff flow and pointer"),

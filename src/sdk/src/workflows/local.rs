@@ -318,29 +318,46 @@ impl LocalRun<'_> {
         };
 
         let run_id = format!("run-{}", uuid::Uuid::new_v4());
-        let admitted = crate::workflows::new_run_record(
-            &run_id,
-            workflow_id,
-            crate::clock::now_millis() as u64,
-        );
+        let started_at = crate::clock::now_millis() as u64;
+        let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at);
         store.record_run(&admitted)?;
 
         let workflow_id = workflow_id.to_string();
         let join = tokio::spawn({
             let run_id = run_id.clone();
             let workflow_id = workflow_id.clone();
+            let store = store.clone();
             async move {
                 // Held for the whole run and dropped with it, which unbinds the
                 // loopback endpoints so a later run can bind them again.
                 let _host = host;
-                crate::workflows::run_workflow(
+                let outcome = crate::workflows::run_workflow(
                     context,
                     &workflow_id,
                     &run_id,
                     input.trigger,
                     input.inputs,
                 )
-                .await
+                .await;
+                // `run_workflow` can refuse the run (bad inputs, a disabled
+                // workflow, a claim conflict) before it ever writes its own
+                // record — the admission record above is all that exists for
+                // this run id. Without this, that record is stuck at
+                // `running` forever, since nothing else ever reconciles it.
+                if let Err(err) = &outcome {
+                    let mut record =
+                        crate::workflows::new_run_record(&run_id, &workflow_id, started_at);
+                    record.status = crate::workflows::RunStatus::Failed;
+                    record.error = Some(err.to_string());
+                    record.finished_at = Some(crate::clock::now_millis() as u64);
+                    if let Err(store_err) = store.record_run(&record) {
+                        tracing::warn!(
+                            run = %run_id,
+                            "could not finalize admitted run record: {store_err}"
+                        );
+                    }
+                }
+                outcome
             }
         });
 

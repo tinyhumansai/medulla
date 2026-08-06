@@ -58,27 +58,24 @@ where
         if available.is_empty() {
             return Ok(finish(buffered, oversized, true));
         }
-        match available.iter().position(|byte| *byte == b'\n') {
-            Some(index) => {
-                if !oversized {
-                    buffered.extend_from_slice(&available[..index]);
-                }
-                reader.consume(index + 1);
-                return Ok(finish(buffered, oversized, false));
+        // The record's bytes in this window: up to the newline, or all of them.
+        // Tested *before* they are retained, so the cap is enforced whether the
+        // record arrives in one window or a thousand.
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let chunk = newline.unwrap_or(available.len());
+        if !oversized {
+            if buffered.len() + chunk > MAX_LINE_BYTES {
+                oversized = true;
+                // Release what was accumulated now. Holding it until the newline
+                // arrives is exactly the unbounded growth the cap exists to stop.
+                buffered = Vec::new();
+            } else {
+                buffered.extend_from_slice(&available[..chunk]);
             }
-            None => {
-                let consumed = available.len();
-                if !oversized {
-                    buffered.extend_from_slice(available);
-                    if buffered.len() > MAX_LINE_BYTES {
-                        oversized = true;
-                        // Release it now. Waiting until the newline arrives is
-                        // exactly the unbounded growth the cap exists to stop.
-                        buffered = Vec::new();
-                    }
-                }
-                reader.consume(consumed);
-            }
+        }
+        reader.consume(chunk + usize::from(newline.is_some()));
+        if newline.is_some() {
+            return Ok(finish(buffered, oversized, false));
         }
     }
 }

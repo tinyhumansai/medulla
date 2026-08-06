@@ -441,6 +441,99 @@ fn sync_prune_sweeps_the_deprecated_codex_skills_root() {
     assert!(!home.path().join(".codex/skills/medulla-audit").exists());
 }
 
+/// The legacy sweep must not depend on the order the harnesses were named.
+/// `--harness generic,codex` collapses to Generic alone, because both write
+/// `.agents/skills` — but `.codex/skills` is Codex's own root, and leftovers
+/// there would survive purely because Generic happened to be listed first.
+#[test]
+fn sync_prune_sweeps_the_deprecated_codex_root_whatever_the_target_order() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Generic, SkillTarget::Codex]);
+    let legacy = home.path().join(".codex/skills/medulla-audit/SKILL.md");
+    fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    fs::write(&legacy, "---\nname: medulla-audit\n---\n\nold body\n").unwrap();
+
+    let report = sync(&[summary("babysit", "Watch a PR.")], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!home.path().join(".codex/skills/medulla-audit").exists());
+}
+
+/// The legacy root is swept exactly once even when Codex survives dedupe, so a
+/// leftover there is not reported (or removed) twice.
+#[test]
+fn sync_prune_sweeps_the_deprecated_codex_root_only_once() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Codex, SkillTarget::Generic]);
+    let legacy = home.path().join(".codex/skills/medulla-audit/SKILL.md");
+    fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    fs::write(&legacy, "old body\n").unwrap();
+
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!home.path().join(".codex/skills/medulla-audit").exists());
+}
+
+/// An operator who symlinks a shared skill collection into `~/.claude/skills`
+/// must not have its files deleted. `read_dir` resolves the link, so the
+/// `SKILL.md` behind a `medulla-*` symlink is content outside the root — and
+/// the prefix alone is far too thin a claim to delete a file on.
+#[cfg(unix)]
+#[test]
+fn sync_prune_never_deletes_through_a_symlinked_skill_directory() {
+    let home = TempDir::new().unwrap();
+    let elsewhere = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+
+    let shared = elsewhere.path().join("shared-skill");
+    fs::create_dir_all(&shared).unwrap();
+    let external = shared.join("SKILL.md");
+    fs::write(&external, "theirs\n").unwrap();
+
+    let skills = home.path().join(".claude/skills");
+    fs::create_dir_all(&skills).unwrap();
+    std::os::unix::fs::symlink(&shared, skills.join("medulla-shared")).unwrap();
+
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 0);
+    assert_eq!(
+        fs::read_to_string(&external).unwrap(),
+        "theirs\n",
+        "the linked-to file must survive a prune"
+    );
+    assert!(
+        skills.join("medulla-shared").is_symlink(),
+        "and so must the link itself"
+    );
+}
+
+/// The symlink guard is scoped to the prefix rule. A marker we wrote identifies
+/// the file wherever it sits, so a marked leftover reached through a link is
+/// still ours to retire.
+#[cfg(unix)]
+#[test]
+fn sync_prune_still_removes_a_marked_skill_behind_a_symlink() {
+    let home = TempDir::new().unwrap();
+    let elsewhere = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+
+    let shared = elsewhere.path().join("ours");
+    fs::create_dir_all(&shared).unwrap();
+    let external = shared.join("SKILL.md");
+    fs::write(&external, render(&summary("audit", "Audit a repo."))).unwrap();
+
+    let skills = home.path().join(".claude/skills");
+    fs::create_dir_all(&skills).unwrap();
+    std::os::unix::fs::symlink(&shared, skills.join("medulla-audit")).unwrap();
+
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!external.exists());
+}
+
 /// A dry run decides the same removals and writes none of them.
 #[test]
 fn a_dry_run_prune_reports_the_prefix_removal_without_making_it() {

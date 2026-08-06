@@ -30,7 +30,7 @@ pub(super) struct Inner {
     pub(super) sessions: RwLock<Vec<Arc<SessionHandle>>>,
     pub(super) next_id: AtomicU64,
     pub(super) now: NowFn,
-    /// Where a session's forwarded clipboard writes go. See
-    /// [`clipboard`](super::clipboard).
-    pub(super) clipboard: ClipboardSink,
+    /// Feeds the single clipboard worker thread, in submission order. See
+    /// [`PtyManager::forward_clipboard`](super::PtyManager::forward_clipboard).
+    pub(super) clipboard_tx: std::sync::Mutex<std::sync::mpsc::Sender<String>>,
 }

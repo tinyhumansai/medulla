@@ -237,6 +237,19 @@ impl App {
     }
 }
 
+/// The rail label for a harness title, or `None` when the title carries no
+/// name worth showing.
+///
+/// A title of pure punctuation or control bytes ("---") slugs to the empty
+/// string. That is not a title: rendering it would leave a dangling ` · ` on
+/// the row and, because the newest running task wins the lane, would hide an
+/// older task that does have a meaningful title. The session-history label
+/// path drops empty slugs the same way.
+pub(super) fn lane_title(title: &str) -> Option<String> {
+    let displayed = display_session_title(title);
+    (!displayed.is_empty()).then_some(displayed)
+}
+
 /// Slug an untrusted harness title before rail wrapping.
 ///
 /// The harness advertises a sentence ("Fix session handoff flow and pointer");

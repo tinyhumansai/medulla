@@ -257,14 +257,8 @@ fn an_operator_started_claude_is_pointed_at_the_managed_skills() {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let argv = dir.path().join("argv");
     let bin = dir.path().join("fake-claude");
-    std::fs::write(
-        &bin,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nsleep 30\n",
-            argv.display()
-        ),
-    )
-    .expect("the stand-in harness is writable");
+    std::fs::write(&bin, records_argv_then_sleeps(&argv))
+        .expect("the stand-in harness is writable");
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))

@@ -215,13 +215,29 @@ const SLUG_SCAN_MAX_CHARS: usize = 512;
 /// Prompts open with conversational scaffolding ("okay so can you please…"),
 /// and taking the first three words verbatim would spend the whole slug on it.
 /// Only words that never identify a session on their own are listed.
+/// Contractions are folded to their letters before this list is consulted (see
+/// [`APOSTROPHES`]), so the elided forms of the words above are listed too:
+/// `let's` arrives here as `lets`, `I'm` as `im`.
 const FILLER_WORDS: &[&str] = &[
-    "a", "about", "an", "and", "are", "as", "at", "be", "but", "by", "can", "could", "do", "does",
-    "for", "from", "hey", "hi", "how", "i", "if", "in", "into", "is", "it", "its", "just", "let",
-    "lets", "like", "me", "my", "of", "ok", "okay", "on", "or", "our", "please", "so", "thanks",
-    "that", "the", "their", "then", "there", "these", "they", "this", "to", "uh", "um", "us",
-    "was", "we", "well", "what", "when", "which", "will", "with", "would", "you", "your",
+    "a", "about", "an", "and", "are", "arent", "as", "at", "be", "but", "by", "can", "cant",
+    "could", "couldnt", "do", "does", "doesnt", "dont", "for", "from", "hey", "hi", "how", "i",
+    "id", "if", "ill", "im", "in", "into", "is", "isnt", "it", "its", "ive", "just", "let", "lets",
+    "like", "me", "my", "of", "ok", "okay", "on", "or", "our", "please", "so", "thanks", "that",
+    "thats", "the", "their", "then", "there", "theres", "these", "they", "theyre", "theyve",
+    "this", "to", "uh", "um", "us", "was", "wasnt", "we", "well", "were", "weve", "what", "whats",
+    "when", "which", "will", "with", "wont", "would", "wouldnt", "you", "youd", "youll", "youre",
+    "youve", "your",
 ];
+
+/// Apostrophes a contraction may be written with: ASCII, the typographic right
+/// single quote most editors substitute, and the modifier letter Unicode
+/// recommends for exactly this use.
+///
+/// These are dropped rather than treated as word breaks. Splitting on them
+/// would cut `let's` into `let` and `s`, and the orphan `s` — meaningless on
+/// its own, and not something a filler list can usefully enumerate — would
+/// survive into the slug as its first word.
+const APOSTROPHES: [char; 3] = ['\'', '\u{2019}', '\u{02bc}'];
 
 /// Reduce any text to a session slug: at most [`SLUG_MAX_WORDS`] lowercase
 /// words joined by hyphens, e.g. `fix-session-handoff`.

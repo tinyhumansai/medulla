@@ -251,8 +251,13 @@ to anyone running a Codex profile. An install retires a managed skill an
 earlier release left in `.codex/skills`, because Codex scans both and silently
 drops a `$name` mention that resolves to two skills.
 
-Generated files carry a `medulla:managed` marker line, and nothing
-without that marker is ever overwritten or deleted — a collision is reported and
+Generated files carry a `medulla:managed` marker line — a YAML comment on the
+first line inside the frontmatter, where the harness's own parser discards it;
+above the frontmatter, as releases up to 0.7 wrote it, it stopped the
+frontmatter being read at all and the skill was listed with the marker in place
+of its description. Files written the old way are still recognised and are
+rewritten on the next install. Nothing without a marker is ever overwritten or
+deleted — a collision is reported and
 skipped, which means that workflow is *not* installed, and the command exits
 non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
 counts as someone else's for the same reason; remove it by hand to let Medulla
@@ -292,6 +297,11 @@ documented exception to `--add-dir` being a file-access grant, and the reason
 this works at all; the `permissions.additionalDirectories` *setting* grants
 access without loading skills. The flag is added only once the root actually
 holds skills, so an install nobody ran changes no argv.
+
+Every direct-spawn door adds it: the headless executor, the Workers pane's own
+sessions, and the task frames opened on a pseudo-terminal. A session that had
+the tools but not the skills could call `workflow_run` and had no way to know
+which workflows it could name.
 
 Two things this deliberately does not do. It does not relocate the harness's
 config directory: `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move credentials and

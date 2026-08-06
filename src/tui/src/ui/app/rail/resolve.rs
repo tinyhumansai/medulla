@@ -95,6 +95,7 @@ mod tests {
             busy: false,
             control: SessionControl::User,
             origin: SessionOrigin::User,
+            retained: false,
             name: None,
             attention: None,
         }

@@ -26,6 +26,7 @@ fn row(provider: HarnessProvider, preset: Option<&str>) -> SessionRow {
         busy: false,
         control: SessionControl::Orchestrator,
         origin: SessionOrigin::Orchestrator,
+        retained: false,
         name: None,
         attention: None,
     }

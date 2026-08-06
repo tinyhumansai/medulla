@@ -243,8 +243,36 @@ impl App {
 /// the rail has room for a name. [`slug`] keeps the first three meaningful
 /// words and, because it treats every non-alphanumeric byte as a word break,
 /// leaves no control byte, escape sequence, or newline to reach the pane.
+///
+/// The slug is then clipped to [`SESSION_TITLE_MAX_CELLS`], because its own
+/// ceiling counts characters and a title of wide characters would otherwise
+/// render twice as wide as the rail budgeted for it.
 pub(super) fn display_session_title(title: &str) -> String {
-    slug(title)
+    clip_cells(&slug(title), SESSION_TITLE_MAX_CELLS)
+}
+
+/// Clip `value` to `width` terminal cells, marking a cut with an ellipsis.
+///
+/// The ellipsis costs a cell of its own, so a clipped value keeps `width - 1`
+/// cells of text. A character that straddles the budget is dropped whole rather
+/// than split, which is what keeps the result a valid grapheme sequence.
+fn clip_cells(value: &str, width: usize) -> String {
+    if value.width() <= width {
+        return value.to_string();
+    }
+    let budget = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut used = 0;
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > budget {
+            break;
+        }
+        used += character_width;
+        out.push(character);
+    }
+    out.push('…');
+    out
 }
 
 /// Resolve the newest running task whose harness has advertised a title.

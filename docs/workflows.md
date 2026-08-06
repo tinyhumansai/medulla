@@ -239,7 +239,7 @@ one", and the removal is not recoverable from the output.
 | `--with-mcp` | also register `medulla mcp` with each harness |
 | `--with-commands` | also write the `/medulla-<id>` slash command |
 | `--tools run\|full` | the tool surface a skill-triggered session gets (default: `run`) |
-| `--prune` | on `sync`, delete skills for workflows that are gone or disabled |
+| `--prune` | on `sync`, delete skills for workflows that are gone or disabled, and any other `medulla-*` skill with no workflow behind it |
 | `--dry-run`, `--json` | report without writing; machine-readable output |
 
 Claude gets `.claude/skills/medulla-<id>/SKILL.md`. Codex and every other

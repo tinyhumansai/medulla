@@ -105,7 +105,8 @@ pub async fn handle_control(
             .map(tasks::task_json)
             .collect::<Vec<_>>() })),
         "task.abort" => tasks::task_abort(ops, registry, &token, &params),
-        "run.report" => runs::run_report(runs, &grant, &params),
+        // `self::` because the module and the registry argument share a name.
+        "run.report" => self::runs::run_report(runs, &grant, &params),
         "hook.report" => hooks::hook_report(ops, &grant, &params),
         other => Err(ControlFailure::new(
             ErrorKind::BadRequest,

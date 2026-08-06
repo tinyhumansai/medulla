@@ -166,11 +166,11 @@ fn summarize(event: HookEvent, payload: &Value) -> String {
 }
 
 /// Strips control characters (including terminal escape/OSC sequences) from
-/// harness-supplied text before it becomes a [`HookReport::summary`]. Every
-/// path below folds arbitrary strings from the harness's own hook payload —
-/// `tool_name`, `message` — into the summary, and that string is later
-/// rendered straight into the operator's terminal, so it must never carry a
-/// raw control byte.
+/// harness-supplied text before it becomes a
+/// [`medulla::harness_hooks::HookReport::summary`]. Every path below folds
+/// arbitrary strings from the harness's own hook payload — `tool_name`,
+/// `message` — into the summary, and that string is later rendered straight
+/// into the operator's terminal, so it must never carry a raw control byte.
 fn sanitize(value: &str) -> String {
     value.chars().filter(|c| !c.is_control()).collect()
 }

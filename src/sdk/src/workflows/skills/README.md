@@ -178,9 +178,9 @@ answer and the CLI says so rather than silently doing nothing.
 
 `install` is an operator action, and for the directories a person curates
 (`~/.claude`) that is right: nothing should rewrite their files behind their
-back. The managed scope is different — `<medulla home>/<harness>-skills` is
-Medulla's own root, read only by harnesses Medulla spawns — and treating it the
-same way left it stale. Authoring a workflow in the TUI, evolving one over MCP,
+back. The managed scope is different — `<medulla home>/skills/scopes/<workspace>/<harness>-skills`
+is Medulla's own root, read only by harnesses Medulla spawns — and treating it
+the same way left it stale. Authoring a workflow in the TUI, evolving one over MCP,
 disabling one, or deleting one changed what a session should be told, and
 nothing rewrote the directory afterwards. The operator's next session was
 offered a catalog that no longer matched the store.

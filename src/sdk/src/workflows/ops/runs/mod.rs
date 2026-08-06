@@ -6,6 +6,7 @@
 //! back from it.
 
 pub mod view;
+mod types;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,7 @@ use super::record_value;
 use crate::workflows::local::LocalRun;
 use crate::workflows::{StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowStore};
 
+pub use types::Wait;
 pub use view::StepDetail;
 
 /// Simulate a workflow: resolve every expression and satisfy every declared
@@ -61,28 +63,6 @@ pub fn list_runs(
         .map(|record| view::project(record, detail))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({ "runs": runs }))
-}
-
-/// How long a caller is willing to hold a `workflow_run` call open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Wait {
-    /// Return as soon as the run is admitted, with its id.
-    #[default]
-    No,
-    /// Block until the run settles, however long that takes.
-    Forever,
-    /// Block until the run settles or this budget expires, whichever is first.
-    Until(Duration),
-}
-
-impl Wait {
-    /// Whether this mode holds the call open at all.
-    ///
-    /// The one thing worth knowing about a `Wait` from outside: a caller that
-    /// is not waiting has nobody to send progress to.
-    pub fn blocks(self) -> bool {
-        !matches!(self, Self::No)
-    }
 }
 
 /// Run a workflow on this machine, for real.

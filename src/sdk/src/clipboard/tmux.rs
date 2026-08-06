@@ -37,7 +37,12 @@ pub struct Tmux {
     /// socket path happens to name — they differ whenever a session was started
     /// with `-L`/`-S`, and a worker reached over SSH is not guaranteed to be in
     /// the default one.
-    pub socket: String,
+    ///
+    /// Private: `$TMUX` is untrusted configuration, so every `Tmux` in
+    /// existence has already passed [`Tmux::parse`]'s validation that this
+    /// names a real Unix socket this process owns. A public setter would let a
+    /// caller build one straight from a tainted value and skip that check.
+    socket: String,
 }
 
 impl Tmux {
@@ -56,9 +61,34 @@ impl Tmux {
     ///
     /// `$TMUX` is `<socket>,<server-pid>,<session-index>`; only the socket is
     /// needed, and a value carrying just the socket is accepted too.
+    ///
+    /// `$TMUX` is inherited environment, so it is untrusted: a child process,
+    /// or anything else able to set the environment this process launches
+    /// with, could point it at a socket that is not the real controlling
+    /// server to redirect where a copy lands. This is validated at that
+    /// boundary — accepted only when the path names a Unix socket that
+    /// actually exists and is owned by the user running this process — rather
+    /// than left to whatever `tmux -S` happens to do with it.
     pub fn parse(value: Option<&str>) -> Option<Self> {
         let socket = value?.split(',').next().unwrap_or_default().trim();
-        (!socket.is_empty()).then(|| Tmux {
+        Self::validated(socket)
+    }
+
+    /// Accept `socket` only when it names a real Unix socket owned by us.
+    ///
+    /// Rejects anything that is not an absolute path, does not exist, is not
+    /// a socket (a regular file, say), or belongs to another user — each of
+    /// those is a shape a tainted `$TMUX` could take, and none of them is a
+    /// server this process should be handing clipboard text to.
+    fn validated(socket: &str) -> Option<Self> {
+        if socket.is_empty() || !socket.starts_with('/') {
+            return None;
+        }
+        let meta = std::fs::symlink_metadata(socket).ok()?;
+        if !is_socket_we_own(&meta) {
+            return None;
+        }
+        Some(Tmux {
             socket: socket.to_string(),
         })
     }

@@ -79,16 +79,14 @@ impl Tmux {
     /// than left to whatever `tmux -S` happens to do with it.
     pub fn parse(value: Option<&str>) -> Option<Self> {
         let value = value?.trim();
-        let mut fields = value.rsplitn(3, ',');
-        // Consume the trailing session-index and server-pid fields, if
-        // present, so what remains is the socket path however many commas it
-        // contains. A value carrying just the socket (no commas at all) is
-        // accepted too: `rsplitn` then yields the whole value as the sole
-        // field.
-        let socket = match (fields.next(), fields.next(), fields.next()) {
-            (Some(_session), Some(_pid), Some(socket)) => socket,
-            (Some(socket), None, None) => socket,
-            _ => value,
+        // Only peel trailing fields off when there are enough commas for
+        // `<pid>,<session-index>` to plausibly be present; a bare socket (no
+        // comma at all, or the one comma of a genuinely comma-free path
+        // paired with something that is not the tmux triple) is left as is.
+        let socket = if value.matches(',').count() >= 2 {
+            value.rsplitn(3, ',').last().unwrap_or(value)
+        } else {
+            value
         };
         Self::validated(socket.trim())
     }

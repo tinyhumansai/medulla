@@ -164,8 +164,7 @@ fn tmux_is_detected_from_the_env_var_and_its_socket_kept() {
     // server tmux itself would be running.
     let dir = tempfile::tempdir().expect("tempdir");
     let socket_path = dir.path().join("default");
-    let _listener =
-        std::os::unix::net::UnixListener::bind(&socket_path).expect("bind test socket");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket_path).expect("bind test socket");
     let socket = socket_path.to_str().expect("utf8 path").to_string();
 
     let tmux = Tmux::parse(Some(&format!("{socket},3423,0"))).expect("inside tmux");

@@ -79,16 +79,14 @@ impl ClipboardQueue {
             if self.closed.load(std::sync::atomic::Ordering::Acquire) {
                 return None;
             }
-            guard = self
-                .signal
-                .wait(guard)
-                .unwrap_or_else(|e| e.into_inner());
+            guard = self.signal.wait(guard).unwrap_or_else(|e| e.into_inner());
         }
     }
 
     /// Wake the worker thread so it observes `closed` and exits.
     pub(super) fn close(&self) {
-        self.closed.store(true, std::sync::atomic::Ordering::Release);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
         self.signal.notify_one();
     }
 }

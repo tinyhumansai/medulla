@@ -51,8 +51,8 @@ impl crate::control_socket::types::FleetOps for RecordingFleet {
 /// (chatgpt-codex-connector P2 on PR #192).
 #[test]
 fn a_summary_with_control_bytes_is_sanitized_before_it_is_recorded() {
-    let ops: std::sync::Arc<dyn crate::control_socket::types::FleetOps> =
-        std::sync::Arc::new(RecordingFleet::default());
+    let fleet = std::sync::Arc::new(RecordingFleet::default());
+    let ops: std::sync::Arc<dyn crate::control_socket::types::FleetOps> = fleet.clone();
     let grant = Grant::hook_only("s");
 
     let response = hook_report(
@@ -66,6 +66,11 @@ fn a_summary_with_control_bytes_is_sanitized_before_it_is_recorded() {
     .expect("a hook-only grant may always report");
     assert_eq!(response, json!({ "recorded": true }));
 
-    let recorded = RecordingFleet::default();
-    let _ = recorded; // placeholder shadow removed below
+    let recorded = fleet.recorded.lock().unwrap();
+    let summary = &recorded.as_ref().expect("hook_report always records").summary;
+    assert_eq!(summary, "clear[2Jscreenbell");
+    assert!(
+        !summary.chars().any(|c| c.is_control()),
+        "a control byte reached the recorded summary: {summary:?}"
+    );
 }

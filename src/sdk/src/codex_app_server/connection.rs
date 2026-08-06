@@ -220,6 +220,18 @@ impl Connection {
         Ok(connection)
     }
 
+    /// Terminate the child and fail everything still waiting on it.
+    ///
+    /// Shutdown does not merely drop the connection, because a caller may still
+    /// hold a handle — a lane mid-turn, a live [`ThreadSubscription`] — and
+    /// waiting for the last one to retire would leave a Codex process running
+    /// past the point the operator asked for it to stop. Callers see the same
+    /// [`AppServerError::Process`] a crashed child produces, which every path
+    /// already handles.
+    pub fn close(&self) {
+        self.mark_dead("connection closed");
+    }
+
     /// Whether the child is still serving.
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)

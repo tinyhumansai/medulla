@@ -70,6 +70,27 @@ fn save_a_runnable_workflow(store: &Arc<dyn WorkflowStore>, id: &str) {
     ops::create(store, &document, id).expect("saves the workflow");
 }
 
+/// A workflow declaring one required input it never actually uses.
+///
+/// Its `code` node is unreachable by a call missing that input — the point is
+/// never to get there, only to fail resolving inputs first.
+fn save_a_workflow_requiring_an_input(store: &Arc<dyn WorkflowStore>, id: &str) {
+    let document = json!({
+        "id": id,
+        "name": "Needs Input",
+        "inputs": [{ "name": "repo", "type": "string", "required": true }],
+        "nodes": [
+            { "id": "t", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "compute", "kind": "code", "name": "Compute",
+              "config": { "language": "javascript", "source": "return { total: 1 + 1 };" } }
+        ],
+        "edges": [{ "from_node": "t", "to_node": "compute" }]
+    })
+    .to_string();
+    ops::create(store, &document, id).expect("saves the workflow");
+}
+
 /// The request these tests run, against a scratch workspace.
 fn request<'a>(
     store: &Arc<dyn WorkflowStore>,

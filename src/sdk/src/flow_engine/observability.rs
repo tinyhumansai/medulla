@@ -122,10 +122,7 @@ impl WorkflowRunObserver {
     }
 
     /// Add a sink for completed-step snapshots.
-    pub(crate) fn with_step_snapshot(
-        mut self,
-        snapshot: Option<StepSnapshot>,
-    ) -> Self {
+    pub(crate) fn with_step_snapshot(mut self, snapshot: Option<StepSnapshot>) -> Self {
         self.step_snapshot = snapshot;
         self
     }

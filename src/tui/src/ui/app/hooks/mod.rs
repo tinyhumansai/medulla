@@ -86,7 +86,7 @@ impl App {
     /// longer where it was — the config was reloaded under the editor — is
     /// reported rather than overwriting whatever now sits there.
     pub(super) fn save_hook(&mut self, at: Option<usize>, text: &str) {
-        let hook = match HookSpec::from_editor_line(text) {
+        let mut hook = match HookSpec::from_editor_line(text) {
             Ok(hook) => hook,
             Err(error) => {
                 self.set_status(format!("Hook · {error}"));
@@ -96,6 +96,10 @@ impl App {
         let mut hooks = self.loaded.config.hooks.hooks.clone();
         match at {
             Some(index) if index < hooks.len() && !hooks[index].builtin => {
+                // The editor form has no label field, so parsing one always
+                // yields `None` — carry the row's existing label forward
+                // rather than dropping it on every edit.
+                hook.label = hooks[index].label.clone();
                 hooks[index] = hook;
                 self.hook_index = index;
             }

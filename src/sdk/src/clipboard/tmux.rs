@@ -111,11 +111,20 @@ impl Tmux {
 /// Both checks matter: the type check rules out a tainted `$TMUX` pointing at
 /// an ordinary file, and the ownership check rules out one pointing at a real
 /// socket that just happens to belong to someone else on a shared box.
+#[cfg(unix)]
 fn is_socket_we_own(meta: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     // SAFETY: `getuid` takes no arguments and always succeeds.
     let uid = unsafe { libc::getuid() };
     meta.file_type().is_socket() && meta.uid() == uid
+}
+
+/// tmux, and therefore `$TMUX`, does not exist on Windows: there is no socket
+/// concept to validate, so nothing this crate is handed there can be a real
+/// tmux server.
+#[cfg(not(unix))]
+fn is_socket_we_own(_meta: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// Arguments for `tmux load-buffer`, reading the text from stdin.

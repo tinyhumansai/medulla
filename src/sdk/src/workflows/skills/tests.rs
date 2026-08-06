@@ -522,7 +522,7 @@ fn sync_prune_still_removes_a_marked_skill_behind_a_symlink() {
     let shared = elsewhere.path().join("ours");
     fs::create_dir_all(&shared).unwrap();
     let external = shared.join("SKILL.md");
-    fs::write(&external, render(&summary("audit", "Audit a repo."))).unwrap();
+    fs::write(&external, render(&summary("audit", "Audit a repo.")).body).unwrap();
 
     let skills = home.path().join(".claude/skills");
     fs::create_dir_all(&skills).unwrap();

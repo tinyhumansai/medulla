@@ -269,6 +269,7 @@ fn local_context(
                 http_credentials: HashMap::new(),
             },
             sink,
+            step_snapshot: None,
         },
         run_id,
     ))

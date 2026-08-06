@@ -197,7 +197,11 @@ pub(crate) async fn call(
             let wait = wait_mode(&arguments)?;
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            ops::run(
+            // Kept alongside the sink so a bounded wait that gives up on the
+            // run can deactivate it below — the sink itself is moved into the
+            // run's background task, which outlives this call.
+            let progress = progress.filter(|_| wait.blocks());
+            let result = ops::run(
                 crate::workflows::local::LocalRun {
                     store: store.clone(),
                     config: &policy.workflows,
@@ -210,13 +214,25 @@ pub(crate) async fn call(
                     // has already answered with its id would be reporting
                     // progress against a token the client stopped watching.
                     sink: progress
-                        .filter(|_| wait.blocks())
+                        .clone()
                         .map(|progress| run_progress::sink(progress, id)),
                 },
                 wait,
             )
             .await
-            .map_err(to_rpc)
+            .map_err(to_rpc);
+            // `admitted`'s shape (`ops::run`, `Wait::Until` that ran out of
+            // budget) is the only outcome where this call answers while the
+            // run is still going — every other outcome either never made a
+            // sink (`Wait::No`) or already ran to completion (`Wait::Forever`,
+            // or `Wait::Until` that settled in time), so there is nothing left
+            // to silence.
+            if let (Ok(value), Some(progress)) = (&result, &progress) {
+                if value.get("status").and_then(Value::as_str) == Some("running") {
+                    progress.deactivate();
+                }
+            }
+            result
         }
         // Counts by default: a history listing is read to find *which* run to
         // look at, and inlining every step of every run is what made the

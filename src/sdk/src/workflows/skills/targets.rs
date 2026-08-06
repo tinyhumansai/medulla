@@ -19,7 +19,7 @@ use super::{SkillScope, SkillTarget};
 pub fn scope_root(scope: SkillScope, env: &HashMap<String, String>, cwd: &Path) -> PathBuf {
     match scope {
         SkillScope::Project => cwd.to_path_buf(),
-        SkillScope::Managed => managed_root(env),
+        SkillScope::Managed => managed_root(env, cwd),
         SkillScope::User => env
             .get("HOME")
             .map(|home| home.trim())

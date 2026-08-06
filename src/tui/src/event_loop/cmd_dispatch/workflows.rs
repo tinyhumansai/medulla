@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use medulla::daemon::embedded::EmbeddedDaemonOptions;

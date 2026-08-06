@@ -10,6 +10,8 @@
 //! slot per request, so a relogin that refills that slot is picked up with no
 //! rebind at all.
 
+pub(crate) mod startup;
+
 #[cfg(test)]
 mod tests;
 

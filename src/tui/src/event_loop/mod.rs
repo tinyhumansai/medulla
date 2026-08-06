@@ -163,7 +163,14 @@ pub(crate) async fn run(
                         app.workflow_run_started(&workflow, &run_id);
                     }
                     #[cfg(feature = "workflows")]
-                    AppMsg::WorkflowRunOutput { run_id, node, line } => {
+                    AppMsg::WorkflowRunOutput {
+                        run_id,
+                        node,
+                        line,
+                        // Dropped here, which is what frees the sink's backlog
+                        // slot; see `PendingFrame`.
+                        pending: _pending,
+                    } => {
                         app.workflow_run_output(&run_id, &node, line);
                     }
                     #[cfg(feature = "workflows")]

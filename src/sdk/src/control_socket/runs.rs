@@ -222,6 +222,18 @@ impl HarnessRunRegistry {
             .cloned()
     }
 
+    /// Whether `session` has reported any run at all.
+    ///
+    /// Separate from [`for_session`](Self::for_session) because a reader that
+    /// only wants the yes/no — the rail, deciding per frame whether a session is
+    /// worth listing — would otherwise clone every run to throw them away.
+    pub fn any_for_session(&self, session: &str) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .is_some_and(|runs| runs.get(session).is_some_and(|runs| !runs.is_empty()))
+    }
+
     /// What `session` has running and recently ran, oldest first.
     pub fn for_session(&self, session: &str) -> Vec<HarnessRun> {
         self.inner

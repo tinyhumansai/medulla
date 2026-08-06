@@ -21,6 +21,11 @@
 //! the registry keeps only the latest line per run. So the forwarder sends the
 //! most recent frame at a bounded rate and discards what it overtook, rather
 //! than queueing thousands of lines that are stale by the time they arrive.
+//! Two things fall out of that and are tested for: the run's terminal report is
+//! never the thing discarded, however late a progress frame arrives behind it;
+//! and progress is dropped at the sink once `MAX_PENDING_PROGRESS` frames are
+//! already waiting, so a stalled control plane cannot turn the queue into a
+//! memory leak.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

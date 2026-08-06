@@ -42,6 +42,31 @@ fn a_notification_is_the_one_message_meant_for_the_operator() {
 }
 
 #[test]
+fn control_bytes_in_a_notification_message_are_stripped() {
+    let summary = summarize(
+        HookEvent::Notification,
+        &payload(json!({ "message": "clear\x1b[2Jscreen\x07bell" })),
+    );
+    assert_eq!(summary, "clear[2Jscreenbell");
+    assert!(
+        !summary.chars().any(|c| c.is_control()),
+        "a control byte reached the summary: {summary:?}"
+    );
+}
+
+#[test]
+fn control_bytes_in_a_tool_name_are_stripped() {
+    let summary = summarize(
+        HookEvent::PostToolUse,
+        &payload(json!({ "tool_name": "Ed\x1b]0;pwned\x07it" })),
+    );
+    assert!(
+        !summary.chars().any(|c| c.is_control()),
+        "a control byte reached the summary: {summary:?}"
+    );
+}
+
+#[test]
 fn every_event_summarizes_without_any_payload_at_all() {
     for event in HookEvent::ALL {
         let summary = summarize(event, &serde_json::Value::Null);

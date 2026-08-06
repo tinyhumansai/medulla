@@ -271,17 +271,9 @@ impl App {
         session_id: &str,
     ) -> Option<&'a mut SessionRailRow> {
         let local_sessions = self.local_sessions.as_ref()?;
-        groups
-            .iter_mut()
-            .flat_map(|group| group.sessions.iter_mut())
-            .find(|session| {
-                session.local.is_none()
-                    && session.task.as_ref().is_some_and(|task| {
-                        local_sessions
-                            .session_for_task(&task.task_id)
-                            .is_some_and(|served| served == session_id)
-                    })
-            })
+        task_row_serving(groups, session_id, |task_id| {
+            local_sessions.session_for_task(task_id)
+        })
     }
 
     /// Flatten the tree into rows, wrapping agents in host rows when needed.

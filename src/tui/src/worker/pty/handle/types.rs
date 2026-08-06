@@ -276,6 +276,12 @@ pub struct SessionHandle {
 pub(super) struct TerminalModes {
     /// Stateful parser, retained so escape sequences split across PTY reads work.
     pub(super) parser: vte::Parser,
+    /// Independent OSC 52 capture, retained across reads for the same reason.
+    ///
+    /// See [`super::osc52`] for why `vte`'s own OSC dispatch is not enough on
+    /// its own: its OSC buffer is a fixed 1024 bytes, so a copy larger than
+    /// that arrives truncated through [`vte::Perform::osc_dispatch`] alone.
+    pub(super) osc52: super::osc52::Osc52Scanner,
     /// Whether xterm alternate-scroll mode (DECSET 1007) is enabled.
     pub(super) alternate_scroll: bool,
     /// The clipboard write the child last asked for (OSC 52), until it is taken.

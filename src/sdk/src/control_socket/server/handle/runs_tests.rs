@@ -1,3 +1,9 @@
+//! What `run.report` accepts, and who the run it creates is attributed to.
+//!
+//! The handler is the trust boundary for run reporting: the grant decides which
+//! session a report is filed under, and the field limits decide what a reporter
+//! may spend the registry's memory on. Both are checked here.
+
 use serde_json::json;
 
 use crate::control_socket::grants::Grant;

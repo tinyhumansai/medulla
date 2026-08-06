@@ -78,16 +78,24 @@ pub fn workspace_state_dir_under(home: &Path, cwd: &Path) -> PathBuf {
 }
 
 /// `state_dir` narrowed to one workspace, by a digest of its canonical path.
+fn scoped_state_dir(state_dir: &Path, workspace: &Path) -> PathBuf {
+    state_dir.join("scopes").join(workspace_scope(workspace))
+}
+
+/// The directory-name digest that identifies one workspace.
 ///
 /// Canonical rather than literal so `.` and a symlinked checkout resolve to the
 /// same scope; truncated to sixteen hex characters because this is a directory
 /// name a person occasionally has to read, and collision here would need a
 /// deliberate preimage attack on a path nobody else chooses.
-fn scoped_state_dir(state_dir: &Path, workspace: &Path) -> PathBuf {
+///
+/// Shared in-crate because the generated skills are scoped the same way and by
+/// the same rule — a second copy of this derivation is a second thing that can
+/// drift.
+pub(crate) fn workspace_scope(workspace: &Path) -> String {
     let identity = std::fs::canonicalize(workspace).unwrap_or_else(|_| absolute_path(workspace));
     let digest = Sha256::digest(identity.to_string_lossy().as_bytes());
-    let scope = format!("{digest:x}");
-    state_dir.join("scopes").join(&scope[..16])
+    format!("{digest:x}")[..16].to_string()
 }
 
 /// A file-backed proposal decision claim released when dropped.

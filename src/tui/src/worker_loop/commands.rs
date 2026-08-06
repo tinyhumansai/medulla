@@ -93,19 +93,19 @@ async fn connect_master(app: &mut WorkerApp, start: &StartWiring, input: String)
         .trim()
         .starts_with('@')
         .then(|| input.trim().to_string());
-    let address = if handle.is_some() {
-        match transport.resolve_handle(&input).await {
-            Some(address) => address,
-            None => {
-                app.set_status(format!("Master {input} was not found"));
-                return;
-            }
-        }
-    } else {
-        input.trim().to_string()
+    // Every input goes through `resolve_handle`, not just the `@` form. On the
+    // host link a node name *is* the address, so this is not a directory lookup
+    // — it is the enrollment check, and it is the only one there is. Skipping it
+    // for a bare name persisted whatever was typed: the row said "added", and
+    // the first message failed much later with "no link peer is enrolled",
+    // pointing at the send rather than at the typo that caused it.
+    let Some(address) = transport.resolve_handle(&input).await else {
+        app.set_status(format!("Master {} is not enrolled", input.trim()));
+        return;
     };
-    // No handshake to perform: enrollment already established the pair key, so
-    // adding the row is the whole operation (`docs/host-link-protocol.md` §7).
+    // No handshake to perform beyond that: enrollment already established the
+    // pair key, so adding the row is the whole operation
+    // (`docs/host-link-protocol.md` §7).
     app.add_master(address.clone(), handle);
     if let Err(err) = medulla::config::persist_link_peers(app.config_path(), app.masters()) {
         app.set_status(format!(

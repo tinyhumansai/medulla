@@ -106,6 +106,28 @@ impl Tmux {
     }
 }
 
+/// Whether `meta` names a Unix socket owned by the user running this process.
+///
+/// Both checks matter: the type check rules out a tainted `$TMUX` pointing at
+/// an ordinary file, and the ownership check rules out one pointing at a real
+/// socket that just happens to belong to someone else on a shared box.
+fn is_socket_we_own(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    meta.file_type().is_socket() && meta.uid() == current_uid()
+}
+
+/// The effective user id of this process, via `libc`-free `/proc` fallback
+/// where available and `nix`-free direct syscall otherwise.
+fn current_uid() -> u32 {
+    // SAFETY: `getuid` takes no arguments and always succeeds.
+    unsafe { libc_getuid() }
+}
+
+extern "C" {
+    #[link_name = "getuid"]
+    fn libc_getuid() -> u32;
+}
+
 /// Arguments for `tmux load-buffer`, reading the text from stdin.
 ///
 /// `hand_off` adds `-w`, which asks tmux to also send the buffer on to its own

@@ -162,6 +162,20 @@ fn read_payload(deadline: Instant) -> Value {
 /// so it is read defensively and skipped when absent: a report with a thin
 /// summary is worth far more than one that did not arrive.
 fn summarize(event: HookEvent, payload: &Value) -> String {
+    sanitize(&summarize_raw(event, payload))
+}
+
+/// Strips control characters (including terminal escape/OSC sequences) from
+/// harness-supplied text before it becomes a [`HookReport::summary`]. Every
+/// path below folds arbitrary strings from the harness's own hook payload —
+/// `tool_name`, `message` — into the summary, and that string is later
+/// rendered straight into the operator's terminal, so it must never carry a
+/// raw control byte.
+fn sanitize(value: &str) -> String {
+    value.chars().filter(|c| !c.is_control()).collect()
+}
+
+fn summarize_raw(event: HookEvent, payload: &Value) -> String {
     let field = |key: &str| payload.get(key).and_then(Value::as_str).unwrap_or("");
     match event {
         HookEvent::PostToolUse => match field("tool_name") {

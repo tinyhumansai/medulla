@@ -368,6 +368,21 @@ async fn a_pool_opens_one_connection_and_releases_it_on_shutdown() {
 
     pool.shutdown().await;
     assert!(pool.is_empty().await);
+
+    // This test still holds `first` and `second`, which is the case that made
+    // forgetting the map entry insufficient: the reader task and the child kept
+    // each other alive, so `Drop` never ran and the app-server outlived the
+    // shutdown that was supposed to stop it. Shutdown closes each connection
+    // explicitly, so a caller holding a handle sees a dead one rather than a
+    // live process nobody asked for.
+    assert!(!first.is_alive(), "shutdown closed the connection");
+    assert!(
+        first
+            .call("thread/start", serde_json::json!({}))
+            .await
+            .is_err(),
+        "a closed connection refuses further calls"
+    );
 }
 
 /// A binary that is not there fails at acquisition, where the error names the

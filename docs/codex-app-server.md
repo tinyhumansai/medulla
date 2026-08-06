@@ -64,6 +64,13 @@ pinned argv, and the environment that decides who the process authenticates as
 that share one process; two that disagree on any of it get their own, because a
 process authenticates once and holds that identity for its whole life.
 
+The pinned argv is the same process-level Codex configuration the CLI seam
+assembles: `MEDULLA_CODEX_ARGS` / `TINYPLACE_CODEX_ARGS`, the daemon's configured
+extra args, and a routed preset's `codexOverrides` — the provider block, the
+API-key auth preference and the model catalog entry without which Codex prefers a
+signed-in ChatGPT account and never consults the routed endpoint. Because all of
+it is in the key, a routed run and a plain one never land on the same process.
+
 Everything per-task is a thread or turn parameter, which the protocol scopes
 correctly:
 
@@ -112,6 +119,12 @@ it would be a bug.
   they are for ACP. The transport has a steering operation; Medulla does not use
   it yet.
 - **Minimal event detail.** See "When to use it" above.
+- **No Medulla hooks.** The CLI seam installs them as a per-run `-c hooks=…`
+  override paired with a capability grant in the child's environment. Neither
+  scopes to a *shared* process: a hook installed for one lane would fire on every
+  other lane's turns, and the grant it redeems is stripped for the same reason a
+  fleet grant is. A run that configured hooks logs a warning rather than letting
+  the operator believe they are running.
 - **Codex only.** No other harness ships an app-server. Pairing the transport
   with another provider is refused at every layer that can see both.
 - **Experimental upstream.** `codex app-server` is marked experimental by the

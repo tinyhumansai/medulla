@@ -507,6 +507,7 @@ fn scan_skill_dirs(target: SkillTarget, skills: &Path) -> io::Result<Vec<Candida
             symlinked,
         });
     }
+    found.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(found)
 }
 

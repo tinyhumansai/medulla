@@ -113,7 +113,17 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
 /// content is a collision rather than a deletion.
 ///
 /// Codex's deprecated `.codex/skills` root is swept too, since
-/// [`install`] only retires what a still-installed workflow left there.
+/// [`install`] only retires what a still-installed workflow left there. That
+/// sweep keys off Codex being *requested*, not off Codex surviving
+/// [`dedupe_by_skills_dir`]: `--harness generic,codex` collapses to Generic
+/// alone, because both write `.agents/skills`, and the legacy leftovers would
+/// otherwise go unswept purely because of the order the harnesses were named.
+///
+/// A `medulla-*` entry that is a symlink to a directory is never pruned on the
+/// prefix rule. `read_dir` resolves it, so the `SKILL.md` behind it belongs to
+/// whatever the operator linked in — outside the root entirely — and deleting
+/// it would destroy content Medulla never wrote. A marked file reached that way
+/// is still ours to remove: we wrote the marker, so we know what it is.
 ///
 /// # Errors
 ///

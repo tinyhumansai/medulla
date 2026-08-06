@@ -33,3 +33,46 @@ fn disabled_update_check_spawns_no_background_work() {
 
     assert!(rx.try_recv().is_err());
 }
+
+/// Sinks fan out with the workflow, so the bound has to hold when several of
+/// them race — the case a check-then-increment silently overshoots.
+#[cfg(feature = "workflows")]
+#[test]
+fn concurrent_claims_never_exceed_the_bound() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
+
+    const LIMIT: usize = 4;
+    const SINKS: usize = 16;
+
+    let depth = Arc::new(AtomicUsize::new(0));
+    let start = Arc::new(Barrier::new(SINKS));
+    let granted = Arc::new(AtomicUsize::new(0));
+
+    // Claims are held for the whole race: releasing one would free a slot the
+    // next thread could legitimately take, and the count would prove nothing.
+    let held = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..SINKS {
+            let depth = depth.clone();
+            let start = start.clone();
+            let granted = granted.clone();
+            let held = &held;
+            scope.spawn(move || {
+                start.wait();
+                if let Some(frame) = super::types::PendingFrame::claim(&depth, LIMIT) {
+                    granted.fetch_add(1, Ordering::Relaxed);
+                    held.lock().expect("held frames").push(frame);
+                }
+            });
+        }
+    });
+
+    assert_eq!(granted.load(Ordering::Relaxed), LIMIT);
+    assert_eq!(depth.load(Ordering::Relaxed), LIMIT);
+
+    // And every held slot comes back, so a later frame is queueable again.
+    held.lock().expect("held frames").clear();
+    assert_eq!(depth.load(Ordering::Relaxed), 0);
+    assert!(super::types::PendingFrame::claim(&depth, LIMIT).is_some());
+}

@@ -347,6 +347,116 @@ fn sync_prune_removes_orphans_and_spares_unmarked_neighbours() {
     assert_eq!(fs::read_to_string(&neighbour).unwrap(), "mine\n");
 }
 
+/// The leftover an operator actually hits: a `medulla-*` skill from a release
+/// whose marker this build cannot read. Nothing identifies it as ours except
+/// the prefix, and without prefix-pruning no command could ever remove it —
+/// the harness would go on offering a workflow that no longer exists.
+#[test]
+fn sync_prune_removes_an_unreadable_medulla_skill_with_no_workflow_behind_it() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+    let kept = summary("babysit", "Watch a PR.");
+    install(&[kept.clone()], &options).unwrap();
+
+    let stale = skill_path(SkillTarget::Claude, home.path(), "medulla-ancient");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "---\nname: medulla-ancient\n---\n\nold body\n").unwrap();
+    assert!(
+        parse_marker(&fs::read_to_string(&stale).unwrap()).is_none(),
+        "the fixture is only meaningful if the marker is unreadable"
+    );
+
+    let report = sync(&[kept], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!home.path().join(".claude/skills/medulla-ancient").exists());
+    assert!(skill_path(SkillTarget::Claude, home.path(), "medulla-babysit").is_file());
+}
+
+/// The other half of the prefix rule: a slug a *kept* workflow claims stays
+/// under the marker discipline. Unmanaged content there is a collision the
+/// operator resolves, never a file prune deletes behind their back.
+#[test]
+fn sync_prune_spares_unmanaged_content_at_a_live_workflows_slug() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+    let kept = summary("babysit", "Watch a PR.");
+
+    let path = skill_path(SkillTarget::Claude, home.path(), "medulla-babysit");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "mine\n").unwrap();
+
+    let report = sync(&[kept], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 0);
+    assert_eq!(report.count(FileAction::SkippedUnmanaged), 1);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "mine\n");
+}
+
+/// Prefix-pruning is scoped to the namespace: an unmarked skill outside it
+/// belongs to someone else however stale it looks.
+#[test]
+fn sync_prune_leaves_unmarked_skills_outside_the_medulla_namespace() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Claude]);
+    let neighbour = home.path().join(".claude/skills/handwritten/SKILL.md");
+    fs::create_dir_all(neighbour.parent().unwrap()).unwrap();
+    fs::write(&neighbour, "mine\n").unwrap();
+
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 0);
+    assert_eq!(fs::read_to_string(&neighbour).unwrap(), "mine\n");
+}
+
+/// A command file is namespaced the same way, and prunes the same way.
+#[test]
+fn sync_prune_removes_an_unreadable_medulla_command_file() {
+    let home = TempDir::new().unwrap();
+    let mut options = opts(home.path(), vec![SkillTarget::Claude]);
+    options.with_commands = true;
+    let stale = home.path().join(".claude/commands/medulla-ancient.md");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "old command\n").unwrap();
+
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!stale.exists());
+}
+
+/// `install` retires a legacy Codex duplicate only on behalf of a workflow it
+/// is installing, so a deleted workflow's copy is the prune pass's job.
+#[test]
+fn sync_prune_sweeps_the_deprecated_codex_skills_root() {
+    let home = TempDir::new().unwrap();
+    let options = opts(home.path(), vec![SkillTarget::Codex]);
+    let legacy = home.path().join(".codex/skills/medulla-audit/SKILL.md");
+    fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    fs::write(&legacy, "---\nname: medulla-audit\n---\n\nold body\n").unwrap();
+
+    let report = sync(&[summary("babysit", "Watch a PR.")], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(!home.path().join(".codex/skills/medulla-audit").exists());
+}
+
+/// A dry run decides the same removals and writes none of them.
+#[test]
+fn a_dry_run_prune_reports_the_prefix_removal_without_making_it() {
+    let home = TempDir::new().unwrap();
+    let mut options = opts(home.path(), vec![SkillTarget::Claude]);
+    let stale = skill_path(SkillTarget::Claude, home.path(), "medulla-ancient");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "old body\n").unwrap();
+
+    options.dry_run = true;
+    let report = sync(&[], &options, true).unwrap();
+
+    assert_eq!(report.count(FileAction::Removed), 1);
+    assert!(stale.is_file());
+}
+
 #[test]
 fn sync_without_prune_leaves_orphans_in_place() {
     let home = TempDir::new().unwrap();

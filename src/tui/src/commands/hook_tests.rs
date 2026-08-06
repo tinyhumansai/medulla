@@ -96,27 +96,22 @@ fn declared_timeout_matches_the_builtins_per_event_value() {
 #[test]
 fn the_read_and_report_budgets_can_never_together_exceed_the_declared_timeout() {
     for event in HookEvent::ALL {
-        let deadline = Instant::now() + declared_timeout(event).saturating_sub(HEADROOM);
-        // What `read_payload` would spend at most, computed the same way it
-        // does internally.
-        let read_budget = READ_BUDGET.min(deadline.saturating_duration_since(Instant::now()));
+        let declared = declared_timeout(event);
+        // The read spends at most `READ_BUDGET`; the report gets whatever the
+        // one deadline leaves. Both are reserved out of `declared - HEADROOM`,
+        // so the read's own constant must fit inside that window with room to
+        // report — asserted against the constants themselves, with no clock
+        // read to cancel the arithmetic out.
         assert!(
-            read_budget <= declared_timeout(event),
-            "{}: the read budget alone must never exceed the declared timeout",
+            HEADROOM < declared,
+            "{}: the headroom must fit inside the declared timeout",
             event.as_str()
         );
-        // Whatever is left over for the report, after the read spent its
-        // whole (worst-case) budget, must still leave the shim's total run —
-        // read + report + the headroom already reserved — under the
-        // harness's declared timeout.
-        let remaining_for_report = deadline.saturating_duration_since(Instant::now() + read_budget);
-        let worst_case_total = read_budget + remaining_for_report + HEADROOM;
         assert!(
-            worst_case_total <= declared_timeout(event),
-            "{}: read ({read_budget:?}) + report ({remaining_for_report:?}) + headroom \
-             ({HEADROOM:?}) = {worst_case_total:?}, over the declared {:?}",
-            event.as_str(),
-            declared_timeout(event)
+            READ_BUDGET + HEADROOM < declared,
+            "{}: read ({READ_BUDGET:?}) + headroom ({HEADROOM:?}) leaves nothing \
+             of the declared {declared:?} for the report",
+            event.as_str()
         );
     }
 }

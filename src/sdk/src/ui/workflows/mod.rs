@@ -34,4 +34,4 @@ pub use inspect::{
 pub use journal::{actionable, displayed, note_rows, pending, proposal_detail, proposal_rows};
 pub use progress::{classify as classify_progress, Progress};
 pub use rows::{run_rows, status_color, status_label, workflow_rows, WorkflowRow};
-pub use run_view::{human_duration, run_overview, short_session};
+pub use run_view::{human_duration, run_overview, short_session, value_text};

@@ -156,16 +156,19 @@ impl PtyManager {
 
     /// Hand on whatever `handle`'s child last asked to copy, if anything.
     ///
-    /// Called by the reader thread after every drain, and on a thread of its own
-    /// because the sink waits on `tmux`/`pbcopy` children — seconds, in the
-    /// pathological case, during which the reader must keep draining or the
-    /// harness blocks on its own output.
+    /// Called by the reader thread after every drain. Handed off to the
+    /// clipboard worker thread rather than run inline, because the sink waits
+    /// on `tmux`/`pbcopy` children — seconds, in the pathological case, during
+    /// which the reader must keep draining or the harness blocks on its own
+    /// output. The handoff is a channel send, not a fresh thread, so two copies
+    /// from the same burst are written in the order the harness sent them
+    /// instead of racing each other to `tmux`/`pbcopy`.
     pub(super) fn forward_clipboard(&self, handle: &SessionHandle) {
         let Some(text) = handle.take_clipboard() else {
             return;
         };
-        let sink = self.inner.clipboard.clone();
-        std::thread::spawn(move || sink(&text));
+        let tx = self.inner.clipboard_tx.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = tx.send(text);
     }
 
     /// The handle for `id`, if there is one.

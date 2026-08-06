@@ -53,8 +53,8 @@ mod tests;
 
 pub use connection::{Connection, ThreadSubscription};
 pub use jsonrpc::{Message, Notification, RequestId};
-pub use records::{read_record, Record, MAX_LINE_BYTES};
 pub use pool::{pool, AppServerPool};
+pub use records::{read_record, Record, MAX_LINE_BYTES};
 pub use types::{
     AppServerError, AppServerKey, AppServerSpec, ApprovalPolicy, SandboxMode, ThreadOptions,
     TurnOutcome, TurnStatus, CLIENT_NAME,

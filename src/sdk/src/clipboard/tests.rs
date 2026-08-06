@@ -197,6 +197,20 @@ fn tmux_is_detected_from_the_env_var_and_its_socket_kept() {
 }
 
 #[test]
+fn tmux_socket_path_containing_a_comma_is_kept_whole() {
+    // `tmux -S /some,path` writes that literal path into `$TMUX`; splitting
+    // at the first comma would validate only `/some`, which does not exist,
+    // and wrongly conclude this process is not inside tmux.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket_path = dir.path().join("sock,with,commas");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket_path).expect("bind test socket");
+    let socket = socket_path.to_str().expect("utf8 path").to_string();
+
+    let tmux = Tmux::parse(Some(&format!("{socket},3423,0"))).expect("inside tmux");
+    assert_eq!(tmux.socket(), socket);
+}
+
+#[test]
 fn load_buffer_targets_our_own_server_and_asks_for_the_hand_off() {
     assert_eq!(
         load_buffer_args("/tmp/sock", true),

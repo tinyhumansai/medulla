@@ -365,7 +365,7 @@ fn a_rename_onto_the_old_slug_is_installed_by_the_same_sync() {
     let renamed = summary("deploy-prod", "Ship it.");
     let mut dry_options = options.clone();
     dry_options.dry_run = true;
-    let dry = sync(&[renamed.clone()], &dry_options, true).unwrap();
+    let dry = sync(std::slice::from_ref(&renamed), &dry_options, true).unwrap();
     let report = sync(&[renamed], &options, true).unwrap();
 
     assert_eq!(dry, report, "dry run and real run disagreed");

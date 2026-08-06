@@ -144,7 +144,19 @@ pub fn sync(
 
     for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
         let root = target_root(*target, opts.scope, &opts.root);
-        for stale in scan_prunable(*target, &root, &keep_ids, &keep_slugs)? {
+        let candidates = scan_candidates(*target, &root)?;
+        for stale in prunable(candidates, &keep_ids, &keep_slugs) {
+            report.files.push(remove_managed(&stale, opts)?);
+        }
+    }
+
+    // Deliberately outside the loop above and keyed off the requested targets:
+    // the deduped list may have dropped Codex, and `.codex/skills` is a root no
+    // other target shares, so it must be swept exactly once either way.
+    if opts.targets.contains(&SkillTarget::Codex) {
+        let root = target_root(SkillTarget::Codex, opts.scope, &opts.root);
+        let candidates = scan_skill_dirs(SkillTarget::Codex, &legacy_codex_skills_dir(&root))?;
+        for stale in prunable(candidates, &keep_ids, &keep_slugs) {
             report.files.push(remove_managed(&stale, opts)?);
         }
     }

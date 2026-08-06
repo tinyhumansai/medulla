@@ -200,8 +200,14 @@ impl GrantRegistry {
     /// its parent cannot start anything new, only finish narrating what it
     /// already had. The grant itself goes when the run settles; see
     /// [`HarnessRunRegistry::retire`](super::runs::HarnessRunRegistry::retire).
+    /// A session's *hook-only* grant is dropped outright rather than narrowed.
+    /// It belongs to the harness's own lifecycle hooks, which died with the
+    /// harness — the run is reported by the MCP subprocess, which holds the
+    /// fleet grant — and narrowing it would leave a token refused by both
+    /// checks and redeemable for nothing.
     pub fn restrict_to_reporting(&self, session: &str) {
         if let Ok(mut grants) = self.inner.lock() {
+            grants.retain(|_, grant| grant.session != session || !grant.hook_only);
             for grant in grants.values_mut() {
                 if grant.session == session {
                     grant.report_only = true;

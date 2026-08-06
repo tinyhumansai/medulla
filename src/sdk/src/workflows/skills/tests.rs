@@ -356,7 +356,7 @@ fn sync_prune_removes_an_unreadable_medulla_skill_with_no_workflow_behind_it() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
     let kept = summary("babysit", "Watch a PR.");
-    install(&[kept.clone()], &options).unwrap();
+    install(std::slice::from_ref(&kept), &options).unwrap();
 
     let stale = skill_path(SkillTarget::Claude, home.path(), "medulla-ancient");
     fs::create_dir_all(stale.parent().unwrap()).unwrap();

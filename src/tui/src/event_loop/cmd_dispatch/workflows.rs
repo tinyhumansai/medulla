@@ -69,6 +69,7 @@ async fn run(
     inputs: serde_json::Map<String, serde_json::Value>,
     workflows_config: &medulla::config::WorkflowsConfig,
     custom_harnesses: &[medulla::config::CustomHarnessConfig],
+    hooks: &medulla::harness_hooks::HooksConfig,
 ) -> anyhow::Result<(String, Option<String>)> {
     let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

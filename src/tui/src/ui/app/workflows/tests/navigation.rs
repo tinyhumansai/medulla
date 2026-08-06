@@ -5,7 +5,6 @@
 //! is already on disk and one that is still executing — a run started over MCP
 //! is reported long before it settles, and the record is written when it does.
 
-use medulla::workflows::WorkflowStore;
 
 use super::{app_with, diamond};
 

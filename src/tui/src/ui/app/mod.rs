@@ -26,6 +26,7 @@ mod feedback;
 mod harness_workspace;
 #[cfg(test)]
 mod harness_workspace_tests;
+mod hooks;
 mod hosts;
 mod input;
 mod keys;

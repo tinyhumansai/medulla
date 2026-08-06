@@ -169,7 +169,6 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
         workspace_choices: Vec::new(),
         workspace_index: 0,
         workspace_picked: false,
-        managed: true,
     });
 
     // First Enter advances from Harness step to Workspace step: where the
@@ -195,15 +194,17 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
         picker.workspace_index = 0;
     }
 
-    // Second Enter takes the workspace and advances to the decision step.
+    // Second Enter takes the workspace and starts the harness — the workspace
+    // step is the last one, exactly as its own title says. There is no control
+    // question after it: a harness started by hand is the operator's.
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(cmd.is_none());
-    assert_eq!(
-        a.agent_picker.as_ref().map(|picker| picker.step),
-        Some(AgentPickerStep::Decision),
-        "the picker should have advanced to its decision step"
+    assert!(
+        a.agent_picker.is_none(),
+        "the workspace step is the last one, so Enter must close the picker"
     );
+    assert_eq!(a.attached_session(), None, "must not attach behind a modal");
 }
 
 #[test]

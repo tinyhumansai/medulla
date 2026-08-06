@@ -35,4 +35,9 @@ pub struct InteractiveSession {
     /// The harness's own session id, once announced. Observability only.
     pub(super) harness_session_id: Mutex<Option<String>>,
     pub(super) interrupt_seq: AtomicU64,
+    /// Revokes this session's hook-only grant (see
+    /// [`crate::harness_hooks::seed_hook_grant`]) when the session drops.
+    /// Never read — its only job is to outlive every turn this session runs
+    /// and then give the grant back.
+    pub(super) _hook_grant: crate::harness_hooks::HookGrantGuard,
 }

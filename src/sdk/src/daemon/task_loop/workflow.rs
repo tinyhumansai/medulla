@@ -281,6 +281,7 @@ impl DaemonRuntime {
                 http_credentials: Default::default(),
             },
             sink,
+            step_snapshot: None,
         };
 
         // The frame's task id becomes the run id, so the orchestrator's existing

@@ -51,7 +51,6 @@ impl App {
             workspace_choices: Vec::new(),
             workspace_index: 0,
             workspace_picked: false,
-            managed: true,
         });
         self.set_status("New agent · pick a harness type · Enter workspace · Esc cancel");
     }

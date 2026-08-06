@@ -1,24 +1,25 @@
-//! Unit tests for skill rendering, target layout, and the managed-file
-//! discipline.
+//! Unit tests for the install/sync/uninstall pipeline and the managed-file
+//! discipline that guards it.
 //!
 //! The marker discipline gets the most attention here on purpose: it is the
 //! only thing standing between this feature and clobbering a hand-written file
 //! in someone's `~/.claude`, and unlike the rendering, a regression in it is
-//! not visible by reading the output.
+//! not visible by reading the output. Rendering itself is covered in
+//! [`super::render_tests`], and target/scope path resolution in
+//! [`super::targets_tests`].
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use serde_json::json;
 use tempfile::TempDir;
 
-use crate::workflows::{InputType, WorkflowInput, WorkflowSummary};
+use crate::workflows::WorkflowSummary;
 
+use super::render::parse_marker;
 use super::*;
 
 /// A listing view with the fields skill rendering actually reads.
-fn summary(id: &str, description: &str, inputs: Vec<WorkflowInput>) -> WorkflowSummary {
+fn summary(id: &str, description: &str) -> WorkflowSummary {
     WorkflowSummary {
         id: id.to_string(),
         name: id.to_string(),
@@ -26,7 +27,7 @@ fn summary(id: &str, description: &str, inputs: Vec<WorkflowInput>) -> WorkflowS
         enabled: true,
         node_count: 3,
         trigger_kind: Some("manual".to_string()),
-        inputs,
+        inputs: Vec::new(),
     }
 }
 
@@ -41,281 +42,91 @@ fn opts(root: &Path, targets: Vec<SkillTarget>) -> InstallOptions {
     }
 }
 
+/// A file the previous release installed carries its marker as an HTML comment
+/// above the frontmatter. It is still ours: it must be recognised, must be
+/// rewritten into the readable layout, and must never be reported as a
+/// collision against the very skill that wrote it.
 #[test]
-fn slug_prefixes_and_sanitises() {
-    assert_eq!(slug_for("babysit"), "medulla-babysit");
-    assert_eq!(slug_for("Review PR"), "medulla-review-pr");
-    assert_eq!(slug_for("a//b"), "medulla-a-b");
-    assert_eq!(slug_for("!!!"), "medulla-workflow");
-}
-
-#[test]
-fn zero_input_skill_states_an_empty_inputs_object() {
-    let skill = render(&summary("babysit", "Watch a pull request.", vec![]));
-
-    assert_eq!(skill.slug, "medulla-babysit");
-    assert!(skill
-        .body
-        .starts_with("<!-- medulla:managed workflow=babysit rev="));
-    assert!(skill.body.contains("name: medulla-babysit"));
-    assert!(skill.body.contains("This workflow takes no inputs"));
-    assert!(skill.body.contains("mcp__medulla__workflow_run"));
-    assert!(skill.body.contains("\"inputs\": {}"));
-    // The fallback keeps the skill useful with no server attached.
-    assert!(skill
-        .body
-        .contains("medulla workflow run babysit --inputs '{}'"));
-    assert!(skill.body.contains("medulla skills install --with-mcp"));
-    // Blocking behaviour is stated, because it is the surprising part.
-    assert!(skill.body.contains("blocks until the run finishes"));
-}
-
-#[test]
-fn description_carries_the_workflow_words_and_a_trigger_clause() {
-    let skill = render(&summary("babysit", "Watch a pull request", vec![]));
-    assert_eq!(
-        skill.description,
-        "Watch a pull request. Use when the operator asks to run the Medulla \
-         \"babysit\" workflow, or describes the work it does."
-    );
-}
-
-#[test]
-fn description_is_non_empty_when_the_workflow_has_none() {
-    let skill = render(&summary("babysit", "   ", vec![]));
-    assert_eq!(
-        skill.description,
-        "Use when the operator asks to run the Medulla \"babysit\" workflow, or \
-         describes the work it does."
-    );
-    // Frontmatter carries it as a double-quoted scalar, so the workflow name's
-    // own quotes are escaped rather than ending the string early.
-    assert!(skill.body.contains(
-        "description: \"Use when the operator asks to run the Medulla \\\"babysit\\\" workflow, \
-         or describes the work it does.\"\n"
-    ));
-}
-
-#[test]
-fn optional_inputs_render_their_defaults_in_the_example() {
-    let inputs = vec![
-        WorkflowInput::new("repo", InputType::String)
-            .with_default(json!("current"))
-            .with_description("Repository to inspect"),
-        WorkflowInput::new("deep", InputType::Boolean),
-    ];
-    let skill = render(&summary("audit", "Audit a repo.", inputs));
-
-    assert!(skill
-        .body
-        .contains("| `repo` | string | no | Repository to inspect | `\"current\"` |"));
-    assert!(skill.body.contains("| `deep` | boolean | no | — | — |"));
-    // The default is shown as a runnable value; the undeclared one as a
-    // type-shaped placeholder.
-    assert!(skill.body.contains("\"repo\": \"current\""));
-    assert!(skill.body.contains("\"deep\": false"));
-}
-
-#[test]
-fn required_inputs_are_marked_and_placeheld() {
-    let inputs = vec![
-        WorkflowInput::new("pr", InputType::Number)
-            .required()
-            .with_description("The pull request number"),
-        WorkflowInput::new("payload", InputType::Json).required(),
-    ];
-    let skill = render(&summary("babysit", "Watch a PR.", inputs.clone()));
-
-    assert!(skill
-        .body
-        .contains("| `pr` | number | yes | The pull request number | — |"));
-    assert!(skill.body.contains("| `payload` | json | yes | — | — |"));
-    assert!(skill.body.contains("\"pr\": 0"));
-    assert!(skill.body.contains("do not invent"));
-
-    let command = render_command(&skill, &summary("babysit", "Watch a PR.", inputs));
-    assert!(command.contains("argument-hint: \"<pr> <payload>\""));
-    assert!(command.contains("$ARGUMENTS"));
-    assert!(command.starts_with("<!-- medulla:managed workflow=babysit rev="));
-}
-
-#[test]
-fn rev_changes_only_when_the_body_does() {
-    let first = render(&summary("babysit", "Watch a PR.", vec![]));
-    let same = render(&summary("babysit", "Watch a PR.", vec![]));
-    let changed = render(&summary("babysit", "Watch a PR closely.", vec![]));
-
-    assert_eq!(first.rev, same.rev);
-    assert_eq!(first.body, same.body);
-    assert_ne!(first.rev, changed.rev);
-
-    // The rev fingerprints the content below the marker, so it survives being
-    // read back off the file it was written to.
-    let below = first.body.split_once('\n').expect("marker line").1;
-    assert!(first.body.contains(&format!("rev={}", first.rev)));
-    assert!(!below.contains(&first.rev));
-}
-
-#[test]
-fn every_target_has_its_documented_layout() {
-    let root = Path::new("/root");
-
-    assert_eq!(
-        skill_path(SkillTarget::Claude, root, "medulla-x"),
-        Path::new("/root/.claude/skills/medulla-x/SKILL.md")
-    );
-    // Codex reads `.agents/skills`, anchored to the real home rather than to
-    // CODEX_HOME. Its own `.codex/skills` is scanned too, but upstream calls
-    // that one deprecated, and an operator with CODEX_HOME set would never see
-    // a file we wrote there.
-    assert_eq!(
-        skill_path(SkillTarget::Codex, root, "medulla-x"),
-        Path::new("/root/.agents/skills/medulla-x/SKILL.md")
-    );
-    // The generic target shares that location: the Agent Skills convention is
-    // the one thing unverified harnesses have in common.
-    assert_eq!(
-        skill_path(SkillTarget::Generic, root, "medulla-x"),
-        Path::new("/root/.agents/skills/medulla-x/SKILL.md")
-    );
-
-    assert_eq!(
-        command_path(SkillTarget::Claude, root, "medulla-x").unwrap(),
-        Path::new("/root/.claude/commands/medulla-x.md")
-    );
-    assert_eq!(
-        command_path(SkillTarget::Codex, root, "medulla-x").unwrap(),
-        Path::new("/root/.codex/prompts/medulla-x.md")
-    );
-    assert!(command_path(SkillTarget::Generic, root, "medulla-x").is_none());
-}
-
-#[test]
-fn scope_root_reads_home_for_user_and_cwd_for_project() {
-    let mut env = HashMap::new();
-    env.insert("HOME".to_string(), "/home/op".to_string());
-    let cwd = Path::new("/work/repo");
-
-    assert_eq!(
-        scope_root(SkillScope::User, &env, cwd),
-        Path::new("/home/op")
-    );
-    assert_eq!(
-        scope_root(SkillScope::Project, &env, cwd),
-        Path::new("/work/repo")
-    );
-
-    // An unset or blank HOME falls back rather than panicking.
-    env.insert("HOME".to_string(), "  ".to_string());
-    assert_eq!(scope_root(SkillScope::User, &env, cwd), cwd);
-    assert_eq!(scope_root(SkillScope::User, &HashMap::new(), cwd), cwd);
-}
-
-#[test]
-fn the_managed_scope_resolves_under_the_medulla_home_not_the_operators() {
+fn a_skill_the_old_layout_installed_is_adopted_and_rewritten() {
     let home = TempDir::new().unwrap();
-    let mut env = HashMap::new();
-    env.insert(
-        "MEDULLA_HOME".to_string(),
-        home.path().display().to_string(),
+    let summary = summary("babysit", "Watch a PR.");
+    let skill = render(&summary);
+    let path = skill_path(
+        SkillTarget::Claude,
+        home.path(),
+        &crate::workflows::skills::slug_for("babysit"),
     );
-    env.insert("HOME".to_string(), "/home/op".to_string());
-
-    let root = scope_root(SkillScope::Managed, &env, Path::new("/work/repo"));
-    assert_eq!(root, managed_root(&env));
-    assert!(
-        root.starts_with(home.path()),
-        "the managed root belongs to Medulla, not the operator: {}",
-        root.display()
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // The old file: the same rendered content, marker on line one.
+    let content = skill.body.replacen(
+        &format!("# medulla:managed workflow=babysit rev={}\n", skill.rev),
+        "",
+        1,
     );
-
-    // Each harness gets its own directory, so the path handed to one harness
-    // never exposes another's files. Laid out inside like a project root, which
-    // is what makes --add-dir find it.
-    let claude = managed_dir(SkillTarget::Claude, &env);
-    assert_eq!(claude, root.join("claude-skills"));
-    assert_eq!(
-        managed_dir(SkillTarget::Codex, &env),
-        root.join("codex-skills")
-    );
-    assert_eq!(
-        skill_path(SkillTarget::Claude, &claude, "medulla-babysit"),
-        claude
-            .join(".claude")
-            .join("skills")
-            .join("medulla-babysit")
-            .join("SKILL.md")
-    );
-}
-
-#[test]
-fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
-    let home = TempDir::new().unwrap();
-    let mut env = HashMap::new();
-    env.insert(
-        "MEDULLA_HOME".to_string(),
-        home.path().display().to_string(),
-    );
-    let provider = crate::protocol::HarnessProvider::Claude;
-
-    // Nothing installed yet: the argv is untouched. Granting a session access to
-    // a directory that holds nothing buys nothing and shows up in the operator's
-    // transcript as an unexplained extra directory.
-    assert!(spawn_args(provider, &env).is_empty());
-
-    let root = managed_root(&env);
-    let summary = summary("babysit", "Watch a PR.", Vec::new());
-    install(
-        &[summary],
-        &InstallOptions {
-            targets: vec![SkillTarget::Claude],
-            scope: SkillScope::Managed,
-            root: root.clone(),
-            with_commands: false,
-            dry_run: false,
-        },
+    std::fs::write(
+        &path,
+        format!("<!-- medulla:managed workflow=babysit rev=deadbeef -->\n{content}"),
     )
     .unwrap();
 
-    // The install lands in the harness's own directory, and that directory —
-    // not the shared root — is what the session is given.
-    let claude = managed_dir(SkillTarget::Claude, &env);
-    assert!(skill_path(SkillTarget::Claude, &claude, "medulla-babysit").is_file());
     assert_eq!(
-        spawn_args(provider, &env),
-        vec!["--add-dir".to_string(), claude.display().to_string()],
-        "Claude loads .claude/skills from an --add-dir directory; that flag is the \
-         only spelling that does it"
+        parse_marker(&std::fs::read_to_string(&path).unwrap()).map(|(id, _)| id),
+        Some("babysit".to_string()),
+        "the legacy marker must still identify the file as ours"
     );
 
-    // Codex has no equivalent flag, so it gets nothing rather than a flag its
-    // CLI would reject.
-    assert!(spawn_args(crate::protocol::HarnessProvider::Codex, &env).is_empty());
+    let report = install(&[summary], &opts(home.path(), vec![SkillTarget::Claude])).unwrap();
+
+    assert_eq!(report.files[0].action, FileAction::Updated);
+    assert!(!report.has_collisions());
+    assert!(std::fs::read_to_string(&path).unwrap().starts_with("---\n"));
 }
 
+/// A hand-written skill can legitimately mention `# medulla:managed` in its own
+/// prose — for example a document *about* this feature. If its frontmatter
+/// never closes, that line is never inside the frontmatter at all, so it must
+/// not be read as a marker: doing so would let Medulla adopt, and later prune,
+/// a file it never wrote.
 #[test]
-fn default_targets_are_the_harnesses_already_present() {
-    let home = TempDir::new().unwrap();
-    assert!(default_targets(home.path()).is_empty());
+fn an_unclosed_frontmatter_is_never_scanned_for_a_marker() {
+    let unclosed = "---\n# medulla:managed workflow=babysit rev=abc\nno closing delimiter below\n";
+    assert_eq!(parse_marker(unclosed), None);
+}
 
-    fs::create_dir_all(home.path().join(".claude")).unwrap();
-    fs::create_dir_all(home.path().join(".agents")).unwrap();
-    assert_eq!(
-        default_targets(home.path()),
-        vec![SkillTarget::Claude, SkillTarget::Generic]
-    );
+/// `seal` always splices the marker onto the line directly after the opening
+/// `---`, so that is the only slot a real file of ours ever has it in. A
+/// hand-written skill can legitimately mention `# medulla:managed` deeper in
+/// its own (otherwise valid, closed) frontmatter — a migration note, or
+/// documentation about this feature — and that must not be read as a marker
+/// either, for the same reason an unclosed block is rejected: it would let
+/// Medulla adopt, and later overwrite or prune, a file it never wrote.
+#[test]
+fn a_marker_deeper_in_a_closed_frontmatter_block_is_not_recognised() {
+    let deeper =
+        "---\nname: not-a-real-skill\n# medulla:managed workflow=babysit rev=abc\n---\nbody\n";
+    assert_eq!(parse_marker(deeper), None);
+}
 
-    // Codex is detected by its config directory, which is where its config,
-    // prompts, and credentials still live — its *skills* are the only thing
-    // that moved to `.agents`.
-    fs::create_dir_all(home.path().join(".codex")).unwrap();
+/// The slot is a byte position, not a line number: YAML accepts an indented
+/// comment, `seal` never writes one, and adopting a file on the strength of
+/// whitespace we could not have produced is the same mistake as adopting one
+/// for a marker in the wrong place.
+#[test]
+fn an_indented_marker_is_not_one_we_wrote() {
+    let indented = "---\n  # medulla:managed workflow=babysit rev=abc\nname: theirs\n---\nbody\n";
+    assert_eq!(parse_marker(indented), None);
+
+    // The opener is held to the same rule: an indented `  ---` opens nothing,
+    // so what follows it cannot be a marker of ours either.
+    let opener = "  ---\n# medulla:managed workflow=babysit rev=abc\nname: theirs\n---\nbody\n";
+    assert_eq!(parse_marker(opener), None);
+
+    // Trailing whitespace, by contrast, is what an editor does to a line we
+    // did write, so it stays tolerated.
+    let trailing = "---\n# medulla:managed workflow=babysit rev=abc \nname: ours\n---   \nbody\n";
     assert_eq!(
-        default_targets(home.path()),
-        vec![
-            SkillTarget::Claude,
-            SkillTarget::Codex,
-            SkillTarget::Generic
-        ]
+        parse_marker(trailing),
+        Some(("babysit".to_string(), "abc".to_string()))
     );
 }
 
@@ -332,7 +143,7 @@ fn codex_and_generic_share_one_directory_and_are_visited_once() {
             SkillTarget::Claude,
         ],
     );
-    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+    let workflows = vec![summary("babysit", "Watch a PR.")];
 
     let report = install(&workflows, &options).unwrap();
     assert_eq!(report.count(FileAction::Created), 2, "{report:?}");
@@ -352,7 +163,7 @@ fn codex_and_generic_share_one_directory_and_are_visited_once() {
 fn an_install_retires_the_skill_an_older_release_left_in_codexs_own_root() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Codex]);
-    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+    let workflows = vec![summary("babysit", "Watch a PR.")];
 
     // What a previous version of this command wrote: a *managed* file under
     // `.codex/skills`. Codex still scans that root, so leaving it there would
@@ -392,7 +203,7 @@ fn an_install_retires_the_skill_an_older_release_left_in_codexs_own_root() {
 fn install_is_idempotent() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+    let workflows = vec![summary("babysit", "Watch a PR.")];
 
     let first = install(&workflows, &options).unwrap();
     assert_eq!(first.count(FileAction::Created), 1);
@@ -410,13 +221,9 @@ fn install_is_idempotent() {
 fn a_changed_workflow_updates_its_managed_file() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
-    let report = install(
-        &[summary("babysit", "Watch a PR closely.", vec![])],
-        &options,
-    )
-    .unwrap();
+    let report = install(&[summary("babysit", "Watch a PR closely.")], &options).unwrap();
 
     assert_eq!(report.count(FileAction::Updated), 1);
     let path = skill_path(SkillTarget::Claude, home.path(), "medulla-babysit");
@@ -431,7 +238,7 @@ fn an_unmarked_collision_is_skipped_with_bytes_untouched() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, "hand written, do not touch\n").unwrap();
 
-    let report = install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    let report = install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
     assert!(report.has_collisions());
     assert_eq!(report.count(FileAction::SkippedUnmanaged), 1);
@@ -450,7 +257,7 @@ fn a_marker_for_another_workflow_is_also_left_alone() {
     let squatter = "<!-- medulla:managed workflow=other rev=abc -->\nnot yours\n";
     fs::write(&path, squatter).unwrap();
 
-    let report = install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    let report = install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
     // Ours, but another workflow's: a collision rather than an unmanaged file,
     // because "someone else wrote this" would send the operator hunting for a
@@ -467,7 +274,7 @@ fn dry_run_reports_without_writing() {
     let mut options = opts(home.path(), vec![SkillTarget::Claude]);
     options.dry_run = true;
 
-    let report = install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    let report = install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
     assert_eq!(report.count(FileAction::Created), 1);
     assert!(!skill_path(SkillTarget::Claude, home.path(), "medulla-babysit").exists());
@@ -478,7 +285,7 @@ fn dry_run_reports_without_writing() {
 fn a_disabled_workflow_gets_nothing() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let mut disabled = summary("babysit", "Watch a PR.", vec![]);
+    let mut disabled = summary("babysit", "Watch a PR.");
     disabled.enabled = false;
 
     let report = install(&[disabled], &options).unwrap();
@@ -500,7 +307,7 @@ fn commands_are_written_only_when_asked_and_only_where_they_exist() {
     );
     options.with_commands = true;
 
-    install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
     assert!(home
         .path()
@@ -517,8 +324,8 @@ fn commands_are_written_only_when_asked_and_only_where_they_exist() {
 fn sync_prune_removes_orphans_and_spares_unmarked_neighbours() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let kept = summary("babysit", "Watch a PR.", vec![]);
-    let orphan = summary("audit", "Audit a repo.", vec![]);
+    let kept = summary("babysit", "Watch a PR.");
+    let orphan = summary("audit", "Audit a repo.");
     install(&[kept.clone(), orphan], &options).unwrap();
 
     let neighbour = home.path().join(".claude/skills/handwritten/SKILL.md");
@@ -544,12 +351,8 @@ fn sync_prune_removes_orphans_and_spares_unmarked_neighbours() {
 fn sync_without_prune_leaves_orphans_in_place() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    let kept = summary("babysit", "Watch a PR.", vec![]);
-    install(
-        &[kept.clone(), summary("audit", "Audit.", vec![])],
-        &options,
-    )
-    .unwrap();
+    let kept = summary("babysit", "Watch a PR.");
+    install(&[kept.clone(), summary("audit", "Audit.")], &options).unwrap();
 
     let report = sync(&[kept], &options, false).unwrap();
 
@@ -561,9 +364,9 @@ fn sync_without_prune_leaves_orphans_in_place() {
 fn sync_prunes_a_workflow_that_has_since_been_disabled() {
     let home = TempDir::new().unwrap();
     let options = opts(home.path(), vec![SkillTarget::Claude]);
-    install(&[summary("babysit", "Watch a PR.", vec![])], &options).unwrap();
+    install(&[summary("babysit", "Watch a PR.")], &options).unwrap();
 
-    let mut disabled = summary("babysit", "Watch a PR.", vec![]);
+    let mut disabled = summary("babysit", "Watch a PR.");
     disabled.enabled = false;
     let report = sync(&[disabled], &options, true).unwrap();
 
@@ -578,8 +381,8 @@ fn uninstall_removes_only_the_named_workflows_files() {
     options.with_commands = true;
     install(
         &[
-            summary("babysit", "Watch a PR.", vec![]),
-            summary("audit", "Audit a repo.", vec![]),
+            summary("babysit", "Watch a PR."),
+            summary("audit", "Audit a repo."),
         ],
         &options,
     )
@@ -608,7 +411,7 @@ fn installed_lists_marked_skills_only() {
     let home = TempDir::new().unwrap();
     let mut options = opts(home.path(), vec![SkillTarget::Claude]);
     options.with_commands = true;
-    let workflows = vec![summary("babysit", "Watch a PR.", vec![])];
+    let workflows = vec![summary("babysit", "Watch a PR.")];
     install(&workflows, &options).unwrap();
 
     let stray = home.path().join(".claude/skills/handwritten/SKILL.md");
@@ -622,17 +425,4 @@ fn installed_lists_marked_skills_only() {
     assert_eq!(found[0].slug, "medulla-babysit");
     assert_eq!(found[0].target, SkillTarget::Claude);
     assert_eq!(found[0].rev, render(&workflows[0]).rev);
-}
-
-#[test]
-fn target_and_scope_parse_round_trip() {
-    for target in SkillTarget::ALL {
-        assert_eq!(SkillTarget::parse(target.as_str()).unwrap(), target);
-    }
-    assert_eq!(SkillTarget::parse(" CLAUDE ").unwrap(), SkillTarget::Claude);
-    assert!(SkillTarget::parse("cursor").is_err());
-
-    assert_eq!(SkillScope::parse("User").unwrap(), SkillScope::User);
-    assert_eq!(SkillScope::parse("project").unwrap(), SkillScope::Project);
-    assert!(SkillScope::parse("global").is_err());
 }

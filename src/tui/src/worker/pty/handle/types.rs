@@ -228,6 +228,26 @@ pub struct SessionHandle {
     /// every dispatch, and it is the gate that stops a task prompt landing in a
     /// composer a person is typing in.
     pub(super) operator_held: AtomicBool,
+    /// Whether this session has finished the task it was opened for and is being
+    /// kept for the operator to read.
+    ///
+    /// A lifecycle fact, deliberately *not* a
+    /// [`SessionControl`](super::super::types::SessionControl) variant. Control
+    /// answers "who may type here", and a retained session has no one typing in
+    /// it yet — it is the last screen of finished work, left standing because
+    /// closing it is what made a completed task look like it had vanished.
+    ///
+    /// The distinction is load-bearing rather than cosmetic. Marking these
+    /// sessions `User` instead would have been the smaller change and would have
+    /// deadlocked dispatch: `checkout_writer` reads any user-held session in a
+    /// directory as the writer holding that checkout, so the first task to
+    /// finish in a workspace would have queued every task after it until their
+    /// budgets expired.
+    ///
+    /// An atomic beside `busy` and `operator_held` for the same reason those
+    /// are: [`try_claim`](super::SessionHandle::try_claim) tests it per session
+    /// on every dispatch.
+    pub(super) retained: AtomicBool,
     /// How many bytes sit in [`SessionIo::writes`] still unwritten.
     ///
     /// The budget a caller is admitted against, so a child that never drains its
@@ -256,20 +276,51 @@ pub struct SessionHandle {
 pub(super) struct TerminalModes {
     /// Stateful parser, retained so escape sequences split across PTY reads work.
     pub(super) parser: vte::Parser,
+    /// Independent OSC 52 capture, retained across reads for the same reason.
+    ///
+    /// See [`super::osc52`] for why `vte`'s own OSC dispatch is not enough on
+    /// its own: its OSC buffer is a fixed 1024 bytes, so a copy larger than
+    /// that arrives truncated through [`vte::Perform::osc_dispatch`] alone.
+    pub(super) osc52: super::osc52::Osc52Scanner,
     /// Whether xterm alternate-scroll mode (DECSET 1007) is enabled.
     pub(super) alternate_scroll: bool,
+    /// The clipboard write the child last asked for (OSC 52), until it is taken.
+    ///
+    /// A harness copying something — a `y` in its own copy mode, a `tmux
+    /// load-buffer -w` run inside the pane, a script echoing the escape — is
+    /// asking *its* terminal for the clipboard, and its terminal is us. Nobody
+    /// downstream would ever see it otherwise: `vt100` drops OSC 52, and the
+    /// child's bytes are parsed into a screen grid rather than replayed to our
+    /// own stdout, so the copy would die in this process. Captured here and
+    /// [taken](super::SessionHandle::take_clipboard) by the reader thread, which
+    /// forwards it on to the operator's terminal.
+    ///
+    /// Last write wins, which is what a clipboard is: a copy nobody has
+    /// collected yet is superseded by the next one, exactly as in a real
+    /// terminal.
+    pub(super) clipboard: Option<String>,
 }
 
 impl Default for TerminalModes {
     fn default() -> Self {
         Self {
             parser: vte::Parser::new(),
+            osc52: super::osc52::Osc52Scanner::default(),
             alternate_scroll: false,
+            clipboard: None,
         }
     }
 }
 
 impl vte::Perform for TerminalModes {
+    /// Capture the child's clipboard writes; every other OSC is the screen
+    /// emulator's business.
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if let Some(text) = medulla::clipboard::tmux::osc52_from_params(params) {
+            self.clipboard = Some(text);
+        }
+    }
+
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,

@@ -269,8 +269,35 @@ fn project_local_config_cannot_authorize_hook_commands() {
     )
     .unwrap();
 
-    assert_eq!(loaded.config.hooks.hooks.len(), 1);
-    assert_eq!(loaded.config.hooks.hooks[0].command(), "global-hook");
+    // Medulla's own reporting hooks are resolved into the same list at load, so
+    // the question is what the *operator's* half contains.
+    let operator = loaded.config.hooks.operator_hooks();
+    assert_eq!(operator.len(), 1);
+    assert_eq!(operator[0].command(), "global-hook");
+}
+
+#[test]
+fn medullas_own_hooks_are_installed_by_default_and_can_be_switched_off() {
+    let home = temp_dir("hook-defaults-home");
+    let cwd = temp_dir("hook-defaults-cwd");
+    std::fs::create_dir_all(home_of(&home)).unwrap();
+    let config = home_of(&home).join("config.toml");
+    let env = env(&[("MEDULLA_HOME", home.to_str().unwrap())]);
+
+    // No config file at all: the defaults still arrive, because an operator who
+    // has configured nothing is exactly who should not have to.
+    let loaded = load_config(None, &env, &cwd).unwrap();
+    let builtin = crate::harness_hooks::builtin::REPORTED_EVENTS.len();
+    assert_eq!(loaded.config.hooks.hooks.len(), builtin);
+    assert!(loaded.config.hooks.hooks.iter().all(|hook| hook.builtin));
+    assert!(loaded.config.hooks.operator_hooks().is_empty());
+
+    std::fs::write(&config, "[hookDefaults]\nenabled = false\n").unwrap();
+    let loaded = load_config(None, &env, &cwd).unwrap();
+    assert!(
+        loaded.config.hooks.is_empty(),
+        "turning the defaults off must leave nothing behind"
+    );
 }
 
 #[test]

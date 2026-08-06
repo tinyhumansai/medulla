@@ -81,6 +81,8 @@ impl App {
             template_index: 0,
             custom_harnesses: Vec::new(),
             custom_harness_index: 0,
+            hook_index: 0,
+            hook_log: medulla::harness_hooks::HookEventLog::new(),
             template_scroll: 0,
             template_modal: false,
             #[cfg(feature = "workflows")]
@@ -128,6 +130,7 @@ impl App {
             medulla_home: None,
             theme,
             config_path: None,
+            hooks_config_path: None,
             resume_picker: None,
             should_quit: false,
             area: Rect::new(0, 0, 80, 24),
@@ -156,9 +159,11 @@ impl App {
             handback_prompt: None,
             pointer_grab: None,
             hit_handback: Vec::new(),
+            hit_agent_picker: None,
             help_scroll: 0,
             handback_policy,
-            took_control_by_attach: false,
+            sessions_taken: std::collections::HashMap::new(),
+            orchestrator_claimed: std::collections::HashSet::new(),
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
@@ -172,9 +177,27 @@ impl App {
 
     /// Point appearance persistence at the user-global `config.toml`; injectable
     /// so feature tests avoid the real home.
+    ///
+    /// Also defaults [`Self::hooks_config_path`] to the same file: most tests
+    /// and the common case (no project-local config in effect) have exactly one
+    /// writable path, and [`Self::set_hooks_config_path`] is there for the
+    /// caller that knows the two must differ.
     pub fn set_config_path(&mut self, path: std::path::PathBuf) {
-        self.config_path = Some(path);
+        self.config_path = Some(path.clone());
+        self.hooks_config_path = Some(path);
         self.reload_custom_harnesses();
+    }
+
+    /// Point hook persistence at a file distinct from [`Self::config_path`].
+    ///
+    /// Call after [`Self::set_config_path`], which otherwise defaults this to
+    /// the same file — needed whenever `config_path` resolved to a
+    /// project-local layer, since `medulla::config::load_config` strips
+    /// `[[hooks]]` from every layer but an explicit `--config` file and the
+    /// user-global config. See [`super::types::App::hooks_config_path`]'s own
+    /// docs for why the distinction exists at all.
+    pub fn set_hooks_config_path(&mut self, path: std::path::PathBuf) {
+        self.hooks_config_path = Some(path);
     }
 
     /// Record who the core is signed in as, for the Account subpage.
@@ -340,6 +363,13 @@ impl App {
         self.local_sessions = Some(sessions);
     }
 
+    /// Read lifecycle reports out of the log the control socket writes into.
+    ///
+    /// Shared, not copied: the point is to render what is arriving now.
+    pub fn set_hook_log(&mut self, log: medulla::harness_hooks::HookEventLog) {
+        self.hook_log = log;
+    }
+
     /// The live sessions this device is running, if it hosts.
     pub fn local_sessions(&self) -> Option<&crate::ui::harness_pane::LocalSessions> {
         self.local_sessions.as_ref()
@@ -352,6 +382,26 @@ impl App {
     /// one rather than counting rows it does not control.
     pub fn pane_session_for_test(&self) -> Option<&str> {
         self.pane_session.as_deref()
+    }
+
+    /// Stand a remote session under the rail cursor, as a draw against a linked
+    /// host would.
+    ///
+    /// Injection seam: reaching this state honestly needs a second machine, and
+    /// what reads it is a *refusal* — so a test that cannot set it cannot tell
+    /// the refusal apart from the silent wrong handover it exists to prevent.
+    pub fn set_pane_remote_session_for_test(&mut self, agent: Option<String>) {
+        self.pane_remote_session = agent;
+    }
+
+    /// Whether the "start a session" picker is on screen.
+    ///
+    /// Inspection seam for the pointer rules: several of them are about a click
+    /// the picker must *absorb* — one off a row, one outside its box — and
+    /// "nothing happened" is only distinguishable from "the modal closed" by
+    /// being able to ask.
+    pub fn agent_picker_open_for_test(&self) -> bool {
+        self.agent_picker.is_some()
     }
 
     /// The session currently receiving the operator's keystrokes.

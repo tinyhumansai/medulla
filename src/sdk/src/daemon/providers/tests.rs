@@ -78,7 +78,14 @@ async fn direct_runs_report_the_session_before_workspace_context() {
 fn build_run_args_per_provider() {
     assert_eq!(
         build_run_args(HarnessProvider::Claude, "hello", None, None, &[], false),
-        vec!["-p", "--output-format", "stream-json", "--verbose", "hello"]
+        vec![
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--",
+            "hello"
+        ]
     );
     assert_eq!(
         build_run_args(HarnessProvider::Claude, "hi", None, None, &[], true),
@@ -88,6 +95,7 @@ fn build_run_args_per_provider() {
             "stream-json",
             "--verbose",
             "--dangerously-skip-permissions",
+            "--",
             "hi"
         ]
     );
@@ -101,6 +109,18 @@ fn build_run_args_per_provider() {
             false
         ),
         vec!["exec", "--json", "-m", "gpt-5", "do"]
+    );
+    // Skip-permissions reaches codex as a sandbox bypass: its default
+    // `workspace-write` policy has no network and only the cwd writable, which
+    // a worktree task cannot commit or push from.
+    assert_eq!(
+        build_run_args(HarnessProvider::Codex, "do", None, None, &[], true),
+        vec![
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "do"
+        ]
     );
     assert_eq!(
         build_run_args(
@@ -198,9 +218,34 @@ fn build_run_args_claude_with_model() {
             "--model",
             "anthropic/claude-opus-4.8",
             "--mcp",
+            "--",
             "task",
         ]
     );
+}
+
+/// The prompt must survive a *variadic* option sitting last in `extra_args`.
+///
+/// `--add-dir <directories...>` is the real one: it is how a session is pointed
+/// at its managed skills, and without a terminator it reads the prompt as one
+/// more directory, leaving claude with no prompt at all.
+#[test]
+fn build_run_args_claude_terminates_options_before_the_prompt() {
+    let args = build_run_args(
+        HarnessProvider::Claude,
+        "do the thing",
+        None,
+        None,
+        &["--add-dir".to_string(), "/skills".to_string()],
+        false,
+    );
+    let terminator = args
+        .iter()
+        .position(|arg| arg == "--")
+        .expect("the prompt must be separated from option parsing");
+    assert_eq!(args.last().unwrap(), "do the thing");
+    assert_eq!(terminator, args.len() - 2, "{args:?}");
+    assert!(args[..terminator].contains(&"/skills".to_string()));
 }
 
 #[test]
@@ -213,8 +258,9 @@ fn build_run_args_claude_extra_and_dash_prompt() {
         &["--mcp".to_string()],
         true,
     );
-    // extra args precede the (space-neutralized) prompt.
-    assert_eq!(args[args.len() - 2], "--mcp");
+    // extra args precede the terminator and the (space-neutralized) prompt.
+    assert_eq!(args[args.len() - 3], "--mcp");
+    assert_eq!(args[args.len() - 2], "--");
     assert_eq!(args.last().unwrap(), " -hi");
     assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
 }

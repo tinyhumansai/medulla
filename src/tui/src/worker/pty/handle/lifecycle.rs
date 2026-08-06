@@ -53,6 +53,8 @@ impl SessionHandle {
             generation: AtomicU64::new(0),
             busy: AtomicBool::new(busy),
             operator_held: AtomicBool::new(control == SessionControl::User),
+            // Nothing has run in it yet, so there is nothing finished to keep.
+            retained: AtomicBool::new(false),
             queued_bytes,
             cold: Mutex::new(ColdFields {
                 label,

@@ -42,7 +42,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::flow_engine::execute;
-use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
+use crate::flow_engine::observability::{StepSnapshot, WorkEventSink, WorkflowRunObserver};
 use crate::flow_engine::{
     agent_evidence, build_capabilities_with_agent_evidence, open_checkpointer, CapabilitySettings,
     HostServices,
@@ -60,6 +60,8 @@ pub struct RunContext {
     pub services: HostServices,
     /// Where progress events go.
     pub sink: WorkEventSink,
+    /// Persists completed-step snapshots while the run is still executing.
+    pub step_snapshot: Option<StepSnapshot>,
 }
 
 /// Write a terminal status onto a run record unless a settled path already did.
@@ -207,11 +209,10 @@ async fn run_workflow_inner(
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 
-    let observer = Arc::new(WorkflowRunObserver::new(
-        workflow_id,
-        &workflow.graph,
-        context.sink,
-    ));
+    let observer = Arc::new(
+        WorkflowRunObserver::new(workflow_id, &workflow.graph, context.sink)
+            .with_step_snapshot(context.step_snapshot),
+    );
     let agent_evidence = Arc::new(agent_evidence::AgentEvidence::default());
     let capabilities = build_capabilities_with_agent_evidence(
         settings.clone(),
@@ -504,11 +505,10 @@ pub async fn resume_workflow(
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 
-    let observer = Arc::new(WorkflowRunObserver::new(
-        &record.workflow_id,
-        &workflow.graph,
-        context.sink,
-    ));
+    let observer = Arc::new(
+        WorkflowRunObserver::new(&record.workflow_id, &workflow.graph, context.sink)
+            .with_step_snapshot(context.step_snapshot),
+    );
     let agent_evidence = Arc::new(agent_evidence::AgentEvidence::default());
     let capabilities = build_capabilities_with_agent_evidence(
         settings.clone(),

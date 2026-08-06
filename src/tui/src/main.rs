@@ -9,6 +9,7 @@ use std::io::{self, IsTerminal};
 use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
+use crate::commands::run_hook_cmd;
 use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
 #[cfg(feature = "workflows")]
 use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
@@ -38,7 +39,20 @@ mod worker_loop;
 /// place able to source the values from it rather than restating them.
 fn main() -> anyhow::Result<()> {
     install_crypto_provider();
-    medulla::tokio_tuning::build_runtime()?.block_on(async_main())
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    // The hook shim runs inside an operator's live turn under a 3-5 second
+    // harness deadline (see `commands::hook`'s module docs), so it gets a
+    // single-thread runtime rather than paying to spin up the multi-thread,
+    // 16 MiB-per-worker-stack runtime every other command needs to host an
+    // agent turn.
+    if matches!(parse_command(&raw), Command::Hook) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async_main(raw))
+    } else {
+        medulla::tokio_tuning::build_runtime()?.block_on(async_main(raw))
+    }
 }
 
 /// Pick the TLS backend before anything opens a connection.
@@ -56,13 +70,22 @@ fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-async fn async_main() -> anyhow::Result<()> {
+async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
+    let command = parse_command(&raw);
+
     // Load a cwd `.env` into the process env before anything reads it (this is
     // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    medulla::home::load_dotenv_from_cwd();
+    //
+    // The hook shim is the exception: it runs inside the operator's live turn,
+    // with the harness waiting on this process under a hard deadline, and the
+    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
+    // read there would burn the shim's whole budget before `run_hook_cmd`'s
+    // own deadline even starts, so the harness would kill it as a hung hook.
+    if !matches!(&command, Command::Hook) {
+        medulla::home::load_dotenv_from_cwd();
+    }
 
-    let raw: Vec<String> = std::env::args().skip(1).collect();
-    match parse_command(&raw) {
+    match command {
         Command::Run => run_core(&raw[1..]).await,
         Command::Daemon if daemon_uses_tui(io::stdout().is_terminal(), &raw) => {
             run_worker_tui_command(&raw[1..]).await
@@ -86,6 +109,28 @@ async fn async_main() -> anyhow::Result<()> {
                 Ok(json) => println!("{json}"),
                 Err(err) => eprintln!("failed to serialize sessions: {err}"),
             }
+            Ok(())
+        }
+        // Deliberately ahead of everything that loads config or touches the
+        // terminal: the shim runs inside an operator's live turn, and its whole
+        // job is to be cheap and silent. `run_hook_cmd` reads only the hook
+        // grant's own two variables, so only those are decoded here —
+        // `std::env::vars()` panics on any non-UTF-8 entry in the inherited
+        // environment, and that must never turn "always exit zero" into a
+        // crash before the shim gets a chance to swallow anything.
+        Command::Hook => {
+            let env: std::collections::HashMap<String, String> = [
+                medulla::control_socket::HOOK_SOCKET_ENV,
+                medulla::control_socket::HOOK_GRANT_ENV,
+            ]
+            .into_iter()
+            .filter_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| (key.to_string(), value))
+            })
+            .collect();
+            run_hook_cmd(&raw[1..], &env).await;
             Ok(())
         }
         Command::Login => run_login(&raw[1..]).await,

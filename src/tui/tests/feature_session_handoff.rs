@@ -323,6 +323,12 @@ fn the_ask_modal_takes_a_note_with_e_and_commits_it_on_enter() {
     // the note; `y` still answers the question.
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Under the orchestrator to begin with, because that is what makes the
+    // question worth asking: attaching takes the harness off dispatch, and
+    // walking away without answering leaves it locked out. A session the
+    // operator started is never asked about — see
+    // `releasing_a_harness_you_started_yourself_asks_nothing`.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 
@@ -376,6 +382,8 @@ fn the_ask_modal_takes_a_note_with_e_and_commits_it_on_enter() {
 fn keeping_the_harness_sends_nothing() {
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Taken from the orchestrator, so releasing owes it a question.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 
@@ -404,6 +412,8 @@ fn escape_leaves_the_note_intact_and_y_then_sends_it() {
     // an operator who loses a paragraph to a stray key does not write another.
     let sessions = PtyManager::new();
     let id = user_session_in(&sessions, "/");
+    // Taken from the orchestrator, so releasing owes it a question.
+    sessions.set_control(&id, SessionControl::Orchestrator);
     let mut app = app_with_harnesses(sessions.clone());
     select_harness_row(&mut app);
 

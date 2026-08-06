@@ -26,18 +26,18 @@ fn a_graph_wider_than_the_canvas_folds_into_view() {
     assert!(screen.contains("Step 11"), "the far end folded into view");
     assert_eq!(app.wf.canvas_row, 0, "and nothing had to scroll: {screen}");
 
-    // Alternate bands run backwards, so the second band's first step is on the
-    // right — directly under where the first band ran out.
+    // Every band starts at the left margin, so the graph reads like text: the
+    // step after a fold is the leftmost one on the next band down.
     let per_band = app.layers_per_band();
     assert!(per_band < 12, "the chain has to fold at all");
-    let last_of_first = app.graph_cell(per_band - 1, 0);
+    let first_of_first = app.graph_cell(0, 0);
     let first_of_second = app.graph_cell(per_band, 0);
     assert_eq!(
-        last_of_first.0, first_of_second.0,
-        "the fold picks up in the column it left off in"
+        first_of_first.0, first_of_second.0,
+        "both bands start in the same column"
     );
     assert!(
-        first_of_second.1 > last_of_first.1,
+        first_of_second.1 > first_of_first.1,
         "one band below the other"
     );
 }
@@ -85,29 +85,22 @@ fn the_graph_is_still_the_same_drawing_while_the_highlight_moves() {
 }
 
 #[test]
-fn a_reversed_band_draws_its_wires_leftward() {
-    let mut long = diamond("long");
-    long.graph = serde_json::from_value(json!({
-        "nodes": (0..12).map(|index| json!({
-            "id": format!("n{index}"),
-            "kind": if index == 0 { "trigger" } else { "transform" },
-            "name": format!("Step {index}"),
-            "config": {},
-        })).collect::<Vec<_>>(),
-        "edges": (0..11).map(|index| json!({
-            "from_node": format!("n{index}"), "to_node": format!("n{}", index + 1),
-        })).collect::<Vec<_>>(),
-    }))
-    .expect("graph parses");
-    let (_home, mut app) = app_with(&[long], &[]);
+fn every_band_runs_the_same_way() {
+    let (_home, mut app) = app_with(&[chain("long", 12, |index| format!("Step {index}"))], &[]);
 
     let screen = render(&mut app);
+    assert!(app.layers_per_band() < 12, "the chain has to fold at all");
 
-    assert!(screen.contains('▶'), "the first band points right");
-    assert!(
-        screen.contains('◀'),
-        "the band under it runs the other way: {screen}"
-    );
+    // A plain chain has no loop in it, so nothing points left. Alternate bands
+    // used to run backwards and half the arrowheads with them, which meant
+    // working out which way a band went before you could follow it.
+    assert!(screen.contains('▶'), "steps point right: {screen}");
+    let graph: String = screen
+        .lines()
+        .skip_while(|line| !line.contains("Step 0"))
+        .take_while(|line| !line.contains("wheel/Page"))
+        .collect();
+    assert!(!graph.contains('◀'), "a band runs the other way: {screen}");
 }
 
 #[test]
@@ -248,23 +241,22 @@ fn a_band_never_runs_past_the_pane() {
 }
 
 #[test]
-fn a_fold_picks_up_where_the_band_above_ended() {
+fn a_fold_starts_the_next_band_at_the_left_margin() {
     let (_home, mut app) = app_with(&[chain("long", 12, |index| format!("Step {index}"))], &[]);
     render_sized(&mut app, 140, 34);
     let per_band = app.layers_per_band();
     assert!(per_band < 12, "the chain has to fold at all");
 
-    // The last column of a band and the first of the one below it are the two
-    // ends of a fold, and alternating the direction is what puts them in the
-    // same place — a fold is a hop down, not a run back across the pane.
-    let (last_x, last_row) = app.graph_cell(per_band - 1, 0);
-    let last_end = last_x + app.column_width(per_band - 1);
+    // Both bands start at the left margin: the fold runs back across the pane,
+    // which is the price of every band reading the same way.
+    let (first_x, first_row) = app.graph_cell(0, 0);
     let (next_x, next_row) = app.graph_cell(per_band, 0);
-    let next_end = next_x + app.column_width(per_band);
 
-    assert!(next_row > last_row, "one band below the other");
-    assert!(
-        last_end.abs_diff(next_end) <= super::super::GUTTER_SPAN,
-        "the fold's two ends are within a gutter of each other: {last_end} then {next_end}"
+    assert!(next_row > first_row, "one band below the other");
+    assert_eq!(next_x, first_x, "and starting in the same column");
+    assert_eq!(
+        first_x,
+        super::super::FOLD_MARGIN,
+        "which is the left margin"
     );
 }

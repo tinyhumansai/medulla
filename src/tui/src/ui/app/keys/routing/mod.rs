@@ -10,7 +10,7 @@ use medulla::runtime::WorkerOp;
 
 use super::super::types::{
     App, Cmd, Prompt, PromptKind, ROUTING_STRATEGIES, ROUTING_SUBPAGES, RP_ADD_HOST, RP_HARNESSES,
-    RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
+    RP_HOOKS, RP_HOSTS, RP_STRATEGIES, RP_TEMPLATES, RP_WORKSPACES, SUBSCRIPTION_STRATEGIES,
 };
 
 impl App {
@@ -58,6 +58,7 @@ impl App {
             RP_TEMPLATES => self.templates_key(code),
             RP_ADD_HOST => self.add_host_key(code),
             RP_HARNESSES => self.harnesses_key(code),
+            RP_HOOKS => self.hooks_key(code),
             RP_STRATEGIES => self.strategies_key(code),
             _ => RoutingKey::Unhandled,
         }
@@ -373,6 +374,37 @@ impl App {
             }
             KeyCode::Char('d') => {
                 self.remove_selected_workspace();
+                RoutingKey::Handled(None)
+            }
+            _ => RoutingKey::Unhandled,
+        }
+    }
+
+    /// Declare, edit, and withdraw the hooks every launched harness carries.
+    fn hooks_key(&mut self, code: KeyCode) -> RoutingKey {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_hook_selection(true);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_hook_selection(false);
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('a') => {
+                self.open_add_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('e') | KeyCode::Enter => {
+                self.open_edit_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('d') | KeyCode::Char('x') => {
+                self.delete_selected_hook();
+                RoutingKey::Handled(None)
+            }
+            KeyCode::Char('b') => {
+                self.toggle_builtin_hooks();
                 RoutingKey::Handled(None)
             }
             _ => RoutingKey::Unhandled,

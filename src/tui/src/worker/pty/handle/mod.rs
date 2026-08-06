@@ -16,10 +16,13 @@
 mod control;
 mod io;
 mod lifecycle;
+mod osc52;
 mod screen;
 mod state;
 mod types;
 
+#[cfg(test)]
+mod osc52_tests;
 #[cfg(test)]
 mod tests;
 

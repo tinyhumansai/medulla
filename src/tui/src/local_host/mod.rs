@@ -501,6 +501,15 @@ impl LocalHostHarnesses {
     pub(crate) fn custom_harnesses(&self) -> &[medulla::config::CustomHarnessConfig] {
         &self.options.custom_harnesses
     }
+
+    /// The resolved `[[hooks]]` this device's primary host was started with.
+    ///
+    /// Exposed for the same reason as [`Self::custom_harnesses`]: a one-shot
+    /// embedded daemon started elsewhere for the same session should install
+    /// the same built-in and operator hooks rather than starting with none.
+    pub(crate) fn hooks(&self) -> &medulla::harness_hooks::HooksConfig {
+        &self.options.hooks
+    }
 }
 
 /// Start every host this machine declares: the `[host]` primary, then each

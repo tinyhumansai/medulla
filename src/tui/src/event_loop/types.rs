@@ -115,6 +115,12 @@ pub(crate) struct SessionWiring {
     /// The host-link presence observation, when that service is running.
     /// Where appearance/config edits are persisted.
     pub config_path: std::path::PathBuf,
+    /// Where hook edits are persisted — see `App::hooks_config_path` (in
+    /// `medulla_tui::ui::app`) for why this can differ from
+    /// [`Self::config_path`]: a project-local config is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from, so a hook saved
+    /// against it would be silently ignored on the next launch.
+    pub hooks_config_path: std::path::PathBuf,
     /// The Medulla home: where user-level application state is kept.
     pub medulla_home: std::path::PathBuf,
     /// The account the embedded core is signed in as, when it is.
@@ -143,4 +149,10 @@ pub(crate) struct SessionWiring {
     /// or to the transcript. Shared with the host's executor — the sessions it
     /// opens are the ones rendered here.
     pub local_sessions: Option<medulla_tui::ui::harness_pane::LocalSessions>,
+    /// Lifecycle reports from the harnesses this Medulla launched, as their
+    /// hooks file them.
+    ///
+    /// The same log the control socket writes into, shared rather than copied:
+    /// the Hooks page renders what is arriving right now.
+    pub hook_log: medulla::harness_hooks::HookEventLog,
 }

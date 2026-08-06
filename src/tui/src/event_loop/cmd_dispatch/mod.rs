@@ -238,11 +238,15 @@ pub(super) fn run_cmd(
             let custom_harnesses = local_hosts
                 .map(|spawner| spawner.custom_harnesses().to_vec())
                 .unwrap_or_default();
+            let hooks = local_hosts
+                .map(|spawner| spawner.hooks().clone())
+                .unwrap_or_default();
             workflows::spawn_run(
                 id,
                 inputs,
                 _workflows_config.clone(),
                 custom_harnesses,
+                hooks,
                 msg_tx,
             )
         }

@@ -76,6 +76,11 @@ impl Canvas {
         }
     }
 
+    /// How many cells wide the canvas is.
+    pub(super) fn width(&self) -> usize {
+        self.width
+    }
+
     /// The cell at `(x, y)`, when it is on the canvas.
     fn at(&mut self, x: usize, y: usize) -> Option<&mut Cell> {
         (x < self.width && y < self.height).then(|| &mut self.cells[y * self.width + x])
@@ -92,10 +97,46 @@ impl Canvas {
                 continue;
             };
             cell.ch = ch;
+            // Any wire that reached this cell first is forgotten rather than
+            // resolved under the text: a label's own spaces would otherwise
+            // serialise as the box-drawing character the wire wanted, and
+            // `↺ Until green` would read `↺─Until─green`.
+            cell.wire = 0;
             cell.color = style.color;
             cell.dim = style.dim;
             cell.bold = style.bold;
             cell.selected = style.selected;
+            cell.locked = true;
+        }
+    }
+
+    /// Write `text` the way [`text`](Self::text) does, but never over a cell a
+    /// node already owns.
+    ///
+    /// This is how a port name is written: it is a caption on a wire, so it
+    /// gives way to the boxes rather than the other way round. It still locks
+    /// the cells it does take, so a later edge tunnels behind it instead of
+    /// running through the middle of a case name.
+    ///
+    /// Dropped whole rather than clipped when it would run off the canvas: the
+    /// first two letters of a case name at the right edge read as a different
+    /// name, and the inspector still has it.
+    pub(super) fn label(&mut self, x: usize, y: usize, text: &str, style: CellStyle) {
+        if x + text.chars().count() > self.width {
+            return;
+        }
+        for (offset, ch) in text.chars().enumerate() {
+            let Some(cell) = self.at(x + offset, y) else {
+                continue;
+            };
+            if cell.locked {
+                continue;
+            }
+            cell.ch = ch;
+            cell.wire = 0;
+            cell.color = style.color;
+            cell.dim = style.dim;
+            cell.bold = style.bold;
             cell.locked = true;
         }
     }
@@ -106,6 +147,13 @@ impl Canvas {
     /// passes them reversed and gets the same line.
     pub(super) fn horizontal(&mut self, x0: usize, x1: usize, y: usize, style: CellStyle) {
         let (lo, hi) = (x0.min(x1), x0.max(x1));
+        // A run of one cell goes nowhere, so it records no direction. Left in,
+        // it stamps a RIGHT on the cell and the corner a route turns at comes
+        // out as `├` or `╭` — a stub pointing at nothing, which is what a fold
+        // arriving in the left margin used to draw.
+        if lo == hi {
+            return;
+        }
         for x in lo..=hi {
             let sides = if x == lo {
                 RIGHT
@@ -121,6 +169,10 @@ impl Canvas {
     /// Paint a vertical wire from `y0` to `y1` inclusive, in column `x`.
     pub(super) fn vertical(&mut self, x: usize, y0: usize, y1: usize, style: CellStyle) {
         let (lo, hi) = (y0.min(y1), y0.max(y1));
+        // As in [`horizontal`](Self::horizontal): one cell is not a direction.
+        if lo == hi {
+            return;
+        }
         for y in lo..=hi {
             let sides = if y == lo {
                 DOWN

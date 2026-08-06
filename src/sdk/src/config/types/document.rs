@@ -82,6 +82,10 @@ pub struct TuiConfig {
     /// with a diagnostic. Empty by default.
     #[serde(default, skip_serializing_if = "HooksConfig::is_empty")]
     pub hooks: HooksConfig,
+    /// Whether Medulla installs its own lifecycle reporting hooks alongside the
+    /// operator's. On by default; resolved into [`TuiConfig::hooks`] at load.
+    #[serde(default)]
+    pub hook_defaults: HookDefaultsConfig,
     /// Custom OpenAI-compatible router. Absent means routing is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router: Option<RouterConfig>,
@@ -126,6 +130,7 @@ impl Default for TuiConfig {
             harness: HarnessSection::default(),
             attribution: AttributionConfig::default(),
             hooks: HooksConfig::default(),
+            hook_defaults: HookDefaultsConfig::default(),
             router: None,
             budget: None,
             routing_strategy: None,

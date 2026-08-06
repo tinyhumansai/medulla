@@ -82,9 +82,10 @@ pub const TABS: [&str; 6] = [
 /// that is done from the host tree. Its draw arm, keys and `[host].workspaces`
 /// persistence all still build, so restoring it is putting its name back here
 /// and renumbering.
-pub const ROUTING_SUBPAGES: [&str; 5] = [
+pub const ROUTING_SUBPAGES: [&str; 6] = [
     "Hosts",
     "Harness Types",
+    "Hooks",
     "Agent Templates",
     "Add Host",
     "Strategies",
@@ -92,12 +93,16 @@ pub const ROUTING_SUBPAGES: [&str; 5] = [
 
 pub(super) const RP_HOSTS: usize = 0;
 pub(super) const RP_HARNESSES: usize = 1;
-pub(super) const RP_TEMPLATES: usize = 2;
-pub(super) const RP_ADD_HOST: usize = 3;
-pub(super) const RP_STRATEGIES: usize = 4;
+// Beside Harness Types on purpose: a hook is a property of every harness
+// Medulla launches, and this page is the one place they are declared for all of
+// them.
+pub(super) const RP_HOOKS: usize = 2;
+pub(super) const RP_TEMPLATES: usize = 3;
+pub(super) const RP_ADD_HOST: usize = 4;
+pub(super) const RP_STRATEGIES: usize = 5;
 // Past the end of `ROUTING_SUBPAGES`, so the nav clamp cannot reach it and its
 // arm is unreachable — the page is off without its code rotting.
-pub(super) const RP_WORKSPACES: usize = 5;
+pub(super) const RP_WORKSPACES: usize = 6;
 
 /// The TokenMaxxxing tab's sidebar pages.
 pub(super) const TOKENMAXXING_SUBPAGES: [&str; 3] = ["Overview", "Bounties", "Leaderboard"];
@@ -555,17 +560,20 @@ pub(super) struct AgentPicker {
     /// [`selected_picker_workspace`](App::selected_picker_workspace) to decide
     /// whether an entered directory outranks the completions listed under it.
     pub(super) workspace_picked: bool,
-    /// Whether to spawn managed (orchestrator can dispatch) or unmanaged.
-    pub(super) managed: bool,
 }
 
 /// Active stage of the manual session launcher.
+///
+/// There is deliberately no "managed or unmanaged?" stage. A session the
+/// operator starts by hand is theirs — that is what starting it by hand *means*
+/// — and the orchestrator spawns its own sessions managed without asking
+/// anybody. So the question only ever had one sensible answer, and asking it
+/// bought a keystroke, an extra screen, and a freshly started session the
+/// operator then had to take back from the orchestrator before typing into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AgentPickerStep {
     /// Choose an installed CLI or registered preset.
     Harness,
-    /// Choose managed or unmanaged control mode.
-    Decision,
     /// Choose or complete the working directory.
     Workspace,
 }
@@ -613,7 +621,12 @@ pub(super) struct PointerGrab {
 /// certainly thinking about it. Silently handing it back would be worse — it
 /// would resume dispatch into a session mid-thought.
 pub(super) struct HandbackPrompt {
-    /// The session the operator is releasing.
+    /// The session the question is about.
+    ///
+    /// Every answer acts on this, never on whatever the rail last resolved: the
+    /// question can outlive the frame that raised it, and a `y` that moved
+    /// control of a *different* session is the worst outcome this whole flow
+    /// has.
     pub(super) session: String,
     /// Whether attaching is what took control, as opposed to an explicit
     /// `/takecontrol`. An explicit take is a decision, so the prompt says so
@@ -642,7 +655,21 @@ pub(super) struct HandbackPrompt {
     pub(super) is_takeover: bool,
 }
 
-/// What to do when the operator releases a session they hold.
+/// How the operator came to hold a session the orchestrator had.
+///
+/// Only the wording of the release question turns on this — both origins ask,
+/// because both locked dispatch out of a workspace. What does *not* appear here
+/// is "started it myself": that session was never taken from anyone, so it is
+/// absent from [`App::sessions_taken`] rather than being a third variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TakeOrigin {
+    /// Focusing in took it, which the operator may not have realised.
+    Focus,
+    /// `/takecontrol`, `Ctrl-G`, or answering the takeover question — a decision.
+    Explicit,
+}
+
+/// What to do when the operator releases a session they took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HandbackPolicy {
     /// Ask, every time.
@@ -710,6 +737,10 @@ pub(super) enum PromptKind {
     CustomHarnessAdd,
     /// Edit the custom harness with the given stable id.
     CustomHarnessEdit(String),
+    /// Declare a lifecycle hook for every harness Medulla launches.
+    HookAdd,
+    /// Edit the hook at the given row of the Hooks page.
+    HookEdit(usize),
     /// Reject a workflow proposal with the operator's explanation.
     RejectProposal {
         /// The workflow the proposal belongs to.
@@ -888,6 +919,13 @@ pub struct App {
     pub(super) custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
     /// Selected row on the Routing Harness Types page.
     pub(super) custom_harness_index: usize,
+    /// Selected row on the Routing Hooks page.
+    pub(super) hook_index: usize,
+    /// Lifecycle reports arriving from the harnesses this Medulla launched.
+    ///
+    /// Written by the control socket's `hook.report` handler and read here; an
+    /// app with no control plane bound simply renders an empty log.
+    pub(super) hook_log: medulla::harness_hooks::HookEventLog,
     /// Scroll offset inside the open agent-template popup.
     pub(super) template_scroll: usize,
     /// Whether the agent-template popup is open over the catalog.
@@ -1010,6 +1048,19 @@ pub struct App {
     /// Injectable so feature tests never touch the real home. `None` disables
     /// persistence (changes still apply live).
     pub(super) config_path: Option<std::path::PathBuf>,
+    /// Where hook edits are persisted — deliberately not always [`Self::config_path`].
+    ///
+    /// `config_path` may resolve to a project-local file
+    /// (`.medulla/config.toml`/`medulla.toml`), which is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from on every load that
+    /// is not an explicit `--config` (project configuration must not authorize
+    /// shell commands in the operator's environment). Saving a hook there would
+    /// show "Hook saved" and apply for the rest of this session while writing
+    /// to a file the next launch ignores. Defaulted to [`Self::config_path`] by
+    /// [`Self::set_config_path`] and overridden by
+    /// [`Self::set_hooks_config_path`] whenever the caller knows the two must
+    /// differ — see `app_loop::run_tui` in the `medulla-tui` crate.
+    pub(super) hooks_config_path: Option<std::path::PathBuf>,
     pub(super) resume_picker: Option<ResumePicker>,
     /// Whether the event loop should exit after this tick.
     pub should_quit: bool,
@@ -1103,6 +1154,12 @@ pub struct App {
     // two would drift, and the direction they would drift in is a pointer that
     // hands a harness back when the operator meant to keep it.
     pub(super) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
+    // The "start a session" picker's outer box, and where each offered row was
+    // drawn with the index it stands for in that step's list. Recorded during
+    // the draw for the same reason the hand-back answers are: the harness step
+    // windows a long list, so screen position and list index are not the same
+    // number, and only the draw knows which window it used.
+    pub(super) hit_agent_picker: Option<(Rect, Vec<(Rect, usize)>)>,
     // The agent behind a selected session row that this device does NOT run,
     // recorded alongside `pane_session` on the same draw.
     //
@@ -1126,13 +1183,42 @@ pub struct App {
     pub(super) help_scroll: u16,
     /// What releasing a held session does, from `[harness].handback`.
     pub(super) handback_policy: HandbackPolicy,
-    /// Whether attaching is what took control of the current session.
+    /// The sessions taken *from the orchestrator*, and how each was taken.
     ///
-    /// Distinguishes "you picked this up by focusing in" from "you asked for it
-    /// with /takecontrol", which the release prompt words differently: the
-    /// second was a decision, and re-asking about it as though it were an
-    /// accident is how a confirmation becomes noise.
-    pub(super) took_control_by_attach: bool,
+    /// Membership is the whole question the release prompt exists to ask. A
+    /// session the operator started themselves was never the orchestrator's, so
+    /// letting go of the keyboard owes it nothing, and asking about it every
+    /// time is how a confirmation becomes furniture. One taken out from under
+    /// dispatch is different: walking away from it leaves the orchestrator
+    /// locked out of a workspace, silently and indefinitely.
+    ///
+    /// The origin distinguishes "you picked this up by focusing in" from "you
+    /// asked for it with /takecontrol", which the release prompt words
+    /// differently: the second was a decision, and re-asking about it as though
+    /// it were an accident is how a confirmation becomes noise.
+    ///
+    /// Keyed by session rather than kept as one flag because several sessions
+    /// can be held at once — take A, keep it on release, then attach to B. A
+    /// single flag answered for whichever was touched last: it worded B's
+    /// question with A's takeover, and kept asking about sessions nobody had
+    /// taken from anyone.
+    pub(super) sessions_taken: std::collections::HashMap<String, TakeOrigin>,
+    /// Sessions the operator has at some point given to the orchestrator.
+    ///
+    /// Separate from [`sessions_taken`](Self::sessions_taken), which says who
+    /// holds a session *now*; this remembers that dispatch once had a claim on
+    /// it, and it is never cleared.
+    ///
+    /// Needed because [`SessionOrigin`](crate::worker::pty::SessionOrigin) alone
+    /// under-counts. A session the operator started carries origin `User`
+    /// forever, but handing it back makes it genuinely dispatchable —
+    /// `SessionHandle::serves_label` lets a handed-back operator session be
+    /// adopted for a task. If that turn then fails, the executor hands it
+    /// straight back to the operator without going through
+    /// [`take_session`](App::take_session), leaving a session with origin
+    /// `User`, no entry in `sessions_taken`, and dispatch locked out of it.
+    /// Releasing that in silence is the bug this set closes.
+    pub(super) orchestrator_claimed: std::collections::HashSet<String>,
     /// Commands raised by synchronous input handlers, drained by the event loop.
     ///
     /// The key and mouse handlers that move session control cannot return a

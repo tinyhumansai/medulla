@@ -184,7 +184,10 @@ impl WorkflowBridge for StoreWorkflowBridge {
     }
 
     fn runs(&self, id: &str) -> Result<Value, String> {
-        ops::list_runs(&self.store, id).map_err(readable)
+        // Full detail: this bridge answers an orchestrator frame, not a
+        // model's tool call, and the caller on the other end may be rendering
+        // the steps.
+        ops::list_runs(&self.store, id, ops::StepDetail::Full).map_err(readable)
     }
 
     /// One authoring turn on this host's own copilot.

@@ -398,6 +398,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .or_else(|| loaded.sources.last().map(std::path::PathBuf::from))
         .unwrap_or_else(|| home_config_path.clone());
+    // Hooks cannot follow `active_config_path` to a project-local layer:
+    // `load_config` strips `[[hooks]]` from every layer but an explicit
+    // `--config` file and the user-global config, so a hook saved to the
+    // project-local file would show "saved" and vanish on the next launch.
+    // An explicit `--config` is fully trusted (discovery, and the strip, never
+    // run), so it is honored here exactly as `active_config_path` honors it;
+    // otherwise hooks always target the user-global file, whatever layer other
+    // settings resolved to.
+    let hooks_config_path = args
+        .config
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home_config_path.clone());
 
     // Optional background host-link service (observational only): keep per-peer
     // liveness current and surface it into the Overview panel and Agents lanes.
@@ -588,7 +601,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // returns `None` when there are none, so the gate only duplicated a check it
     // already makes. The hub is host-link/harness wiring and stays TUI-side
     // regardless of which runtime backs the session.
-    let hub_session = crate::hub_relay::start(
+    // Held (not read) for the rest of this scope: dropping it early would tear
+    // the hub session down. Whether it started is no longer a gate on the
+    // control plane below — see that call's doc comment.
+    let _hub_session = crate::hub_relay::start(
         &env,
         &home,
         hub_slot.clone(),
@@ -609,6 +625,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     )
     .await;
 
+    // Every harness Medulla launches reports its lifecycle here, through the
+    // hooks Medulla installs into it. Created before the control plane because
+    // that is what writes into it, and shared with the app, which reads it.
+    let hook_log = medulla::harness_hooks::HookEventLog::new();
+
     // Bound once, here, and held for the whole process: the socket belongs to
     // this process rather than to a login session, and rebinding inside the
     // relogin loop below would race this process's own live socket. The server
@@ -625,9 +646,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         crate::control_plane::start(
             &env,
             &loaded.config,
-            hub_session.is_some(),
             hub_slot.clone(),
             local_default_worker,
+            hook_log.clone(),
             &hub_logs,
         )
         .await
@@ -657,6 +678,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 startup_status: status.take(),
                 link_obs: link_obs.clone(),
                 config_path: active_config_path.clone(),
+                hooks_config_path: hooks_config_path.clone(),
                 medulla_home: home.clone(),
                 account: account.clone(),
                 sharing: sharing.take(),
@@ -666,6 +688,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // reflected there — a UI gap, not a hosting one.
                 host: primary_observation.clone(),
                 local_sessions: local_sessions.clone(),
+                hook_log: hook_log.clone(),
             },
         )
         .await;

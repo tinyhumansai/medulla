@@ -31,8 +31,11 @@ contains four things that each exist for a reason:
   `false`, `{}`) rather than plausible-looking invented values, because a model
   that copies an invented value ships it to a real run. Inputs with defaults
   show the default, so the example is runnable as written.
-- **A "while it runs" paragraph.** `workflow_run` blocks until the run finishes.
-  Saying so is what stops a model calling it again a minute later.
+- **A "while it runs" paragraph.** `workflow_run` starts the run and answers at
+  once with a run id; the run continues without the call. Saying so is what
+  stops a model reporting a started run as a finished one, or calling it again a
+  minute later — and the paragraph names `workflow_run_get`, because starting a
+  run and reading it are two calls.
 - **A fallback paragraph.** Skills are copied into user-scope directories that
   outlive any MCP configuration, so the tool being absent is a normal state. The
   body says: do not claim the run started, run `medulla workflow run` from the
@@ -41,13 +44,32 @@ contains four things that each exist for a reason:
 
 ## The marker discipline
 
-Every generated file's first line is
+Every generated file opens with its frontmatter, and the first line inside it is
 
 ```text
-<!-- medulla:managed workflow=<percent-encoded id> rev=<sha256 of everything below> -->
+---
+# medulla:managed workflow=<percent-encoded id> rev=<sha256 of the generated content>
+name: medulla-<slug>
 ```
 
-and that line is the entire safety story for writing into someone's `~/.claude`.
+and that comment is the entire safety story for writing into someone's
+`~/.claude`.
+
+It lives *inside* the frontmatter because a harness only parses frontmatter that
+opens on line 1. Written above it — as releases up to 0.7 did — Claude Code read
+the document as one long body and showed the marker itself where the description
+belongs, so every skill installed, listed, and never triggered: the description
+is the only field a paraphrased request is matched against. YAML discards `#`
+comments before anything else sees the document, so the marker is invisible to
+the harness and still exactly one line to us.
+
+`parse_marker` accepts the old HTML-comment spelling too, and must keep doing
+so. A release that only recognised the current one would disown every file its
+predecessor installed — colliding against its own skill on reinstall, and
+leaving it behind on `sync --prune` and `uninstall`. The `rev` mixes in a marker
+format tag for the mirror-image reason: without it, a file whose *content* is
+unchanged keeps a matching `rev` across the move, and the install reports
+`unchanged` over a file no harness can read.
 
 The id is percent-encoded, because the store accepts any id that is a single
 path component — `nightly sweep`, an id with a newline, a quote, or a `%` in it

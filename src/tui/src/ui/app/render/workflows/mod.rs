@@ -71,6 +71,14 @@ pub(in crate::ui::app) const NODE_HEIGHT: usize = 1;
 /// wires between two stacked nodes have a row to run along.
 pub(in crate::ui::app) const LANE_STRIDE: usize = NODE_HEIGHT + 1;
 
+/// Cells past a node's trailing edge that its outgoing wires turn down in.
+///
+/// Near the source side, leaving the rest of the gutter for the port label —
+/// which is written on the *incoming* run rather than the outgoing one, because
+/// every edge out of one node shares that node's exit row and two labels there
+/// would overwrite each other.
+pub(in crate::ui::app) const GUTTER_GAP: usize = 2;
+
 /// Columns kept clear down the left of the canvas.
 ///
 /// A wire that folds onto the next band arrives from above and turns into its

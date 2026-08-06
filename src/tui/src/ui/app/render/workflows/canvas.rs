@@ -27,20 +27,12 @@ use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
 
 use super::super::super::types::App;
 use super::paint::{Canvas, CellStyle};
-use super::GUTTER_SPAN;
+use super::{GUTTER_GAP, GUTTER_SPAN};
 
 /// Columns of a node's slot that its name is allowed to fill before a wire is
 /// routed around it, leaving a gap between the longest label and the wire that
 /// leaves it.
 const NODE_GAP: usize = 1;
-
-/// Cells past a node's trailing edge that its outgoing wires turn down in.
-///
-/// Near the source side, leaving the rest of the gutter for the port label —
-/// which is written on the *incoming* run rather than the outgoing one, because
-/// every edge out of one node shares that node's exit row and two labels there
-/// would overwrite each other.
-const GUTTER_GAP: usize = NODE_GAP + 1;
 
 /// How many columns a port label has, between the gutter's vertical run and the
 /// arrowhead at the target's leading edge.
@@ -112,11 +104,13 @@ impl App {
 
         let overlay = self.selected_workflow_run().map(RunOverlay::new);
         let mut canvas = Canvas::new(inner.width as usize, inner.height as usize);
-        // Wires first, so a box drawn over a wire's last cell wins — the
-        // painter locks node cells, and an edge routed before its target exists
-        // would otherwise have written into it.
-        self.paint_edges(&mut canvas, layout, overlay.as_ref());
+        // Nodes first, because that is what the canvas's cell locking is for: a
+        // wire routed across a name then tunnels behind it. Painted the other
+        // way round the lock has nothing to protect yet, and a label's own
+        // spaces come out as wire — `↺ Until green and clean` reading
+        // `↺─Until─green─and clean` wherever an edge happened to cross it.
         self.paint_nodes(&mut canvas, layout, overlay.as_ref());
+        self.paint_edges(&mut canvas, layout, overlay.as_ref());
         f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
     }
 
@@ -252,6 +246,14 @@ impl App {
                 self.label_width(from, overlay),
                 self.label_width(to, overlay),
             );
+            //
+            // Clamped to the canvas on the right, because the columns are sized
+            // to fill the pane and the last one of a forward band therefore has
+            // no gutter left to turn in. Buying it one by making every band
+            // narrower costs most of a layer per band on a narrow pane, so the
+            // fold turns against the frame instead — the wire stays whole and
+            // still says which way the graph continues.
+            let right = canvas.width().saturating_sub(1);
             let (exit, gutter) = if out_reversed {
                 (
                     fx.saturating_sub(1 + NODE_GAP),
@@ -259,35 +261,47 @@ impl App {
                 )
             } else {
                 (
-                    fx + from_width + NODE_GAP,
-                    fx + self.column_width(from.layer) + GUTTER_GAP,
+                    (fx + from_width + NODE_GAP).min(right),
+                    (fx + self.column_width(from.layer) + GUTTER_GAP).min(right),
                 )
             };
-            // The cell an arrowhead lands on: one clear cell outside the
-            // target's leading edge, which is its right edge on a band that runs
-            // right to left. The blank between the arrowhead and the marker is
-            // what stops a wire and a name reading as one run of characters.
-            let entry = if in_reversed {
-                tx + to_width + NODE_GAP
-            } else {
-                tx.saturating_sub(1 + NODE_GAP)
-            };
-            let head = if in_reversed { '◀' } else { '▶' };
             let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
-            // Whether the target is ahead of the source along the band: a
-            // target behind it is a loop, and comes back into its trailing edge.
-            let forward = if out_reversed { tx < fx } else { tx > fx };
+            // Whether the target sits behind the source in the plan — a loop's
+            // closing arm. Compared by layer rather than by column: the sway
+            // moves a node a cell either way, and a wire that changed which end
+            // of its target it aimed at as the graph breathed would twitch.
+            let backward = to.layer <= from.layer;
+            // The cell an arrowhead lands on: one clear cell outside the edge of
+            // the target it arrives at. A forward edge arrives at the leading
+            // edge — the left on a band that runs left to right, the right on one
+            // that runs the other way. A loop's closing arm arrives at the
+            // *trailing* edge instead, so it comes back in the side the work left
+            // by rather than crossing the whole box to reach its front. The blank
+            // between the arrowhead and the marker is what stops a wire and a
+            // name reading as one run of characters.
+            let enters_left = backward == in_reversed;
+            let (entry, head) = if enters_left {
+                (tx.saturating_sub(1 + NODE_GAP), '▶')
+            } else {
+                ((tx + to_width + NODE_GAP).min(right), '◀')
+            };
 
             // The wire as a polyline, corner to corner. Building it up front is
             // what lets the flow highlight ride the path that was actually
             // drawn rather than the straight line between the two nodes, which
             // is not where the wire is.
             let points: Vec<(usize, usize)> = if folds {
-                // Out, down into the blank row above the target's band, across
-                // to the target's column, then down into it. With alternating
-                // band directions that "across" is a short hop, because the
-                // next band picks up under where this one ended.
-                let link_row = to_row.saturating_sub(1);
+                // Out, along the blank row beside the target's lane, across to
+                // the target's column, then in. With alternating band directions
+                // that "across" is a short hop, because the next band picks up
+                // under where this one ended. The blank row is the one on the
+                // side the wire arrives from, so a loop climbing back to an
+                // earlier band turns below its target rather than above it.
+                let link_row = if from_row < to_row {
+                    to_row - 1
+                } else {
+                    to_row + 1
+                };
                 vec![
                     (exit, from_row),
                     (gutter, from_row),
@@ -295,38 +309,30 @@ impl App {
                     (entry, link_row),
                     (entry, to_row),
                 ]
-            } else if forward {
+            } else if backward && from_row == to_row {
+                // A loop closing on the same row of the same band. Routed
+                // through the blank row under the lane rather than straight back
+                // along it: the row between them is full of the very steps the
+                // loop repeats, and a wire tunnelling behind all of them
+                // re-emerges between their labels looking like a mistake.
+                let link_row = to_row + 1;
+                vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, link_row),
+                    (entry, link_row),
+                    (entry, to_row),
+                ]
+            } else {
                 vec![
                     (exit, from_row),
                     (gutter, from_row),
                     (gutter, to_row),
                     (entry, to_row),
                 ]
-            } else {
-                // A loop back to an earlier step in the same band: it returns
-                // the way it came, into the node's trailing edge.
-                let tail = if in_reversed {
-                    tx.saturating_sub(1 + NODE_GAP)
-                } else {
-                    tx + to_width + NODE_GAP
-                };
-                vec![
-                    (exit, from_row),
-                    (gutter, from_row),
-                    (gutter, to_row),
-                    (tail, to_row),
-                ]
             };
             let route = paint_route(canvas, &points, style);
-
-            let (head_x, head) = if folds || forward {
-                (entry, head)
-            } else if in_reversed {
-                (tx.saturating_sub(1 + NODE_GAP), '▶')
-            } else {
-                (tx + to_width + NODE_GAP, '◀')
-            };
-            canvas.arrow(head_x, to_row, head, style);
+            canvas.arrow(entry, to_row, head, style);
 
             // The moving highlight. Undimmed against the dim wire, so the eye
             // follows it without the wire itself competing with the nodes.
@@ -367,8 +373,11 @@ impl App {
                 } else {
                     (gutter + 1, to_row)
                 };
-                if forward || folds {
-                    canvas.text(label_x, label_row, &label, style);
+                // A loop's closing arm carries no choice to report — it is the
+                // one way back — so it is left unlabelled rather than writing a
+                // port name across the run it returns along.
+                if !backward || folds {
+                    canvas.label(label_x, label_row, &label, style);
                 }
             }
         }

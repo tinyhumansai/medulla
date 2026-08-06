@@ -544,3 +544,120 @@ fn a_terminal_too_small_to_draw_anything_does_not_panic() {
 }
 
 mod layout_tests;
+
+/// A trigger into a loop whose body is a four-step chain that returns to it —
+/// the shape every "keep going until it is done" workflow has.
+fn looping(id: &str) -> WorkflowRecord {
+    WorkflowRecord {
+        id: id.to_string(),
+        name: format!("{id} loop"),
+        description: String::new(),
+        enabled: true,
+        defaults: Default::default(),
+        graph: serde_json::from_value(json!({
+            "name": id,
+            "nodes": [
+                { "id": "start", "kind": "trigger", "name": "Start",
+                  "config": { "trigger_kind": "manual" } },
+                { "id": "watch", "kind": "loop", "name": "Until it settles",
+                  "config": { "max_iterations": 8 } },
+                { "id": "read", "kind": "tool_call", "name": "Read the state",
+                  "config": { "slug": "medulla:shell" } },
+                { "id": "fix", "kind": "agent", "name": "Fix it",
+                  "config": { "prompt": "go" } },
+                { "id": "again", "kind": "transform", "name": "Round again",
+                  "config": { "expression": "=." } },
+                { "id": "report", "kind": "transform", "name": "Report",
+                  "config": { "expression": "=." } },
+            ],
+            "edges": [
+                { "from_node": "start", "to_node": "watch" },
+                { "from_node": "watch", "from_port": "body", "to_node": "read" },
+                { "from_node": "watch", "from_port": "done", "to_node": "report" },
+                { "from_node": "read", "to_node": "fix" },
+                { "from_node": "fix", "to_node": "again" },
+                // The arm that closes the loop.
+                { "from_node": "again", "to_node": "watch" },
+            ],
+        }))
+        .expect("graph parses"),
+        source_path: None,
+    }
+}
+
+#[test]
+fn a_loop_folds_to_its_own_depth_rather_than_one_band_per_step() {
+    let (_home, mut app) = app_with(&[looping("babysit")], &[]);
+    render(&mut app);
+
+    // Five columns of plan — start, the loop, and its three body steps, with
+    // `Report` sharing the loop's own next column. The closing arm is not a
+    // sixth step and must not rank as one.
+    assert_eq!(app.workflow_layout().layers, 5);
+    assert!(
+        app.folded_rows() <= 6,
+        "a six-node loop folded onto {} rows: {:?}",
+        app.folded_rows(),
+        app.band_heights()
+    );
+}
+
+#[test]
+fn a_node_name_is_never_broken_up_by_a_wire_crossing_it() {
+    let (_home, mut app) = app_with(&[looping("babysit")], &[]);
+
+    let screen = render(&mut app);
+
+    // The loop's closing arm crosses this name's row on its way back. Its own
+    // spaces used to resolve as the wire's box-drawing character.
+    assert!(
+        screen.contains("↺ Until it settles"),
+        "the name is broken up: {screen}"
+    );
+    assert!(
+        !screen.contains("↺─Until"),
+        "a wire was drawn through the label: {screen}"
+    );
+}
+
+#[test]
+fn a_loops_closing_arm_comes_back_into_the_step_it_repeats() {
+    let (_home, mut app) = app_with(&[looping("babysit")], &[]);
+
+    let screen = render(&mut app);
+    let row = screen
+        .lines()
+        .find(|line| line.contains("↺ Until it settles"))
+        .expect("the loop is on some row");
+
+    // Into the trailing edge — the side the work left by — rather than crossing
+    // the whole box to arrive at its front, which is what routing the return
+    // arm like a forward edge did.
+    assert!(
+        row.contains("↺ Until it settles ◀"),
+        "the return arm does not arrive at the trailing edge: {row}"
+    );
+}
+
+#[test]
+fn a_fold_turns_against_the_frame_rather_than_costing_a_column() {
+    let (_home, mut app) = app_with(&[looping("babysit")], &[]);
+
+    // Narrow enough that the last column of a band ends flush against the panel
+    // border, which is where the wire leaving it has nowhere to turn.
+    let screen = render_sized(&mut app, 74, 30);
+
+    // The width goes on the plan: reserving a right margin for that turn cost
+    // roughly a whole layer per band, and a graph that folds after every step
+    // is harder to read than one whose last fold turns against the frame.
+    assert!(
+        app.layers_per_band() > 1,
+        "a margin ate the second column: {} layers per band",
+        app.layers_per_band()
+    );
+    // And the turn is still drawn, rather than being clipped off the canvas.
+    assert!(
+        screen.lines().any(|line| line.contains('╮')),
+        "the fold has no visible turn: {screen}"
+    );
+}

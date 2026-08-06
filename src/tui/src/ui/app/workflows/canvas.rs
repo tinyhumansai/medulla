@@ -180,6 +180,14 @@ impl App {
     /// measured exactly the way the layout measures it; everything left of the
     /// panel's own borders is canvas, because the content pane now holds one
     /// view rather than sharing the row with a copilot column.
+    ///
+    /// Only the left margin comes off. Reserving one on the right too — for the
+    /// gutter the last column of a forward band folds down in — is the tidier
+    /// geometry, but five columns is most of a whole extra layer per band on a
+    /// narrow pane, and a graph that folds after every single step to keep its
+    /// corners clear is far harder to read than one whose last fold turns
+    /// against the frame. So the renderer clamps that wire to the canvas instead
+    /// (see `paint_edges`), and the width is spent on the plan.
     pub(in crate::ui::app) fn canvas_width(&self) -> usize {
         const BORDERS: usize = 2;
         let rail = self.workflow_sidebar_width(self.area.width);

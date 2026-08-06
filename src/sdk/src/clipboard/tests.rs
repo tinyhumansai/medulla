@@ -159,15 +159,42 @@ fn copy_report_names_every_mechanism_that_took_it() {
 
 #[test]
 fn tmux_is_detected_from_the_env_var_and_its_socket_kept() {
-    let tmux = Tmux::parse(Some("/tmp/tmux-1000/default,3423,0")).expect("inside tmux");
-    assert_eq!(tmux.socket, "/tmp/tmux-1000/default");
+    // `$TMUX` is untrusted, so `parse` only accepts a path naming a real
+    // socket this process owns — a bound `UnixListener` stands in for the
+    // server tmux itself would be running.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket_path = dir.path().join("default");
+    let _listener =
+        std::os::unix::net::UnixListener::bind(&socket_path).expect("bind test socket");
+    let socket = socket_path.to_str().expect("utf8 path").to_string();
+
+    let tmux = Tmux::parse(Some(&format!("{socket},3423,0"))).expect("inside tmux");
+    assert_eq!(tmux.socket(), socket);
     assert_eq!(
-        Tmux::parse(Some("/tmp/sock")).map(|t| t.socket),
-        Some("/tmp/sock".to_string()),
+        Tmux::parse(Some(&socket)).map(|t| t.socket().to_string()),
+        Some(socket.clone()),
         "a bare socket is accepted too"
     );
+
     assert_eq!(Tmux::parse(None), None);
     assert_eq!(Tmux::parse(Some("")), None, "an empty $TMUX is not tmux");
+    assert_eq!(
+        Tmux::parse(Some("relative/socket")),
+        None,
+        "a relative path is never a real tmux socket"
+    );
+    assert_eq!(
+        Tmux::parse(Some("/medulla-not-a-real-tmux-socket-xyz")),
+        None,
+        "a socket that does not exist is rejected"
+    );
+    let regular_file = dir.path().join("not-a-socket");
+    std::fs::write(&regular_file, b"not a socket").expect("write regular file");
+    assert_eq!(
+        Tmux::parse(Some(regular_file.to_str().expect("utf8 path"))),
+        None,
+        "a path that exists but is not a socket is rejected"
+    );
 }
 
 #[test]

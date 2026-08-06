@@ -305,6 +305,7 @@ impl Default for TerminalModes {
     fn default() -> Self {
         Self {
             parser: vte::Parser::new(),
+            osc52: super::osc52::Osc52Scanner::default(),
             alternate_scroll: false,
             clipboard: None,
         }

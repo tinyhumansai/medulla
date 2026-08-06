@@ -198,14 +198,8 @@ fn an_operator_started_claude_is_handed_medullas_own_tools() {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let argv = dir.path().join("argv");
     let bin = dir.path().join("fake-claude");
-    std::fs::write(
-        &bin,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nsleep 30\n",
-            argv.display()
-        ),
-    )
-    .expect("the stand-in harness is writable");
+    std::fs::write(&bin, records_argv_then_sleeps(&argv))
+        .expect("the stand-in harness is writable");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

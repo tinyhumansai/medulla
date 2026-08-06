@@ -134,23 +134,35 @@ fn input_rows(run: &RunRecord) -> Vec<DetailRow> {
 /// kind of literalism that makes a pane look like a debugger. Everything else is
 /// compact JSON, which is what a number, a flag, or a small list wants.
 fn render_value(value: &serde_json::Value) -> String {
-    // A value the record bounded on the way in says so in its own shape; showing
-    // the wrapper's machinery would be showing our bookkeeping rather than the
-    // caller's argument.
-    if let Some(original) = value
+    truncate(&value_text(value), INPUT_VALUE_CHARS)
+}
+
+/// The readable text of a recorded value, unbounded.
+///
+/// A value the record bounded on the way in says so in its own shape, carrying
+/// the useful text under `preview`; showing the wrapper's machinery would be
+/// showing our bookkeeping rather than the caller's argument. Every surface that
+/// shows an input goes through here — the detail rows, the history rail, the
+/// node preview — so none of them can disagree about it, and each applies its
+/// own width afterwards.
+///
+/// A string is returned as its text — quoting `"main"` into `"\"main\""` is the
+/// kind of literalism that makes a pane look like a debugger. Everything else is
+/// compact JSON, which is what a number, a flag, or a small list wants.
+pub fn value_text(value: &serde_json::Value) -> String {
+    if let Some(preview) = value
         .get("_medullaTruncated")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
         .then(|| value.get("preview").and_then(serde_json::Value::as_str))
         .flatten()
     {
-        return truncate(original, INPUT_VALUE_CHARS);
+        return preview.to_string();
     }
-    let text = match value {
+    match value {
         serde_json::Value::String(text) => text.clone(),
         other => other.to_string(),
-    };
-    truncate(&text, INPUT_VALUE_CHARS)
+    }
 }
 
 /// Cut `text` to `chars` characters, marking that it was cut.

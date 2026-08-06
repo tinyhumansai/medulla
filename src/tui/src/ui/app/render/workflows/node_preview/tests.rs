@@ -516,3 +516,25 @@ fn a_wrapped_operand_with_nothing_legible_keeps_its_whole_source() {
     // The fallback is part of what fills the placeholder, so it is not dropped.
     assert!(preview.contains("none"), "{preview}");
 }
+
+#[test]
+fn a_condition_whose_field_contains_then_is_not_cut_mid_identifier() {
+    // `.inputs.authenticated` has `then` inside it. A substring search for the
+    // keyword split the condition at `au|thenticated`, naming the operand
+    // `${if au}` after a fragment of the field it was meant to report.
+    let preview = text(kind_lines(
+        "agent",
+        &json!({
+            "prompt": "=\"Use \" + (if .inputs.authenticated then \"secure\" else \"open\" end)"
+        }),
+        100,
+        &AgentDefaults::default(),
+    ));
+
+    assert!(preview.contains("${if authenticated}"), "{preview}");
+    assert!(
+        preview.contains("inputs.authenticated → one of two texts"),
+        "{preview}"
+    );
+    assert!(!preview.contains("${if au}"), "{preview}");
+}

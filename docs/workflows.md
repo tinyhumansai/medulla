@@ -256,12 +256,21 @@ first line inside the frontmatter, where the harness's own parser discards it;
 above the frontmatter, as releases up to 0.7 wrote it, it stopped the
 frontmatter being read at all and the skill was listed with the marker in place
 of its description. Files written the old way are still recognised and are
-rewritten on the next install. Nothing without a marker is ever overwritten or
-deleted — a collision is reported and
-skipped, which means that workflow is *not* installed, and the command exits
-non-zero so a wrapper notices. A file whose marker Medulla cannot fully parse
-counts as someone else's for the same reason; remove it by hand to let Medulla
-manage that path again. Re-running is a no-op.
+rewritten on the next install. Nothing without a marker is ever overwritten — a
+collision is reported and skipped, which means that workflow is *not*
+installed, and the command exits non-zero so a wrapper notices. A file whose
+marker Medulla cannot fully parse counts as someone else's for the same reason;
+remove it by hand to let Medulla manage that path again. Re-running is a no-op.
+
+`sync --prune` is the one command that removes a file on the strength of its
+name. The `medulla-` slug prefix is Medulla's namespace, so a `medulla-*` skill
+directory or `/medulla-*` command that no enabled workflow claims is deleted
+even when its marker is missing or unreadable — otherwise a leftover from a
+release whose marker this build cannot parse is undeletable by any command, and
+the harness keeps offering a workflow that no longer exists. The sweep reaches
+Codex's deprecated `.codex/skills` root too. A slug a *live* workflow claims
+stays under the marker rule: unmanaged content there is a collision, never a
+deletion.
 Disabled workflows get no skill: a workflow that may not run should not be
 advertised as runnable.
 

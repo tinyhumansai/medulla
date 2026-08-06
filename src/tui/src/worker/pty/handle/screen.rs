@@ -79,6 +79,13 @@ impl SessionHandle {
             let mut parser = std::mem::take(&mut modes.parser);
             for &byte in bytes {
                 parser.advance(&mut *modes, byte);
+                // Run in parallel with `vte`'s own OSC dispatch above, which
+                // truncates a payload past 1024 bytes; a complete capture
+                // here supersedes whatever that produced for the same write.
+                // See `super::osc52` for why both exist.
+                if let Some(text) = modes.osc52.advance(byte) {
+                    modes.clipboard = Some(text);
+                }
             }
             modes.parser = parser;
         }

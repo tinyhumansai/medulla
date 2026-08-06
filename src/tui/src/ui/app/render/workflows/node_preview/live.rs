@@ -65,24 +65,40 @@ pub(super) fn live_lines(frames: &[String], running: bool) -> Vec<Line<'static>>
     lines
 }
 
+/// Strip control characters from a frame's text before it reaches a span.
+///
+/// Every payload here is a coding agent's own stdout, relayed verbatim — and
+/// for a run started over MCP, relayed from another process entirely. Ratatui
+/// does not neutralize what it is handed: an ESC or OSC sequence in a tool
+/// argument or a thinking fragment reaches the operator's terminal and is
+/// interpreted there, so a file a harness merely *read* could move the cursor or
+/// rewrite the window title. Trimming stays here rather than at the call sites
+/// because a sequence can hide behind leading whitespace.
+fn inline_text(value: &str) -> String {
+    value.trim().chars().filter(|c| !c.is_control()).collect()
+}
+
 /// One progress frame, marked up by what kind of frame it is.
 fn frame_line(frame: &str) -> Line<'static> {
     match classify_progress(frame) {
         Progress::Tool { text, .. } => Line::from(vec![
             Span::styled("  ⏺ ", Style::default().fg(Color::Cyan)),
-            Span::raw(text),
+            Span::raw(inline_text(&text)),
         ]),
         Progress::ToolResult { failed, detail, .. } => Line::from(vec![
             Span::styled(
                 if failed { "    ✗ " } else { "    ✓ " },
                 Style::default().fg(if failed { Color::Red } else { Color::Green }),
             ),
-            Span::styled(detail, Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(
+                inline_text(&detail),
+                Style::default().add_modifier(Modifier::DIM),
+            ),
         ]),
         Progress::Thinking(fragment) => Line::from(vec![
             Span::styled("  · ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                fragment.trim().to_string(),
+                inline_text(&fragment),
                 Style::default()
                     .fg(Color::Magenta)
                     .add_modifier(Modifier::ITALIC),
@@ -91,9 +107,13 @@ fn frame_line(frame: &str) -> Line<'static> {
         Progress::Status(text) => Line::from(vec![
             Span::styled("  · ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                text.trim().to_string(),
+                inline_text(&text),
                 Style::default().add_modifier(Modifier::DIM),
             ),
         ]),
     }
 }
+
+#[cfg(test)]
+#[path = "live_tests.rs"]
+mod tests;

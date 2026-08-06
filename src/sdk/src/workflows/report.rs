@@ -105,6 +105,8 @@ impl RunReporter {
             let (reports, mut inbox) = tokio::sync::mpsc::unbounded_channel::<Report>();
             let workflow_id = workflow_id.to_string();
             let run_id = run_id.to_string();
+            let pending = Arc::new(AtomicUsize::new(0));
+            let drained = pending.clone();
             tokio::spawn(async move {
                 let Ok(mut client) =
                     crate::control_socket::ControlClient::connect(&socket, &token).await

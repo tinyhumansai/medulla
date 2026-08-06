@@ -133,11 +133,20 @@ impl super::super::types::App {
     /// registry: it lives in the control plane, not in the App, and a borrow of
     /// it would hold that lock across a render pass.
     pub(in crate::ui::app) fn live_run_view(&self) -> Option<LiveRun> {
-        if let Some(local) = self.live_run_for_view() {
-            return Some(local.clone());
+        // An explicitly selected run wins over the workflow-level fallback,
+        // whichever source holds it. Resolving the local source first and only
+        // then consulting the registry would answer a rail selection of a
+        // reported run with some *other* run of the same workflow that happens
+        // to be live here — frames from the wrong process under the right name.
+        if let Some(id) = self.wf.overlay.as_deref() {
+            if let Some(local) = self.live_runs.get(id) {
+                return Some(local.clone());
+            }
+            if let Some(reported) = self.harness_runs.find(id) {
+                return Some(LiveRun::from_reported(&reported));
+            }
         }
-        let reported = self.harness_runs.find(self.wf.overlay.as_deref()?)?;
-        Some(LiveRun::from_reported(&reported))
+        self.live_run_for_view().cloned()
     }
 }
 

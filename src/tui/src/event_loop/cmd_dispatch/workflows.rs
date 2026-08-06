@@ -94,6 +94,10 @@ async fn run(
         // custom harness preset does not fail with "not configured on this
         // host" purely because this one-shot daemon started with none.
         custom_harnesses: custom_harnesses.to_vec(),
+        // Same reasoning as `custom_harnesses` above: this one-shot daemon
+        // should install the same built-in and operator lifecycle hooks the
+        // session's primary host resolved, not start with none.
+        hooks: hooks.clone(),
         ..Default::default()
     })
     .map_err(anyhow::Error::msg)?;

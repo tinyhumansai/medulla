@@ -233,6 +233,10 @@ impl App {
                 .row(&id)?
                 .thread_name
                 .map(|title| display_session_title(&title))
+                // A title of pure punctuation ("---") slugs to nothing. Treating
+                // that as a title would render a dangling " · " and, because the
+                // newest running task wins, hide an older task's real title.
+                .filter(|title| !title.is_empty())
         })
     }
 }

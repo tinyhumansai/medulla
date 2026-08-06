@@ -175,8 +175,13 @@ async fn a_reported_run_is_recorded_under_the_grants_own_session() {
 
 #[tokio::test]
 async fn a_run_report_missing_its_identity_is_refused_rather_than_recorded() {
-    let response = Harness::new()
+    let mut harness = Harness::new();
+    let response = harness
         .call("run.report", json!({ "status": "running" }))
         .await;
     assert_eq!(kind(&response), "badRequest");
+    // The second half of the name: refusing it must also mean nothing landed
+    // in the registry, or the rail would grow a row for a report the handler
+    // said no to.
+    assert!(harness.runs.for_session("session-1").is_empty());
 }

@@ -336,26 +336,108 @@ fn remove_managed(managed: &ManagedFile, opts: &InstallOptions) -> io::Result<Fi
     })
 }
 
+/// A file in a generated file's place, with whatever marker it turned out to
+/// carry.
+///
+/// The marker is `None` for a file we cannot identify — someone else's, an
+/// unreadable one, or a `SKILL.md` that is not there at all because only the
+/// directory around it survived.
+struct Candidate {
+    path: PathBuf,
+    slug: String,
+    marker: Option<(String, String)>,
+    target: SkillTarget,
+    is_skill: bool,
+}
+
+impl Candidate {
+    /// The [`ManagedFile`] a removal needs, for a candidate we have decided is
+    /// ours to retire.
+    ///
+    /// An unmarked candidate has no workflow to name, so the report attributes
+    /// it to its slug — the only identity it has left.
+    fn into_managed(self) -> ManagedFile {
+        let (workflow_id, rev) = self
+            .marker
+            .unwrap_or_else(|| (self.slug.clone(), String::new()));
+        ManagedFile {
+            path: self.path,
+            slug: self.slug,
+            workflow_id,
+            rev,
+            target: self.target,
+            is_skill: self.is_skill,
+        }
+    }
+}
+
 /// Every marked file under one target's skill and command directories.
 ///
 /// Missing directories yield nothing rather than an error: not having a
 /// `.codex` is the normal state for most machines.
 fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>> {
+    Ok(scan_candidates(target, root, false)?
+        .into_iter()
+        .filter(|candidate| candidate.marker.is_some())
+        .map(Candidate::into_managed)
+        .collect())
+}
+
+/// Everything a prune pass should remove under one target root.
+///
+/// Two rules, in order. A file whose marker names a workflow goes when that
+/// workflow is not kept — the long-standing behaviour. A file with no marker we
+/// can read goes when its slug is in the `medulla-` namespace and no kept
+/// workflow claims that slug; that is what retires a leftover from a release
+/// whose marker we no longer recognise, or a directory whose `SKILL.md` an
+/// operator deleted by hand.
+fn scan_prunable(
+    target: SkillTarget,
+    root: &Path,
+    keep_ids: &BTreeSet<&str>,
+    keep_slugs: &BTreeSet<String>,
+) -> io::Result<Vec<ManagedFile>> {
+    Ok(scan_candidates(target, root, true)?
+        .into_iter()
+        .filter(|candidate| match &candidate.marker {
+            Some((workflow_id, _)) => !keep_ids.contains(workflow_id.as_str()),
+            None => {
+                candidate.slug.starts_with(SLUG_PREFIX) && !keep_slugs.contains(&candidate.slug)
+            }
+        })
+        .map(Candidate::into_managed)
+        .collect())
+}
+
+/// Every file in a generated file's place under one target's directories,
+/// marked or not, sorted by path.
+///
+/// `include_legacy` adds Codex's deprecated `.codex/skills` root. It is off for
+/// the listing paths, which report what a harness will actually load, and on
+/// for pruning, which has to reach a root [`install`] only cleans on behalf of
+/// a workflow that still exists.
+fn scan_candidates(
+    target: SkillTarget,
+    root: &Path,
+    include_legacy: bool,
+) -> io::Result<Vec<Candidate>> {
     let mut found = Vec::new();
 
-    for entry in read_dir_opt(&skills_dir(target, root))? {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let path = dir.join("SKILL.md");
-        let slug = entry.file_name().to_string_lossy().into_owned();
-        if let Some((workflow_id, rev)) = read_marker(&path)? {
-            found.push(ManagedFile {
+    let mut skill_roots = vec![skills_dir(target, root)];
+    if include_legacy && target == SkillTarget::Codex {
+        skill_roots.push(legacy_codex_skills_dir(root));
+    }
+    for skills in &skill_roots {
+        for entry in read_dir_opt(skills)? {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let path = dir.join("SKILL.md");
+            found.push(Candidate {
+                marker: read_marker(&path)?,
                 path,
-                slug,
-                workflow_id,
-                rev,
+                slug: entry.file_name().to_string_lossy().into_owned(),
                 target,
                 is_skill: true,
             });
@@ -372,16 +454,13 @@ fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if let Some((workflow_id, rev)) = read_marker(&path)? {
-                found.push(ManagedFile {
-                    path,
-                    slug,
-                    workflow_id,
-                    rev,
-                    target,
-                    is_skill: false,
-                });
-            }
+            found.push(Candidate {
+                marker: read_marker(&path)?,
+                path,
+                slug,
+                target,
+                is_skill: false,
+            });
         }
     }
 

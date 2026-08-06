@@ -204,6 +204,38 @@ async fn a_wait_budget_that_expires_hands_back_the_run_rather_than_an_error() {
 }
 
 #[tokio::test]
+async fn a_run_rejected_for_bad_inputs_settles_as_failed_rather_than_running_forever() {
+    // Regression for the admission record `LocalRun::start` writes before the
+    // detached task ever calls `run_workflow`: `run_workflow` resolves declared
+    // inputs before it claims the run or writes its own record, so a caller
+    // that omits a required one used to leave that admission record stuck at
+    // `running` — nothing ever reconciled it, since the failure happened before
+    // `RunFinalizer` (or anything else) existed for this run id.
+    let (root, store) = store();
+    save_a_workflow_requiring_an_input(&store, "needs-input");
+    let config = medulla::config::WorkflowsConfig::default();
+    let env = env_with_only_claude();
+
+    let answer = ops::run(
+        request(&store, &config, &env, root.path(), "needs-input"),
+        Wait::No,
+    )
+    .await
+    .expect("admitted despite the bad call — the refusal surfaces once the task runs");
+
+    let run_id = answer["runId"].as_str().expect("a run id").to_string();
+    let done = settled(&store, &run_id, 200).await;
+    assert_eq!(done["status"], "failed", "{done}");
+    assert!(
+        done["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("repo"),
+        "{done}"
+    );
+}
+
+#[tokio::test]
 async fn a_disabled_workflow_is_refused_synchronously_rather_than_admitted() {
     let (root, store) = store();
     save_a_runnable_workflow(&store, "compute");

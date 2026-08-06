@@ -263,6 +263,9 @@ struct ManagedFile {
 ///
 /// Under `dry_run` the identical decision is made and reported, and nothing is
 /// written — including the parent directories, so a dry run leaves no trace.
+/// `cleared` names the paths this pass's prune emptied, which a dry run must
+/// treat as absent even though the file is still there.
+#[allow(clippy::too_many_arguments)]
 fn write_managed(
     path: &Path,
     body: &str,
@@ -270,6 +273,7 @@ fn write_managed(
     workflow_id: &str,
     opts: &InstallOptions,
     claimed: &mut HashMap<PathBuf, String>,
+    cleared: &BTreeSet<PathBuf>,
 ) -> io::Result<FileOutcome> {
     let outcome = |action| FileOutcome {
         path: path.to_path_buf(),

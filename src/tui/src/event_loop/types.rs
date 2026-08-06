@@ -2,6 +2,50 @@
 
 use medulla::runtime::ContextItem;
 
+/// One harness progress frame's place in the sink's backlog.
+///
+/// `AppMsg` is delivered over an unbounded channel, which is right for the
+/// lifecycle messages on it — losing `WorkflowRunFinished` would leave a row
+/// spinning forever. Harness progress is the opposite: an `agent` step emits
+/// thousands of frames, the pane shows a tail of them, and a frame the loop has
+/// not reached yet is one nobody will ever read. Without a bound, an agent that
+/// out-talks a busy event loop grows the queue with frames whose only effect is
+/// to delay the settle message behind them.
+///
+/// So the sink counts what it has queued and stops queueing past
+/// [`MAX_PENDING_FRAMES`](super::cmd_dispatch::workflows::MAX_PENDING_FRAMES).
+/// Dropping this token is what marks a frame taken, which happens when the loop
+/// destructures the message — no bookkeeping at the consumer, and no way for a
+/// message dropped on shutdown to leak a slot.
+#[cfg(feature = "workflows")]
+pub(super) struct PendingFrame(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(feature = "workflows")]
+impl PendingFrame {
+    /// Claim a backlog slot, if the sink is not already at its bound.
+    ///
+    /// `None` means the frame is dropped rather than queued.
+    pub(super) fn claim(
+        depth: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        limit: usize,
+    ) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        if depth.load(Ordering::Relaxed) >= limit {
+            return None;
+        }
+        depth.fetch_add(1, Ordering::Relaxed);
+        Some(Self(depth.clone()))
+    }
+}
+
+#[cfg(feature = "workflows")]
+impl Drop for PendingFrame {
+    fn drop(&mut self) {
+        self.0
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Messages sent from spawned async tasks back to the event loop.
 pub(super) enum AppMsg {
     /// A status-line update.

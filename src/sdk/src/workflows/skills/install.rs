@@ -286,7 +286,13 @@ fn write_managed(
         return Ok(outcome(FileAction::SlugCollision));
     }
 
-    let action = match read_existing(path)? {
+    let existing = if cleared.contains(path) {
+        Existing::Absent
+    } else {
+        read_existing(path)?
+    };
+
+    let action = match existing {
         Existing::Absent => FileAction::Created,
         // Bytes we cannot even read as text are certainly not a marker of ours.
         Existing::Foreign => FileAction::SkippedUnmanaged,

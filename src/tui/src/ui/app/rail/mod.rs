@@ -221,6 +221,17 @@ impl App {
             .collect();
         let mut orphans = Vec::new();
         for row in self.own_session_rows() {
+            // A dispatch this device is serving reaches the rail from both
+            // surfaces at once: `split_fold` folded the task from the event
+            // stream, and `own_session_rows` lists the live pty so the runs it
+            // started have a row to nest under. They are one harness, so the
+            // task row takes the local session rather than a second row for the
+            // same process appearing beside it — which is exactly the "carries
+            // either (or … both)" case [`SessionRailRow`] documents.
+            if let Some(existing) = self.task_row_serving(&mut groups, &row.id) {
+                existing.local = Some(row);
+                continue;
+            }
             let agent_id = resolve::agent_for_session(&declarations, &row)
                 .map(|declaration| declaration.agent_id.clone());
             let index = agent_id.as_ref().and_then(|agent_id| {

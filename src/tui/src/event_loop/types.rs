@@ -61,6 +61,9 @@ pub(super) enum AppMsg {
         node: String,
         /// The frame, in the vocabulary `medulla::daemon::status_detail` writes.
         line: String,
+        /// Keeps this frame counted against the sink's backlog until the loop
+        /// has taken it. See [`PendingFrame`].
+        pending: PendingFrame,
     },
     /// A run started from this TUI settled.
     #[cfg(feature = "workflows")]

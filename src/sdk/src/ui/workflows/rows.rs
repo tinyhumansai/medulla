@@ -120,10 +120,9 @@ fn input_digest(run: &RunRecord) -> Option<String> {
     }
     let mut digest = String::new();
     for (name, value) in &run.inputs {
-        let value = match value {
-            serde_json::Value::String(text) => text.clone(),
-            other => other.to_string(),
-        };
+        // Through `value_text` so an input the record bounded shows the text it
+        // was given rather than the wrapper we stored it in.
+        let value = super::run_view::value_text(value);
         let pair = format!("{name}={}", value.replace(['\n', '\r'], " "));
         if !digest.is_empty() {
             digest.push(' ');

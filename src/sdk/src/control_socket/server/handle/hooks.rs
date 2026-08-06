@@ -25,6 +25,14 @@ use super::params::{optional_str, required_str};
 /// the log window with a single entry.
 const MAX_SUMMARY: usize = 400;
 
+/// The longest `cwd` or `harnessSessionId` a report may carry.
+///
+/// Both are free-form strings from the reporting client, with no backstop of
+/// their own the way `summary` has. [`HookEventLog`](crate::harness_hooks::HookEventLog)
+/// retains hundreds of reports, so an unbounded field here is an easy way to
+/// pin an unbounded amount of client-supplied memory.
+const MAX_FIELD: usize = 256;
+
 /// Record one lifecycle report, attributed to the caller's own session.
 pub(super) fn hook_report(
     ops: &Arc<dyn FleetOps>,

@@ -252,8 +252,14 @@ pub fn slug(text: &str) -> String {
     // Bound the scan itself, not just the output: split/lowercase/collect over
     // the whole string would let an unbounded title allocate and scan without
     // limit before the three-word cap below ever applies.
-    let bounded = text.chars().take(SLUG_SCAN_MAX_CHARS);
-    let bounded: String = bounded.collect();
+    // Apostrophes are dropped, not split on, so a contraction stays one word.
+    // The scan bound is applied to the source characters, before the drop, so
+    // the work this does still cannot exceed it.
+    let bounded: String = text
+        .chars()
+        .take(SLUG_SCAN_MAX_CHARS)
+        .filter(|c| !APOSTROPHES.contains(c))
+        .collect();
 
     let mut first_words: Vec<String> = Vec::with_capacity(SLUG_MAX_WORDS);
     let mut meaningful: Vec<String> = Vec::with_capacity(SLUG_MAX_WORDS);

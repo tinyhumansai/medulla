@@ -129,7 +129,16 @@ pub fn sync_managed(
         dry_run: false,
     };
     let mut installed = sync(&workflows, &opts, report.errors.is_empty())?;
-    installed.files.extend(retire_unscoped(target, env)?.files);
+
+    // Best effort, and deliberately after the sync: retiring a directory
+    // nothing reads is housekeeping, and failing it must not turn a refresh
+    // that actually updated this session's skills into an error.
+    match retire_unscoped(target, env) {
+        Ok(retired) => installed.files.extend(retired.files),
+        Err(source) => {
+            tracing::debug!("could not retire the unscoped managed skills root: {source}")
+        }
+    }
     Ok(installed)
 }
 

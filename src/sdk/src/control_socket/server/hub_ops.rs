@@ -68,12 +68,29 @@ pub(super) fn activity_key(request: &TaskRequest) -> String {
 pub struct HubFleetOps {
     slot: HubSlot,
     defaults: FleetDefaults,
+    hook_log: crate::harness_hooks::HookEventLog,
 }
 
 impl HubFleetOps {
     /// Serve the fleet reachable through `slot`.
+    ///
+    /// Lifecycle reports go to a log of this instance's own until
+    /// [`Self::with_hook_log`] points them somewhere the operator can see.
     pub fn new(slot: HubSlot, defaults: FleetDefaults) -> Self {
-        HubFleetOps { slot, defaults }
+        HubFleetOps {
+            slot,
+            defaults,
+            hook_log: crate::harness_hooks::HookEventLog::new(),
+        }
+    }
+
+    /// Send lifecycle reports to `log`, which the caller also reads.
+    ///
+    /// The log is shared, not moved: the app holds the same one and renders it
+    /// on the Hooks page.
+    pub fn with_hook_log(mut self, log: crate::harness_hooks::HookEventLog) -> Self {
+        self.hook_log = log;
+        self
     }
 
     /// The handle currently in the slot, if the hub has connected.
@@ -221,5 +238,9 @@ impl FleetOps for HubFleetOps {
         } else {
             false
         }
+    }
+
+    fn record_hook_event(&self, report: crate::harness_hooks::HookReport) {
+        self.hook_log.record(report);
     }
 }

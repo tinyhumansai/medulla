@@ -39,6 +39,17 @@ use medulla::protocol::HarnessProvider;
 /// this crate owns the alternate screen, and a stray line on stdout/stderr
 /// corrupts whatever pane is drawn there.
 ///
+/// Also mints the credential this session's built-in lifecycle hooks report
+/// with (see [`medulla::mcp::local_hook_grant`]) and writes it
+/// straight into `env`, since — unlike the fleet grant — it is safe for every
+/// subprocess the harness starts to inherit: a hook-only grant can do nothing
+/// but attribute a report to the session it already is. That is also why it
+/// is minted regardless of provider, override, or whether `attach_cli` above
+/// granted fleet access at all: every provider's hooks are wired to call back
+/// into this same command, so withholding this credential the way the fleet
+/// grant is withheld would leave those hooks unable to report even where
+/// nothing about the launch is untrusted.
+///
 /// [`LaunchSpec::mcp_grant_session`]: super::types::LaunchSpec::mcp_grant_session
 #[cfg(feature = "workflows")]
 pub fn attach_mcp(
@@ -52,7 +63,25 @@ pub fn attach_mcp(
     // sharing one would share a capability and revoking either would revoke
     // both.
     let session = format!("pty-{}", uuid::Uuid::new_v4());
-    medulla::mcp::attach_cli(provider, bin, &session, env, extra_args, log)
+    let fleet_granted = medulla::mcp::attach_cli(provider, bin, &session, env, extra_args, log);
+    let hook_granted = if let Some((socket, token)) = medulla::mcp::local_hook_grant(&session) {
+        env.insert(
+            medulla::control_socket::HOOK_SOCKET_ENV.to_string(),
+            socket.to_string_lossy().into_owned(),
+        );
+        env.insert(medulla::control_socket::HOOK_GRANT_ENV.to_string(), token);
+        true
+    } else {
+        false
+    };
+    // Either grant minted under `session` is enough reason for the caller to
+    // revoke it when this launch ends: `revoke_session` drops every grant
+    // recorded under the key, fleet and hook alike, in one call. Returning
+    // `None` only when nothing at all was minted keeps a hook-only launch —
+    // Codex, or an overridden Claude binary, where `attach_cli` grants no
+    // fleet access — from leaking its hook grant past this session's own
+    // reap.
+    fleet_granted.or_else(|| hook_granted.then_some(session))
 }
 
 /// Without the engine compiled in there is no tool server to attach.

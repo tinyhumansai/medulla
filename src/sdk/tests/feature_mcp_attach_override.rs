@@ -241,3 +241,70 @@ fn naming_the_default_binary_via_the_override_key_logs_nothing() {
     );
     medulla::mcp::revoke_session(granted.as_deref().unwrap());
 }
+
+/// The P1 Codex found on this branch: a hook shim needs a real grant to
+/// report with, and — unlike the fleet grant — withholding it from an
+/// overridden binary would leave every hook Medulla installs unable to
+/// report, since the override withholding exists to protect fleet
+/// capability that a hook-only grant never carries. See
+/// `medulla::mcp::attach::local_hook_grant`.
+#[test]
+fn a_hook_only_grant_is_minted_even_for_an_overridden_binary() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    // `attach_cli` withholds the fleet grant here — proven above by
+    // `an_overridden_provider_binary_gets_no_fleet_grant` — but the hook-only
+    // grant this test mints is independent of that decision.
+    let (socket, token) = medulla::mcp::local_hook_grant("hook-only-override-test-session").expect(
+        "a hook-only grant must be minted whenever a control plane is bound, \
+             regardless of any provider-binary override",
+    );
+    assert_eq!(socket, PathBuf::from("/run/medulla-test.sock"));
+    assert!(!token.is_empty());
+    medulla::mcp::revoke_session("hook-only-override-test-session");
+}
+
+/// The P2 Codex found on this branch: `builtin` resolves the same reporting
+/// hooks into *every* loaded config, but only the PTY door
+/// (`worker::pty::launch::attach_mcp` in the `medulla-tui` crate) seeded the
+/// environment those hooks need. `seed_hook_grant` (used by the headless
+/// executor, the interactive session, and the `medulla <cli>` wrapper) is the
+/// same seam, minted against a real control plane here — the same one this
+/// binary installs to prove `local_hook_grant` itself.
+#[test]
+fn seed_hook_grant_mints_a_real_grant_and_revokes_it_on_drop() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    let mut env = std::collections::HashMap::new();
+    let guard = medulla::harness_hooks::seed_hook_grant("seed-hook-grant-test-session", &mut env);
+    let socket = env
+        .get(medulla::control_socket::HOOK_SOCKET_ENV)
+        .cloned()
+        .expect("a bound control plane must seed the hook socket env var");
+    let token = env
+        .get(medulla::control_socket::HOOK_GRANT_ENV)
+        .cloned()
+        .expect("a bound control plane must seed the hook grant env var");
+    assert_eq!(socket, "/run/medulla-test.sock");
+    assert!(!token.is_empty());
+
+    // The seeded token really does authenticate `hook.report` while the guard
+    // is alive — the same check `hook_grant_from_env` on the shim side would
+    // make, without needing the shim process itself.
+    assert!(
+        medulla::control_socket::hook_grant_from_env(&env).is_some(),
+        "the shim must be able to read back what was just seeded"
+    );
+
+    drop(guard);
+    // Dropped means revoked: the same token must no longer redeem against the
+    // plane's own registry, proving `seed_hook_grant`'s `Drop` actually calls
+    // `revoke_session` rather than merely being wired to.
+    let plane = medulla::control_socket::active().expect("this test installed one");
+    assert!(
+        plane.grants.redeem(&token).is_none(),
+        "the grant must be gone once its guard has dropped"
+    );
+}

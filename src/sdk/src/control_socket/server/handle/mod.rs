@@ -4,6 +4,7 @@
 //! task lifecycle operations to focused submodules. The accept loop in
 //! [`super`] only frames lines and writes the returned response.
 
+mod hooks;
 mod params;
 mod tasks;
 mod workers;
@@ -76,6 +77,20 @@ pub async fn handle_control(
         );
     };
 
+    // A hook-only grant reaches this process's environment directly (see
+    // `Grant::hook_only`'s docs) rather than the fleet grant's owner-only MCP
+    // config file, so it must not be able to do anything but attribute a
+    // report to its own session — every other op is refused here, before it
+    // ever reaches a handler that would otherwise treat any redeemed grant as
+    // license to act.
+    if grant.hook_only && op != "hook.report" {
+        return fail(
+            &id,
+            ErrorKind::Unauthenticated,
+            "this grant may only file hook reports",
+        );
+    }
+
     let result = match op {
         "grant.child" => grant_child(grants, &grant),
         "worker.list" => workers::worker_list(ops).await,
@@ -87,6 +102,7 @@ pub async fn handle_control(
             .map(tasks::task_json)
             .collect::<Vec<_>>() })),
         "task.abort" => tasks::task_abort(ops, registry, &token, &params),
+        "hook.report" => hooks::hook_report(ops, &grant, &params),
         other => Err(ControlFailure::new(
             ErrorKind::BadRequest,
             format!("unknown op: {other}"),

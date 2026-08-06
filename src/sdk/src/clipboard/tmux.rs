@@ -23,9 +23,11 @@
 //!   normal OSC 52 and handles it as it would from any pane;
 //! - [`Tmux::load_buffer`], which puts the text in the local server's paste
 //!   buffer over the tmux CLI. That needs no terminal capability and no
-//!   configuration at all, so it is the one route that always works — worst
-//!   case the operator pastes with tmux's own prefix-`]`. With `-w` tmux also
-//!   makes its own attempt at the outer terminal.
+//!   configuration at all — only a reachable server on the socket in `$TMUX`,
+//!   which can still be dead or missing — so it is the route least likely to
+//!   need anything else to be set up. Worst case the operator pastes with
+//!   tmux's own prefix-`]`. With `-w` tmux also makes its own attempt at the
+//!   outer terminal.
 
 /// The tmux server this process is running inside, discovered from `$TMUX`.
 #[derive(Debug, Clone, PartialEq, Eq)]

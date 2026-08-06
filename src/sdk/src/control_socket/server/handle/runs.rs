@@ -91,4 +91,5 @@ fn clipped(value: String, field: &str) -> Result<String, ControlFailure> {
 }
 
 #[cfg(test)]
+#[path = "runs_tests.rs"]
 mod tests;

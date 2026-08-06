@@ -60,15 +60,7 @@ pub(crate) async fn start(
         .iter()
         .find(|worker| worker.address == primary_address)
         .map(|worker| worker.address.clone());
-    let server = super::start(
-        env,
-        config,
-        hub,
-        local_default_worker,
-        hook_log,
-        logs,
-    )
-    .await;
+    let server = super::start(env, config, hub, local_default_worker, hook_log, logs).await;
     #[cfg(unix)]
     let runs = server
         .as_ref()

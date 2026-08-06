@@ -41,8 +41,7 @@ impl PendingFrame {
 #[cfg(feature = "workflows")]
 impl Drop for PendingFrame {
     fn drop(&mut self) {
-        self.0
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

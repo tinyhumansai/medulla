@@ -24,6 +24,7 @@
 //! - [`types`] — the data model: pool keys, spawn specs, thread options, the
 //!   turn outcome, and the error type.
 //! - [`jsonrpc`] — the line-framed JSON-RPC message model this speaks.
+//! - [`records`] — bounded line framing over the child's stdout.
 //! - [`connection`] — one supervised child process: the reader/writer tasks, the
 //!   pending-request table, and per-thread notification fan-out.
 //! - [`pool`] — the process-sharing seam: connections keyed by everything that

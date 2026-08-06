@@ -75,7 +75,7 @@ pub fn refresh_managed(
     if let Some(target) = managed_target(provider) {
         let _ = sync_managed(target, env, cwd);
     }
-    spawn_args(provider, env)
+    spawn_args(provider, env, cwd)
 }
 
 /// Re-render the store into `target`'s managed directory, pruning what no

@@ -370,14 +370,18 @@ impl LocalRun<'_> {
             sink,
             step_snapshot: Some(Arc::new(move |steps| {
                 match snapshot_store.get_run(&snapshot_run_id) {
-                    Ok(Some(mut record)) if record.status == crate::workflows::RunStatus::Running => {
+                    Ok(Some(mut record))
+                        if record.status == crate::workflows::RunStatus::Running =>
+                    {
                         record.steps = steps.to_vec();
                         if let Err(error) = snapshot_store.record_run(&record) {
                             tracing::warn!(run = %snapshot_run_id, "could not persist run step snapshot: {error}");
                         }
                     }
                     Ok(_) => {}
-                    Err(error) => tracing::warn!(run = %snapshot_run_id, "could not read run for step snapshot: {error}"),
+                    Err(error) => {
+                        tracing::warn!(run = %snapshot_run_id, "could not read run for step snapshot: {error}")
+                    }
                 }
             })),
         };

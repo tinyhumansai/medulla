@@ -127,20 +127,11 @@ pub(crate) async fn start(
 pub(crate) async fn start(
     env: &HashMap<String, String>,
     config: &medulla::config::TuiConfig,
-    hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
     hook_log: medulla::harness_hooks::HookEventLog,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<()> {
-    let _ = (
-        env,
-        config,
-        hub_available,
-        hub,
-        local_default_worker,
-        hook_log,
-        logs,
-    );
+    let _ = (env, config, hub, local_default_worker, hook_log, logs);
     None
 }

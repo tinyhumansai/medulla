@@ -102,8 +102,10 @@ fn backend_and_link_parse() {
     let link = cfg.link.unwrap();
     assert_eq!(link.peers.len(), 1);
     assert_eq!(link.peers[0].protocol, "task");
-    // Serde default (no env resolution) is the prod forwarder URL.
-    assert_eq!(link.forwarder_url, "https://api.tiny.place");
+    // Serde default (no env or document resolution) is the prod backend, which
+    // is also what serves the forwarder. `load_config` overwrites it with the
+    // resolved backend URL.
+    assert_eq!(link.forwarder_url, "https://api.tinyhumans.ai");
 }
 
 #[test]

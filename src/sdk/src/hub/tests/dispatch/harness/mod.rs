@@ -34,19 +34,17 @@ impl FakeWorker {
     }
 
     pub(in crate::hub::tests) fn new(mode: Mode) -> Arc<Self> {
-        Self::with(mode, false, 0)
+        Self::with(mode, false)
     }
 
     /// A worker with explicit send-failure and contact-acceptance-delay knobs.
-    pub(in crate::hub::tests) fn with(mode: Mode, fail_send: bool, accept_after: u32) -> Arc<Self> {
+    pub(in crate::hub::tests) fn with(mode: Mode, fail_send: bool) -> Arc<Self> {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
             inbox: Mutex::new(VecDeque::new()),
             mode,
             resets: AtomicU32::new(0),
             fail_send,
-            accept_after,
-            contact_checks: AtomicU32::new(0),
         })
     }
 }
@@ -283,16 +281,6 @@ impl Relay for FakeWorker {
             }
         }
         out
-    }
-
-    async fn request_contact(&self, _peer: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    /// Accepted once polled `accept_after` times (0 → already a contact, so `run`
-    /// proceeds straight to the send).
-    async fn contact_accepted(&self, _peer: &str) -> bool {
-        self.contact_checks.fetch_add(1, Ordering::Relaxed) >= self.accept_after
     }
 
     async fn reset_session(&self, _peer: &str) {

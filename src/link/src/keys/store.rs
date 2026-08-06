@@ -1,7 +1,7 @@
 //! Reading, writing and locking `<home>/link/node.json`.
 //!
 //! The write is atomic (temp sibling then rename) and `0600`, and the lock is
-//! the advisory whole-file lock the tiny.place identity bootstrap uses: held for
+//! the advisory whole-file lock the host-link identity bootstrap uses: held for
 //! the life of the guard, released by the OS if the process dies.
 
 use std::fs::{File, OpenOptions};

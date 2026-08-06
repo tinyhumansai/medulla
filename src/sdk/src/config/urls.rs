@@ -11,10 +11,10 @@ use std::collections::HashMap;
 pub const PROD_BACKEND_BASE_URL: &str = "https://api.tinyhumans.ai";
 /// Staging backend API base URL (selected by `MEDULLA_STAGING`).
 pub const STAGING_BACKEND_BASE_URL: &str = "https://staging-api.tinyhumans.ai";
-/// Production tiny.place base URL (the default).
-pub const PROD_TINYPLACE_BASE_URL: &str = "https://api.tiny.place";
-/// Staging tiny.place base URL (selected by `MEDULLA_STAGING`).
-pub const STAGING_TINYPLACE_BASE_URL: &str = "https://staging-api.tiny.place";
+// The link forwarder has no constants of its own: it is served by the same
+// backend as everything else, so its default *follows* the resolved backend
+// base URL rather than naming a second host. See
+// [`resolve_forwarder_base_url`].
 
 /// Whether `MEDULLA_STAGING` selects the staging defaults. Truthy is `"1"` or
 /// `"true"` (case-insensitive, trimmed).
@@ -30,15 +30,6 @@ pub fn default_backend_base_url(env: &HashMap<String, String>) -> String {
         STAGING_BACKEND_BASE_URL.to_string()
     } else {
         PROD_BACKEND_BASE_URL.to_string()
-    }
-}
-
-/// The default tiny.place base URL for this environment (staging vs prod).
-pub fn default_tinyplace_base_url(env: &HashMap<String, String>) -> String {
-    if is_staging(env) {
-        STAGING_TINYPLACE_BASE_URL.to_string()
-    } else {
-        PROD_TINYPLACE_BASE_URL.to_string()
     }
 }
 
@@ -95,16 +86,22 @@ pub fn display_host(base_url: &str) -> String {
     }
 }
 
-/// Resolve the tiny.place base URL for the `[tinyplace]` section. Order:
-/// explicitly-configured `tinyplace.baseUrl` > staging/prod default. (The
-/// `TINYPLACE_*`/`NEXT_PUBLIC_API_URL` env chain is applied later, at endpoint
-/// resolution in [`crate::protocol::config`].)
-pub fn resolve_tinyplace_base_url(
-    env: &HashMap<String, String>,
-    config_url: Option<&str>,
-) -> String {
+/// Resolve the link forwarder base URL for the `[link]` section. Order:
+/// explicitly-configured `link.forwarderUrl` > the resolved backend base URL.
+///
+/// The forwarder is not a separate service on a separate host: the backend that
+/// serves the API is the one that blindly forwards link datagrams, so pointing
+/// `backend.baseUrl` (or `MEDULLA_API_URL`, or `MEDULLA_STAGING`) at a
+/// deployment moves the forwarder with it. Deriving it rather than defaulting it
+/// to a constant is what stops an operator who switched backends from being left
+/// on the old deployment's forwarder — two endpoints on different forwarders both
+/// start cleanly, report healthy, and never hear from each other.
+///
+/// `backend_url` is the already-resolved value from
+/// [`resolve_backend_base_url`], so the two cannot drift.
+pub fn resolve_forwarder_base_url(backend_url: &str, config_url: Option<&str>) -> String {
     if let Some(value) = config_url.map(str::trim).filter(|v| !v.is_empty()) {
         return value.to_string();
     }
-    default_tinyplace_base_url(env)
+    backend_url.to_string()
 }

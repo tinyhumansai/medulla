@@ -86,10 +86,7 @@ async fn router_injects_claude_endpoint_and_resolves_key_by_name_without_leaking
     let bin = dir.write_script("router_claude.sh", &script);
 
     // The daemon's own environment holds the key under its configured name.
-    let env = env_with(&[
-        ("TINYPLACE_CLAUDE_BIN", &bin),
-        ("MEDULLA_ROUTER_KEY", SECRET),
-    ]);
+    let env = env_with(&[("MEDULLA_CLAUDE_BIN", &bin), ("MEDULLA_ROUTER_KEY", SECRET)]);
     let router =
         router_cfg(r#"{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
     let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
@@ -121,7 +118,7 @@ async fn router_codex_endpoint_only_preserves_existing_credentials() {
     );
     let bin = dir.write_script("router_codex.sh", &script);
     let env = env_with(&[
-        ("TINYPLACE_CODEX_BIN", &bin),
+        ("MEDULLA_CODEX_BIN", &bin),
         ("OPENAI_API_KEY", "pre-existing-key"),
     ]);
     let router = router_cfg(r#"{"baseUrl":"https://gw/v1"}"#);
@@ -136,7 +133,7 @@ async fn router_codex_endpoint_only_preserves_existing_credentials() {
 async fn router_missing_key_env_is_a_hard_error_not_a_silent_empty_key() {
     // apiKeyEnv names a var that is absent from the daemon env → explicit error
     // (surfaced upstream as an error frame), never a silent unauthenticated spawn.
-    let env = env_with(&[("TINYPLACE_CODEX_BIN", "/nonexistent/codex")]);
+    let env = env_with(&[("MEDULLA_CODEX_BIN", "/nonexistent/codex")]);
     let router = router_cfg(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"ABSENT_ROUTER_KEY"}"#);
     let options = router_options(HarnessProvider::Codex, "codex", env, Some(router));
     let err = run_provider_task(options)
@@ -161,7 +158,7 @@ async fn no_router_config_spawns_child_unchanged() {
          printf '{{\"type\":\"result\",\"result\":\"done\"}}\\n'\n",
     );
     let bin = dir.write_script("no_router_claude.sh", &script);
-    let env = env_with(&[("TINYPLACE_CLAUDE_BIN", &bin)]);
+    let env = env_with(&[("MEDULLA_CLAUDE_BIN", &bin)]);
     let options = router_options(HarnessProvider::Claude, &bin, env, None);
     let result = run_provider_task(options).await.expect("run ok");
     assert_eq!(result.reply, "done");
@@ -215,10 +212,7 @@ async fn router_loaded_from_config_file_reaches_the_spawned_child() {
          printf '{{\"type\":\"result\",\"result\":\"endpoint=%s\"}}\\n' \"$ANTHROPIC_BASE_URL\"\n",
     );
     let bin = dir.write_script("cfg_router_claude.sh", &script);
-    let env = env_with(&[
-        ("TINYPLACE_CLAUDE_BIN", &bin),
-        ("MEDULLA_ROUTER_KEY", SECRET),
-    ]);
+    let env = env_with(&[("MEDULLA_CLAUDE_BIN", &bin), ("MEDULLA_ROUTER_KEY", SECRET)]);
     let options = router_options(HarnessProvider::Claude, &bin, env, Some(router));
     let result = run_provider_task(options).await.expect("router run ok");
 
@@ -250,7 +244,7 @@ async fn an_openrouter_router_reaches_the_child_as_the_local_proxy_never_the_key
     let bin = dir.write_script("openrouter_claude.sh", &script);
 
     let env = env_with(&[
-        ("TINYPLACE_CLAUDE_BIN", &bin),
+        ("MEDULLA_CLAUDE_BIN", &bin),
         ("OPENROUTER_API_KEY", SECRET),
         // Keeps the proxy off the network. It is never called in this test — the
         // fake harness does not make a request — but a listener that *could*

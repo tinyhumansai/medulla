@@ -186,13 +186,15 @@ names (Claude Code, Codex, or OpenCode). Workflows are authored as JSON files, s
 (personal + per-repository), run through the vendored `tinyflows` engine, and
 surfaced in the TUI's Workflows tab with a canvas, run overlay, and copilot.
 
-## tiny.place
+## Host link
 
-The relay that carries encrypted task frames between the orchestrator and
-workers. It uses X3DH + double-ratchet encryption, presents as a Signal-like
-server, and is the transport layer under the hub/daemon pair. All coordination
-e2e tests drive a mock tiny.place server to keep suites deterministic and
-offline.
+The transport that carries encrypted task frames between the orchestrator and
+workers, specified in [`host-link-protocol.md`](host-link-protocol.md). Two
+endpoints exchange UDP datagrams through a **forwarder** — served by the same
+backend as the rest of the API — which routes bytes it cannot read. It replaced
+the tiny.place mailbox, a store-and-forward relay this codebase no longer talks
+to. All coordination e2e tests drive it in-process to keep suites deterministic
+and offline.
 
 ## ACP (Agent Client Protocol)
 

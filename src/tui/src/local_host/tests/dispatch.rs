@@ -63,7 +63,7 @@ async fn opencode_falls_back_to_the_headless_executor_rather_than_being_refused(
 
     let error = run(dispatch_options(
         HarnessProvider::Opencode,
-        "TINYPLACE_OPENCODE_BIN",
+        "MEDULLA_OPENCODE_BIN",
     ))
     .await
     .expect_err("a nonexistent binary must fail to spawn");

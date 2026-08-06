@@ -34,7 +34,7 @@ impl WorkerOp {
     /// Parse a free-text "add worker" line into a [`WorkerOp::Add`].
     ///
     /// The first whitespace-delimited token is the identity; any remainder is a
-    /// human label. A leading `@` marks the token as a tiny.place handle
+    /// human label. A leading `@` marks the token as a link handle
     /// (`handle`); otherwise it is treated as an address. `harness` is left
     /// `None`. Returns `None` when `input` is blank so callers can surface an
     /// "empty" notice rather than issuing a no-op mutation.

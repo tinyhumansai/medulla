@@ -49,14 +49,19 @@ async fn local_delivery_is_bounded_destructive_and_isolated() {
 }
 
 #[tokio::test]
-async fn local_contacts_are_endpoint_discovery_without_remote_side_effects() {
+async fn a_local_endpoint_is_discoverable_only_once_it_is_bound() {
+    // What the contact edge used to express, said through the surface that
+    // survived it: an unbound name is not addressable, and binding it is the
+    // whole admission step. `send` is the check — there is no separate
+    // permission to ask for.
     let network = LocalBridgeNetwork::new();
     let owner = network.bind("@owner").unwrap();
-    assert!(!owner.contact_accepted("worker").await);
+    assert!(!owner.is_device_local("worker").await);
+    assert!(owner.send("worker", "too early").await.is_err());
 
     let worker = network.bind("worker").unwrap();
-    assert!(owner.request_contact("worker").await.is_ok());
-    assert!(owner.contact_accepted("worker").await);
+    assert!(owner.is_device_local("worker").await);
+    assert!(owner.send("worker", "now").await.is_ok());
     assert_eq!(
         worker.resolve_handle("owner").await.as_deref(),
         Some("@owner")

@@ -11,7 +11,9 @@
 #
 #   1. CLI flags                    (e.g. --config, --core, --no-alt-screen)
 #   2. environment variables        (MEDULLA_API_URL, MEDULLA_TOKEN via tokenEnv,
-#                                     MEDULLA_STAGING, MEDULLA_STATE_DIR, TINYPLACE_*)
+#                                     MEDULLA_STAGING, MEDULLA_STATE_DIR, MEDULLA_*
+#                                     harness knobs; the old TINYPLACE_* spelling
+#                                     of those is deprecated but still read)
 #   3. project-local config file    ./.medulla/config.toml  or  ./medulla.toml
 #   4. user-global config file      <medulla_home>/config.toml
 #   5. built-in defaults            (production endpoints)
@@ -213,9 +215,10 @@ tokenEnv = "MEDULLA_TOKEN"
 # <stateDir>/node.json — never in a config file, which gets copied, shared and
 # pasted into issues.
 # [link]
-# Backend fronting the forwarder and the host registry (the env staging switch
-# applies as for backend). Default: https://api.tiny.place
-# forwarderUrl = "https://api.tiny.place"
+# Backend fronting the forwarder and the host registry. Defaults to whatever
+# backend.baseUrl resolved to — the forwarder is served by the same backend, so
+# moving one moves the other. Set this only for a deliberately split deployment.
+# forwarderUrl = "https://api.tinyhumans.ai"
 # This endpoint's node name, as issued at enrollment.
 # nodeName = "my-orchestrator"
 # Link identity directory. Default: <home>/link

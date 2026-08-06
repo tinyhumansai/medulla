@@ -25,18 +25,21 @@ use crate::clock::iso_now;
 use crate::worker_profile::{default_worker_name, is_registered, profile_path, WorkerProfile};
 
 /// The owning orchestrator from the generic environment chain, in priority
-/// order: `MEDULLA_LINK_OWNER` → `TINYPLACE_HARNESS_DM_TO` →
-/// `TINYPLACE_OPENHUMAN_OWNER` → `OPENHUMAN_OWNER_AGENT`.
+/// order: `MEDULLA_LINK_OWNER` → `MEDULLA_HARNESS_DM_TO` →
+/// `MEDULLA_OPENHUMAN_OWNER` → `OPENHUMAN_OWNER_AGENT`, with the deprecated
+/// `TINYPLACE_*` spelling of each read directly behind it.
 ///
 /// The three legacy names are kept behind the new one so a host that was
 /// configured before the link existed keeps working: an env var lives in
 /// someone's shell profile, and silently ignoring it would look like a worker
 /// that forgot who it belongs to.
-/// (The wrapper layers a per-provider `TINYPLACE_<P>_DM_TO` in front of this.)
+/// (The wrapper layers a per-provider `MEDULLA_<P>_DM_TO` in front of this.)
 pub fn env_owner(env: &HashMap<String, String>) -> Option<String> {
     for key in [
         "MEDULLA_LINK_OWNER",
+        "MEDULLA_HARNESS_DM_TO",
         "TINYPLACE_HARNESS_DM_TO",
+        "MEDULLA_OPENHUMAN_OWNER",
         "TINYPLACE_OPENHUMAN_OWNER",
         "OPENHUMAN_OWNER_AGENT",
     ] {

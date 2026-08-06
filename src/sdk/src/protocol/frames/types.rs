@@ -818,7 +818,7 @@ pub struct WorkflowAdvert {
 /// One declared input in a remotely advertised workflow.
 ///
 /// This transport type mirrors the engine's input declaration without making
-/// the tiny.place protocol depend on the optional workflow engine feature.
+/// the host-link protocol depend on the optional workflow engine feature.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowInputAdvert {

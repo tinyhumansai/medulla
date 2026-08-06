@@ -80,10 +80,10 @@ fn harness_with_env(
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     // Point transcript discovery at the temp dir, and the "codex" binary at sh.
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         sessions_dir.to_string_lossy().into_owned(),
     );
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), "/bin/sh".to_string());
     for (key, value) in extra {
         env.insert(key.to_string(), value.to_string());
     }
@@ -151,7 +151,7 @@ done
 }
 
 fn cwd_of(env: &HashMap<String, String>) -> String {
-    env.get("TINYPLACE_CODEX_SESSIONS_DIR")
+    env.get("MEDULLA_CODEX_SESSIONS_DIR")
         .cloned()
         .unwrap_or_default()
 }

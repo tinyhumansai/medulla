@@ -94,7 +94,7 @@ pub struct CycleResultSummary {
     pub task_ledger: HashMap<String, TaskDigest>,
 }
 /// One managed worker peer, projected from a `worker.list` entry. A worker is a
-/// remote tiny.place peer the orchestrator can delegate to. §4.2 is load-bearing:
+/// remote host-link peer the orchestrator can delegate to. §4.2 is load-bearing:
 /// `id` is the registry's own stable handle (for select/edit/remove), `address` is
 /// the messaging target, and `peer_id` (the wallet) is a separate field — never
 /// merged.
@@ -104,7 +104,7 @@ pub struct WorkerInfo {
     pub id: String,
     /// Messaging address used to reach the worker.
     pub address: String,
-    /// Optional tiny.place handle.
+    /// Optional link handle.
     pub handle: Option<String>,
     /// Optional operator-defined label.
     pub label: Option<String>,
@@ -231,7 +231,7 @@ pub enum WorkerOp {
     Add {
         /// Direct messaging address, mutually exclusive with `handle`.
         address: Option<String>,
-        /// tiny.place handle, mutually exclusive with `address`.
+        /// link handle, mutually exclusive with `address`.
         handle: Option<String>,
         /// Optional operator-facing label.
         label: Option<String>,
@@ -334,7 +334,7 @@ pub struct RuntimeSnapshot {
     pub presence: HashMap<String, AgentPresence>,
     /// Wrapper sessions grouped by peer identifier.
     pub sessions: HashMap<String, Vec<PeerSession>>,
-    /// This installation's tiny.place identity, when configured.
+    /// This installation's host-link identity, when configured.
     pub link: Option<LinkIdentity>,
     /// Resumable chat threads.
     pub threads: Vec<ThreadSummary>,

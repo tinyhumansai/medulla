@@ -9,14 +9,14 @@ use super::helpers::{app_at_setup, app_with, key, render, sh, wait_for};
 use medulla::protocol::HarnessProvider;
 
 use super::super::state::WorkerWiring;
-use super::super::types::{ExecutionMode, Screen, SetupStep, WorkerCmd, TAB_CONTACTS};
+use super::super::types::{ExecutionMode, Screen, SetupStep, WorkerCmd, TAB_MASTER, TAB_SESSIONS};
 
 // ----------------------------------------------------------------- render ---
 
 #[test]
 fn master_tab_explains_worker_level_credentials() {
-    let mut app = app_with(PtyManager::new(), None);
-    app.set_tab(TAB_CONTACTS);
+    let mut app = app_with(PtyManager::new());
+    app.set_tab(TAB_MASTER);
     let out = render(&mut app, 110, 16);
     assert!(out.contains("Worker-level credentials"), "got: {out}");
     assert!(out.contains("local wallet"), "got: {out}");
@@ -26,7 +26,7 @@ fn master_tab_explains_worker_level_credentials() {
 fn the_header_shows_this_daemons_address() {
     // A peer needs it to reach this machine, so it is on screen rather than in
     // a startup log line already scrolled past.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     let out = render(&mut app, 110, 16);
     assert!(out.contains("So1anaWa11et"), "got: {out}");
     assert!(out.contains("WORKER"));
@@ -37,7 +37,7 @@ fn the_header_says_what_this_worker_runs_and_where() {
     // The three questions an operator asks after "who am I": what can this run,
     // in which directory, and through which relay. The workspace matters most —
     // a peer's task edits files there.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
 
     let out = render(&mut app, 130, 16);
 
@@ -59,7 +59,6 @@ fn a_worker_with_no_harness_says_so_in_the_header_too() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),
         sessions: PtyManager::new(),
-        contacts: None,
         agent_id: None,
         providers: Vec::new(),
         startup_status: None,
@@ -81,7 +80,7 @@ fn a_worker_with_no_harness_says_so_in_the_header_too() {
 fn an_empty_fleet_says_what_fills_it() {
     // The operator does not open sessions here — peer work does — so the empty
     // state must not offer a key that no longer exists.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     let out = render(&mut app, 110, 20);
     assert!(out.contains("No agents running"));
     assert!(out.contains("Master tasks open agent"), "got: {out}");
@@ -89,7 +88,7 @@ fn an_empty_fleet_says_what_fills_it() {
 
 #[test]
 fn workspace_tab_renders_the_allowlist_and_permission_boundary() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.add_workspace("/another".into());
     app.set_tab(super::super::types::TAB_WORKSPACES);
 
@@ -104,7 +103,7 @@ fn workspace_tab_renders_the_allowlist_and_permission_boundary() {
 
 #[test]
 fn workspace_prompt_renders_the_input_and_controls() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.set_tab(super::super::types::TAB_WORKSPACES);
     app.on_key(key(KeyCode::Char('a')));
     for ch in "/new-root".chars() {
@@ -123,7 +122,6 @@ fn a_missing_harness_is_reported_as_such_not_as_an_empty_list() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),
         sessions: PtyManager::new(),
-        contacts: None,
         agent_id: None,
         providers: Vec::new(),
         startup_status: None,
@@ -158,7 +156,7 @@ fn a_live_session_renders_its_terminal_in_the_pane() {
             })
             .unwrap_or(false)
     });
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
     let out = render(&mut app, 110, 20);
     assert!(
         out.contains("WORKER-PANE-OK"),
@@ -180,7 +178,7 @@ fn exited_and_failed_sessions_stay_in_the_list_after_they_end() {
             && !sessions.row(&broken).unwrap().state.is_running()
     });
 
-    let mut app = app_with(sessions.clone(), None);
+    let mut app = app_with(sessions.clone());
     let out = render(&mut app, 110, 20);
     assert!(
         out.contains("peer-clean"),
@@ -203,8 +201,7 @@ fn a_long_quiet_running_session_is_called_out_as_quiet() {
     // match the annotation the render adds, never the peer's name.
     let sessions = PtyManager::new();
     sessions.open(sh("sleep 30", "peer-seven")).unwrap();
-    let mut app =
-        app_with(sessions.clone(), None).with_now(std::sync::Arc::new(|| 10_000_000_000_000));
+    let mut app = app_with(sessions.clone()).with_now(std::sync::Arc::new(|| 10_000_000_000_000));
 
     let out = render(&mut app, 110, 20);
     assert!(
@@ -220,7 +217,7 @@ fn a_long_quiet_running_session_is_called_out_as_quiet() {
 fn launching_asks_how_the_worker_runs_before_what_it_runs_on() {
     // Mode first: it decides which executor the runtime is built with, and
     // therefore what there is to look at.
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     assert_eq!(app.screen(), Screen::Setup);
     assert_eq!(app.setup_step(), SetupStep::Mode);
     assert_eq!(app.mode(), None);
@@ -236,7 +233,7 @@ fn launching_asks_how_the_worker_runs_before_what_it_runs_on() {
 
 #[test]
 fn answering_the_mode_advances_to_the_harness_question() {
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     assert!(
         app.on_key(key(KeyCode::Char('1'))).is_none(),
         "not started yet"
@@ -255,7 +252,7 @@ fn answering_the_mode_advances_to_the_harness_question() {
 
 #[test]
 fn answering_both_questions_starts_the_worker() {
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     app.on_key(key(KeyCode::Char('1'))); // interactive
     let cmd = app.on_key(key(KeyCode::Char('2'))); // codex
 
@@ -275,7 +272,7 @@ fn answering_both_questions_starts_the_worker() {
 fn nothing_listens_for_peer_work_until_setup_is_answered() {
     // A worker should not accept work before being told how to run it, so the
     // start command is the only thing that opens the inbox.
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     for code in [KeyCode::Up, KeyCode::Down, KeyCode::Tab] {
         assert!(
             !matches!(app.on_key(key(code)), Some(WorkerCmd::Start { .. })),
@@ -291,7 +288,6 @@ fn a_single_installed_harness_is_settled_without_a_menu_of_one() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),
         sessions: PtyManager::new(),
-        contacts: None,
         agent_id: None,
         providers: vec![HarnessProvider::Codex],
         startup_status: None,
@@ -324,7 +320,6 @@ fn with_no_harness_installed_there_is_nothing_to_ask_and_the_screen_says_so() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),
         sessions: PtyManager::new(),
-        contacts: None,
         agent_id: None,
         providers: Vec::new(),
         startup_status: None,
@@ -347,7 +342,7 @@ fn with_no_harness_installed_there_is_nothing_to_ask_and_the_screen_says_so() {
 
 #[test]
 fn the_setup_step_can_be_quit_without_choosing() {
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     assert_eq!(app.on_key(key(KeyCode::Char('q'))), Some(WorkerCmd::Quit));
 }
 
@@ -356,7 +351,7 @@ fn ctrl_c_quits_the_setup_step_too() {
     // The launch step owns the keyboard, so the usual quit chord has to be
     // honoured there as well or an operator is trapped mid-setup.
     use crossterm::event::{KeyEvent, KeyModifiers};
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert_eq!(app.on_key(ctrl_c), Some(WorkerCmd::Quit));
     assert_eq!(app.screen(), Screen::Setup, "quitting is not choosing");
@@ -367,7 +362,7 @@ fn enter_answers_the_highlighted_setup_option() {
     // The number keys answer directly; Enter answers whatever the cursor is on.
     // From the mode step with the cursor at rest that settles interactive and
     // advances to the harness question — without starting the worker yet.
-    let app = &mut app_at_setup(PtyManager::new(), None);
+    let app = &mut app_at_setup(PtyManager::new());
     assert!(
         app.on_key(key(KeyCode::Enter)).is_none(),
         "answering the first of two questions does not start the worker"
@@ -383,7 +378,7 @@ fn enter_answers_the_highlighted_setup_option() {
 fn headless_renders_the_daemon_log_instead_of_a_terminal() {
     // There is no screen to embed when every task is a one-shot process; the
     // daemon's own narration is the whole view.
-    let mut app = super::helpers::headless_app(PtyManager::new(), None);
+    let mut app = super::helpers::headless_app(PtyManager::new());
     app.logs().push("task t_8f3a → claude");
     app.logs().push("task t_8f3a ✓ (12 events)");
 
@@ -401,10 +396,10 @@ fn headless_renders_the_daemon_log_instead_of_a_terminal() {
 fn the_first_tab_is_labelled_for_the_mode() {
     // Calling it "Sessions" in headless would promise something that never
     // appears.
-    let mut headless = super::helpers::headless_app(PtyManager::new(), None);
+    let mut headless = super::helpers::headless_app(PtyManager::new());
     assert!(render(&mut headless, 100, 14).contains("1 Log"));
 
-    let mut interactive = app_with(PtyManager::new(), None);
+    let mut interactive = app_with(PtyManager::new());
     assert!(render(&mut interactive, 100, 14).contains("1 Agents"));
 }
 
@@ -414,7 +409,7 @@ fn the_daemon_log_colours_every_class_of_line_it_renders() {
     // render must handle a failure line (✗), a success line (✓), a hand-off
     // line (→) and a plain line without tripping over any of them — every
     // branch of the colouring is walked here.
-    let mut app = super::helpers::headless_app(PtyManager::new(), None);
+    let mut app = super::helpers::headless_app(PtyManager::new());
     app.logs().push("task t1 → claude");
     app.logs().push("task t1 ✓ done");
     app.logs().push("task t2 ✗ provider failed");
@@ -435,19 +430,19 @@ fn the_daemon_log_colours_every_class_of_line_it_renders() {
 
 #[test]
 fn an_empty_headless_log_explains_what_it_is_waiting_for() {
-    let mut app = super::helpers::headless_app(PtyManager::new(), None);
+    let mut app = super::helpers::headless_app(PtyManager::new());
     let out = render(&mut app, 100, 18);
     assert!(out.contains("Waiting for peer work"), "got: {out}");
 }
 
 #[test]
-fn master_and_requests_are_the_same_in_both_modes() {
-    // The contact graph is a property of the machine, not of how it runs tasks.
+fn the_master_tab_is_the_same_in_both_modes() {
+    // The peer roster is a property of the machine, not of how it runs tasks.
     for mut app in [
-        super::helpers::headless_app(PtyManager::new(), None),
-        app_with(PtyManager::new(), None),
+        super::helpers::headless_app(PtyManager::new()),
+        app_with(PtyManager::new()),
     ] {
-        app.set_tab(TAB_CONTACTS);
+        app.set_tab(TAB_MASTER);
         assert!(render(&mut app, 100, 16).contains("Master"));
     }
 }
@@ -459,7 +454,7 @@ fn y_copies_this_workers_address() {
     // The orchestrator addresses a worker by this string, and the screen holds
     // the terminal's mouse capture — so without a key the address on screen can
     // only be retyped.
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     let sink = app.capture_clipboard();
 
     app.on_key(key(KeyCode::Char('y')));
@@ -473,8 +468,8 @@ fn y_copies_this_workers_address() {
 
 #[test]
 fn the_address_can_be_copied_from_any_tab() {
-    for tab in [TAB_CONTACTS, super::super::types::TAB_REQUESTS] {
-        let mut app = app_with(PtyManager::new(), None);
+    for tab in [TAB_SESSIONS, TAB_MASTER] {
+        let mut app = app_with(PtyManager::new());
         let sink = app.capture_clipboard();
         app.set_tab(tab);
         app.on_key(key(KeyCode::Char('y')));
@@ -487,7 +482,6 @@ fn copying_without_an_identity_says_so_rather_than_copying_nothing() {
     let mut app = WorkerApp::new(WorkerWiring {
         logs: crate::log::LogBuffer::new(),
         sessions: PtyManager::new(),
-        contacts: None,
         agent_id: None,
         providers: vec![HarnessProvider::Codex],
         startup_status: None,
@@ -506,7 +500,7 @@ fn copying_without_an_identity_says_so_rather_than_copying_nothing() {
     app.on_key(key(KeyCode::Char('y')));
     assert!(sink.lock().unwrap().is_empty(), "nothing to copy");
     assert!(
-        app.status().contains("No tiny.place identity"),
+        app.status().contains("No host-link identity"),
         "got {:?}",
         app.status()
     );

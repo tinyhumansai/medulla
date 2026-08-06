@@ -129,14 +129,6 @@ impl Relay for GatedPeer {
         inbox.drain(..count).collect()
     }
 
-    async fn request_contact(&self, _peer: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn contact_accepted(&self, _peer: &str) -> bool {
-        true
-    }
-
     async fn reset_session(&self, _peer: &str) {}
 
     async fn liveness(&self, _peer: &str) -> BridgeLiveness {
@@ -308,14 +300,6 @@ impl Relay for Fleet {
 
     async fn drain_inbox(&self, _limit: i64) -> Vec<InboundMessage> {
         Vec::new()
-    }
-
-    async fn request_contact(&self, _peer: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn contact_accepted(&self, _peer: &str) -> bool {
-        true
     }
 
     async fn reset_session(&self, _peer: &str) {}

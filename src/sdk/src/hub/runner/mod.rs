@@ -30,11 +30,6 @@ mod capabilities;
 mod pump;
 mod system_info;
 
-/// How long to wait for a peer to accept our contact request before sending.
-const CONTACT_WAIT: Duration = Duration::from_secs(20);
-/// How often to re-check contact status while waiting.
-const CONTACT_POLL: Duration = Duration::from_millis(500);
-
 /// How long to wait for the FIRST sign of life (any inbound frame — `ack`,
 /// `status`, `reply`, `error`) before treating the peer as unreachable and
 /// re-handshaking. Short: a live worker acks within a poll or two.
@@ -369,13 +364,13 @@ impl TaskRunner {
         prepared_abort: Option<Arc<Notify>>,
         visible_task_id: Option<String>,
     ) -> Result<TaskOutcome, RunError> {
-        // Register this dispatch's abort signal FIRST — before the contact wait —
-        // so a `task_abort` that arrives during contact negotiation (up to
-        // `CONTACT_WAIT` for a first-time worker) is honored, not silently dropped
-        // by finding nothing in the registry. Keyed by the orchestrator-facing id
-        // the backend aborts by, and held for the whole call (spanning any
-        // reset+resend retries). The guard removes it on every return path, so a
-        // settled dispatch leaves nothing for a later `task_abort` to match.
+        // Register this dispatch's abort signal FIRST, so a `task_abort` that
+        // arrives before the first frame goes out is honored rather than silently
+        // dropped by finding nothing in the registry. Keyed by the
+        // orchestrator-facing id the backend aborts by, and held for the whole
+        // call (spanning any reset+resend retries). The guard removes it on every
+        // return path, so a settled dispatch leaves nothing for a later
+        // `task_abort` to match.
         let abort = prepared_abort.unwrap_or_else(|| Arc::new(Notify::new()));
         self.aborts
             .lock()
@@ -386,26 +381,6 @@ impl TaskRunner {
             key: req.abort_id.clone(),
             signal: abort.clone(),
         };
-
-        // Establish the contact and WAIT for acceptance. A request only creates a
-        // `pending` edge, and the relay refuses a DM to a non-contact
-        // (`403 not_a_contact`) — sending immediately races the peer's
-        // auto-accepter. Bounded, so a peer that never accepts surfaces as a
-        // normal task error instead of hanging. An abort here bails immediately:
-        // nothing has been dispatched yet, so there is no worker to stop.
-        if !self.relay.contact_accepted(&req.worker_address).await {
-            let _ = self.relay.request_contact(&req.worker_address).await;
-            let deadline = std::time::Instant::now() + CONTACT_WAIT;
-            while std::time::Instant::now() < deadline
-                && !self.relay.contact_accepted(&req.worker_address).await
-            {
-                tokio::select! {
-                    biased;
-                    _ = abort.notified() => return Err(RunError::Aborted),
-                    _ = tokio::time::sleep(CONTACT_POLL) => {}
-                }
-            }
-        }
 
         let mut attempt = 0u32;
         loop {

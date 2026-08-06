@@ -4,16 +4,12 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
-
-use medulla::contacts::{ContactRequest, RequestState};
 
 use super::super::pty::{PtyState, SessionRow, ATTENTION_GLYPH};
 use super::super::screen::screen_lines;
-use super::types::{
-    Screen, WorkerApp, TABS, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
-};
+use super::types::{Screen, WorkerApp, TABS, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES};
 
 mod master;
 mod prompt;
@@ -46,7 +42,6 @@ impl WorkerApp {
             TAB_SESSIONS => self.draw_sessions(f, rows[2]),
             TAB_MASTER => self.draw_master(f, rows[2]),
             TAB_WORKSPACES => self.draw_workspaces(f, rows[2]),
-            TAB_REQUESTS => self.draw_requests(f, rows[2]),
             _ => {}
         }
         self.draw_status(f, rows[3]);
@@ -159,16 +154,15 @@ impl WorkerApp {
             ));
         } else {
             spans.push(Span::styled(
-                "  no tiny.place identity",
+                "  no host-link identity",
                 Style::default().fg(Color::Yellow),
             ));
         }
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
-    /// The tab bar, with a pending-request badge.
+    /// The tab bar.
     fn draw_tabs(&mut self, f: &mut Frame, area: Rect) {
-        let pending = self.pending_requests().len();
         let mut spans = Vec::new();
         let mut ranges = Vec::new();
         let mut x = area.x;
@@ -180,20 +174,12 @@ impl WorkerApp {
             } else {
                 name
             };
-            let mut label = format!(" {} {name} ", i + 1);
-            // A waiting request is the one thing on this screen that needs the
-            // operator, so it is counted in the chrome rather than only inside
-            // its own tab.
-            if i == TAB_REQUESTS && pending > 0 {
-                label = format!(" {} {name} ({pending}) ", i + 1);
-            }
+            let label = format!(" {} {name} ", i + 1);
             let style = if i == self.tab {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
-            } else if i == TAB_REQUESTS && pending > 0 {
-                Style::default().fg(Color::Yellow)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -335,74 +321,6 @@ impl WorkerApp {
         // No cursor is drawn: this pane is a window, not a keyboard. A blinking
         // cursor here would imply typing goes somewhere it does not.
     }
-
-    /// The Requests tab: peers waiting on a decision.
-    fn draw_requests(&mut self, f: &mut Frame, area: Rect) {
-        let rows = self.pending_requests();
-        let selected = self.request_index.min(rows.len().saturating_sub(1));
-        self.request_index = selected;
-
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-            .split(area);
-
-        // The header states poll health, so an empty queue is distinguishable
-        // from a relay that cannot be reached — they look identical otherwise.
-        let health = self
-            .contacts
-            .as_ref()
-            .map(|d| d.health().summary(self.now()))
-            .unwrap_or_else(|| "no identity".to_string());
-        let block = self.panel(
-            format!("Pending requests · {} · {health}", rows.len()),
-            true,
-        );
-        let inner = block.inner(columns[0]);
-        f.render_widget(block, columns[0]);
-
-        let mut lines: Vec<Line> = Vec::new();
-        if self.contacts.is_none() {
-            lines.push(dim("No tiny.place identity is configured."));
-        } else if rows.is_empty() {
-            lines.push(dim("Nothing waiting."));
-        } else {
-            self.hit_rows = Some((inner, 0));
-            for (i, request) in rows.iter().enumerate() {
-                lines.push(request_line(request, i == selected));
-            }
-        }
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
-
-        // The detail pane: what accepting actually grants.
-        let block = self.panel("Decision", false);
-        let inner = block.inner(columns[1]);
-        f.render_widget(block, columns[1]);
-        let detail = match self.selected_request() {
-            Some(request) => vec![
-                Line::from(vec![
-                    Span::styled("peer ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(request.agent_id.clone()),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "Accepting lets this peer send task frames to this",
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(Span::styled(
-                    "machine, which run as coding-agent sessions here.",
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(""),
-                dim("a accept · x decline · B block"),
-            ],
-            None => vec![dim("No request selected.")],
-        };
-        f.render_widget(
-            Paragraph::new(Text::from(detail)).wrap(Wrap { trim: false }),
-            inner,
-        );
-    }
 }
 
 /// The accent colour for a daemon log line.
@@ -480,17 +398,4 @@ fn session_line(
         None => row.state.glyph().to_string(),
     };
     crate::ui::agent_lane::line(glyph, row.label.clone(), waiting.unwrap_or(quiet), style)
-}
-
-/// One row of the pending-request list.
-fn request_line(request: &ContactRequest, selected: bool) -> Line<'static> {
-    let text = format!("{} {}", request.state.glyph(), request.display_name());
-    let mut style = Style::default().fg(match request.state {
-        RequestState::Failed => Color::Red,
-        _ => Color::Yellow,
-    });
-    if selected {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    Line::from(Span::styled(text, style))
 }

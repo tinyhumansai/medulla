@@ -2,7 +2,7 @@
 //!
 //! This is the shape a plain `medulla` runs in — a [`TaskRunner`] dispatching
 //! over a [`RoutingBridge`] to an [`EmbeddedDaemon`] bound on the same
-//! device-local bus. No tiny.place client, no identity, no contact graph, no
+//! device-local bus. No remote client, no identity, no contact graph, no
 //! relay, and no second process: a task leaves the orchestrator and comes back
 //! answered without a packet leaving the machine.
 
@@ -37,7 +37,7 @@ fn installed_bin() -> String {
 fn env_with_only_claude() -> std::collections::HashMap<String, String> {
     std::collections::HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
+        ("MEDULLA_CLAUDE_BIN".to_string(), installed_bin()),
     ])
 }
 

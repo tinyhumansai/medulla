@@ -42,7 +42,7 @@ async fn direct_runs_report_the_session_before_workspace_context() {
         prompt: "go".into(),
         cwd: dir.path().to_string_lossy().into_owned(),
         env: HashMap::from([(
-            "TINYPLACE_CLAUDE_BIN".into(),
+            "MEDULLA_CLAUDE_BIN".into(),
             harness.to_string_lossy().into_owned(),
         )]),
         timeout_ms: 1_000,
@@ -145,7 +145,7 @@ fn build_run_args_neutralizes_dash_prompt() {
 #[test]
 fn provider_bin_env_override_wins() {
     let mut env = HashMap::new();
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), "/opt/codex".to_string());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), "/opt/codex".to_string());
     assert_eq!(provider_bin(HarnessProvider::Codex, &env), "/opt/codex");
     assert_eq!(provider_bin(HarnessProvider::Claude, &env), "claude");
 }
@@ -268,21 +268,28 @@ fn build_run_args_claude_extra_and_dash_prompt() {
 
 #[test]
 fn provider_bin_prefers_first_env_key_and_trims() {
+    // Ordering for claude is MEDULLA_ > the legacy TINYVERSE_ > the deprecated
+    // TINYPLACE_.
     let mut env = HashMap::new();
-    // Claude honors TINYVERSE_* before TINYPLACE_*.
     env.insert(
         "TINYVERSE_CLAUDE_BIN".to_string(),
         "  /opt/claude  ".to_string(),
     );
     env.insert(
         "TINYPLACE_CLAUDE_BIN".to_string(),
-        "/other/claude".to_string(),
+        "/oldest/claude".to_string(),
     );
     assert_eq!(provider_bin(HarnessProvider::Claude, &env), "/opt/claude");
 
+    env.insert(
+        "MEDULLA_CLAUDE_BIN".to_string(),
+        "  /new/claude  ".to_string(),
+    );
+    assert_eq!(provider_bin(HarnessProvider::Claude, &env), "/new/claude");
+
     // A whitespace-only override is ignored (falls back to the default).
     let mut blank = HashMap::new();
-    blank.insert("TINYPLACE_CODEX_BIN".to_string(), "   ".to_string());
+    blank.insert("MEDULLA_CODEX_BIN".to_string(), "   ".to_string());
     assert_eq!(provider_bin(HarnessProvider::Codex, &blank), "codex");
 }
 

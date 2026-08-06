@@ -120,11 +120,11 @@ fn sessions_json_is_valid_json_array() {
     let _ = std::fs::create_dir_all(&tmp);
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".to_string(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
         tmp.join("claude").to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         tmp.join("codex").to_string_lossy().into_owned(),
     );
     let json = sessions_json(&env, tmp.to_str().unwrap()).unwrap();

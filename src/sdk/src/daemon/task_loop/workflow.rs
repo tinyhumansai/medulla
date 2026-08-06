@@ -21,7 +21,7 @@ use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::protocol::{TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert};
 // `trigger_input` is shared with the cloud plane's adapter
 // ([`crate::workflows::bridge`]) rather than defined twice: a frame's text must
-// become the same trigger payload whether it arrived over tiny.place or over the
+// become the same trigger payload whether it arrived over the host link or over the
 // backend socket, and two copies of that rule would eventually disagree.
 use crate::workflows::bridge::trigger_input;
 use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};

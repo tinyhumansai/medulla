@@ -58,9 +58,4 @@ pub(in crate::hub::tests) struct FakeWorker {
     pub(in crate::hub::tests) resets: AtomicU32,
     /// When true, every `send` fails — exercises the transport-error path.
     pub(super) fail_send: bool,
-    /// `contact_accepted` returns false until it has been polled this many times,
-    /// simulating a peer whose auto-accepter settles a few polls later.
-    pub(super) accept_after: u32,
-    /// How many times `contact_accepted` has been polled.
-    pub(in crate::hub::tests) contact_checks: AtomicU32,
 }

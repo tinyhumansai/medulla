@@ -13,12 +13,6 @@ impl TaskRunner {
     /// invokes a model. The request is bounded by the runner's acknowledgement
     /// window so a stale worker cannot leave a Routing refresh pending forever.
     pub async fn system_info(&self, address: &str) -> Result<WorkerSystemInfo, RunError> {
-        if !self.relay.contact_accepted(address).await {
-            let _ = self.relay.request_contact(address).await;
-            return Err(RunError::Worker(
-                "worker has not accepted this hub contact yet".into(),
-            ));
-        }
         let mut attempt = 0;
         loop {
             let correlation_id = format!(

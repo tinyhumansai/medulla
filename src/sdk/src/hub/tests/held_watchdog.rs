@@ -147,14 +147,6 @@ impl Relay for HoldingPeer {
         inbox.drain(..count).collect()
     }
 
-    async fn request_contact(&self, _peer: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn contact_accepted(&self, _peer: &str) -> bool {
-        true
-    }
-
     async fn reset_session(&self, _peer: &str) {}
 
     async fn liveness(&self, _peer: &str) -> BridgeLiveness {

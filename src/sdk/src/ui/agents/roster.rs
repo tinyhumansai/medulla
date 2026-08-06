@@ -2,7 +2,7 @@
 //!
 //! [`derive_agent_lanes`](super::derive_agent_lanes) seeds one lane per
 //! [`AgentDescriptor`] in the render snapshot, and that roster only ever carries
-//! what a *backend* advertises. A tiny.place worker added at runtime lives in
+//! what a *backend* advertises. A host-link worker added at runtime lives in
 //! the orchestrator hub's own roster instead — the very list that resolves a
 //! delegated task's address — so it was reachable, dispatchable, and completely
 //! absent from the Agents tab until a task happened to be running on it.

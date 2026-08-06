@@ -134,11 +134,11 @@ async fn interactive_codex_session_accepts_a_second_turn() {
     let cwd = workspace.path().to_string_lossy().into_owned();
 
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), bin);
+    env.insert("MEDULLA_CODEX_BIN".to_string(), bin);
     // Real codex writes rollouts under $CODEX_HOME/sessions (default ~/.codex);
     // point the transcript tailer at that tree (it recurses the date subdirs).
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".to_string(),
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
         format!("{home}/.codex/sessions"),
     );
     env.insert("TERM".to_string(), "xterm-256color".to_string());
@@ -208,7 +208,7 @@ async fn experiment_codex_dialog_dismissal() {
     let workspace = tempfile::tempdir().unwrap();
     let cwd = workspace.path().to_string_lossy().into_owned();
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), bin.clone());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), bin.clone());
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     let sessions = PtyManager::new();
     let id = sessions
@@ -293,7 +293,7 @@ async fn experiment_codex_startup_dialog_dismissal() {
     let workspace = tempfile::tempdir().unwrap();
     let cwd = workspace.path().to_string_lossy().into_owned();
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), bin.clone());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), bin.clone());
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     let sessions = PtyManager::new();
     let id = sessions
@@ -368,7 +368,7 @@ async fn diagnose_codex_paste_rendering() {
     let workspace = tempfile::tempdir().unwrap();
     let cwd = workspace.path().to_string_lossy().into_owned();
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), bin.clone());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), bin.clone());
     env.insert("TERM".to_string(), "xterm-256color".to_string());
 
     let sessions = PtyManager::new();

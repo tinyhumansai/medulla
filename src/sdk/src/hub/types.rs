@@ -42,7 +42,7 @@ pub struct TaskRequest {
     pub cycle_id: Option<String>,
     /// The instruction/prompt the worker runs.
     pub instruction: String,
-    /// The worker's bridge address: a local endpoint name or tiny.place id.
+    /// The worker's bridge address: a local endpoint name or link node name.
     pub worker_address: String,
     /// Optional harness hint (`claude`/`codex`/`opencode`).
     pub provider: Option<HarnessProvider>,

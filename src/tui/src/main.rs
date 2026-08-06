@@ -207,7 +207,7 @@ fn onboarding_ui() -> Option<medulla::onboarding::OnboardingUi> {
 
 /// Start the worker-daemon TUI (`medulla daemon --tui`).
 ///
-/// One process: the tiny.place identity, the contact queue, the harness PTYs,
+/// One process: the host-link identity, the contact queue, the harness PTYs,
 /// and the screen all live in it. Harness sessions run in the current working
 /// directory with this process's environment, so the operator sees the repo they
 /// launched from.
@@ -254,24 +254,37 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     // same identity directory, same forwarder. Requiring config for the TUI and
     // not for the daemon would mean adding `--tui` silently cost you your hosts.
     // It must be `default_link_config`, not `LinkConfig::default()`: only the
-    // former reads `MEDULLA_STAGING`, and a host on the prod forwarder never
-    // hears from an orchestrator on staging.
-    let link_config = loaded
-        .config
-        .link
-        .clone()
-        .unwrap_or_else(|| medulla::config::default_link_config(&env));
+    // former follows the resolved backend, and a host on the prod forwarder
+    // never hears from an orchestrator on staging.
+    let link_config = loaded.config.link.clone().unwrap_or_else(|| {
+        medulla::config::default_link_config(&env, &loaded.config.backend.base_url)
+    });
     let masters = link_config.peers.clone();
 
     // The bridge the worker loop serves peer work over. One endpoint holds the
     // link identity for the life of the process: a second `Link` on the same
     // node would draw sequences from a second counter under one AEAD key, which
     // reuses nonces (protocol §3.1).
-    let enrolled_node_id = medulla_link::keys::read_node_state(&medulla_link::keys::node_path(
+    let enrolled = medulla_link::keys::read_node_state(&medulla_link::keys::node_path(
         std::path::Path::new(&link_config.state_dir),
     ))
-    .ok()
-    .map(|state| state.node_id.to_string());
+    .ok();
+    let enrolled_node_id = enrolled.as_ref().map(|state| state.node_id.to_string());
+    // What the datagrams actually go to. The forwarder key is issued *with* the
+    // endpoint at enrollment, so a host cannot be re-pointed at another
+    // forwarder by editing config — only by enrolling again — and the transport
+    // is right to keep using `node.json`. What was wrong is reporting
+    // `link.forwarderUrl` as though it were the live forwarder: an operator who
+    // moved `backend.baseUrl` (or set `MEDULLA_STAGING` / `MEDULLA_API_URL`)
+    // then read the new deployment back off a screen whose datagrams were still
+    // going to the old one. Reporting the enrolled endpoint makes that drift
+    // visible as the mismatch it is. Only an unenrolled host — which has no
+    // endpoint to report — falls back to the configured URL.
+    let reported_endpoint = enrolled
+        .as_ref()
+        .map(|state| state.forwarder_endpoint.clone())
+        .filter(|endpoint| !endpoint.trim().is_empty())
+        .unwrap_or_else(|| link_config.forwarder_url.clone());
     let transport =
         match medulla_link::Link::connect(medulla_link::LinkConfig::new(&link_config.state_dir))
             .await
@@ -330,13 +343,10 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         masters,
         config_path,
         credential_dir: std::path::PathBuf::from(&link_config.state_dir),
-        // The link has no contact graph — enrollment is the only handshake
-        // (protocol §7) — so there is no admission queue to render.
-        contacts: None,
         agent_id,
         startup_status,
         transport,
-        endpoint: Some(link_config.forwarder_url.clone()),
+        endpoint: Some(reported_endpoint),
         theme,
         // Claude gates a fresh directory behind a modal trust dialog that only
         // appears on a TTY, so the worker clears it up front — naming the

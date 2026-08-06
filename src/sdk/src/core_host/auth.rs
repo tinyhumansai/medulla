@@ -76,7 +76,7 @@ pub async fn store_session(core: &Core, jwt: &str) -> Result<(), CoreError> {
 /// The stored app session token, if there is one.
 ///
 /// `Ok(None)` is the signed-out state, not a failure. Surfaces that need the JWT
-/// itself — the tiny.place hub uplink, the memory service's backend target —
+/// itself — the hub uplink, the memory service's backend target —
 /// take it from here rather than reading a file, so there is exactly one place a
 /// session lives.
 pub async fn session_token(core: &Core) -> Result<Option<String>, CoreError> {

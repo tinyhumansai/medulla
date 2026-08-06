@@ -7,7 +7,7 @@
 //! has no `toml` dependency, so the profile is JSON (the field names are
 //! camelCase to match the rest of the persisted state).
 //!
-//! "Registered" means both a profile file *and* a tiny.place identity exist. This
+//! "Registered" means both a profile file *and* a host-link identity exist. This
 //! module only models and persists the profile; identity bootstrap lives in
 //! [`crate::protocol::runtime`].
 
@@ -42,7 +42,7 @@ pub fn profile_path(env: &HashMap<String, String>) -> PathBuf {
 }
 
 /// Whether this worker is registered: a persisted profile exists *and* a
-/// tiny.place identity is present.
+/// host-link identity is present.
 pub fn is_registered(profile: Option<&WorkerProfile>, identity_present: bool) -> bool {
     profile.is_some() && identity_present
 }

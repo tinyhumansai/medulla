@@ -58,11 +58,11 @@ fn staged_history(dir: &std::path::Path) -> HashMap<String, String> {
 
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".into(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".into(),
         claude.to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".into(),
+        "MEDULLA_CODEX_SESSIONS_DIR".into(),
         codex.to_string_lossy().into_owned(),
     );
     env
@@ -228,11 +228,11 @@ async fn no_local_history_reaches_the_empty_state_and_skips() {
     let dir = tempfile::tempdir().unwrap();
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".into(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".into(),
         dir.path().join("nope").to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".into(),
+        "MEDULLA_CODEX_SESSIONS_DIR".into(),
         dir.path().join("also-nope").to_string_lossy().into_owned(),
     );
     let mut term = terminal();
@@ -330,11 +330,11 @@ fn many_sessions(dir: &std::path::Path, count: usize) -> HashMap<String, String>
 
     let mut env = HashMap::new();
     env.insert(
-        "TINYPLACE_CLAUDE_SESSIONS_DIR".into(),
+        "MEDULLA_CLAUDE_SESSIONS_DIR".into(),
         claude.to_string_lossy().into_owned(),
     );
     env.insert(
-        "TINYPLACE_CODEX_SESSIONS_DIR".into(),
+        "MEDULLA_CODEX_SESSIONS_DIR".into(),
         dir.join("none").to_string_lossy().into_owned(),
     );
     env

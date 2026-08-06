@@ -19,28 +19,32 @@
 //! the reader task marks the connection dead on EOF and drains both tables, so
 //! waiting callers get a [`AppServerError::Process`] and the pool discards the
 //! connection on its next lookup.
+//!
+//! # Ownership
+//!
+//! Both background tasks hold the connection *weakly*, and deliberately so. A
+//! strong handle would close a cycle — the reader waits on stdout, the child
+//! that owns stdout is kept alive by the connection, and the connection is kept
+//! alive by the reader — under which `Drop` never runs and a shut-down pool
+//! leaves live Codex processes behind. Holding weakly makes dropping the last
+//! caller-visible handle enough to kill the child, which is what closes stdout
+//! and lets the tasks retire.
 
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use super::jsonrpc::{
     notification_line, request_line, response_line, Message, Notification, RequestId,
 };
+use super::records::{read_record, Record, MAX_LINE_BYTES};
 use super::types::{AppServerError, AppServerSpec, CLIENT_NAME};
-
-/// A single line longer than this is dropped rather than buffered.
-///
-/// Matches the CLI seam's own record cap: a stdout line that never terminates is
-/// a broken server, and holding an unbounded buffer for one would let it consume
-/// the host.
-const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 
 /// The stream of notifications belonging to one thread.
 ///

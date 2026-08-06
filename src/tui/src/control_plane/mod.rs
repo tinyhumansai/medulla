@@ -35,6 +35,14 @@ use crate::hub_relay::HubSlot;
 /// deliberate policy: a shim must reach exactly one fleet, and quietly serving
 /// two would make "which fleet did my task go to" unanswerable.
 ///
+/// Binds even when `hub` is not yet filled — a login-less or hub-less launch
+/// still has locally launched harnesses whose lifecycle hooks need somewhere
+/// to report, and `HubFleetOps` already reads the slot per request rather
+/// than at construction, so a relogin that fills it later needs no rebind.
+/// Only the fleet-facing ops go unanswered until then; `hook.report` carries
+/// no authority over the hub at all (see the module docs on
+/// `control_socket::server::handle::hooks`).
+///
 /// Diagnostics go to `logs`, never to the terminal — ratatui owns the alternate
 /// screen and only repaints the cells it manages, so a stray line lands on top
 /// of the UI and is never cleared.
@@ -42,13 +50,12 @@ use crate::hub_relay::HubSlot;
 pub(crate) async fn start(
     env: &HashMap<String, String>,
     config: &medulla::config::TuiConfig,
-    hub_available: bool,
     hub: HubSlot,
     local_default_worker: Option<String>,
     hook_log: medulla::harness_hooks::HookEventLog,
     logs: &medulla_tui::log::LogBuffer,
 ) -> Option<ControlServer> {
-    if !config.mcp.fleet_tools || !hub_available {
+    if !config.mcp.fleet_tools {
         return None;
     }
     let configured = config.mcp.socket_path.as_deref();

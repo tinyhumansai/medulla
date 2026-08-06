@@ -31,6 +31,13 @@ const GET_TOOL: &str = "mcp__medulla__workflow_run_get";
 /// they will not read.
 const MAX_SLUG_CHARS: usize = 64;
 
+/// The namespace every generated slug opens with.
+///
+/// Load-bearing beyond the cosmetic: [`super::install`] treats a `medulla-`
+/// skill directory with no workflow behind it as ours to retire, so the prefix
+/// is the one thing that makes a marker-less leftover recognisable.
+pub(crate) const SLUG_PREFIX: &str = "medulla-";
+
 /// The slug a workflow's skill is installed under.
 ///
 /// Prefixed with `medulla-` so a directory listing of `~/.claude/skills` says

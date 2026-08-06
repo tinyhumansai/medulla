@@ -198,6 +198,7 @@ fn tmux_is_detected_from_the_env_var_and_its_socket_kept() {
 }
 
 #[test]
+#[cfg(unix)]
 fn tmux_socket_path_containing_a_comma_is_kept_whole() {
     // `tmux -S /some,path` writes that literal path into `$TMUX`; splitting
     // at the first comma would validate only `/some`, which does not exist,

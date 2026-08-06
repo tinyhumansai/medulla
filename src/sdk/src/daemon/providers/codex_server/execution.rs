@@ -58,11 +58,13 @@ pub async fn run_codex_server_task(options: RunTaskOptions) -> Result<RunTaskRes
 
 /// The body, in terms of the app-server's own error type.
 async fn run(options: RunTaskOptions) -> Result<RunTaskResult, AppServerError> {
+    let env = child_env(&options);
     let spec = AppServerSpec {
         bin: crate::protocol::env::provider_bin(HarnessProvider::Codex, &options.env),
-        args: Vec::new(),
-        env: child_env(&options),
+        args: process_args(&options, &env)?,
+        env,
     };
+    warn_about_dropped_hooks(&options);
     let connection = pool().acquire(&spec).await?;
 
     let mut thread = ThreadOptions::from_permissions(

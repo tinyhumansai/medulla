@@ -72,7 +72,7 @@ async fn fleet_tools_off_binds_nothing_at_all() {
     let server = start(
         &env(&[]),
         &config(root.path(), false),
-                HubSlot::default(),
+        HubSlot::default(),
         None,
         medulla::harness_hooks::HookEventLog::new(),
         &logs,
@@ -83,23 +83,29 @@ async fn fleet_tools_off_binds_nothing_at_all() {
     assert!(!root.path().join("control.sock").exists());
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn a_hub_that_did_not_start_gets_no_control_plane() {
+async fn a_hub_that_has_not_started_still_gets_a_control_plane() {
+    // A login-less or hub-less launch still has locally launched harnesses
+    // whose lifecycle hooks need somewhere to report — see `start`'s doc
+    // comment. An empty `HubSlot` must not block the bind.
     let root = tempfile::tempdir().unwrap();
+    let _home = ScratchHome::install(root.path());
     let logs = medulla_tui::log::LogBuffer::new();
 
     let server = start(
         &env(&[]),
         &config(root.path(), true),
-                HubSlot::default(),
-        None,
+        HubSlot::default(),
+        Some("this-device".into()),
         medulla::harness_hooks::HookEventLog::new(),
         &logs,
     )
-    .await;
+    .await
+    .expect("the socket should bind even with no hub session");
 
-    assert!(server.is_none());
-    assert!(!root.path().join("control.sock").exists());
+    assert!(root.path().join("control.sock").exists());
+    drop(server);
 }
 
 /// A bind sweeps the config files a *previous* run left behind, and does it

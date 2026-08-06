@@ -113,6 +113,68 @@ async fn run(options: RunTaskOptions) -> Result<RunTaskResult, AppServerError> {
     })
 }
 
+/// The argv the pooled process is launched with, ahead of the `app-server`
+/// subcommand.
+///
+/// Every entry here is *process-level* Codex configuration — the layer the CLI
+/// seam assembles before `exec`, not the per-turn flags that seam adds after it.
+/// Passing an empty list instead would silently discard the operator's whole
+/// configuration for app-server runs: a routed preset's `codexOverrides` supply
+/// the provider block, the API-key auth preference and the model catalog entry
+/// that a routed model needs before it will answer at all, so dropping them
+/// sends the run to the wrong account or fails it against the routed endpoint,
+/// with nothing to distinguish that from the preset being wrong.
+///
+/// Three inputs, in the same order the CLI seam applies them:
+///
+/// 1. `MEDULLA_CODEX_ARGS` / `TINYPLACE_CODEX_ARGS` from the run's environment.
+/// 2. The daemon's configured `extra_args`.
+/// 3. [`crate::codex_overrides::launch_args`], read from the *routed* `env` so
+///    it sees the endpoint [`child_env`] just injected.
+///
+/// All of it is part of [`AppServerKey`](crate::codex_app_server::AppServerKey),
+/// so two runs that disagree get separate processes rather than one of them
+/// silently inheriting the other's configuration.
+///
+/// # Errors
+///
+/// A catalog that cannot be derived fails the run, matching the CLI seam: a
+/// process started without it reaches the provider with tool shapes it rejects,
+/// and a 400 on the first turn is far harder to read.
+fn process_args(
+    options: &RunTaskOptions,
+    env: &HashMap<String, String>,
+) -> Result<Vec<String>, AppServerError> {
+    let mut args = crate::protocol::env::provider_args(HarnessProvider::Codex, &options.env);
+    args.extend(options.extra_args.iter().cloned());
+    args.extend(
+        crate::codex_overrides::launch_args(HarnessProvider::Codex, options.model.as_deref(), env)
+            .map_err(|error| AppServerError::Process(error.to_string()))?,
+    );
+    Ok(args)
+}
+
+/// Say out loud that configured Medulla hooks do not run on this transport.
+///
+/// The CLI seam delivers them as a `-c hooks=…` override paired with a
+/// per-run capability grant in the child's environment. Neither survives here:
+/// the process is *shared*, so a hook installed for one lane would fire on every
+/// other lane's turns, and the grant it would redeem is stripped by
+/// [`child_env`] for exactly that reason. Refusing loudly beats letting an
+/// operator believe a configured hook is running — the same choice the ACP seam
+/// makes.
+fn warn_about_dropped_hooks(options: &RunTaskOptions) {
+    let configured = options.hooks.for_provider(HarnessProvider::Codex).len();
+    if configured > 0 {
+        tracing::warn!(
+            target: "medulla::codex_app_server",
+            hooks = configured,
+            "medulla hooks are not installed for app-server dispatch: the codex process is \
+             shared between lanes, so a per-run hook and its grant cannot be scoped to one",
+        );
+    }
+}
+
 /// The environment the pooled process runs with.
 ///
 /// The same two layers the ACP seam applies, and for the same reasons: the child

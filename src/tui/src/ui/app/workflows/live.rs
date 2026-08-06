@@ -85,8 +85,10 @@ impl super::super::types::App {
     pub fn workflow_run_started(&mut self, workflow: &str, run_id: &str) {
         // One live run per workflow: a second `x` on the same workflow replaces
         // the picture rather than interleaving two runs' frames under one node.
-        self.live_runs
-            .retain(|_, run| run.workflow != workflow || run.running);
+        // Including a predecessor that is still executing — `live_run_for_view`
+        // picks the running run out of a `HashMap`, so leaving the older one
+        // behind would let the pane show either of them.
+        self.live_runs.retain(|_, run| run.workflow != workflow);
         self.live_runs
             .insert(run_id.to_string(), LiveRun::new(workflow.to_string()));
     }

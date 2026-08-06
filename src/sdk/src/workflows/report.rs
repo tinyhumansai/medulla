@@ -181,17 +181,31 @@ impl RunReporter {
     /// tests" means something different under `verify` than under `implement`.
     pub fn progress_sink(&self) -> NodeProgressSink {
         let reports = self.reports.clone();
-        std::sync::Arc::new(move |node: &str, frame: &str| {
+        let pending = self.pending.clone();
+        Arc::new(move |node: &str, frame: &str| {
             let frame = frame.trim();
             if frame.is_empty() {
                 return;
             }
-            let _ = reports.send(Report {
-                status: "running",
-                detail: Some(frame.to_string()),
-                node: Some(node.to_string()),
-                terminal: false,
-            });
+            // Dropped rather than queued once the forwarder is this far behind:
+            // it shows one line at a time, so a frame with 64 ahead of it will
+            // never be displayed, and queueing it would only trade memory for
+            // nothing. See `MAX_PENDING_PROGRESS`.
+            if pending.load(Ordering::Relaxed) >= MAX_PENDING_PROGRESS {
+                return;
+            }
+            pending.fetch_add(1, Ordering::Relaxed);
+            if reports
+                .send(Report {
+                    status: "running",
+                    detail: Some(frame.to_string()),
+                    node: Some(node.to_string()),
+                    terminal: false,
+                })
+                .is_err()
+            {
+                pending.fetch_sub(1, Ordering::Relaxed);
+            }
         })
     }
 

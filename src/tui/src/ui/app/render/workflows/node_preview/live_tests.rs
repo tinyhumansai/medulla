@@ -1,65 +1,95 @@
-//! What the live pane makes of a step's streamed harness frames.
+//! Frame rendering, and the sanitizing it does on the way.
 
-use medulla::daemon::{THINKING_PREFIX, TOOL_PREFIX};
+use super::{frame_line, live_lines};
 
-use super::live::live_lines;
+/// Everything a rendered line puts on the screen, concatenated.
+fn text(line: &ratatui::text::Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+}
 
-/// Flatten styled lines into the text an operator reads.
-fn text(lines: Vec<ratatui::text::Line<'static>>) -> String {
-    lines
-        .into_iter()
-        .map(|line| {
-            line.spans
-                .into_iter()
-                .map(|span| span.content.into_owned())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// An OSC 0 window-title rewrite and a CSI clear, the two payloads that make a
+/// relayed harness frame worth sanitizing.
+const ESCAPES: &str = "\u{1b}]0;pwned\u{7}\u{1b}[2J";
+
+#[test]
+fn a_tool_call_is_stripped_of_terminal_escapes() {
+    let line = frame_line(&format!("running Read({ESCAPES}/etc/passwd)"));
+
+    let rendered = text(&line);
+    assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+    assert!(!rendered.contains('\u{7}'), "{rendered:?}");
+    // The legible part survives: this sanitizes, it does not redact.
+    assert!(rendered.contains("Read(]0;pwned[2J/etc/passwd)"), "{rendered:?}");
 }
 
 #[test]
-fn a_step_with_no_frames_draws_nothing_at_all() {
-    // Not an empty box with a heading: a step that has said nothing should
-    // cost the preview no rows.
+fn a_tool_result_is_stripped_of_terminal_escapes() {
+    for (frame, mark) in [
+        (format!("tool completed · read 12 lines{ESCAPES}"), "✓"),
+        (format!("tool failed · no such file{ESCAPES}"), "✗"),
+    ] {
+        let rendered = text(&frame_line(&frame));
+        assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+        assert!(rendered.contains(mark), "{rendered:?}");
+    }
+}
+
+#[test]
+fn a_thinking_fragment_is_stripped_of_terminal_escapes() {
+    let rendered = text(&frame_line(&format!("thinking · {ESCAPES}next I will")));
+
+    assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+    assert!(rendered.contains("next I will"), "{rendered:?}");
+}
+
+#[test]
+fn a_status_frame_is_stripped_of_terminal_escapes() {
+    // Anything that is not a tool call or a thought falls through to `Status`,
+    // which is the variant a harness's free-form chatter lands in.
+    let rendered = text(&frame_line(&format!("{ESCAPES}compiling")));
+
+    assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+    assert!(rendered.contains("compiling"), "{rendered:?}");
+}
+
+#[test]
+fn no_frames_draws_no_header_at_all() {
+    // An empty buffer means the step has said nothing yet; a bare "live" badge
+    // over nothing is worse than the box simply not being there.
     assert!(live_lines(&[], true).is_empty());
 }
 
 #[test]
-fn frames_are_marked_up_as_the_kinds_of_frame_they_are() {
-    let frames = vec![
-        format!("{TOOL_PREFIX}bash: cargo test"),
-        "tool completed · exit 0".to_string(),
-        format!("{THINKING_PREFIX}weighing the failure"),
-        "writing".to_string(),
-    ];
+fn only_the_tail_is_drawn_and_the_rest_is_counted() {
+    let frames: Vec<String> = (0..super::VISIBLE_FRAMES + 7)
+        .map(|index| format!("frame {index}"))
+        .collect();
 
-    let preview = text(live_lines(&frames, true));
+    let lines = live_lines(&frames, true);
+    let rendered: Vec<String> = lines.iter().map(text).collect();
 
-    assert!(preview.contains("live"), "{preview}");
-    assert!(preview.contains("⏺ bash: cargo test"), "{preview}");
-    assert!(preview.contains("✓ exit 0"), "{preview}");
-    assert!(preview.contains("weighing the failure"), "{preview}");
-    assert!(preview.contains("writing"), "{preview}");
-    // The producer's prefixes are machinery, not something to read.
-    assert!(!preview.contains(TOOL_PREFIX), "{preview}");
+    // Header, the "earlier frames" note, then exactly the visible tail.
+    assert_eq!(rendered.len(), super::VISIBLE_FRAMES + 2);
+    assert!(rendered[0].contains("live"));
+    assert!(rendered[1].contains("… 7 earlier frames"), "{:?}", rendered[1]);
+    assert!(rendered[2].contains("frame 7"), "{:?}", rendered[2]);
+    assert!(
+        rendered.last().is_some_and(|last| last
+            .contains(&format!("frame {}", super::VISIBLE_FRAMES + 6))),
+        "{:?}",
+        rendered.last()
+    );
 }
 
 #[test]
-fn a_settled_run_says_its_frames_are_the_last_ones_rather_than_live() {
-    let preview = text(live_lines(&["writing".to_string()], false));
+fn a_settled_run_is_labelled_last_rather_than_live() {
+    let lines = live_lines(&["compiling".to_string()], false);
 
-    assert!(preview.contains("last"), "{preview}");
-    assert!(!preview.contains(" live "), "{preview}");
-}
-
-#[test]
-fn a_long_stream_reports_what_it_dropped_instead_of_silently_clipping() {
-    let frames: Vec<String> = (0..60).map(|index| format!("step {index}")).collect();
-
-    let preview = text(live_lines(&frames, true));
-
-    assert!(preview.contains("20 earlier frames"), "{preview}");
-    assert!(preview.contains("step 59"), "{preview}");
-    assert!(!preview.contains("step 0\n"), "{preview}");
+    let header = text(&lines[0]);
+    assert!(header.contains("last"), "{header:?}");
+    assert!(!header.contains("live"), "{header:?}");
+    assert!(header.contains("when the run ended"), "{header:?}");
 }

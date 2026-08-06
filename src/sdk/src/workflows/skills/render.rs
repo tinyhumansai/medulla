@@ -63,7 +63,7 @@ pub fn slug_for(workflow_id: &str) -> String {
     if slug.is_empty() {
         slug.push_str("workflow");
     }
-    let mut slug = format!("medulla-{slug}");
+    let mut slug = format!("{SLUG_PREFIX}{slug}");
     if slug.len() > MAX_SLUG_CHARS {
         // ASCII by construction, so a byte truncation is a char truncation. A
         // trailing dash would read as an accident.

@@ -130,6 +130,7 @@ pub fn sync(
     prune: bool,
 ) -> io::Result<InstallReport> {
     let mut report = InstallReport::default();
+    let mut cleared: BTreeSet<PathBuf> = BTreeSet::new();
     if prune {
         let keep: BTreeSet<&str> = workflows
             .iter()
@@ -142,12 +143,15 @@ pub fn sync(
                 if keep.contains(managed.workflow_id.as_str()) {
                     continue;
                 }
+                cleared.insert(managed.path.clone());
                 report.files.push(remove_managed(&managed, opts)?);
             }
         }
     }
 
-    report.files.extend(install(workflows, opts)?.files);
+    report
+        .files
+        .extend(install_over(workflows, opts, &cleared)?.files);
     Ok(report)
 }
 

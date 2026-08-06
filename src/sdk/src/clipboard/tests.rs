@@ -158,6 +158,7 @@ fn copy_report_names_every_mechanism_that_took_it() {
 }
 
 #[test]
+#[cfg(unix)]
 fn tmux_is_detected_from_the_env_var_and_its_socket_kept() {
     // `$TMUX` is untrusted, so `parse` only accepts a path naming a real
     // socket this process owns — a bound `UnixListener` stands in for the

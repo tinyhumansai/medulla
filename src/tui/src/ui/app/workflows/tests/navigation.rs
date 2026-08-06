@@ -11,7 +11,7 @@ use super::{app_with, diamond};
 
 /// Persist a settled run of `workflow` under `id`, as a finished run leaves it.
 fn persist_run(app: &super::App, workflow: &str, id: &str) {
-    let store = app.workflow_store().expect("a store is configured");
+    let store = app.workflow_store();
     let mut record = medulla::workflows::new_run_record(id, workflow, 1);
     record.status = medulla::workflows::RunStatus::Succeeded;
     record.finished_at = Some(2);
@@ -27,7 +27,7 @@ fn opening_a_persisted_run_selects_its_row_and_overlays_it() {
 
     app.open_workflow_run("review", "run-1");
 
-    assert_eq!(app.tab_index, crate::ui::app::types::tab_pos("Workflows"));
+    assert_eq!(app.tab_index, super::super::super::types::tab_pos("Workflows"));
     assert_eq!(app.selected_workflow().map(|w| w.id.as_str()), Some("review"));
     // The record is on disk, so the run rail lands on its row rather than
     // leaving the cursor where it was.

@@ -113,3 +113,71 @@ fn an_unknown_status_word_reads_as_still_running() {
         HarnessRunStatus::Failed
     );
 }
+
+#[test]
+fn an_active_run_is_only_evicted_when_nothing_settled_can_be_dropped() {
+    use crate::control_socket::runs::MAX_RUNS_PER_SESSION;
+
+    let registry = HarnessRunRegistry::new();
+    // One settled run first, then a full session's worth of active ones.
+    registry.report(
+        "pty-1",
+        report("run-done", "review", HarnessRunStatus::Succeeded, None),
+    );
+    for index in 0..MAX_RUNS_PER_SESSION {
+        registry.report(
+            "pty-1",
+            report(
+                &format!("run-{index}"),
+                "review",
+                HarnessRunStatus::Running,
+                None,
+            ),
+        );
+    }
+
+    let runs = registry.for_session("pty-1");
+    assert_eq!(runs.len(), MAX_RUNS_PER_SESSION);
+    // The finished run went first, and every executing one — the ones the
+    // operator is actually watching — survived.
+    assert!(runs.iter().all(|run| run.run_id != "run-done"));
+
+    // With nothing settled left to drop, the oldest active run gives way.
+    registry.report(
+        "pty-1",
+        report("run-newest", "review", HarnessRunStatus::Running, None),
+    );
+    let runs = registry.for_session("pty-1");
+    assert_eq!(runs.len(), MAX_RUNS_PER_SESSION);
+    assert!(runs.iter().all(|run| run.run_id != "run-0"));
+    assert!(runs.iter().any(|run| run.run_id == "run-newest"));
+}
+
+#[test]
+fn a_run_keeps_only_its_newest_frames() {
+    use crate::control_socket::runs::MAX_FRAMES_PER_RUN;
+
+    let registry = HarnessRunRegistry::new();
+    let overshoot = 5;
+    for index in 0..MAX_FRAMES_PER_RUN + overshoot {
+        registry.report(
+            "pty-1",
+            report(
+                "run-1",
+                "review",
+                HarnessRunStatus::Running,
+                Some(&format!("frame {index}")),
+            ),
+        );
+    }
+
+    let runs = registry.for_session("pty-1");
+    assert_eq!(runs[0].frames.len(), MAX_FRAMES_PER_RUN);
+    // The window slid rather than stopped: the oldest frames are gone and the
+    // newest one is the last thing reported.
+    assert_eq!(runs[0].frames[0].text, format!("frame {overshoot}"));
+    assert_eq!(
+        runs[0].frames.last().map(|frame| frame.text.as_str()),
+        Some(format!("frame {}", MAX_FRAMES_PER_RUN + overshoot - 1).as_str())
+    );
+}

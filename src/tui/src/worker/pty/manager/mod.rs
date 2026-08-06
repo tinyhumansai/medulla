@@ -100,6 +100,9 @@ impl Drop for Inner {
             // until this process exits.
             session.reap(now);
         }
+        // Wake the clipboard worker thread so it exits rather than blocking on
+        // its condvar forever.
+        self.clipboard.close();
     }
 }
 

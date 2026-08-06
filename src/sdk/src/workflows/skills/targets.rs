@@ -223,11 +223,12 @@ pub fn default_targets(root: &Path) -> Vec<SkillTarget> {
 pub fn spawn_args(
     provider: crate::protocol::HarnessProvider,
     env: &HashMap<String, String>,
+    cwd: &Path,
 ) -> Vec<String> {
     if provider != crate::protocol::HarnessProvider::Claude {
         return Vec::new();
     }
-    let dir = managed_dir(SkillTarget::Claude, env);
+    let dir = managed_dir(SkillTarget::Claude, env, cwd);
     if !skills_dir(SkillTarget::Claude, &dir).is_dir() {
         return Vec::new();
     }

@@ -69,7 +69,7 @@ fn recovers_after_exceeding_the_capture_budget() {
     // once it is dropped for size, a later well-formed write still lands.
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"\x1b]52;c;");
-    bytes.extend(std::iter::repeat(b'A').take(9 * 1024 * 1024));
+    bytes.extend(std::iter::repeat_n(b'A', 9 * 1024 * 1024));
     bytes.push(0x07);
     bytes.extend_from_slice(&osc52_set("after"));
     assert_eq!(scan(&bytes), Some("after".to_string()));

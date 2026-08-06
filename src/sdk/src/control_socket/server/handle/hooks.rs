@@ -60,6 +60,20 @@ pub(super) fn hook_report(
     Ok(json!({ "recorded": true }))
 }
 
+/// Strip control characters (including terminal escape/OSC sequences) from a
+/// caller-supplied field before it is recorded.
+///
+/// `commands::hook::sanitize` in the TUI crate already does this at the
+/// source, but the shim is not the only thing that can call `hook.report`:
+/// any subprocess inheriting `MEDULLA_HOOK_GRANT` can call it directly and
+/// skip that shim entirely. `report.summary` is later rendered straight into
+/// the operator's terminal via `Span::raw` (see `draw_hook_feed`), so it must
+/// never carry a raw control byte regardless of who is on the other end of
+/// the socket (chatgpt-codex-connector P2 on PR #192).
+fn sanitize(value: &str) -> String {
+    value.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// Clip `value` to `max_chars` characters, on a character boundary.
 fn truncate_to(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {

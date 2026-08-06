@@ -291,6 +291,15 @@ renamed, disabled, or deleted is reflected in the next session with no command
 to re-run. Previously this was install-time only, and a store that had moved
 since left the harness reading a catalog that no longer existed.
 
+That guarantee holds for a refresh that succeeded. A refresh that could not
+write — a full disk, a permission problem under the Medulla home — does not
+stop the spawn: the session still comes up, and is still pointed at whatever
+the last successful refresh left in the managed root, which may describe an
+older catalog. Refusing to launch a harness over a file Medulla could not write
+under its own state directory would trade a small loss for a total one, so the
+failure is logged rather than raised. Running `medulla skills install --scope
+managed --harness claude` by hand reports the error a refresh swallows.
+
 The root is `<medulla home>/skills/scopes/<workspace>/claude-skills/`, laid out
 like a project root (`.claude/skills/…`), and Medulla adds `--add-dir <that
 directory>` when it spawns Claude Code. Each harness gets its own

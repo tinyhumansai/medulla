@@ -126,14 +126,25 @@ async fn run(
     // Every `agent` node's harness reports through here as it works. Forwarded
     // rather than folded: the App owns the buffer, and a render pass must not
     // reach into a run's internals to read it.
+    //
+    // Bounded at the sink, not at the channel: `AppMsg` carries the run's
+    // lifecycle too, and a bounded channel would either block a step's harness
+    // or drop the settle message. Counting frames instead leaves those
+    // unaffected and drops only progress nobody would have read — see
+    // [`PendingFrame`].
     let progress: medulla::flow_engine::NodeProgressSink = {
         let tx = tx.clone();
         let run_id = run_id.clone();
+        let queued = Arc::new(AtomicUsize::new(0));
         Arc::new(move |node: &str, line: &str| {
+            let Some(pending) = PendingFrame::claim(&queued, MAX_PENDING_FRAMES) else {
+                return;
+            };
             let _ = tx.send(AppMsg::WorkflowRunOutput {
                 run_id: run_id.clone(),
                 node: node.to_string(),
                 line: line.to_string(),
+                pending,
             });
         })
     };

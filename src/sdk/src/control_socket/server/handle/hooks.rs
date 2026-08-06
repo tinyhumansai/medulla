@@ -50,7 +50,7 @@ pub(super) fn hook_report(
     let mut report = HookReport::new(grant.session.clone(), event);
     report.at_ms = crate::clock::now_millis();
     report.summary = optional_str(params, "summary")
-        .map(|summary| truncate(&summary))
+        .map(|summary| truncate_to(&summary, MAX_SUMMARY))
         .unwrap_or_default();
     report.cwd = optional_str(params, "cwd").map(|cwd| truncate_to(&cwd, MAX_FIELD));
     report.harness_session_id =

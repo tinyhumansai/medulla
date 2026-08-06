@@ -91,18 +91,18 @@ fn a_node_keeps_only_its_newest_frames() {
     let mut app = app();
     app.workflow_run_started("review", "run-1");
     let overshoot = 5;
-    for index in 0..super::live::MAX_FRAMES_PER_NODE + overshoot {
+    for index in 0..super::MAX_FRAMES_PER_NODE + overshoot {
         app.workflow_run_output("run-1", "implement", format!("frame {index}"));
     }
 
     let run = app.live_runs.get("run-1").expect("a tracked run");
     let frames = run.frames("implement");
-    assert_eq!(frames.len(), super::live::MAX_FRAMES_PER_NODE);
+    assert_eq!(frames.len(), super::MAX_FRAMES_PER_NODE);
     // The window slid: the oldest frames went, the newest is the last one in.
     assert_eq!(frames[0], format!("frame {overshoot}"));
     assert_eq!(
         frames.last().map(String::as_str),
-        Some(format!("frame {}", super::live::MAX_FRAMES_PER_NODE + overshoot - 1).as_str())
+        Some(format!("frame {}", super::MAX_FRAMES_PER_NODE + overshoot - 1).as_str())
     );
 }
 
@@ -134,7 +134,7 @@ fn a_reported_run_becomes_the_same_shape_as_a_local_one() {
         ],
     };
 
-    let view = super::live::LiveRun::from_reported(&run);
+    let view = super::LiveRun::from_reported(&run);
     assert_eq!(view.workflow, "review");
     // Terminal on the wire means not live here.
     assert!(!view.running);
@@ -156,5 +156,5 @@ fn a_reported_run_that_is_still_going_reads_as_live() {
         frames: Vec::new(),
     };
 
-    assert!(super::live::LiveRun::from_reported(&run).running);
+    assert!(super::LiveRun::from_reported(&run).running);
 }

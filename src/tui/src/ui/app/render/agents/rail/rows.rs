@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::{fmt_tokens, slug};

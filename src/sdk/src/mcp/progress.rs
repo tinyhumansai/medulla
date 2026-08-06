@@ -91,6 +91,9 @@ impl Progress {
     /// A notification dropped because the client is not draining is a lost
     /// heartbeat, not a lost run.
     pub(crate) fn report(&self, message: impl Into<String>, total: Option<u64>) {
+        if !self.active.load(Ordering::Relaxed) {
+            return;
+        }
         let progress = self.sent.fetch_add(1, Ordering::Relaxed) + 1;
         let mut params = json!({
             "progressToken": self.token,

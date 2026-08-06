@@ -15,7 +15,6 @@ use crate::bridge::{Bridge, LocalBridgeNetwork, RoutingBridge};
 #[derive(Default)]
 struct RecordingRemote {
     sent: Mutex<Vec<(String, String)>>,
-    contacts: Mutex<Vec<String>>,
     resets: Mutex<Vec<String>>,
     inbox: Mutex<Vec<InboundMessage>>,
 }
@@ -55,17 +54,8 @@ impl Bridge for RecordingRemote {
         addresses.iter().map(|a| (a.clone(), false)).collect()
     }
 
-    async fn request_contact(&self, peer: &str) -> Result<(), String> {
-        self.contacts.lock().unwrap().push(peer.to_string());
-        Ok(())
-    }
-
     async fn resolve_handle(&self, name: &str) -> Option<String> {
         (name == "@remote").then(|| "remote-address".to_string())
-    }
-
-    async fn contact_accepted(&self, peer: &str) -> bool {
-        peer == "remote-address"
     }
 
     async fn reset_session(&self, peer: &str) {
@@ -164,26 +154,22 @@ async fn draining_merges_both_inboxes_within_one_shared_limit() {
 }
 
 #[tokio::test]
-async fn a_local_peer_needs_no_contact_edge_and_no_session_reset() {
+async fn a_local_peer_needs_no_session_reset() {
     let (router, remote, _host) = wired();
 
-    assert!(router.contact_accepted("host").await);
-    router.request_contact("host").await.unwrap();
+    assert!(router.is_device_local("host").await);
     router.reset_session("host").await;
 
-    assert!(remote.contacts.lock().unwrap().is_empty());
     assert!(remote.resets.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn a_remote_peer_keeps_its_contact_edge_and_session_reset() {
+async fn a_remote_peer_keeps_its_session_reset() {
     let (router, remote, _host) = wired();
 
-    assert!(router.contact_accepted("remote-address").await);
-    router.request_contact("remote-address").await.unwrap();
+    assert!(!router.is_device_local("remote-address").await);
     router.reset_session("remote-address").await;
 
-    assert_eq!(*remote.contacts.lock().unwrap(), vec!["remote-address"]);
     assert_eq!(*remote.resets.lock().unwrap(), vec!["remote-address"]);
 }
 
@@ -216,7 +202,6 @@ async fn without_a_remote_a_non_local_address_fails_loudly() {
         error.contains("somewhere-else"),
         "unexpected error: {error}"
     );
-    assert!(!router.contact_accepted("somewhere-else").await);
     assert!(router.drain_inbox(10).await.is_empty());
     assert_eq!(router.local_address(), "hub");
     assert!(router.remote().is_none());
@@ -228,7 +213,7 @@ async fn presence_is_asked_of_the_remote() {
     // method it forgets to forward silently takes the trait's default instead of
     // reaching the transport that can actually answer. That default is "no
     // opinion", which reads as a healthy fleet — so the hub advertised a worker
-    // that tiny.place knew was down, and nothing anywhere said otherwise.
+    // that the roster knew was down, and nothing anywhere said otherwise.
     let network = LocalBridgeNetwork::new();
     let hub = network.bind("presence-hub").unwrap();
     let remote = Arc::new(RecordingRemote::default());
@@ -256,7 +241,7 @@ async fn a_local_only_bridge_has_nobody_to_ask_about_presence() {
 #[tokio::test]
 async fn a_device_local_address_is_answered_here_not_asked_of_the_relay() {
     // The regression this exists to catch: a host bound in this process is not
-    // a tiny.place identity and never heartbeats, so asking the relay returns
+    // a host-link identity and never heartbeats, so asking the relay returns
     // "no record" — which reads as offline and withholds every host on this
     // machine from the roster. Its liveness is knowable exactly right here.
     let network = LocalBridgeNetwork::new();

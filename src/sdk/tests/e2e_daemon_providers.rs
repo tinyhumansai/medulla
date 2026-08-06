@@ -4,7 +4,7 @@
 //! End-to-end coverage for the daemon's provider spawn path
 //! ([`medulla::daemon::providers::run_provider_task`]) driven by the mock
 //! coding-agent CLIs in [`mock_harness`]. Each test installs a scripted mock as
-//! the provider binary (via `TINYPLACE_*_BIN`) and asserts the derived semantic
+//! the provider binary (via `MEDULLA_*_BIN`) and asserts the derived semantic
 //! events, reply extraction, and error branches — with no real CLI and no
 //! network.
 
@@ -163,7 +163,7 @@ async fn spawn_failure_for_missing_binary() {
         env.insert("PATH".to_string(), path);
     }
     env.insert(
-        "TINYPLACE_CLAUDE_BIN".to_string(),
+        "MEDULLA_CLAUDE_BIN".to_string(),
         "/nonexistent/definitely-not-here".to_string(),
     );
     assert_eq!(

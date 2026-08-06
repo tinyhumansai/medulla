@@ -79,7 +79,7 @@ const ADDRESS_EDGE: usize = 4;
 
 /// Shorten a machine address for display: `abcd…1234`.
 ///
-/// A tiny.place address is a Solana public key — 32 to 44 base58 characters of
+/// A link address is a Solana public key — 32 to 44 base58 characters of
 /// pure entropy. Rendered whole it is the widest thing in the Agents rail, and
 /// it sizes the whole sidebar, because the rail is measured against its widest
 /// row. It also distinguishes nothing a human reads: the middle is noise, and

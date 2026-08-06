@@ -2,7 +2,7 @@
 //! [`Bridge`], inside someone else's process.
 //!
 //! [`super::entry::run_daemon`] is the standalone `medulla daemon` — it owns a
-//! tiny.place identity, publishes pre-keys, registers a directory card, and
+//! host-link identity, publishes pre-keys, registers a directory card, and
 //! blocks until a signal. None of that is wanted when the orchestrator TUI wants
 //! to *be* a host as well: it already has a process, and the peer it serves is
 //! itself. [`EmbeddedDaemon::start`] is that path — hand it a bridge address and
@@ -12,7 +12,7 @@
 //! The result is that a plain `medulla` run is both orchestrator and host: the
 //! hub dispatches to a device-local address, this module executes it against the
 //! agent CLIs on this machine, and the reply comes back over the in-memory bus.
-//! Pointing the same host at a tiny.place bridge instead is a caller-side
+//! Pointing the same host at a remote bridge instead is a caller-side
 //! choice, not a different code path.
 
 use std::sync::{Arc, Mutex};

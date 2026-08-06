@@ -12,7 +12,6 @@ pub mod clipboard;
 pub mod clock;
 pub mod codex_overrides;
 pub mod config;
-pub mod contacts;
 pub mod control_socket;
 pub mod core_host;
 pub mod daemon;

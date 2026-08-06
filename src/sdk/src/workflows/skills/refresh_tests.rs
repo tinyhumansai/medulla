@@ -482,3 +482,72 @@ fn the_unscoped_managed_root_is_retired() {
     assert!(theirs.is_file(), "a file Medulla did not generate stays");
     assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
 }
+
+/// A refresh on a multi-thread runtime goes through
+/// [`tokio::task::block_in_place`], which panics if it is ever reached from a
+/// current-thread runtime. Both flavours are exercised here so a wrong guard
+/// fails a test rather than a spawn.
+#[test]
+fn a_refresh_runs_under_either_runtime_flavour() {
+    for multi_thread in [true, false] {
+        let home = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let env = env_at(home.path());
+        write_workflow(&env, "babysit", "Watch a PR.", true);
+
+        let runtime = if multi_thread {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .unwrap()
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+        };
+        let args = runtime.block_on(async {
+            // Inside a task, which is where every real caller sits.
+            tokio::spawn({
+                let env = env.clone();
+                let cwd = cwd.path().to_path_buf();
+                async move { refresh_managed(HarnessProvider::Claude, &env, &cwd) }
+            })
+            .await
+            .unwrap()
+        });
+
+        assert!(!args.is_empty(), "multi_thread={multi_thread}");
+        assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
+    }
+}
+
+/// A rewritten skill is replaced whole, so a harness reading the directory
+/// while a refresh runs never sees a truncated file — and no temp file is left
+/// sitting in the skills root pretending to be one.
+#[test]
+fn a_rewritten_skill_is_replaced_whole_and_leaves_no_scratch_file() {
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let env = env_at(home.path());
+
+    write_workflow(&env, "babysit", "Watch a PR.", true);
+    refresh_managed(HarnessProvider::Claude, &env, cwd.path());
+    let path = managed_skill(&env, cwd.path(), "babysit");
+    let first = fs::read_to_string(&path).unwrap();
+
+    // A described-differently workflow renders a different body, so this is an
+    // in-place rewrite of an existing file rather than a fresh create.
+    write_workflow(&env, "babysit", "Watch a pull request to the end.", true);
+    refresh_managed(HarnessProvider::Claude, &env, cwd.path());
+
+    let second = fs::read_to_string(&path).unwrap();
+    assert_ne!(first, second, "the fixture must actually rewrite the file");
+    assert!(second.contains("Watch a pull request to the end."));
+
+    let strays: Vec<_> = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "SKILL.md")
+        .collect();
+    assert!(strays.is_empty(), "left behind {strays:?}");
+}

@@ -84,24 +84,8 @@ async fn capacity_probe_repairs_a_desynchronized_session_and_retries() {
 }
 
 #[tokio::test]
-async fn capacity_probe_rejects_a_peer_that_has_not_accepted_contact() {
-    let worker = FakeWorker::with(Mode::SystemInfo(info()), false, 1);
-    let runner = TaskRunner::start(worker, Duration::from_millis(5));
-
-    let error = runner
-        .system_info("worker")
-        .await
-        .expect_err("not accepted");
-
-    assert_eq!(
-        error,
-        RunError::Worker("worker has not accepted this hub contact yet".to_string())
-    );
-}
-
-#[tokio::test]
 async fn capacity_probe_surfaces_send_and_decode_failures() {
-    let failing = FakeWorker::with(Mode::SystemInfo(info()), true, 0);
+    let failing = FakeWorker::with(Mode::SystemInfo(info()), true);
     let runner = TaskRunner::start(failing, Duration::from_millis(5));
     assert_eq!(
         runner.system_info("worker").await.expect_err("send fails"),

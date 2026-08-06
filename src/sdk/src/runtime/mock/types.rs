@@ -209,7 +209,7 @@ impl MockRuntime {
     /// Script the registry returned by [`Runtime::workers`](crate::runtime::Runtime::workers).
     ///
     /// The worker registry is a separate surface from the snapshot roster — a
-    /// locally-added tiny.place worker is in the former and not the latter —
+    /// locally-added host-link worker is in the former and not the latter —
     /// so views that read both need a mock that can populate them apart.
     pub fn set_workers(&self, workers: Vec<WorkerInfo>) {
         {

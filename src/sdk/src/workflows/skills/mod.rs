@@ -37,6 +37,8 @@ mod types;
 #[cfg(test)]
 mod marker_tests;
 #[cfg(test)]
+mod prune_tests;
+#[cfg(test)]
 mod refresh_tests;
 #[cfg(test)]
 mod registration_tests;

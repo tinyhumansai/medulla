@@ -25,7 +25,7 @@ pub enum Command {
     Login,
     /// Clear stored credentials.
     Logout,
-    /// Launch a coding-agent CLI as a transparent tiny.place-bridged wrapper.
+    /// Launch a coding-agent CLI as a transparent host-link-bridged wrapper.
     Wrapper(HarnessProvider),
     /// Check for / install a newer release (`update [--check]`).
     Update,
@@ -34,7 +34,7 @@ pub enum Command {
     /// Manage the workspace registry (`add`/`list`/`remove`) — the directories
     /// the orchestrator knows about and can place work in.
     Workspace,
-    /// Run the orchestrator hub: relay hosted-backend tasks to tiny.place
+    /// Run the orchestrator hub: relay hosted-backend tasks to host-link
     /// workers over Signal DMs; carries the remaining args.
     Hub,
     /// Author, inspect, and run workflows (`list`/`get`/`create`/`apply-ops`/…).
@@ -120,7 +120,9 @@ pub struct SkillsArgs {
     /// `--dry-run`: report the identical outcome and write nothing.
     pub dry_run: bool,
     /// `--prune` (`sync` only): delete managed skills for workflows that are no
-    /// longer enabled or no longer exist.
+    /// longer enabled or no longer exist, plus any other `medulla-*` skill or
+    /// command with no enabled workflow behind it — a marker this build cannot
+    /// read leaves the slug prefix as the only identity a leftover has.
     pub prune: bool,
     /// `--all` (`uninstall` only): the explicit consent a blanket removal
     /// needs. Without it a bare `uninstall` lists what it would delete and

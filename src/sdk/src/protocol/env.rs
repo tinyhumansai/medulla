@@ -3,10 +3,12 @@
 //!
 //! Every knob the wrapper/daemon read from the process environment resolves
 //! here, as a pure function over an injected `&HashMap<String, String>` so the
-//! precedence matrix is unit-testable and identical across both call sites. The
-//! contract follows the public tiny.place wrapper specification: a
-//! per-provider key always beats the generic (`HARNESS`) key, which beats the
-//! owner fallbacks / provider defaults.
+//! precedence matrix is unit-testable and identical across both call sites.
+//!
+//! Precedence: a per-provider key always beats the generic (`HARNESS`) key,
+//! which beats the owner fallbacks / provider defaults. Within each tier the
+//! `MEDULLA_*` name wins and the deprecated `TINYPLACE_*` spelling is read
+//! directly behind it, so hosts configured before the rename keep working.
 //!
 //! `<P>` is the uppercased provider (`CODEX` / `CLAUDE` / `OPENCODE`).
 
@@ -34,20 +36,46 @@ fn first_env<'a>(env: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a 
         .find(|value| !value.is_empty())
 }
 
-/// `TINYPLACE_<P>_<SUFFIX>` for the given provider.
-fn provider_key(provider: HarnessProvider, suffix: &str) -> String {
-    format!("TINYPLACE_{}_{suffix}", provider.as_str().to_uppercase())
+/// The per-provider keys for `suffix`, highest precedence first:
+/// `MEDULLA_<P>_<SUFFIX>` then the deprecated `TINYPLACE_<P>_<SUFFIX>`.
+///
+/// Both namespaces are read because the `TINYPLACE_*` names are what deployed
+/// hosts and shell profiles already set. Dropping them would not fail loudly —
+/// a worker whose `TINYPLACE_HARNESS_DM_TO` stopped resolving simply runs as a
+/// plain passthrough, owning nothing and serving nobody, which reads as the
+/// harness being broken rather than as a config that needs renaming.
+fn provider_keys(provider: HarnessProvider, suffix: &str) -> [String; 2] {
+    let p = provider.as_str().to_uppercase();
+    [
+        format!("MEDULLA_{p}_{suffix}"),
+        format!("TINYPLACE_{p}_{suffix}"),
+    ]
+}
+
+/// The generic (non-provider) keys for `suffix`, highest precedence first:
+/// `MEDULLA_HARNESS_<SUFFIX>` then the deprecated `TINYPLACE_HARNESS_<SUFFIX>`.
+fn harness_keys(suffix: &str) -> [String; 2] {
+    [
+        format!("MEDULLA_HARNESS_{suffix}"),
+        format!("TINYPLACE_HARNESS_{suffix}"),
+    ]
 }
 
 /// The owner this session forwards envelopes to (and, by default, receives input
-/// from). Order: `TINYPLACE_<P>_DM_TO` > `TINYPLACE_HARNESS_DM_TO` >
-/// `TINYPLACE_OPENHUMAN_OWNER` > `OPENHUMAN_OWNER_AGENT`.
+/// from). Order: `MEDULLA_<P>_DM_TO` > `MEDULLA_HARNESS_DM_TO` >
+/// `MEDULLA_OPENHUMAN_OWNER` > `OPENHUMAN_OWNER_AGENT`, with the deprecated
+/// `TINYPLACE_*` spelling of each read directly behind it.
 pub fn dm_recipient(provider: HarnessProvider, env: &HashMap<String, String>) -> Option<String> {
+    let provider_keys = provider_keys(provider, "DM_TO");
+    let harness_keys = harness_keys("DM_TO");
     first_env(
         env,
         &[
-            &provider_key(provider, "DM_TO"),
-            "TINYPLACE_HARNESS_DM_TO",
+            &provider_keys[0],
+            &provider_keys[1],
+            &harness_keys[0],
+            &harness_keys[1],
+            "MEDULLA_OPENHUMAN_OWNER",
             "TINYPLACE_OPENHUMAN_OWNER",
             "OPENHUMAN_OWNER_AGENT",
         ],
@@ -56,32 +84,36 @@ pub fn dm_recipient(provider: HarnessProvider, env: &HashMap<String, String>) ->
 }
 
 /// The peer whose inbound frames / plain DMs are injected as input. Order:
-/// `TINYPLACE_<P>_RECEIVE_FROM` > `TINYPLACE_HARNESS_RECEIVE_FROM`, then falls
-/// back to the DM recipient.
+/// `MEDULLA_<P>_RECEIVE_FROM` > `MEDULLA_HARNESS_RECEIVE_FROM` (each followed by
+/// its deprecated `TINYPLACE_*` spelling), then falls back to the DM recipient.
 pub fn receive_from(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
     recipient: Option<&str>,
 ) -> Option<String> {
+    let provider_keys = provider_keys(provider, "RECEIVE_FROM");
+    let harness_keys = harness_keys("RECEIVE_FROM");
     first_env(
         env,
         &[
-            &provider_key(provider, "RECEIVE_FROM"),
-            "TINYPLACE_HARNESS_RECEIVE_FROM",
+            &provider_keys[0],
+            &provider_keys[1],
+            &harness_keys[0],
+            &harness_keys[1],
         ],
     )
     .map(str::to_string)
     .or_else(|| recipient.map(str::to_string))
 }
 
-/// Inbound input is enabled unless `TINYPLACE_<P>_RECEIVE` /
-/// `TINYPLACE_HARNESS_RECEIVE` is set to `"0"` (per-provider beats generic).
+/// Inbound input is enabled unless `MEDULLA_<P>_RECEIVE` /
+/// `MEDULLA_HARNESS_RECEIVE` (or their deprecated `TINYPLACE_*` spellings) is
+/// set to `"0"` (per-provider beats generic).
 pub fn receive_enabled(provider: HarnessProvider, env: &HashMap<String, String>) -> bool {
-    for key in [
-        provider_key(provider, "RECEIVE"),
-        "TINYPLACE_HARNESS_RECEIVE".to_string(),
-    ] {
-        if let Some(value) = env.get(&key) {
+    let provider_keys = provider_keys(provider, "RECEIVE");
+    let harness_keys = harness_keys("RECEIVE");
+    for key in provider_keys.iter().chain(harness_keys.iter()) {
+        if let Some(value) = env.get(key) {
             if !value.is_empty() {
                 return value != "0";
             }
@@ -91,12 +123,17 @@ pub fn receive_enabled(provider: HarnessProvider, env: &HashMap<String, String>)
 }
 
 /// Per-provider binary override keys (first non-empty wins), highest precedence
-/// first. Claude also honors the legacy `TINYVERSE_CLAUDE_BIN`.
+/// first. Claude also honors the legacy `TINYVERSE_CLAUDE_BIN`; the
+/// `MEDULLA_*` spellings are deprecated but still read.
 fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
     match provider {
-        HarnessProvider::Claude => &["TINYVERSE_CLAUDE_BIN", "TINYPLACE_CLAUDE_BIN"],
-        HarnessProvider::Codex => &["TINYPLACE_CODEX_BIN"],
-        HarnessProvider::Opencode => &["TINYPLACE_OPENCODE_BIN"],
+        HarnessProvider::Claude => &[
+            "MEDULLA_CLAUDE_BIN",
+            "TINYVERSE_CLAUDE_BIN",
+            "TINYPLACE_CLAUDE_BIN",
+        ],
+        HarnessProvider::Codex => &["MEDULLA_CODEX_BIN", "TINYPLACE_CODEX_BIN"],
+        HarnessProvider::Opencode => &["MEDULLA_OPENCODE_BIN", "TINYPLACE_OPENCODE_BIN"],
         HarnessProvider::Openhuman => &["OPENHUMAN_BIN"],
     }
 }
@@ -166,10 +203,12 @@ pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) ->
     default_bin(provider).to_string()
 }
 
-/// Extra args prepended to the child argv, from `TINYPLACE_<P>_ARGS`
-/// (whitespace-split). Empty / unset yields no args.
+/// Extra args prepended to the child argv, from `MEDULLA_<P>_ARGS` (or the
+/// deprecated `TINYPLACE_<P>_ARGS`), whitespace-split. Empty / unset yields no
+/// args.
 pub fn provider_args(provider: HarnessProvider, env: &HashMap<String, String>) -> Vec<String> {
-    match env.get(&provider_key(provider, "ARGS")) {
+    let keys = provider_keys(provider, "ARGS");
+    match first_env(env, &[&keys[0], &keys[1]]) {
         Some(raw) => raw.split_whitespace().map(str::to_string).collect(),
         None => Vec::new(),
     }
@@ -285,10 +324,12 @@ fn default_sessions_dir(provider: HarnessProvider) -> PathBuf {
 }
 
 /// Resolve the session-transcript directory. Order:
-/// `TINYPLACE_<P>_SESSIONS_DIR` > (claude only) `TINYVERSE_CLAUDE_SESSIONS_DIR` >
-/// `TINYPLACE_HARNESS_SESSIONS_DIR` > provider default.
+/// `MEDULLA_<P>_SESSIONS_DIR` > (claude only) `TINYVERSE_CLAUDE_SESSIONS_DIR` >
+/// `MEDULLA_HARNESS_SESSIONS_DIR` > provider default, with the deprecated
+/// `TINYPLACE_*` spelling of each read directly behind it.
 pub fn sessions_dir(provider: HarnessProvider, env: &HashMap<String, String>) -> PathBuf {
-    let provider_dir = provider_key(provider, "SESSIONS_DIR");
+    let provider_dirs = provider_keys(provider, "SESSIONS_DIR");
+    let harness_dirs = harness_keys("SESSIONS_DIR");
     let tinyverse = if provider == HarnessProvider::Claude {
         "TINYVERSE_CLAUDE_SESSIONS_DIR"
     } else {
@@ -296,7 +337,13 @@ pub fn sessions_dir(provider: HarnessProvider, env: &HashMap<String, String>) ->
     };
     first_env(
         env,
-        &[&provider_dir, tinyverse, "TINYPLACE_HARNESS_SESSIONS_DIR"],
+        &[
+            &provider_dirs[0],
+            &provider_dirs[1],
+            tinyverse,
+            &harness_dirs[0],
+            &harness_dirs[1],
+        ],
     )
     .map(PathBuf::from)
     .unwrap_or_else(|| default_sessions_dir(provider))
@@ -320,22 +367,33 @@ fn timing(
     suffix: &str,
     fallback: u64,
 ) -> u64 {
-    let provider_specific = provider_key(provider, suffix);
-    let generic = format!("TINYPLACE_HARNESS_{suffix}");
-    number_env_or(first_env(env, &[&provider_specific, &generic]), fallback)
+    let provider_specific = provider_keys(provider, suffix);
+    let generic = harness_keys(suffix);
+    number_env_or(
+        first_env(
+            env,
+            &[
+                &provider_specific[0],
+                &provider_specific[1],
+                &generic[0],
+                &generic[1],
+            ],
+        ),
+        fallback,
+    )
 }
 
-/// `TINYPLACE_<P>_SESSION_POLL_MS` / `TINYPLACE_HARNESS_SESSION_POLL_MS` (500).
+/// `MEDULLA_<P>_SESSION_POLL_MS` / `MEDULLA_HARNESS_SESSION_POLL_MS` (500).
 pub fn session_poll_ms(provider: HarnessProvider, env: &HashMap<String, String>) -> u64 {
     timing(provider, env, "SESSION_POLL_MS", DEFAULT_SESSION_POLL_MS)
 }
 
-/// `TINYPLACE_<P>_RECEIVE_POLL_MS` / `TINYPLACE_HARNESS_RECEIVE_POLL_MS` (1500).
+/// `MEDULLA_<P>_RECEIVE_POLL_MS` / `MEDULLA_HARNESS_RECEIVE_POLL_MS` (1500).
 pub fn receive_poll_ms(provider: HarnessProvider, env: &HashMap<String, String>) -> u64 {
     timing(provider, env, "RECEIVE_POLL_MS", DEFAULT_RECEIVE_POLL_MS)
 }
 
-/// `TINYPLACE_<P>_STATUS_HEARTBEAT_MS` / `TINYPLACE_HARNESS_STATUS_HEARTBEAT_MS`
+/// `MEDULLA_<P>_STATUS_HEARTBEAT_MS` / `MEDULLA_HARNESS_STATUS_HEARTBEAT_MS`
 /// (15000).
 pub fn status_heartbeat_ms(provider: HarnessProvider, env: &HashMap<String, String>) -> u64 {
     timing(
@@ -346,7 +404,7 @@ pub fn status_heartbeat_ms(provider: HarnessProvider, env: &HashMap<String, Stri
     )
 }
 
-/// `TINYPLACE_<P>_STATUS_IDLE_MS` / `TINYPLACE_HARNESS_STATUS_IDLE_MS` (30000).
+/// `MEDULLA_<P>_STATUS_IDLE_MS` / `MEDULLA_HARNESS_STATUS_IDLE_MS` (30000).
 pub fn status_idle_ms(provider: HarnessProvider, env: &HashMap<String, String>) -> u64 {
     timing(provider, env, "STATUS_IDLE_MS", DEFAULT_STATUS_IDLE_MS)
 }

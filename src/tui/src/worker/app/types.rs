@@ -4,28 +4,26 @@
 use std::sync::Arc;
 
 use medulla::config::Peer;
-use medulla::contacts::ContactDesk;
 use medulla::protocol::HarnessProvider;
 
 use super::super::pty::PtyManager;
 
-/// The worker TUI's tabs, in order. Number keys 1-4 jump to them.
+/// The worker TUI's tabs, in order. Number keys 1-3 jump to them.
 ///
 /// This is intentionally a subset of the main TUI: the agents doing work, the
-/// master controlling them, the workspace permission boundary, and requests
-/// waiting for approval.
-pub const TABS: [&str; 4] = ["Agents", "Master", "Workspaces", "Requests"];
+/// master controlling them, and the workspace permission boundary.
+///
+/// There is no approval queue: the link has no contact graph, so enrollment is
+/// the only handshake (`docs/host-link-protocol.md` §7) and a peer that holds
+/// the pair key is already admitted.
+pub const TABS: [&str; 3] = ["Agents", "Master", "Workspaces"];
 
 /// Index of the Sessions tab.
 pub const TAB_SESSIONS: usize = 0;
 /// Index of the Master tab.
 pub const TAB_MASTER: usize = 1;
-/// Backwards-compatible internal alias for the old Contacts tab.
-pub const TAB_CONTACTS: usize = TAB_MASTER;
 /// Index of the Workspaces tab.
 pub const TAB_WORKSPACES: usize = 2;
-/// Index of the Requests tab.
-pub const TAB_REQUESTS: usize = 3;
 
 /// How this worker runs the tasks peers send it.
 ///
@@ -96,7 +94,7 @@ pub enum SetupStep {
 pub enum Screen {
     /// The launch step: pick how this worker runs, and on what.
     Setup,
-    /// The running worker: sessions, contacts, requests.
+    /// The running worker: sessions, masters, workspaces.
     Main,
 }
 
@@ -106,8 +104,6 @@ pub enum Screen {
 pub enum Confirm {
     /// Kill the session with this id.
     CloseSession(String),
-    /// Block the peer with this cryptoId.
-    BlockPeer(String),
 }
 
 impl Confirm {
@@ -116,9 +112,6 @@ impl Confirm {
         match self {
             Confirm::CloseSession(id) => {
                 format!("Kill session {id}? Its harness loses unsaved work.  y/n")
-            }
-            Confirm::BlockPeer(peer) => {
-                format!("Block {peer}? It cannot request contact again.  y/n")
             }
         }
     }
@@ -129,16 +122,7 @@ impl Confirm {
 pub enum WorkerCmd {
     /// Quit the TUI (and, being one process, the daemon with it).
     Quit,
-    /// Settle an incoming contact request.
-    ContactOp {
-        /// The requesting peer's cryptoId.
-        agent_id: String,
-        /// Accept, decline, or block.
-        decision: medulla::contacts::ContactDecision,
-    },
-    /// Poll the relay now rather than waiting out the background interval.
-    Refresh,
-    /// Resolve and request contact with a master, then persist it.
+    /// Resolve and connect a master, then persist it.
     ConnectMaster(String),
     /// Send a direct encrypted message to the selected master.
     MessageMaster {
@@ -183,10 +167,7 @@ pub struct WorkerApp {
     pub(super) harness: Option<HarnessProvider>,
     /// Live harness sessions on this machine.
     pub(super) sessions: PtyManager,
-    /// The incoming contact-request queue, when a tiny.place identity is
-    /// configured. `None` renders an explainer rather than an empty list.
-    pub(super) contacts: Option<ContactDesk>,
-    /// This daemon's own tiny.place address, shown so it can be handed to peers.
+    /// This daemon's own link node name, shown so it can be handed to peers.
     pub(super) agent_id: Option<String>,
     /// Which harnesses were found on PATH.
     pub(super) providers: Vec<HarnessProvider>,
@@ -194,15 +175,11 @@ pub struct WorkerApp {
     pub(super) tab: usize,
     /// Cursor in the session list.
     pub(super) session_index: usize,
-    /// Cursor in the contacts list.
-    pub(super) contact_index: usize,
-    /// Cursor in the requests list.
-    pub(super) request_index: usize,
     /// Cursor in the configured master list.
     pub(super) master_index: usize,
     /// Cursor in the workspace allowlist.
     pub(super) workspace_index: usize,
-    /// Public master records persisted in `[tinyplace].peers`.
+    /// Public master records persisted in `[link].peers`.
     pub(super) masters: Vec<Peer>,
     /// Workspace roots this worker advertises to its orchestrator.
     pub(super) workspaces: Vec<String>,
@@ -212,7 +189,7 @@ pub struct WorkerApp {
     pub(super) config_path: std::path::PathBuf,
     /// Directory holding this worker's wallet-level credentials.
     pub(super) credential_dir: std::path::PathBuf,
-    /// Resolved relay endpoint.
+    /// Resolved link forwarder endpoint.
     pub(super) endpoint: Option<String>,
     /// Shared visual roles used by every TUI component.
     pub(super) theme: crate::ui::theme::Theme,

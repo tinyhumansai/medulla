@@ -2,18 +2,16 @@
 //!
 //! The worker TUI is an **observer**, not a terminal multiplexer. It shows the
 //! peer-driven claude/codex sessions as they run, and lets the operator manage
-//! contacts and requests — but it never types into a session and never opens
+//! masters and workspaces — but it never types into a session and never opens
 //! one. Peer work is what opens sessions; the operator watches. So the TUI owns
 //! the keyboard at all times, and there is no attach, no detach chord, and no
 //! key-forwarding: every key drives the chrome.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use medulla::contacts::ContactDecision;
-
 use super::types::{
     Confirm, ExecutionMode, Prompt, PromptKind, Screen, SetupStep, WorkerApp, WorkerCmd,
-    EXECUTION_MODES, TABS, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
+    EXECUTION_MODES, TABS, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES,
 };
 use crate::ui::composer::{edit_prompt, PromptAction};
 
@@ -49,16 +47,9 @@ impl WorkerApp {
             // Available from every tab: the address is what an orchestrator
             // needs, and hunting for the right tab to copy it would be silly.
             KeyCode::Char('y') => self.copy_address(),
-            // Waiting out a background interval to learn whether anything is
-            // arriving is not much of an answer.
-            KeyCode::Char('r') => {
-                self.set_status("Checking the relay…");
-                return Some(WorkerCmd::Refresh);
-            }
-
             KeyCode::Tab => self.set_tab((self.tab + 1) % TABS.len()),
             KeyCode::BackTab => self.set_tab((self.tab + TABS.len() - 1) % TABS.len()),
-            KeyCode::Char(c @ '1'..='4') => {
+            KeyCode::Char(c @ '1'..='3') => {
                 self.set_tab(c as usize - '1' as usize);
             }
 
@@ -127,7 +118,6 @@ impl WorkerApp {
     fn on_tab_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
         match self.tab {
             TAB_SESSIONS => self.on_sessions_key(key),
-            TAB_REQUESTS => self.on_requests_key(key),
             TAB_MASTER => self.on_master_key(key),
             TAB_WORKSPACES => self.on_workspaces_key(key),
             _ => None,
@@ -203,46 +193,9 @@ impl WorkerApp {
         }
     }
 
-    /// Requests tab: accept, decline, block, cycle policy.
-    fn on_requests_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
-        // Policy is a property of the desk, not of any one request, so it stays
-        // reachable when the queue is empty — which is exactly when an operator
-        // wants to change it, since the policy is why nothing is queued.
-        if key.code == KeyCode::Char('p') {
-            self.cycle_policy();
-            return None;
-        }
-        let Some(request) = self.selected_request() else {
-            if matches!(key.code, KeyCode::Char('a' | 'x' | 'B')) {
-                self.set_status("No pending request selected");
-            }
-            return None;
-        };
-        match key.code {
-            KeyCode::Char('a') | KeyCode::Enter => Some(WorkerCmd::ContactOp {
-                agent_id: request.agent_id,
-                decision: ContactDecision::Accept,
-            }),
-            KeyCode::Char('x') => Some(WorkerCmd::ContactOp {
-                agent_id: request.agent_id,
-                decision: ContactDecision::Decline,
-            }),
-            // Blocking is the one decision here that is not casually undone.
-            KeyCode::Char('B') => {
-                self.arm(Confirm::BlockPeer(request.agent_id));
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Master tab: pair a controller or send it an encrypted message.
+    /// Master tab: connect a controller or send it an encrypted message.
     fn on_master_key(&mut self, key: KeyEvent) -> Option<WorkerCmd> {
         match key.code {
-            KeyCode::Char('p') => {
-                self.cycle_policy();
-                None
-            }
             KeyCode::Char('a') => {
                 self.prompt = Some(Prompt::new(PromptKind::ConnectMaster, "Connect a master"));
                 None
@@ -292,10 +245,6 @@ impl WorkerApp {
                         }
                         None
                     }
-                    Confirm::BlockPeer(agent_id) => Some(WorkerCmd::ContactOp {
-                        agent_id,
-                        decision: ContactDecision::Block,
-                    }),
                 }
             }
             // Anything else declines: a destructive action should need a
@@ -306,25 +255,6 @@ impl WorkerApp {
                 None
             }
         }
-    }
-
-    /// Cycle the contact admission policy.
-    fn cycle_policy(&mut self) {
-        let Some(desk) = &self.contacts else {
-            self.set_status("No tiny.place identity — contact policy is unavailable");
-            return;
-        };
-        let policy = desk.cycle_policy();
-        self.set_status(format!(
-            "Admission → {} ({})",
-            policy.as_str(),
-            match policy {
-                medulla::contacts::AdmissionPolicy::Manual => "every request waits for you",
-                medulla::contacts::AdmissionPolicy::Allowlist =>
-                    "configured peers admitted, the rest queued",
-                medulla::contacts::AdmissionPolicy::All => "every peer admitted automatically",
-            }
-        ));
     }
 
     /// Move the active tab's list cursor.
@@ -339,10 +269,7 @@ impl WorkerApp {
                 let len = self.workspaces.len();
                 (&mut self.workspace_index, len)
             }
-            _ => {
-                let len = self.pending_requests().len();
-                (&mut self.request_index, len)
-            }
+            _ => return,
         };
         *index = crate::ui::selection::moved(*index, len, up);
     }

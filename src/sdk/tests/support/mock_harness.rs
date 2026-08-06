@@ -6,7 +6,7 @@
 //! parse for each provider — claude `-p --output-format stream-json`, codex
 //! `exec --json`, and opencode `run --format json`. The daemon's real spawn path
 //! ([`medulla::daemon::providers::run_provider_task`]) runs them through the
-//! `TINYPLACE_*_BIN` env overrides.
+//! `MEDULLA_*_BIN` env overrides.
 //!
 //! A mock is a sequence of high-level [`Step`]s (thinking, agent messages, tool
 //! call/result pairs, provider errors, garbage lines) plus a terminal behavior

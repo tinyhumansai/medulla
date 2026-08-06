@@ -7,9 +7,9 @@
 //! Two execution modes are exercised:
 //! - injected `run_task` (deterministic, for capacity/duplicate/drain), and
 //! - the REAL spawn path ([`run_provider_task`]) driving fake provider CLIs
-//!   (shell scripts emitting realistic JSONL) via `TINYPLACE_*_BIN` overrides.
+//!   (shell scripts emitting realistic JSONL) via `MEDULLA_*_BIN` overrides.
 //!
-//! Nothing touches the network or tiny.place, and no real claude/codex/opencode
+//! Nothing touches the network or a remote forwarder, and no real claude/codex/opencode
 //! binary is required.
 //!
 //! The suite is split across a sibling `e2e_daemon/` directory so no file

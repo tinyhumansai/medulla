@@ -55,11 +55,8 @@ fn run(args: &[&str], cwd: &std::path::Path, home: &std::path::Path) -> Output {
         .args(args)
         .current_dir(cwd)
         .env("MEDULLA_HOME", home)
-        .env(
-            "TINYPLACE_CLAUDE_SESSIONS_DIR",
-            home.join("claude-sessions"),
-        )
-        .env("TINYPLACE_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
+        .env("MEDULLA_CLAUDE_SESSIONS_DIR", home.join("claude-sessions"))
+        .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("MEDULLA_BACKEND_URL")

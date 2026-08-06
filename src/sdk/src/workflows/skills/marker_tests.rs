@@ -277,17 +277,31 @@ fn a_file_that_is_not_utf8_is_left_alone_without_aborting_the_run() {
     fs::write(&rogue_skill, [0xff, 0xfe, 0x00, 0x9f]).unwrap();
     let rogue_command = home.path().join(".claude/commands/medulla-rogue.md");
     fs::write(&rogue_command, [0xe2, 0x28, 0xa1]).unwrap();
+    // The same bytes outside the `medulla-` namespace, which no rule here
+    // reaches.
+    let neighbour = skill_path(SkillTarget::Claude, home.path(), "handwritten");
+    fs::create_dir_all(neighbour.parent().unwrap()).unwrap();
+    fs::write(&neighbour, [0xff, 0xfe, 0x00, 0x9f]).unwrap();
 
     // Scanning, syncing, and uninstalling all complete rather than failing with
-    // `InvalidData`, and the unreadable files keep their bytes.
+    // `InvalidData`.
     let found = installed(&options).unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].workflow_id, "babysit");
 
+    // A prune retires the two unreadable files *in our namespace* — no workflow
+    // is behind either slug, and the prefix is the only identity a file we
+    // cannot decode has left. The neighbour keeps its bytes.
     let synced = sync(&[summary("babysit")], &options, true).unwrap();
-    assert_eq!(synced.count(FileAction::Removed), 0, "{synced:?}");
-    assert_eq!(fs::read(&rogue_skill).unwrap(), [0xff, 0xfe, 0x00, 0x9f]);
-    assert_eq!(fs::read(&rogue_command).unwrap(), [0xe2, 0x28, 0xa1]);
+    assert_eq!(synced.count(FileAction::Removed), 2, "{synced:?}");
+    assert!(!rogue_skill.exists());
+    assert!(!rogue_command.exists());
+    assert_eq!(fs::read(&neighbour).unwrap(), [0xff, 0xfe, 0x00, 0x9f]);
+
+    // Put them back: what follows is about writing onto bytes we cannot read.
+    fs::create_dir_all(rogue_skill.parent().unwrap()).unwrap();
+    fs::write(&rogue_skill, [0xff, 0xfe, 0x00, 0x9f]).unwrap();
+    fs::write(&rogue_command, [0xe2, 0x28, 0xa1]).unwrap();
 
     let removed = uninstall(&["babysit".to_string()], &options).unwrap();
     assert_eq!(removed.count(FileAction::Removed), 2, "{removed:?}");

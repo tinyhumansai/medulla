@@ -25,7 +25,7 @@ pub struct HubWorker {
     /// `hosts[]` block. Blank is omitted from both, which is what leaves the
     /// backend's `host:${socketId}` synthesis in place for a peer nobody placed.
     pub host_id: String,
-    /// tiny.place address (base58 cryptoId or `@handle`).
+    /// link address (node name or `@handle`).
     ///
     /// Not an identity: N declared agents on one machine share one address, and
     /// [`id`](Self::id) is what distinguishes them.

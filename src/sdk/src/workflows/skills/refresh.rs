@@ -37,6 +37,14 @@
 //! And within one workspace the whole load-write-prune pass runs under a
 //! cross-process file lock, so a stale listing cannot prune a skill a newer
 //! pass has just written.
+//!
+//! The lock ends when the pass does, though, and the child that triggered it
+//! has not started reading yet — so a later refresh can be rewriting a file
+//! while an earlier spawn's harness is walking the directory. That is why the
+//! writes are a rename over the target rather than a truncate-and-fill (see
+//! `write_atomically` in [`install`](super::install)): the reader sees one whole
+//! version or the other, whichever side of the rename it lands on, and never a
+//! half-written skill.
 
 use std::collections::HashMap;
 use std::io;
@@ -75,13 +83,41 @@ pub fn refresh_managed(
     cwd: &Path,
 ) -> Vec<String> {
     if let Some(target) = managed_target(provider) {
-        if let Err(source) = sync_managed(target, env, cwd) {
+        if let Err(source) = without_stalling_the_runtime(|| sync_managed(target, env, cwd)) {
             tracing::warn!(
                 "could not refresh the managed skills; the session keeps the ones already installed: {source}"
             );
         }
     }
     spawn_args(provider, env, cwd)
+}
+
+/// Runs a blocking filesystem pass without holding up whatever else the calling
+/// Tokio worker was going to run.
+///
+/// Every door into [`refresh_managed`] is reached from an async task — the
+/// headless executor's `run_provider_attempt` awaits it directly, and the TUI
+/// reaches it from `session_for`, which is synchronous only because the options
+/// it borrows are `!Sync` and so cannot be held across an await. The pass itself
+/// is normally a handful of file reads, but [`RefreshLock`] blocks while another
+/// Medulla process holds the same workspace's lock, and there is no bound on how
+/// long that is. Blocking a worker thread for it delays unrelated task events,
+/// cancellation, and watchdog timers on that thread.
+///
+/// [`block_in_place`](tokio::task::block_in_place) is the tool that fits the
+/// shape of these callers: it hands the worker's remaining tasks to another
+/// thread for the duration, without requiring an await point the TUI path cannot
+/// offer. It panics on a current-thread runtime and is unavailable outside one
+/// altogether, so both of those fall through to calling directly — a
+/// current-thread runtime has no siblings to starve, and outside a runtime there
+/// is nothing to protect.
+fn without_stalling_the_runtime<T>(pass: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(pass)
+        }
+        _ => pass(),
+    }
 }
 
 /// Re-render the store into `target`'s managed directory, pruning what no

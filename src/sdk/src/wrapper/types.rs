@@ -27,7 +27,7 @@ pub struct PtyRequest {
 /// what keeps the SDK free of any terminal dependency.
 pub struct PtyHarness {
     /// Sink for bytes typed into the child: both the operator's own keystrokes
-    /// (forwarded by the spawner) and messages injected from tiny.place.
+    /// (forwarded by the spawner) and messages injected over the host link.
     pub input: mpsc::UnboundedSender<Vec<u8>>,
     /// Resolves with the child's shell-style exit code once it exits.
     pub done: oneshot::Receiver<i32>,
@@ -95,7 +95,7 @@ pub struct WrapperConfig {
     pub env: HashMap<String, String>,
     /// The working directory the child runs in and the session is anchored to.
     pub cwd: String,
-    /// Pure passthrough: never activate the tiny.place bridge.
+    /// Pure passthrough: never activate the host-link bridge.
     pub no_bridge: bool,
     /// Override the generated wrapper session id (deterministic tests).
     pub session_id: Option<String>,

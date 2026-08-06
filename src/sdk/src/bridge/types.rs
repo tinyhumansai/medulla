@@ -100,9 +100,6 @@ pub trait Bridge: Send + Sync {
     /// Destructively drain up to `limit` inbound messages.
     async fn drain_inbox(&self, limit: i64) -> Vec<InboundMessage>;
 
-    /// Establish permission to communicate with `peer`.
-    async fn request_contact(&self, peer: &str) -> Result<(), String>;
-
     /// Resolve a human-readable peer name to its bridge address.
     async fn resolve_handle(&self, _name: &str) -> Option<String> {
         None
@@ -111,15 +108,12 @@ pub trait Bridge: Send + Sync {
     /// Whether `address` is served by this device rather than a remote peer.
     ///
     /// Callers use this to skip machinery that only makes sense across a
-    /// network: address-shape validation, contact edges, session resets. It
+    /// network: address-shape validation, session resets. It
     /// defaults to `false` so a transport that has no device-local scope — every
     /// remote one — is never mistaken for having one.
     async fn is_device_local(&self, _address: &str) -> bool {
         false
     }
-
-    /// Whether `peer` is ready to receive messages.
-    async fn contact_accepted(&self, peer: &str) -> bool;
 
     /// Reset transport-specific session state for `peer`.
     async fn reset_session(&self, peer: &str);
@@ -203,13 +197,6 @@ impl Bridge for BridgeTransport {
         }
     }
 
-    async fn request_contact(&self, peer: &str) -> Result<(), String> {
-        match self {
-            Self::Local(bridge) => bridge.request_contact(peer).await,
-            Self::Link(bridge) => bridge.request_contact(peer).await,
-        }
-    }
-
     async fn resolve_handle(&self, name: &str) -> Option<String> {
         match self {
             Self::Local(bridge) => bridge.resolve_handle(name).await,
@@ -221,13 +208,6 @@ impl Bridge for BridgeTransport {
         match self {
             Self::Local(bridge) => bridge.is_device_local(address).await,
             Self::Link(bridge) => bridge.is_device_local(address).await,
-        }
-    }
-
-    async fn contact_accepted(&self, peer: &str) -> bool {
-        match self {
-            Self::Local(bridge) => bridge.contact_accepted(peer).await,
-            Self::Link(bridge) => bridge.contact_accepted(peer).await,
         }
     }
 

@@ -107,10 +107,10 @@ pub struct OpenHumanRuntime {
     /// An `AtomicUsize` rather than a lock: it is written from the poll task and
     /// read from the render path, which must never block on the poller.
     poll_failures: Arc<std::sync::atomic::AtomicUsize>,
-    /// The tiny.place hub handle, once the hub has connected.
+    /// The hub handle, once the hub has connected.
     ///
     /// The worker surface — the roster, its activity, the watched screens and
-    /// every mutation — is the hub's, not the core's: tiny.place peers are this
+    /// every mutation — is the hub's, not the core's: host-link peers are this
     /// device's business and never reach the orchestration backend. Without it
     /// the Workers tab reads empty and, worse, its mutations inherit the trait's
     /// no-op success.
@@ -148,7 +148,7 @@ impl OpenHumanRuntime {
         Self::with_hub(core, HubSlot::default())
     }
 
-    /// Wrap a core and share the slot the tiny.place hub fills once connected.
+    /// Wrap a core and share the slot the hub fills once connected.
     ///
     /// The slot is passed empty at construction and filled later: the hub needs
     /// a signed-in session to connect, which is only established after the

@@ -106,7 +106,7 @@ fn lane_lines_groups_agent_tasks_with_headers() {
             contract: None,
         },
     )];
-    let lanes = derive_agent_lanes(&events, "TINYPLACE", &roster);
+    let lanes = derive_agent_lanes(&events, "MEDULLA", &roster);
     let dev = lanes.iter().find(|l| l.key == "agent:dev").unwrap();
     let lines = lane_lines(Some(dev), 60);
     // A per-task header divider precedes the turn body.

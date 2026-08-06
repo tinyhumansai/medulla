@@ -34,7 +34,7 @@ fn render(screen: &mut OnboardingScreen) -> String {
 
 #[test]
 fn renders_step_one_with_prefilled_name() {
-    let mut s = OnboardingScreen::new("ada@box/10.0.0.4", None, "https://api.tiny.place");
+    let mut s = OnboardingScreen::new("ada@box/10.0.0.4", None, "https://api.tinyhumans.ai");
     let out = render(&mut s);
     assert!(out.contains("MEDULLA WORKER"), "branding: {out}");
     assert!(out.contains("first-run registration"), "subtitle: {out}");
@@ -44,7 +44,11 @@ fn renders_step_one_with_prefilled_name() {
 
 #[test]
 fn full_happy_path_registers_with_owner() {
-    let mut s = OnboardingScreen::new("worker-1", Some("@lead".into()), "https://api.tiny.place");
+    let mut s = OnboardingScreen::new(
+        "worker-1",
+        Some("@lead".into()),
+        "https://api.tinyhumans.ai",
+    );
     // Step 1: accept the name → LoadIdentity.
     let cmd = s.handle_key(key(KeyCode::Enter));
     assert_eq!(
@@ -53,7 +57,7 @@ fn full_happy_path_registers_with_owner() {
             name: "worker-1".into()
         })
     );
-    assert!(render(&mut s).contains("setting up the tiny.place identity"));
+    assert!(render(&mut s).contains("setting up the host-link identity"));
 
     // Identity resolves → owner step, address + prefilled env owner shown.
     s.apply(OnboardingEvent::IdentityReady {
@@ -72,7 +76,10 @@ fn full_happy_path_registers_with_owner() {
     assert!(out.contains("Step 3/3"), "confirm step: {out}");
     assert!(out.contains("worker-1"), "name in summary: {out}");
     assert!(out.contains("@lead"), "owner in summary: {out}");
-    assert!(out.contains("api.tiny.place"), "endpoint in summary: {out}");
+    assert!(
+        out.contains("api.tinyhumans.ai"),
+        "endpoint in summary: {out}"
+    );
 
     // Finish.
     s.handle_key(key(KeyCode::Enter));

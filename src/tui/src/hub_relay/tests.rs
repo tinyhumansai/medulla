@@ -308,7 +308,7 @@ fn a_roster_remembered_from_a_hosting_run_is_dropped_when_hosting_is_off() {
     // The regression: a roster saved by an older build (or any run that wrote
     // the entry) would keep advertising `this-device` after `MEDULLA_HOST=0`.
     // With no local endpoint bound, the router finds no match and sends its
-    // tasks over tiny.place to a name no relay can resolve.
+    // tasks over the host link to a name no relay can resolve.
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();
     // Write it the way a build without the filter would have.

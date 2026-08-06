@@ -238,7 +238,7 @@ impl fmt::Debug for NodeState {
 /// An exclusive hold on a node's identity directory.
 ///
 /// The lock is an advisory whole-file lock on `<home>/link/node.lock`, the same
-/// construction the tiny.place identity bootstrap uses: it lives as long as this
+/// construction the host-link identity bootstrap uses: it lives as long as this
 /// guard, and the OS releases it when the holding process dies, so a crashed
 /// endpoint leaves its identity immediately reclaimable without a pidfile dance.
 ///

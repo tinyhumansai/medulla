@@ -32,6 +32,6 @@ pub(super) fn installed_bin() -> String {
 pub(super) fn env_with_only_claude() -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
+        ("MEDULLA_CLAUDE_BIN".to_string(), installed_bin()),
     ])
 }

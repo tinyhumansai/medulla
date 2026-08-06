@@ -29,12 +29,12 @@ impl MockProvider {
         }
     }
 
-    /// The `TINYPLACE_*_BIN` override key the daemon honors for this provider.
+    /// The `MEDULLA_*_BIN` override key the daemon honors for this provider.
     pub fn bin_env(self) -> &'static str {
         match self {
-            MockProvider::Claude => "TINYPLACE_CLAUDE_BIN",
-            MockProvider::Codex => "TINYPLACE_CODEX_BIN",
-            MockProvider::Opencode => "TINYPLACE_OPENCODE_BIN",
+            MockProvider::Claude => "MEDULLA_CLAUDE_BIN",
+            MockProvider::Codex => "MEDULLA_CODEX_BIN",
+            MockProvider::Opencode => "MEDULLA_OPENCODE_BIN",
         }
     }
 }

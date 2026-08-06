@@ -93,21 +93,32 @@ fn the_managed_scope_resolves_under_the_medulla_home_not_the_operators() {
     );
     env.insert("HOME".to_string(), "/home/op".to_string());
 
-    let root = scope_root(SkillScope::Managed, &env, Path::new("/work/repo"));
-    assert_eq!(root, managed_root(&env));
+    let repo = Path::new("/work/repo");
+    let root = scope_root(SkillScope::Managed, &env, repo);
+    assert_eq!(root, managed_root(&env, repo));
     assert!(
         root.starts_with(home.path()),
         "the managed root belongs to Medulla, not the operator: {}",
         root.display()
     );
 
+    // And it is per workspace, because the catalog it renders is: a store
+    // discovered for a directory reads that directory's `.medulla/workflows`
+    // too, so one shared root would let two projects overwrite and prune each
+    // other's skills.
+    assert_ne!(
+        root,
+        managed_root(&env, Path::new("/work/other")),
+        "two workspaces must not share a managed root"
+    );
+
     // Each harness gets its own directory, so the path handed to one harness
     // never exposes another's files. Laid out inside like a project root, which
     // is what makes --add-dir find it.
-    let claude = managed_dir(SkillTarget::Claude, &env);
+    let claude = managed_dir(SkillTarget::Claude, &env, repo);
     assert_eq!(claude, root.join("claude-skills"));
     assert_eq!(
-        managed_dir(SkillTarget::Codex, &env),
+        managed_dir(SkillTarget::Codex, &env, repo),
         root.join("codex-skills")
     );
     assert_eq!(
@@ -129,13 +140,15 @@ fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
         home.path().display().to_string(),
     );
     let provider = crate::protocol::HarnessProvider::Claude;
+    let cwd = TempDir::new().unwrap();
+    let cwd = cwd.path();
 
     // Nothing installed yet: the argv is untouched. Granting a session access to
     // a directory that holds nothing buys nothing and shows up in the operator's
     // transcript as an unexplained extra directory.
-    assert!(spawn_args(provider, &env).is_empty());
+    assert!(spawn_args(provider, &env, cwd).is_empty());
 
-    let root = managed_root(&env);
+    let root = managed_root(&env, cwd);
     let summary = summary("babysit", "Watch a PR.");
     install(
         &[summary],
@@ -151,10 +164,10 @@ fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
 
     // The install lands in the harness's own directory, and that directory —
     // not the shared root — is what the session is given.
-    let claude = managed_dir(SkillTarget::Claude, &env);
+    let claude = managed_dir(SkillTarget::Claude, &env, cwd);
     assert!(skill_path(SkillTarget::Claude, &claude, "medulla-babysit").is_file());
     assert_eq!(
-        spawn_args(provider, &env),
+        spawn_args(provider, &env, cwd),
         vec!["--add-dir".to_string(), claude.display().to_string()],
         "Claude loads .claude/skills from an --add-dir directory; that flag is the \
          only spelling that does it"
@@ -162,7 +175,7 @@ fn a_spawned_claude_is_pointed_at_the_managed_root_only_once_it_holds_skills() {
 
     // Codex has no equivalent flag, so it gets nothing rather than a flag its
     // CLI would reject.
-    assert!(spawn_args(crate::protocol::HarnessProvider::Codex, &env).is_empty());
+    assert!(spawn_args(crate::protocol::HarnessProvider::Codex, &env, cwd).is_empty());
 }
 
 #[test]

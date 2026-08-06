@@ -265,11 +265,26 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
     // link identity for the life of the process: a second `Link` on the same
     // node would draw sequences from a second counter under one AEAD key, which
     // reuses nonces (protocol §3.1).
-    let enrolled_node_id = medulla_link::keys::read_node_state(&medulla_link::keys::node_path(
+    let enrolled = medulla_link::keys::read_node_state(&medulla_link::keys::node_path(
         std::path::Path::new(&link_config.state_dir),
     ))
-    .ok()
-    .map(|state| state.node_id.to_string());
+    .ok();
+    let enrolled_node_id = enrolled.as_ref().map(|state| state.node_id.to_string());
+    // What the datagrams actually go to. The forwarder key is issued *with* the
+    // endpoint at enrollment, so a host cannot be re-pointed at another
+    // forwarder by editing config — only by enrolling again — and the transport
+    // is right to keep using `node.json`. What was wrong is reporting
+    // `link.forwarderUrl` as though it were the live forwarder: an operator who
+    // moved `backend.baseUrl` (or set `MEDULLA_STAGING` / `MEDULLA_API_URL`)
+    // then read the new deployment back off a screen whose datagrams were still
+    // going to the old one. Reporting the enrolled endpoint makes that drift
+    // visible as the mismatch it is. Only an unenrolled host — which has no
+    // endpoint to report — falls back to the configured URL.
+    let reported_endpoint = enrolled
+        .as_ref()
+        .map(|state| state.forwarder_endpoint.clone())
+        .filter(|endpoint| !endpoint.trim().is_empty())
+        .unwrap_or_else(|| link_config.forwarder_url.clone());
     let transport =
         match medulla_link::Link::connect(medulla_link::LinkConfig::new(&link_config.state_dir))
             .await

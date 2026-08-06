@@ -96,14 +96,25 @@ pub fn refresh_managed(
 /// with it. When the load reports any error the pass installs without pruning,
 /// which leaves a stale skill behind and is the cheaper of the two mistakes.
 ///
+/// The load, the writes, and the prune all happen under one exclusive lock on
+/// the workspace's managed root, so two spawns racing each other serialize
+/// rather than interleave. Without it the losing pass could scan the directory
+/// with a listing taken before the winner's write and delete the skill it had
+/// just installed — and the operator would see a workflow they had just
+/// authored missing from the session that came up a moment later.
+///
 /// # Errors
 ///
-/// Propagates filesystem errors from the sync.
+/// Propagates filesystem errors from the sync, and from creating or locking the
+/// managed root.
 pub fn sync_managed(
     target: SkillTarget,
     env: &HashMap<String, String>,
     cwd: &Path,
 ) -> io::Result<InstallReport> {
+    let root = managed_root(env, cwd);
+    let _guard = RefreshLock::acquire(&root)?;
+
     let report = FileWorkflowStore::discover(env, cwd).load();
     let workflows: Vec<_> = report
         .workflows
@@ -113,11 +124,81 @@ pub fn sync_managed(
     let opts = InstallOptions {
         targets: vec![target],
         scope: SkillScope::Managed,
-        root: managed_root(env),
+        root,
         with_commands: false,
         dry_run: false,
     };
-    sync(&workflows, &opts, report.errors.is_empty())
+    let mut installed = sync(&workflows, &opts, report.errors.is_empty())?;
+    installed.files.extend(retire_unscoped(target, env)?.files);
+    Ok(installed)
+}
+
+/// Removes what a pre-0.9 release left in the unscoped managed root.
+///
+/// That directory is no longer named by any `--add-dir`, so anything still in
+/// it is read by nobody and would sit in the operator's Medulla home forever.
+/// Expressed as a prune against an empty catalog so it goes through the same
+/// marker discipline as every other removal: a file Medulla did not generate is
+/// left exactly where it is.
+///
+/// Idempotent and safe to race — removing an already-removed file is not an
+/// error — so it needs no lock of its own even though the directory is shared
+/// by every workspace.
+fn retire_unscoped(
+    target: SkillTarget,
+    env: &HashMap<String, String>,
+) -> io::Result<InstallReport> {
+    sync(
+        &[],
+        &InstallOptions {
+            targets: vec![target],
+            scope: SkillScope::Managed,
+            root: legacy_managed_root(env),
+            with_commands: false,
+            dry_run: false,
+        },
+        true,
+    )
+}
+
+/// An exclusive claim on one workspace's managed skills, released on drop.
+///
+/// A lock *file* rather than a lock on one of the skill files, because the
+/// thing being serialized is the whole directory: which files should exist is
+/// exactly what two passes can disagree about. It sits at the managed root,
+/// above the `<harness>-skills` directories the scan walks, so it is never
+/// mistaken for a skill.
+struct RefreshLock {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl RefreshLock {
+    /// Blocks until no other process is refreshing this root.
+    ///
+    /// Blocking rather than try-and-skip: the loser of the race still needs the
+    /// directory to be current before it hands the path to a harness, and the
+    /// pass it is waiting on is a handful of file reads.
+    fn acquire(root: &Path) -> io::Result<Self> {
+        std::fs::create_dir_all(root)?;
+        let path = root.join(".refresh.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)?;
+        file.lock_exclusive()?;
+        Ok(Self { file, path })
+    }
+}
+
+impl Drop for RefreshLock {
+    fn drop(&mut self) {
+        if let Err(source) = FileExt::unlock(&self.file) {
+            tracing::warn!(path = %self.path.display(), "failed to release skill refresh lock: {source}");
+        }
+    }
 }
 
 /// The managed directory a spawned `provider` will actually read, if any.

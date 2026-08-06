@@ -60,6 +60,13 @@ pub fn null_sink() -> WorkEventSink {
 /// *run* — which step is active, what settled — and arrives only when a step
 /// finishes. This is the harness talking while a step is still going, which is
 /// the half a progress view is silent about without it.
+///
+/// Called on the task forwarding the harness's status stream, once per frame
+/// and as fast as the harness emits. An implementation must not block or the
+/// step's own progress stalls behind it: hand the frame to a channel and let
+/// the reader coalesce, the way
+/// [`RunReporter::progress_sink`](crate::workflows::RunReporter::progress_sink)
+/// does.
 pub type NodeProgressSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// One node's place in the plan.

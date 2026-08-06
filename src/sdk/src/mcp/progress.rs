@@ -66,7 +66,19 @@ impl Progress {
             token,
             outbound: outbound?.clone(),
             sent: Arc::new(AtomicU64::new(0)),
+            active: Arc::new(AtomicBool::new(true)),
         })
+    }
+
+    /// Stop this token from sending any further notifications.
+    ///
+    /// Call once the request that owns the token has itself answered — a
+    /// bounded wait ([`crate::workflows::ops::Wait::Until`]) that expired
+    /// while the run kept going, in particular. The client's call is closed;
+    /// a notification with its token after that has nothing to reset the idle
+    /// timer on and nothing the client can correlate it with.
+    pub(crate) fn deactivate(&self) {
+        self.active.store(false, Ordering::Relaxed);
     }
 
     /// Report one step of progress, with a human-readable line for the client.

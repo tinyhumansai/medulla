@@ -315,6 +315,16 @@ reports a document it could not parse, pruning is suspended for that pass. An
 unparseable file is simply absent from the listing, and pruning on that would
 delete a good skill because of an unrelated broken edit.
 
+Two spawns can also happen at once — a worker and a task frame coming up
+together, or two sessions opened in the same checkout. Within one workspace the
+whole load-write-prune pass runs under an exclusive lock on that workspace's
+root (`.refresh.lock`), so a pass working from a listing taken before another
+pass's write cannot prune the skill that write just installed. Releases up to
+0.8 wrote to `<medulla home>/<harness>-skills` with no scope and no lock; a
+refresh retires whatever it finds still sitting there, under the same marker
+discipline as every other removal, since nothing points a harness at it any
+more.
+
 Writing it by hand still works, and is what a scripted setup wants:
 
 ```sh

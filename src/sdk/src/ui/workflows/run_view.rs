@@ -153,7 +153,10 @@ pub fn value_text(value: &serde_json::Value) -> String {
         .then(|| value.get("preview").and_then(serde_json::Value::as_str))
         .flatten()
     {
-        return preview.to_string();
+        // The preview is a prefix of the *serialized* value, so a string's
+        // preview opens with the quote JSON wrote — the same literalism this
+        // function exists to avoid on an unbounded string.
+        return preview.strip_prefix('"').unwrap_or(preview).to_string();
     }
     match value {
         serde_json::Value::String(text) => text.clone(),

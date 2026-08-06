@@ -167,7 +167,11 @@ impl PtyManager {
         let Some(text) = handle.take_clipboard() else {
             return;
         };
-        let tx = self.inner.clipboard_tx.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = self
+            .inner
+            .clipboard_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _ = tx.send(text);
     }
 

@@ -5,8 +5,8 @@
 //! read for the same reason a run record is: to work out what happened and go
 //! back from it.
 
-pub mod view;
 mod types;
+pub mod view;
 
 #[cfg(test)]
 mod tests;

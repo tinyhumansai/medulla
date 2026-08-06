@@ -40,6 +40,9 @@ use crate::harness_work::kinds;
 /// observer should not have to know which.
 pub type WorkEventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
+/// A best-effort durable copy of the completed steps in a still-running run.
+pub(crate) type StepSnapshot = Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>;
+
 /// A sink that discards everything, for runs nobody is watching.
 pub fn null_sink() -> WorkEventSink {
     Arc::new(|_, _| {})
@@ -83,7 +86,7 @@ pub struct WorkflowRunObserver {
     /// The workflow this run belongs to, used only for event context.
     workflow_id: String,
     /// Optional durable mirror for steps that finish before the run settles.
-    step_snapshot: Option<Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>>,
+    step_snapshot: Option<StepSnapshot>,
 }
 
 impl WorkflowRunObserver {
@@ -121,7 +124,7 @@ impl WorkflowRunObserver {
     /// Add a sink for completed-step snapshots.
     pub(crate) fn with_step_snapshot(
         mut self,
-        snapshot: Option<Arc<dyn Fn(&[crate::workflows::RunStep]) + Send + Sync>>,
+        snapshot: Option<StepSnapshot>,
     ) -> Self {
         self.step_snapshot = snapshot;
         self

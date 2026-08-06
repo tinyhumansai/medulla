@@ -42,7 +42,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::flow_engine::execute;
-use crate::flow_engine::observability::{WorkEventSink, WorkflowRunObserver};
+use crate::flow_engine::observability::{StepSnapshot, WorkEventSink, WorkflowRunObserver};
 use crate::flow_engine::{
     agent_evidence, build_capabilities_with_agent_evidence, open_checkpointer, CapabilitySettings,
     HostServices,
@@ -61,7 +61,7 @@ pub struct RunContext {
     /// Where progress events go.
     pub sink: WorkEventSink,
     /// Persists completed-step snapshots while the run is still executing.
-    pub(crate) step_snapshot: Option<Arc<dyn Fn(&[RunStep]) + Send + Sync>>,
+    pub(crate) step_snapshot: Option<StepSnapshot>,
 }
 
 /// Write a terminal status onto a run record unless a settled path already did.

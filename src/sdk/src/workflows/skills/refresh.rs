@@ -86,8 +86,8 @@ pub fn refresh_managed(
 /// [`InstallReport`] and the error.
 ///
 /// Commands are not written: a slash command is a thing an operator types, and
-/// nobody types into `<medulla home>/claude-skills`. The skill itself is what
-/// the model reads.
+/// nobody types into the managed root. The skill itself is what the model
+/// reads.
 ///
 /// Pruning is conditional on a clean load. A document the store could not
 /// parse is *absent* from the listing rather than an error, so pruning a

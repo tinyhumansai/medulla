@@ -270,7 +270,9 @@ release whose marker this build cannot parse is undeletable by any command, and
 the harness keeps offering a workflow that no longer exists. The sweep reaches
 Codex's deprecated `.codex/skills` root too. A slug a *live* workflow claims
 stays under the marker rule: unmanaged content there is a collision, never a
-deletion.
+deletion. So does a `medulla-*` directory you symlinked in from elsewhere — the
+name-based rule stops at the link, because the files behind it are not ours to
+delete.
 Disabled workflows get no skill: a workflow that may not run should not be
 advertised as runnable.
 

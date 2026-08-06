@@ -85,8 +85,8 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
     Ok(report)
 }
 
-/// Installs `workflows` and, with `prune`, removes managed files for anything
-/// else.
+/// Removes managed files for anything outside `workflows` when `prune` is set,
+/// then installs `workflows`.
 ///
 /// The pruned set is "every managed file under the target directories whose
 /// workflow is not in `workflows`" — which covers a deleted workflow, a renamed
@@ -94,33 +94,43 @@ pub fn install(workflows: &[WorkflowSummary], opts: &InstallOptions) -> io::Resu
 /// installed, so they are not in the keep set either). Unmarked neighbours are
 /// left alone, as everywhere else.
 ///
+/// Pruning runs *first* because a rename can hand the new id the old one's
+/// path: `deploy.prod` renamed to `deploy-prod` still slugifies to
+/// `medulla-deploy-prod`, and installing first would find the old marker
+/// sitting there, report a [`FileAction::SlugCollision`], and then delete that
+/// file in the prune — leaving the renamed workflow with no skill at all until
+/// some later pass. Clearing the stale owner first lets the same pass write the
+/// new file. The order is otherwise immaterial: prune only ever touches files
+/// whose workflow is absent from `workflows`, which are exactly the ones the
+/// install pass does not write.
+///
 /// # Errors
 ///
-/// Propagates filesystem errors from the install pass or from removal.
+/// Propagates filesystem errors from removal or from the install pass.
 pub fn sync(
     workflows: &[WorkflowSummary],
     opts: &InstallOptions,
     prune: bool,
 ) -> io::Result<InstallReport> {
-    let mut report = install(workflows, opts)?;
-    if !prune {
-        return Ok(report);
-    }
+    let mut report = InstallReport::default();
+    if prune {
+        let keep: BTreeSet<&str> = workflows
+            .iter()
+            .filter(|summary| summary.enabled)
+            .map(|summary| summary.id.as_str())
+            .collect();
 
-    let keep: BTreeSet<&str> = workflows
-        .iter()
-        .filter(|summary| summary.enabled)
-        .map(|summary| summary.id.as_str())
-        .collect();
-
-    for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
-        for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
-            if keep.contains(managed.workflow_id.as_str()) {
-                continue;
+        for target in &dedupe_by_skills_dir(&opts.targets, opts.scope, &opts.root) {
+            for managed in scan_managed(*target, &target_root(*target, opts.scope, &opts.root))? {
+                if keep.contains(managed.workflow_id.as_str()) {
+                    continue;
+                }
+                report.files.push(remove_managed(&managed, opts)?);
             }
-            report.files.push(remove_managed(&managed, opts)?);
         }
     }
+
+    report.files.extend(install(workflows, opts)?.files);
     Ok(report)
 }
 

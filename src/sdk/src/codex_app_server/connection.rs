@@ -146,8 +146,9 @@ impl Connection {
         });
 
         // Writer: one task owns stdin, so concurrent callers never interleave
-        // half-written lines.
-        let writer_connection = connection.clone();
+        // half-written lines. The channel's sender lives on the connection, so
+        // dropping the last strong handle closes this loop on its own.
+        let writer_connection = Arc::downgrade(&connection);
         tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(line) = outbound_rx.recv().await {
@@ -155,35 +156,52 @@ impl Connection {
                     || stdin.write_all(b"\n").await.is_err()
                     || stdin.flush().await.is_err()
                 {
-                    writer_connection.mark_dead("stdin closed");
+                    if let Some(connection) = writer_connection.upgrade() {
+                        connection.mark_dead("stdin closed");
+                    }
                     return;
                 }
             }
         });
 
-        // Reader: decodes stdout and dispatches. Owns the connection weakly
-        // enough that the process is torn down when the pool drops it.
-        let reader_connection = connection.clone();
+        // Reader: decodes stdout and dispatches. Weak, so the child is torn down
+        // when the pool drops the connection — see the module's ownership note.
+        let reader_connection = Arc::downgrade(&connection);
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut stdout = BufReader::new(stdout);
             loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
-                        if line.len() > MAX_LINE_BYTES {
+                match read_record(&mut stdout).await {
+                    Ok(Record::Line(line)) => {
+                        let Some(message) = Message::parse(&line) else {
                             continue;
-                        }
-                        if let Some(message) = Message::parse(&line) {
-                            reader_connection.dispatch(message);
-                        }
+                        };
+                        // Upgraded per message rather than once: the connection
+                        // may be dropped at any point, and there is nothing to
+                        // dispatch to once it is.
+                        let Some(connection) = reader_connection.upgrade() else {
+                            return;
+                        };
+                        connection.dispatch(message);
                     }
-                    Ok(None) => break,
+                    // Skipped, not fatal: the record was discarded as it
+                    // arrived, and the framing resynchronised on its newline.
+                    Ok(Record::Oversized) => tracing::warn!(
+                        target: "medulla::codex_app_server",
+                        cap = MAX_LINE_BYTES,
+                        "dropped a codex app-server record longer than the line cap"
+                    ),
+                    Ok(Record::Eof) => break,
                     Err(error) => {
-                        reader_connection.mark_dead(&format!("stdout read failed: {error}"));
+                        if let Some(connection) = reader_connection.upgrade() {
+                            connection.mark_dead(&format!("stdout read failed: {error}"));
+                        }
                         return;
                     }
                 }
             }
-            reader_connection.mark_dead("process exited");
+            if let Some(connection) = reader_connection.upgrade() {
+                connection.mark_dead("process exited");
+            }
         });
 
         connection

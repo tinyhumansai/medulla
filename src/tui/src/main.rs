@@ -101,9 +101,23 @@ async fn async_main() -> anyhow::Result<()> {
         }
         // Deliberately ahead of everything that loads config or touches the
         // terminal: the shim runs inside an operator's live turn, and its whole
-        // job is to be cheap and silent.
+        // job is to be cheap and silent. `run_hook_cmd` reads only the hook
+        // grant's own two variables, so only those are decoded here —
+        // `std::env::vars()` panics on any non-UTF-8 entry in the inherited
+        // environment, and that must never turn "always exit zero" into a
+        // crash before the shim gets a chance to swallow anything.
         Command::Hook => {
-            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let env: std::collections::HashMap<String, String> = [
+                medulla::control_socket::HOOK_SOCKET_ENV,
+                medulla::control_socket::HOOK_GRANT_ENV,
+            ]
+            .into_iter()
+            .filter_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| (key.to_string(), value))
+            })
+            .collect();
             run_hook_cmd(&raw[1..], &env).await;
             Ok(())
         }

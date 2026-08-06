@@ -26,7 +26,9 @@ one route — it takes every route that could work, all carrying the same text:
    `allow-passthrough on` hands upwards verbatim — one hop out of the inner
    tmux, where the outer tmux then sees an ordinary OSC 52 from a pane.
 3. **`tmux load-buffer -w`** against the socket in `$TMUX`, which needs no
-   terminal capability and no configuration at all. This one always works, and
+   terminal capability and no configuration at all. It reaches an accessible
+   tmux server without either of those — but it still needs that server to be
+   reachable, so it can fail (a dead socket, tmux missing). When it succeeds,
    worst case you paste from the tmux buffer with `prefix ]`.
 4. **A local clipboard binary** (`pbcopy`, `wl-copy`, `xclip`, `xsel`), so a
    medulla running on the machine you are sitting at lands in the real

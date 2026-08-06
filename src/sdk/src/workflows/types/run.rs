@@ -62,6 +62,92 @@ pub(crate) fn bounded_within(value: &serde_json::Value, max_bytes: usize) -> ser
 /// is what makes a paused run resumable across process restarts.
 pub type RunId = String;
 
+/// Bytes of one declared input value kept on the durable record.
+///
+/// Much smaller than [`MAX_EVIDENCE_BYTES`]: an input is a knob a caller turned,
+/// and every surface that shows a run shows all of them at once. A repository
+/// name, a branch, a PR number, a paragraph of instruction all fit; a pasted
+/// transcript is summarized rather than carried into every future listing.
+pub(crate) const MAX_INPUT_BYTES: usize = 4 * 1024;
+
+/// Who asked for a run, and from where.
+///
+/// Recorded because a run record on its own cannot say why it exists. The
+/// question an operator asks in front of a rail full of runs is "which of these
+/// did the session I am sitting in start", and answering it needs the session's
+/// own correlation key on the record — nothing about the workflow, the graph, or
+/// the steps can supply it after the fact.
+///
+/// Every field is optional except `kind`, because the callers differ in how much
+/// they know about themselves: a `medulla workflow run` on a terminal knows it
+/// is a CLI and nothing else, while a harness session knows the key its tool
+/// grant was minted under.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunOrigin {
+    /// What kind of caller started the run — see [`RunOrigin::SESSION`] and its
+    /// siblings.
+    ///
+    /// A free string rather than an enum: a build that learns a new door must
+    /// still be readable by one that does not, and an unknown kind displayed
+    /// verbatim is strictly better than a record that fails to parse.
+    pub kind: String,
+    /// The harness session this run was started from, when one was.
+    ///
+    /// The MCP grant key the session's tool server was launched under
+    /// (`pty-<uuid>`), which is the only identifier shared by the harness
+    /// process and the host that spawned it. This is what nests a run under its
+    /// session in the Agents rail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    /// What to call the caller on screen, when it has a name worth showing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The directory the run was started in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+impl RunOrigin {
+    /// A run started by a harness session through the workflow MCP tools.
+    pub const SESSION: &'static str = "session";
+    /// A run started from a terminal by `medulla workflow run`.
+    pub const CLI: &'static str = "cli";
+    /// A run started from the operator's own Workflows pane.
+    pub const OPERATOR: &'static str = "operator";
+
+    /// An origin naming the harness session `session` started the run.
+    pub fn session(session: impl Into<String>) -> Self {
+        Self {
+            kind: Self::SESSION.to_string(),
+            session: Some(session.into()),
+            ..Self::default()
+        }
+    }
+
+    /// An origin of `kind` with nothing else known about it.
+    pub fn of_kind(kind: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Record the directory the run started in.
+    pub fn in_workspace(mut self, workspace: impl Into<String>) -> Self {
+        let workspace = workspace.into();
+        self.workspace = (!workspace.trim().is_empty()).then_some(workspace);
+        self
+    }
+
+    /// Record a display name for the caller.
+    pub fn labelled(mut self, label: impl Into<String>) -> Self {
+        let label = label.into();
+        self.label = (!label.trim().is_empty()).then_some(label);
+        self
+    }
+}
+
 /// Where a run got to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,6 +217,33 @@ pub struct RunRecord {
     /// Epoch-millisecond settle stamp, absent while running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<u64>,
+    /// The values supplied for the workflow's *declared* inputs, by name.
+    ///
+    /// The single most useful thing about a run that the graph cannot supply:
+    /// two runs of one workflow differ only in what was passed to them, so a
+    /// history that omitted this listed the same sentence over and over. Bounded
+    /// per value ([`MAX_INPUT_BYTES`]) rather than whole, because every surface
+    /// that lists runs shows all of a run's inputs at once.
+    ///
+    /// Empty on a workflow that declares no inputs, and on records written
+    /// before this field existed — the two are indistinguishable, which is
+    /// acceptable: neither has anything to show.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub inputs: serde_json::Map<String, serde_json::Value>,
+    /// The free-form trigger payload the run was started with.
+    ///
+    /// Separate from [`inputs`](Self::inputs) because they are separate
+    /// arguments: `inputs` names the workflow's declared parameters, while this
+    /// is whatever the trigger handed the graph. Absent when it was empty, and
+    /// on records written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<serde_json::Value>,
+    /// Who started this run, and from where.
+    ///
+    /// Absent on records written before this field existed, and on a run whose
+    /// caller could not say anything about itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<RunOrigin>,
     /// Steps in completion order.
     #[serde(default)]
     pub steps: Vec<RunStep>,
@@ -161,4 +274,55 @@ pub struct RunRecord {
     /// Absent on records written before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnosis: Option<Diagnosis>,
+}
+
+impl RunRecord {
+    /// Record what this run was started with.
+    ///
+    /// Values are bounded individually rather than as one blob, so a single
+    /// oversized argument does not summarize away the six small ones beside it —
+    /// which are usually the ones that identify the run.
+    pub fn with_inputs(
+        mut self,
+        inputs: &serde_json::Map<String, serde_json::Value>,
+        trigger: &serde_json::Value,
+    ) -> Self {
+        self.inputs = inputs
+            .iter()
+            .map(|(name, value)| (name.clone(), bounded_within(value, MAX_INPUT_BYTES)))
+            .collect();
+        // An empty trigger is what almost every caller passes, and recording
+        // `{}` on every run would put a meaningless row on every run view.
+        self.trigger = match trigger {
+            serde_json::Value::Null => None,
+            serde_json::Value::Object(map) if map.is_empty() => None,
+            value => Some(bounded_within(value, MAX_INPUT_BYTES)),
+        };
+        self
+    }
+
+    /// Record who asked for this run.
+    pub fn with_origin(mut self, origin: Option<RunOrigin>) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    /// How long the run took, once it has settled.
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.finished_at
+            .map(|finished| finished.saturating_sub(self.started_at))
+    }
+
+    /// How many recorded steps ended in an engine-reported failure.
+    pub fn failed_steps(&self) -> usize {
+        self.steps
+            .iter()
+            .filter(|step| {
+                matches!(
+                    step.status.trim().to_ascii_lowercase().as_str(),
+                    "failed" | "error"
+                )
+            })
+            .count()
+    }
 }

@@ -285,6 +285,28 @@ pub async fn handle_request(session: &McpSession, request: &Value) -> Option<Val
     })
 }
 
+/// Who a tool server started from `env` should attribute its runs to.
+///
+/// `None` when nothing named a session — an in-process test, or a server a
+/// person started by hand. Runs then carry no origin at all rather than a
+/// guessed one: an origin that names the wrong session is worse than none,
+/// because a rail would draw the run under a harness that never asked for it.
+fn origin_from_env(
+    env: &HashMap<String, String>,
+    cwd: &Path,
+) -> Option<crate::workflows::RunOrigin> {
+    let session = env
+        .get(attach::ORIGIN_SESSION_ENV)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|session| !session.is_empty())?;
+    Some(
+        crate::workflows::RunOrigin::session(session)
+            .in_workspace(cwd.to_string_lossy())
+            .labelled("harness session"),
+    )
+}
+
 /// Serve MCP over stdin/stdout until the client closes the stream.
 ///
 /// One JSON object per line, which is the stdio transport MCP defines and the
@@ -335,10 +357,16 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // keeps the two from interleaving mid-line.
     let (responses, mut pending_responses) =
         tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
+    // Resolved once, from the environment the harness's launch put it in. Every
+    // run this server starts is attributed to that session, which is what lets
+    // the Agents rail draw the run under the harness that asked for it instead
+    // of only in the global workflow history.
+    let origin = origin_from_env(env, cwd);
     let session = Arc::new(
         McpSession::local(store, policy, mode)
             .with_workflows_enabled(workflows_enabled)
             .with_fleet(backend::from_env(env).await)
+            .with_origin(origin)
             .with_notifications(responses.clone()),
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();

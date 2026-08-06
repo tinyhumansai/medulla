@@ -89,6 +89,9 @@ fn run_records_use_camel_case_on_the_wire() {
         }],
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     })
@@ -165,6 +168,9 @@ fn run_evidence_is_omitted_from_the_wire_when_absent() {
         steps: Vec::new(),
         pending_approvals: Vec::new(),
         error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
         summary: None,
         diagnosis: None,
     })
@@ -172,4 +178,64 @@ fn run_evidence_is_omitted_from_the_wire_when_absent() {
 
     assert!(wire.get("summary").is_none());
     assert!(wire.get("diagnosis").is_none());
+    assert!(wire.get("inputs").is_none());
+    assert!(wire.get("trigger").is_none());
+    assert!(wire.get("origin").is_none());
+}
+
+#[test]
+fn what_a_run_was_started_with_survives_the_wire() {
+    let record = RunRecord {
+        id: "run-1".into(),
+        workflow_id: "demo".into(),
+        status: RunStatus::Running,
+        started_at: 1,
+        finished_at: None,
+        steps: Vec::new(),
+        pending_approvals: Vec::new(),
+        error: None,
+        inputs: Default::default(),
+        trigger: None,
+        origin: None,
+        summary: None,
+        diagnosis: None,
+    }
+    .with_inputs(
+        &json!({ "repo": "acme/api" }).as_object().cloned().unwrap(),
+        &json!({ "event": "push" }),
+    )
+    .with_origin(Some(RunOrigin::session("pty-1").in_workspace("/tmp/work")));
+
+    let wire = serde_json::to_value(&record).expect("a run record should serialize");
+    assert_eq!(wire["inputs"]["repo"], json!("acme/api"));
+    assert_eq!(wire["trigger"]["event"], json!("push"));
+    assert_eq!(wire["origin"]["kind"], json!("session"));
+    assert_eq!(wire["origin"]["session"], json!("pty-1"));
+    assert_eq!(wire["origin"]["workspace"], json!("/tmp/work"));
+
+    let back: RunRecord = serde_json::from_value(wire).expect("and parse back");
+    assert_eq!(back, record);
+}
+
+#[test]
+fn an_oversized_input_is_summarized_rather_than_carried_whole() {
+    let record = crate::workflows::new_run_record("run-1", "demo", 1).with_inputs(
+        &json!({ "body": "x".repeat(run::MAX_INPUT_BYTES * 3) })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        &json!({}),
+    );
+    assert_eq!(record.inputs["body"]["_medullaTruncated"], json!(true));
+    assert!(
+        serde_json::to_vec(&record.inputs["body"]).unwrap().len() <= run::MAX_INPUT_BYTES,
+        "one oversized input must not bloat every listing that shows it"
+    );
+}
+
+#[test]
+fn an_empty_trigger_is_not_recorded_as_a_value() {
+    let record = crate::workflows::new_run_record("run-1", "demo", 1)
+        .with_inputs(&Default::default(), &json!({}));
+    assert!(record.trigger.is_none());
 }

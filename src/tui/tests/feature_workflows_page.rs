@@ -409,3 +409,25 @@ fn a_value_of_the_wrong_type_re_asks_the_same_field() {
         "the reason should say what was wrong: {screen}"
     );
 }
+
+#[test]
+fn a_run_row_shows_what_the_run_was_started_with() {
+    // The complaint this answers: every run of one workflow listed the same
+    // sentence, so the rail could not be used to find a particular one.
+    let home = tempfile::tempdir().unwrap();
+    install(home.path(), "sweep", "Nightly sweep", true);
+    let record = medulla::workflows::new_run_record("run-7", "sweep", 100).with_inputs(
+        &json!({ "repo": "acme/api" }).as_object().cloned().unwrap(),
+        &json!({}),
+    );
+    store(home.path()).record_run(&record).expect("records");
+
+    let mut app = workflows_app(home.path());
+    app.reload_workflows();
+
+    let screen = rendered(&mut app);
+    assert!(
+        screen.contains("repo=acme/api"),
+        "the run's argument identifies it: {screen}"
+    );
+}

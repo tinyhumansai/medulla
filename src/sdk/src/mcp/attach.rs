@@ -113,6 +113,27 @@ pub struct ServerSpec {
 }
 
 impl ServerSpec {
+    /// Stamp this server with the session key it is being attached to.
+    ///
+    /// The tool server is a subprocess of a harness Medulla launched, and it is
+    /// the only thing in that process tree that knows which session it belongs
+    /// to — the key its grant was minted under. Carrying it lets a workflow the
+    /// session starts record who started it, which is what nests the run under
+    /// its session in the Agents rail rather than leaving it an anonymous entry
+    /// in a global history.
+    ///
+    /// Non-secret on purpose: it is a correlation key, not a capability. It
+    /// authorizes nothing, so a transport that renders it onto an argv leaks
+    /// only the fact that a session exists.
+    pub fn for_session(mut self, session: &str) -> Self {
+        let session = session.trim();
+        if !session.is_empty() {
+            self.env
+                .push((ORIGIN_SESSION_ENV.to_string(), session.to_string()));
+        }
+        self
+    }
+
     /// The `--mcp-config` document registering this server with Claude Code.
     ///
     /// Only the non-secret environment is rendered; [`Self::secret_env`] reaches
@@ -542,6 +563,19 @@ pub fn revoke_session(session: &str) {
 /// a session is served — the grant still decides that.
 pub const SERVER_COMMAND_ENV: &str = "MEDULLA_MCP_COMMAND";
 
+/// The harness session a tool server is serving.
+///
+/// Set by [`ServerSpec::for_session`] on every registration, both transports.
+/// Read by the server itself ([`crate::mcp::serve_stdio`]) and stamped onto
+/// every workflow run that session starts, so an operator can see which of the
+/// harnesses on their rail is responsible for a run.
+///
+/// Untrusted in the sense that anything in the process tree can rewrite it: it
+/// is an attribution hint, never an authorization. Nothing is granted on the
+/// strength of it, and the worst a forged value can do is file a run under the
+/// wrong session in a list.
+pub const ORIGIN_SESSION_ENV: &str = "MEDULLA_ORIGIN_SESSION";
+
 /// The binary a spawned tool server runs.
 ///
 /// `None` when neither the override nor this process's own path resolves, which
@@ -695,7 +729,9 @@ pub fn attach_cli(
             ));
         }
     }
-    let Some(spec) = server_spec(tool_mode.as_deref(), fleet, workflows_on) else {
+    let spec = server_spec(tool_mode.as_deref(), fleet, workflows_on)
+        .map(|spec| spec.for_session(session));
+    let Some(spec) = spec else {
         // A grant was minted for a session that will not carry it. Given back
         // rather than left in the registry, where it would be a live token
         // nothing can ever redeem.

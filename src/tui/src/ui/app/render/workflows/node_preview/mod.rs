@@ -35,7 +35,7 @@ mod tests;
 
 use kinds::kind_lines;
 use live::live_lines;
-use run_detail::{connection_line, run_lines};
+use run_detail::{connection_line, run_header, run_lines};
 use types::AgentDefaults;
 
 impl App {
@@ -100,6 +100,11 @@ impl App {
             }
         }
         if let Some(run) = &run {
+            // The run first, then the step. A step's evidence read without
+            // knowing what the run was started with is a paragraph out of
+            // context — and the inputs are exactly what the operator is
+            // comparing two runs of one workflow by.
+            lines.extend(run_header(run));
             let state = RunOverlay::new(run).node(&selected.id);
             let duration = state
                 .duration_ms

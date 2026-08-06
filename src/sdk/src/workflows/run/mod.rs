@@ -62,6 +62,12 @@ pub struct RunContext {
     pub sink: WorkEventSink,
     /// Persists completed-step snapshots while the run is still executing.
     pub step_snapshot: Option<StepSnapshot>,
+    /// Who asked for this run, when the caller can say.
+    ///
+    /// Carried on the context rather than passed alongside the inputs because
+    /// it is a property of the *door* the run came through, which every caller
+    /// already knows once and none of them learn per run.
+    pub origin: Option<crate::workflows::RunOrigin>,
 }
 
 /// Write a terminal status onto a run record unless a settled path already did.
@@ -205,7 +211,15 @@ async fn run_workflow_inner(
         )));
     };
 
-    let record = new_run_record(run_id, workflow_id, crate::clock::now_millis() as u64);
+    // The *resolved* inputs, not the supplied ones: a caller that relied on a
+    // declared default gets a record saying what the run actually used, which
+    // is the value an operator would otherwise have to reconstruct from the
+    // graph. Written onto the first record rather than only the settled one, so
+    // a run that is still going — or that never settles — still says what it
+    // was asked to do.
+    let record = new_run_record(run_id, workflow_id, crate::clock::now_millis() as u64)
+        .with_inputs(&resolved_inputs, &input)
+        .with_origin(context.origin.clone());
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 

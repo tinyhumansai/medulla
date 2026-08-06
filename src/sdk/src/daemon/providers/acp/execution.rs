@@ -67,7 +67,9 @@ pub(super) async fn medulla_mcp_servers(
                 None => None,
             },
         };
-        let Some(spec) = attach::server_spec(tool_mode, fleet, workflows_enabled) else {
+        let Some(spec) = attach::server_spec(tool_mode, fleet, workflows_enabled)
+            .map(|spec| spec.for_session(session))
+        else {
             return Vec::new();
         };
         // The subprocess inherits this process's environment, which is what

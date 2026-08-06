@@ -217,6 +217,10 @@ pub(crate) async fn call(
                         .clone()
                         .map(|progress| run_progress::sink(progress, id)),
                     liveness: Some(session.run_liveness.clone()),
+                    // Whichever harness session this server is serving. Stamped
+                    // on the record at admission, so a run that is still going
+                    // is already attributable.
+                    origin: session.origin.clone(),
                 },
                 wait,
             )

@@ -73,6 +73,8 @@ pub(super) fn session_with(
         notifications: None,
         workflow_mutations: tokio::sync::Mutex::new(()),
         run_liveness: crate::workflows::local::RunLiveness::default(),
+        // Nothing launched this session, so it can attribute nothing.
+        origin: None,
     }
 }
 

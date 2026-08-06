@@ -109,6 +109,7 @@ fn request<'a>(
         input: tinyflows::engine::RunInput::new(json!({})),
         sink: None,
         liveness: None,
+        origin: None,
     }
 }
 

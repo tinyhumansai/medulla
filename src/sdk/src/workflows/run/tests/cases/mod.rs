@@ -129,6 +129,7 @@ impl Harness {
             },
             sink: null_sink(),
             step_snapshot: None,
+            origin: None,
         }
     }
 }

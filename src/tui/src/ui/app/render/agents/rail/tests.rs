@@ -126,6 +126,21 @@ fn session_titles_of_wide_characters_stay_within_the_rails_cell_budget() {
 }
 
 #[test]
+fn a_title_that_slugs_to_nothing_is_not_a_lane_title() {
+    // Punctuation- and control-only titles leave the slug empty. Passing that
+    // on would render a dangling " · " and, since the newest running task wins
+    // the lane, would mask an older task that does advertise a real title.
+    assert_eq!(lane_title("---"), None);
+    assert_eq!(lane_title("\u{1b}[2J\n\t"), None);
+    assert_eq!(lane_title("okay so the"), None, "pure filler names nothing");
+
+    assert_eq!(
+        lane_title("Fix session titles"),
+        Some("fix-session-titles".to_string())
+    );
+}
+
+#[test]
 fn session_titles_keep_three_words_of_a_harness_sentence() {
     assert_eq!(
         display_session_title("Fix session handoff flow and pointer"),

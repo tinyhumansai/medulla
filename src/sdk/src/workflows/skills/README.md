@@ -171,6 +171,35 @@ already exists under `<root>`". Creating `~/.codex` for someone who does not use
 Codex is the same litter in a different place. An empty result is a legitimate
 answer and the CLI says so rather than silently doing nothing.
 
+## The managed scope refreshes itself
+
+`install` is an operator action, and for the directories a person curates
+(`~/.claude`) that is right: nothing should rewrite their files behind their
+back. The managed scope is different — `<medulla home>/<harness>-skills` is
+Medulla's own root, read only by harnesses Medulla spawns — and treating it the
+same way left it stale. Authoring a workflow in the TUI, evolving one over MCP,
+disabling one, or deleting one changed what a session should be told, and
+nothing rewrote the directory afterwards. The operator's next session was
+offered a catalog that no longer matched the store.
+
+So [`refresh.rs`](./refresh.rs) re-renders the managed scope at every spawn
+door, immediately before handing the child the argv that points at it. Three
+things make that affordable and safe: it is a `sync`, so unchanged files are
+compared and skipped rather than rewritten; it prunes, which is the half
+re-running `install` never did; and it writes only under Medulla's own root, so
+an automatic write can never disturb a file the operator authored.
+
+Pruning is conditional on a clean load. The store drops a document it cannot
+parse rather than failing, so pruning on a half-read listing would delete the
+skill of a workflow that still exists — an operator who saved a malformed edit
+would find an unrelated skill gone. When the load reports any error the pass
+installs without pruning: a stale skill is the cheaper mistake.
+
+Only Claude is refreshed, matching `spawn_args`. Pointing a harness at a
+directory needs the harness to have a flag for it, and `--add-dir` is the only
+one; rewriting a directory no spawned process reads would be writing files for
+nobody.
+
 ## Why registration never shells out
 
 A skill without the MCP server attached is inert, so `--with-mcp` registers
@@ -212,9 +241,11 @@ rather than replaced, and rather than aborting the other targets.
 - [`render.rs`](./render.rs) — `WorkflowSummary` → skill text, and the managed marker.
 - [`targets.rs`](./targets.rs) — Where each harness expects to find a skill.
 - [`install.rs`](./install.rs) — Install, sync, uninstall, and the marker discipline.
+- [`refresh.rs`](./refresh.rs) — Re-rendering the managed scope at spawn time.
 - [`registration.rs`](./registration.rs) — Merging `medulla mcp` into each harness's config.
 - [`tests.rs`](./tests.rs) — Rendering, target layout, and managed-file behaviour.
 - [`registration_tests.rs`](./registration_tests.rs) — Config merges, preservation, and manual outcomes.
+- [`refresh_tests.rs`](./refresh_tests.rs) — That a spawned session sees the store as it stands.
 
 ## Maintenance
 

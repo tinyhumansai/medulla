@@ -97,35 +97,43 @@ pub fn attach_mcp(
     None
 }
 
-/// Point a harness about to be launched here at Medulla's managed skills.
+/// Refresh Medulla's managed skills and point a harness about to be launched
+/// here at them.
 ///
 /// The tools arrive on their own (see [`attach_mcp`]), but nothing in a fresh
 /// session knows *which* workflows exist or that `workflow_run` is how to start
-/// one. That knowledge is a skill file, and `medulla skills install --scope
-/// managed` writes it under `<medulla home>/<harness>-skills/` — a root Medulla
-/// owns, so the operator's own `~/.claude` is left alone. All that remains is
-/// telling the child to read it, which for Claude Code is `--add-dir`.
+/// one. That knowledge is a skill file under `<medulla home>/<harness>-skills/`
+/// — a root Medulla owns, so the operator's own `~/.claude` is left alone — and
+/// all that remains is telling the child to read it, which for Claude Code is
+/// `--add-dir`.
+///
+/// The files are re-rendered from the workflow store here rather than only by
+/// `medulla skills install`, because the store moves and the skills did not:
+/// a workflow authored in the TUI, evolved over MCP, disabled, or deleted left
+/// the managed directory describing a catalog that no longer existed, and the
+/// only cure was remembering to re-run a command. Now the session sees the
+/// store as it is at the moment it starts.
 ///
 /// Called at both pty doors for the same reason [`attach_mcp`] is: the headless
 /// executor already does this in `medulla::daemon::providers`, and a harness
-/// started on a pty is no less Medulla-spawned than one started headless. Until
-/// this existed, `--scope managed` was documented as covering "the harnesses
-/// Medulla spawns" while the two doors an operator actually watches — the
-/// Workers pane's sessions and the task frames opened on this device — silently
-/// got nothing.
+/// started on a pty is no less Medulla-spawned than one started headless.
 ///
 /// `env` is the child's environment, not the parent's: it is what resolves
-/// `MEDULLA_HOME`/`HOME`, so a scratch-home session reads that home's skills.
+/// `MEDULLA_HOME`/`HOME`, so a scratch-home session refreshes and reads that
+/// home's skills. `cwd` is the session's working directory, which is what makes
+/// a project-local workflow visible to a session opened inside that project.
 /// Appends nothing for a provider with no such flag (everything but Claude
-/// Code) or when the managed root holds no skills for it, so an install nobody
-/// ran changes no argv.
+/// Code), so those argvs are unchanged.
 #[cfg(feature = "workflows")]
 pub fn attach_skills(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
+    cwd: &std::path::Path,
     extra_args: &mut Vec<String>,
 ) {
-    extra_args.extend(medulla::workflows::skills::spawn_args(provider, env));
+    extra_args.extend(medulla::workflows::skills::refresh_managed(
+        provider, env, cwd,
+    ));
 }
 
 /// Without the engine compiled in there are no workflows to have skills for.
@@ -133,9 +141,10 @@ pub fn attach_skills(
 pub fn attach_skills(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
+    cwd: &std::path::Path,
     extra_args: &mut Vec<String>,
 ) {
-    let _ = (provider, env, extra_args);
+    let _ = (provider, env, cwd, extra_args);
 }
 
 /// The argv for an interactive (screen-painting) run of `provider`.

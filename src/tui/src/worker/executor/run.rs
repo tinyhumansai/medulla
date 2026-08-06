@@ -458,7 +458,12 @@ impl PtySessionExecutor {
         );
         // The managed skills that name the workflows those tools can start,
         // on the same terms the headless executor already hands them over.
-        super::super::pty::launch::attach_skills(options.provider, &env, &mut extra_args);
+        super::super::pty::launch::attach_skills(
+            options.provider,
+            &env,
+            std::path::Path::new(&options.cwd),
+            &mut extra_args,
+        );
         Ok(SessionPlan::Launch(Box::new(LaunchSpec {
             provider: options.provider,
             preset: None,

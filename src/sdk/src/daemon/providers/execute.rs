@@ -227,16 +227,18 @@ async fn run_provider_attempt(
         crate::codex_overrides::launch_args(spec.provider, spec.model.as_deref(), &merged_env)
             .map_err(|error| error.to_string())?,
     );
-    // Point the harness at Medulla's own skills root, when one has been
-    // installed. This is what makes a workflow a harness *can* trigger visible
-    // to it: the MCP tools arrive automatically, but nothing tells a session
-    // that `babysit` exists or what it takes. Empty when no managed skill has
-    // been installed for this provider, so the argv is unchanged for anyone who
-    // has not run `medulla skills install --scope managed`.
+    // Re-render Medulla's own skills root from the workflow store and point the
+    // harness at it. This is what makes a workflow a harness *can* trigger
+    // visible to it: the MCP tools arrive automatically, but nothing tells a
+    // session that `babysit` exists or what it takes. Rendered per spawn rather
+    // than only by `medulla skills install`, so a workflow authored, disabled,
+    // or deleted since the last install is described correctly here. Empty for
+    // a provider with no directory flag, so those argvs are unchanged.
     #[cfg(feature = "workflows")]
-    extra_args.extend(crate::workflows::skills::spawn_args(
+    extra_args.extend(crate::workflows::skills::refresh_managed(
         spec.provider,
         &spec.env,
+        std::path::Path::new(&spec.cwd),
     ));
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(

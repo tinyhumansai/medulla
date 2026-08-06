@@ -18,11 +18,17 @@
 //! 3. [`install`] writes it, under a marker discipline that never overwrites a
 //!    file Medulla did not generate.
 //!
+//! [`refresh`] then closes the loop for the one scope Medulla owns: a harness
+//! Medulla spawns re-renders the store into `<medulla home>/<harness>-skills`
+//! on its way up, so authoring, disabling, or deleting a workflow is visible to
+//! the next session without anyone re-running the install command.
+//!
 //! Everything here is pure filesystem work against a caller-supplied root, so
 //! the CLI, a future MCP verb, and a TUI action all drive the same code and a
 //! test can point it at a tempdir.
 
 pub mod install;
+pub mod refresh;
 pub mod registration;
 pub mod render;
 pub mod targets;
@@ -30,6 +36,8 @@ mod types;
 
 #[cfg(test)]
 mod marker_tests;
+#[cfg(test)]
+mod refresh_tests;
 #[cfg(test)]
 mod registration_tests;
 #[cfg(test)]
@@ -40,6 +48,7 @@ mod targets_tests;
 mod tests;
 
 pub use install::{install, installed, sync, uninstall};
+pub use refresh::{refresh_managed, sync_managed};
 pub use registration::{register, RegistrationOptions, RegistrationOutcome};
 pub use render::{render, render_command, slug_for};
 pub use targets::{

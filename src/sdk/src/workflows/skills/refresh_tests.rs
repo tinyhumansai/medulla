@@ -38,10 +38,6 @@ fn document(id: &str, description: &str, enabled: bool) -> String {
 }
 
 /// Put a workflow document in the home store, where `discover` reads it.
-///
-/// Rooted at [`managed_root`] rather than at `MEDULLA_HOME` itself, because the
-/// Medulla home is per-account (`<root>/<user id>`) and the store reads the
-/// resolved one.
 fn write_workflow(env: &HashMap<String, String>, id: &str, description: &str, enabled: bool) {
     let dir = workflows_dir(env);
     fs::create_dir_all(&dir).unwrap();
@@ -52,9 +48,29 @@ fn write_workflow(env: &HashMap<String, String>, id: &str, description: &str, en
     .unwrap();
 }
 
-/// The store directory the documents above land in.
+/// The store directory the documents above land in: the user-global layer, at
+/// the resolved Medulla home rather than at `MEDULLA_HOME` itself, because the
+/// home is per-account (`<root>/<user id>`) and the store reads the resolved
+/// one.
 fn workflows_dir(env: &HashMap<String, String>) -> std::path::PathBuf {
-    managed_root(env).join("workflows")
+    crate::home::medulla_home(env).join("workflows")
+}
+
+/// The project-local layer for `cwd`, which is what makes two workspaces have
+/// two catalogs.
+fn project_workflows_dir(cwd: &Path) -> std::path::PathBuf {
+    cwd.join(".medulla").join("workflows")
+}
+
+/// Put a workflow document in `cwd`'s project-local store.
+fn write_project_workflow(cwd: &Path, id: &str, description: &str, enabled: bool) {
+    let dir = project_workflows_dir(cwd);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{id}.json")),
+        document(id, description, enabled),
+    )
+    .unwrap();
 }
 
 /// An environment whose Medulla home is the scratch directory.
@@ -62,11 +78,11 @@ fn env_at(home: &Path) -> HashMap<String, String> {
     HashMap::from([("MEDULLA_HOME".to_string(), home.display().to_string())])
 }
 
-/// The managed `SKILL.md` for `id`, whether or not it exists.
-fn managed_skill(env: &HashMap<String, String>, id: &str) -> std::path::PathBuf {
+/// The managed `SKILL.md` for `id` in `cwd`'s scope, whether or not it exists.
+fn managed_skill(env: &HashMap<String, String>, cwd: &Path, id: &str) -> std::path::PathBuf {
     skill_path(
         SkillTarget::Claude,
-        &managed_dir(SkillTarget::Claude, env),
+        &managed_dir(SkillTarget::Claude, env, cwd),
         &slug_for(id),
     )
 }
@@ -90,11 +106,13 @@ fn a_workflow_authored_since_the_last_install_reaches_the_next_session() {
         args,
         vec![
             "--add-dir".to_string(),
-            managed_dir(SkillTarget::Claude, &env).display().to_string()
+            managed_dir(SkillTarget::Claude, &env, cwd.path())
+                .display()
+                .to_string()
         ],
         "once the store has a workflow the session must be pointed at the skills"
     );
-    let body = fs::read_to_string(managed_skill(&env, "babysit")).unwrap();
+    let body = fs::read_to_string(managed_skill(&env, cwd.path(), "babysit")).unwrap();
     assert!(body.contains("Watch a PR."), "got {body}");
 }
 
@@ -112,7 +130,7 @@ fn an_edited_workflow_rewrites_its_skill() {
     write_workflow(&env, "babysit", "Watch a PR until it is green.", true);
     refresh_managed(HarnessProvider::Claude, &env, cwd.path());
 
-    let body = fs::read_to_string(managed_skill(&env, "babysit")).unwrap();
+    let body = fs::read_to_string(managed_skill(&env, cwd.path(), "babysit")).unwrap();
     assert!(body.contains("until it is green"), "got {body}");
 }
 
@@ -128,19 +146,19 @@ fn a_deleted_or_disabled_workflow_loses_its_skill() {
     write_workflow(&env, "babysit", "Watch a PR.", true);
     write_workflow(&env, "triage", "Triage issues.", true);
     refresh_managed(HarnessProvider::Claude, &env, cwd.path());
-    assert!(managed_skill(&env, "babysit").is_file());
-    assert!(managed_skill(&env, "triage").is_file());
+    assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
+    assert!(managed_skill(&env, cwd.path(), "triage").is_file());
 
     fs::remove_file(workflows_dir(&env).join("babysit.json")).unwrap();
     write_workflow(&env, "triage", "Triage issues.", false);
     refresh_managed(HarnessProvider::Claude, &env, cwd.path());
 
     assert!(
-        !managed_skill(&env, "babysit").exists(),
+        !managed_skill(&env, cwd.path(), "babysit").exists(),
         "a deleted workflow must stop being advertised"
     );
     assert!(
-        !managed_skill(&env, "triage").exists(),
+        !managed_skill(&env, cwd.path(), "triage").exists(),
         "a disabled workflow must not be offered as runnable"
     );
 }
@@ -156,7 +174,7 @@ fn a_store_that_failed_to_load_does_not_prune() {
 
     write_workflow(&env, "babysit", "Watch a PR.", true);
     refresh_managed(HarnessProvider::Claude, &env, cwd.path());
-    assert!(managed_skill(&env, "babysit").is_file());
+    assert!(managed_skill(&env, cwd.path(), "babysit").is_file());
 
     // Mid-edit: the document no longer parses, so the listing no longer
     // mentions the workflow.
@@ -164,7 +182,7 @@ fn a_store_that_failed_to_load_does_not_prune() {
     refresh_managed(HarnessProvider::Claude, &env, cwd.path());
 
     assert!(
-        managed_skill(&env, "babysit").is_file(),
+        managed_skill(&env, cwd.path(), "babysit").is_file(),
         "a skill must survive a parse failure elsewhere in the store"
     );
 }
@@ -200,7 +218,7 @@ fn a_provider_without_a_directory_flag_is_left_alone() {
 
     assert!(refresh_managed(HarnessProvider::Codex, &env, cwd.path()).is_empty());
     assert!(
-        !managed_dir(SkillTarget::Codex, &env).exists(),
+        !managed_dir(SkillTarget::Codex, &env, cwd.path()).exists(),
         "nothing reads a managed Codex directory today, so nothing should write one"
     );
 }

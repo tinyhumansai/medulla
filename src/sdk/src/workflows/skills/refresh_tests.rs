@@ -270,30 +270,18 @@ fn two_workspaces_do_not_prune_or_read_each_others_skills() {
     assert!(managed_skill(&env, two.path(), "shared").is_file());
 }
 
-/// Concurrent refreshes of one workspace serialize rather than interleave.
-///
-/// The failure this rules out is a lost skill: a pass that read the directory
-/// before a second pass wrote to it would find that file's workflow absent from
-/// its own listing and prune it away. The refreshes here run against a store
-/// that changes underneath them, which is the shape that produces two
-/// disagreeing listings in the first place.
-#[test]
-fn concurrent_refreshes_leave_the_directory_matching_the_store() {
+/// Four threads refreshing one workspace at once, released together so the
+/// passes genuinely overlap rather than running one after another by scheduling
+/// luck.
+fn refresh_burst(env: &HashMap<String, String>, cwd: &Path) {
     use std::sync::{Arc, Barrier};
 
-    let home = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
-    let env = env_at(home.path());
-    write_workflow(&env, "keeper", "Stays throughout.", true);
-
-    // Released together so the passes genuinely overlap rather than happening
-    // to run one after another by scheduling luck.
     let barrier = Arc::new(Barrier::new(4));
     let handles: Vec<_> = (0..4)
         .map(|_| {
             let barrier = Arc::clone(&barrier);
             let env = env.clone();
-            let cwd = cwd.path().to_path_buf();
+            let cwd = cwd.to_path_buf();
             std::thread::spawn(move || {
                 barrier.wait();
                 for _ in 0..8 {
@@ -305,20 +293,98 @@ fn concurrent_refreshes_leave_the_directory_matching_the_store() {
     for handle in handles {
         handle.join().expect("no refresh panicked");
     }
+}
 
-    // One last pass with nothing else running fixes the store state the answer
-    // is checked against.
-    sync_managed(SkillTarget::Claude, &env, cwd.path()).unwrap();
+/// Concurrent refreshes of one workspace serialize rather than interleave, and
+/// what they leave behind is the store, not a partial view of it.
+///
+/// The failure this rules out is a lost skill: a pass that read the directory
+/// before a second pass wrote to it would find that file's workflow absent from
+/// its own listing and prune it away. So the store is moved between bursts —
+/// added to, then taken from — and the directory is read straight after each
+/// burst, with no corrective pass to paper over a race. Every pass in a burst
+/// starts after that burst's change, so a burst that serializes correctly can
+/// only end in one state: the one the store describes.
+#[test]
+fn concurrent_refreshes_leave_the_directory_matching_the_store() {
+    let home = TempDir::new().unwrap();
+    let cwd = TempDir::new().unwrap();
+    let env = env_at(home.path());
+    write_workflow(&env, "keeper", "Stays throughout.", true);
+
+    refresh_burst(&env, cwd.path());
     assert!(
         managed_skill(&env, cwd.path(), "keeper").is_file(),
         "no pass may prune a skill whose workflow is still in the store"
     );
+
+    // Authored while the previous burst's files are already on disk: the new
+    // skill must survive every other pass's prune.
+    write_workflow(&env, "late", "Written between bursts.", true);
+    refresh_burst(&env, cwd.path());
+    assert!(managed_skill(&env, cwd.path(), "late").is_file());
+    assert!(managed_skill(&env, cwd.path(), "keeper").is_file());
+
+    // And a deletion reaches the directory just as reliably: the racing passes
+    // must converge on the smaller catalog rather than one of them reinstating
+    // the skill from a listing it took earlier.
+    fs::remove_file(workflows_dir(&env).join("keeper.json")).unwrap();
+    refresh_burst(&env, cwd.path());
+    assert!(
+        !managed_skill(&env, cwd.path(), "keeper").exists(),
+        "a deleted workflow's skill must not survive a burst of refreshes"
+    );
+    assert!(managed_skill(&env, cwd.path(), "late").is_file());
+}
+
+/// The environment variable that turns the helper test below into a lock
+/// holder, carrying the managed root to lock.
+const HOLD_LOCK_ROOT: &str = "MEDULLA_TEST_HOLD_LOCK_ROOT";
+
+/// Printed by the holder once it owns the lock, so the parent never has to
+/// guess when to start timing.
+const HOLD_LOCK_READY: &str = "medulla-test: lock held";
+
+/// The holder's full test path, as the re-executed binary's filter needs it.
+const HOLD_LOCK_TEST: &str = "workflows::skills::refresh_tests::holds_the_workspace_lock";
+
+/// Not a test of its own: the other half of
+/// [`a_refresh_waits_for_the_workspace_lock`], which re-executes this binary
+/// with [`HOLD_LOCK_ROOT`] set to make a *second process* hold the lock. A
+/// normal run has no such variable and this returns immediately.
+///
+/// The lock is held until the parent closes this process's stdin, so the
+/// release is an event the parent chooses rather than a sleep either side has
+/// to guess at.
+#[test]
+fn holds_the_workspace_lock() {
+    use std::io::{Read, Write};
+
+    let Ok(root) = std::env::var(HOLD_LOCK_ROOT) else {
+        return;
+    };
+
+    let held = refresh::RefreshLock::acquire(Path::new(&root)).expect("the holder takes the lock");
+    println!("{HOLD_LOCK_READY}");
+    std::io::stdout().flush().unwrap();
+
+    let mut sink = String::new();
+    std::io::stdin().read_to_string(&mut sink).unwrap();
+    drop(held);
 }
 
 /// The lock is exclusive across processes, not merely across threads sharing
-/// one guard: a refresh blocks while another holds the workspace's lock file.
+/// one guard: a refresh blocks while another *process* holds the workspace's
+/// lock file, and completes once that process lets go.
+///
+/// Two Medulla instances on one machine are the case that matters — a TUI and a
+/// headless executor in the same checkout — and a same-process contender could
+/// pass on nothing more than Rust's own borrow of the guard, so the contender
+/// here is a re-execution of this test binary.
 #[test]
 fn a_refresh_waits_for_the_workspace_lock() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -327,7 +393,19 @@ fn a_refresh_waits_for_the_workspace_lock() {
     let env = env_at(home.path());
     write_workflow(&env, "babysit", "Watch a PR.", true);
 
-    let held = refresh::RefreshLock::acquire(&managed_root(&env, cwd.path())).unwrap();
+    let mut holder = Command::new(std::env::current_exe().unwrap())
+        .args([HOLD_LOCK_TEST, "--exact", "--nocapture"])
+        .env(HOLD_LOCK_ROOT, managed_root(&env, cwd.path()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("the test binary re-executes");
+    let mut announcements = BufReader::new(holder.stdout.take().unwrap()).lines();
+    let announced = announcements
+        .by_ref()
+        .map(|line| line.expect("the holder's output is readable"))
+        .any(|line| line == HOLD_LOCK_READY);
+    assert!(announced, "the holder must announce that it has the lock");
 
     let (tx, rx) = mpsc::channel();
     let worker = {
@@ -341,15 +419,19 @@ fn a_refresh_waits_for_the_workspace_lock() {
 
     assert!(
         rx.recv_timeout(Duration::from_millis(250)).is_err(),
-        "a refresh must not proceed while another holds the workspace lock"
+        "a refresh must not proceed while another process holds the workspace lock"
     );
     assert!(
         !managed_skill(&env, cwd.path(), "babysit").exists(),
         "and it must not have written anything either"
     );
 
-    drop(held);
-    rx.recv_timeout(Duration::from_secs(10))
+    // Closing the holder's stdin is what releases the lock.
+    drop(holder.stdin.take());
+    let status = holder.wait().expect("the holder exits");
+    assert!(status.success(), "the holder must not fail: {status}");
+
+    rx.recv_timeout(Duration::from_secs(30))
         .expect("the refresh proceeds once the lock is released");
     worker.join().unwrap();
     assert!(managed_skill(&env, cwd.path(), "babysit").is_file());

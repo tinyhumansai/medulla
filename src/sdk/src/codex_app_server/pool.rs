@@ -74,8 +74,22 @@ impl AppServerPool {
     ///
     /// For shutdown and for tests; ordinary operation never needs it, because a
     /// pooled process is the thing being conserved.
+    ///
+    /// Each connection is closed explicitly rather than merely dropped: a lane
+    /// mid-turn still holds a handle, and forgetting the pool's own would leave
+    /// that process running until the lane finished — which is exactly what
+    /// shutdown is being asked to prevent.
     pub async fn shutdown(&self) {
-        self.connections.lock().await.clear();
+        let connections: Vec<_> = self
+            .connections
+            .lock()
+            .await
+            .drain()
+            .map(|(_, connection)| connection)
+            .collect();
+        for connection in connections {
+            connection.close();
+        }
     }
 
     /// How many connections are currently pooled.

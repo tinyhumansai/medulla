@@ -207,5 +207,5 @@ mod tests;
 pub use screen::{ScreenCell, ScreenSnapshot};
 
 mod types;
-use types::Inner;
+use types::{ClipboardQueue, Inner};
 pub use types::{ClipboardSink, NowFn, PtyManager};

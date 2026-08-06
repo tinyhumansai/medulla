@@ -169,7 +169,10 @@ fn conditional_test(body: &str) -> Option<&str> {
     if !rest.starts_with(char::is_whitespace) && !rest.starts_with('(') {
         return None;
     }
-    let end = find_top_level(rest, "then")?;
+    // As a *keyword*, not a substring: the condition is usually a path, and a
+    // field with `then` inside it — `.inputs.authenticated` — would otherwise
+    // cut the condition mid-identifier and name the operand `inputs.au`.
+    let end = find_top_level_keyword(rest, "then")?;
     Some(rest[..end].trim())
 }
 

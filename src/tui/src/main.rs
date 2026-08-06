@@ -346,7 +346,7 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         agent_id,
         startup_status,
         transport,
-        endpoint: Some(link_config.forwarder_url.clone()),
+        endpoint: Some(reported_endpoint),
         theme,
         // Claude gates a fresh directory behind a modal trust dialog that only
         // appears on a TTY, so the worker clears it up front — naming the

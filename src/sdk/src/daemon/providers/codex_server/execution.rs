@@ -141,7 +141,7 @@ async fn run(options: RunTaskOptions) -> Result<RunTaskResult, AppServerError> {
 /// A catalog that cannot be derived fails the run, matching the CLI seam: a
 /// process started without it reaches the provider with tool shapes it rejects,
 /// and a 400 on the first turn is far harder to read.
-fn process_args(
+pub(super) fn process_args(
     options: &RunTaskOptions,
     env: &HashMap<String, String>,
 ) -> Result<Vec<String>, AppServerError> {
@@ -185,7 +185,7 @@ fn warn_about_dropped_hooks(options: &RunTaskOptions) {
 /// A fleet grant is stripped. Unlike the CLI transport, this environment belongs
 /// to a process *shared by several tasks*, so an ambient capability here would
 /// be redeemable by every lane on it, not just the one it was minted for.
-fn child_env(options: &RunTaskOptions) -> HashMap<String, String> {
+pub(super) fn child_env(options: &RunTaskOptions) -> HashMap<String, String> {
     let mut env = options.env.clone();
     env.remove(crate::control_socket::MCP_SOCKET_ENV);
     env.remove(crate::control_socket::MCP_GRANT_ENV);

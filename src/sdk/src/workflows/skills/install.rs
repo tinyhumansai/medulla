@@ -403,14 +403,14 @@ impl Candidate {
 /// Missing directories yield nothing rather than an error: not having a
 /// `.codex` is the normal state for most machines.
 fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>> {
-    Ok(scan_candidates(target, root, false)?
+    Ok(scan_candidates(target, root)?
         .into_iter()
         .filter(|candidate| candidate.marker.is_some())
         .map(Candidate::into_managed)
         .collect())
 }
 
-/// Everything a prune pass should remove under one target root.
+/// The subset of `candidates` a prune pass should remove.
 ///
 /// Two rules, in order. A file whose marker names a workflow goes when that
 /// workflow is not kept — the long-standing behaviour. A file with no marker we
@@ -418,58 +418,39 @@ fn scan_managed(target: SkillTarget, root: &Path) -> io::Result<Vec<ManagedFile>
 /// workflow claims that slug; that is what retires a leftover from a release
 /// whose marker we no longer recognise, or a directory whose `SKILL.md` an
 /// operator deleted by hand.
-fn scan_prunable(
-    target: SkillTarget,
-    root: &Path,
+///
+/// The prefix rule stops at a symlinked directory. Its `SKILL.md` is content the
+/// operator linked in from somewhere outside the root, and the prefix alone is
+/// far too thin a claim to delete a file on the strength of. The marker rule is
+/// unaffected: a marker we wrote identifies the file no matter where it sits.
+fn prunable(
+    candidates: Vec<Candidate>,
     keep_ids: &BTreeSet<&str>,
     keep_slugs: &BTreeSet<String>,
-) -> io::Result<Vec<ManagedFile>> {
-    Ok(scan_candidates(target, root, true)?
+) -> Vec<ManagedFile> {
+    candidates
         .into_iter()
         .filter(|candidate| match &candidate.marker {
             Some((workflow_id, _)) => !keep_ids.contains(workflow_id.as_str()),
             None => {
-                candidate.slug.starts_with(SLUG_PREFIX) && !keep_slugs.contains(&candidate.slug)
+                !candidate.symlinked
+                    && candidate.slug.starts_with(SLUG_PREFIX)
+                    && !keep_slugs.contains(&candidate.slug)
             }
         })
         .map(Candidate::into_managed)
-        .collect())
+        .collect()
 }
 
-/// Every file in a generated file's place under one target's directories,
-/// marked or not, sorted by path.
+/// Every file in a generated file's place under one target's skill and command
+/// directories, marked or not, sorted by path.
 ///
-/// `include_legacy` adds Codex's deprecated `.codex/skills` root. It is off for
-/// the listing paths, which report what a harness will actually load, and on
-/// for pruning, which has to reach a root [`install`] only cleans on behalf of
-/// a workflow that still exists.
-fn scan_candidates(
-    target: SkillTarget,
-    root: &Path,
-    include_legacy: bool,
-) -> io::Result<Vec<Candidate>> {
-    let mut found = Vec::new();
-
-    let mut skill_roots = vec![skills_dir(target, root)];
-    if include_legacy && target == SkillTarget::Codex {
-        skill_roots.push(legacy_codex_skills_dir(root));
-    }
-    for skills in &skill_roots {
-        for entry in read_dir_opt(skills)? {
-            let dir = entry.path();
-            if !dir.is_dir() {
-                continue;
-            }
-            let path = dir.join("SKILL.md");
-            found.push(Candidate {
-                marker: read_marker(&path)?,
-                path,
-                slug: entry.file_name().to_string_lossy().into_owned(),
-                target,
-                is_skill: true,
-            });
-        }
-    }
+/// Covers only the directories the target currently writes. Codex's deprecated
+/// `.codex/skills` is reached through [`scan_skill_dirs`] by the prune pass
+/// alone — the listing paths report what a harness will actually load, and
+/// [`install`] cleans that root only on behalf of a workflow that still exists.
+fn scan_candidates(target: SkillTarget, root: &Path) -> io::Result<Vec<Candidate>> {
+    let mut found = scan_skill_dirs(target, &skills_dir(target, root))?;
 
     if let Some(dir) = commands_dir(target, root) {
         for entry in read_dir_opt(&dir)? {

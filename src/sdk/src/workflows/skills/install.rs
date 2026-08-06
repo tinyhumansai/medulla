@@ -2,10 +2,20 @@
 //! discipline that makes it safe to touch `~/.claude`.
 //!
 //! One rule governs every path in here: a file we did not write is never
-//! overwritten and never deleted. Ownership is proved by the marker line
-//! [`super::render`] puts at the top of everything it generates, so a
-//! hand-written `~/.claude/skills/medulla-babysit/SKILL.md` survives an install
-//! intact and is reported as a collision instead.
+//! overwritten. Ownership is proved by the marker line [`super::render`] puts
+//! at the top of everything it generates, so a hand-written
+//! `~/.claude/skills/medulla-babysit/SKILL.md` survives an install intact and
+//! is reported as a collision instead.
+//!
+//! Removal carries one deliberate exception, and only under
+//! [`sync`]`(.., prune = true)`: the `medulla-` slug prefix is Medulla's
+//! namespace, so a `medulla-*` skill directory with no enabled workflow behind
+//! it is retired even when its marker is missing or unreadable. Without that,
+//! a leftover written by a release whose marker we can no longer parse — or
+//! one an operator's editor mangled — is undeletable by any command, and the
+//! harness goes on advertising a workflow that does not exist. A `medulla-*`
+//! directory that *does* match an enabled workflow keeps the marker rule
+//! intact: unmanaged content there is a collision, never a removal.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;

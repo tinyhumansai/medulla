@@ -636,41 +636,18 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // this process rather than to a login session, and rebinding inside the
     // relogin loop below would race this process's own live socket. The server
     // reads the hub slot per request, so a relogin that refills that slot is
-    // picked up with no rebind.
-    #[cfg(feature = "workflows")]
-    let control_plane = {
-        let primary_address = loaded.config.host.effective_address();
-        let local_default_worker = local_dispatch
-            .hosts
-            .iter()
-            .find(|worker| worker.address == primary_address)
-            .map(|worker| worker.address.clone());
-        crate::control_plane::start(
-            &env,
-            &loaded.config,
-            hub_slot.clone(),
-            local_default_worker,
-            hook_log.clone(),
-            &hub_logs,
-        )
-        .await
-    };
-
-    // The registry the control plane records reported runs in, shared with
-    // every session below. Empty and inert on a build or a host that bound no
-    // socket, which is what leaves the rail unchanged there — and a platform
-    // without Unix-domain sockets never binds one, so it takes the same
-    // default rather than reaching into a server that does not exist.
-    #[cfg(all(feature = "workflows", unix))]
-    let harness_runs = control_plane
-        .as_ref()
-        .map(|server| server.runs().clone())
-        .unwrap_or_default();
-    #[cfg(not(all(feature = "workflows", unix)))]
-    let harness_runs = medulla::control_socket::HarnessRunRegistry::default();
-    // Held for the whole process; see the binding note above.
-    #[cfg(feature = "workflows")]
-    let _control_plane = control_plane;
+    // picked up with no rebind. See `control_plane::startup` for what it
+    // resolves and why the registry it hands back is shared with every session.
+    let control_plane = crate::control_plane::startup::start(
+        &env,
+        &loaded.config,
+        hub_slot.clone(),
+        &local_dispatch,
+        hook_log.clone(),
+        &hub_logs,
+    )
+    .await;
+    let harness_runs = control_plane.runs.clone();
 
     // A session, and another after every logout. `run` reports `Relogin` when
     // the Account page's logout landed, and the whole point of that logout is to

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use serde_json::json;
 
 use super::jsonrpc::{notification_line, request_line, response_line, Message, RequestId};
+use super::records::{read_record, Record, MAX_LINE_BYTES};
 use super::types::{
     AppServerKey, AppServerSpec, ApprovalPolicy, SandboxMode, ThreadOptions, TurnStatus,
 };
@@ -197,4 +198,74 @@ fn treats_an_unknown_turn_status_as_a_failure() {
     assert_eq!(TurnStatus::from_wire("failed"), TurnStatus::Failed);
     assert_eq!(TurnStatus::from_wire("inProgress"), TurnStatus::Failed);
     assert_eq!(TurnStatus::from_wire("something-new"), TurnStatus::Failed);
+}
+
+/// A record within the cap frames normally, terminator stripped either way.
+#[tokio::test]
+async fn frames_complete_records_off_stdout() {
+    let mut reader = std::io::Cursor::new(b"{\"a\":1}\n{\"b\":2}\r\n".to_vec());
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Line("{\"a\":1}".to_string())
+    );
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Line("{\"b\":2}".to_string())
+    );
+    assert_eq!(read_record(&mut reader).await.expect("eof"), Record::Eof);
+}
+
+/// A final record with no trailing newline is still worth acting on; EOF is
+/// reported on the call after it, not instead of it.
+#[tokio::test]
+async fn yields_an_unterminated_final_record_before_eof() {
+    let mut reader = std::io::Cursor::new(b"{\"a\":1}".to_vec());
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Line("{\"a\":1}".to_string())
+    );
+    assert_eq!(read_record(&mut reader).await.expect("eof"), Record::Eof);
+}
+
+/// The point of the whole module: an oversized record is discarded as it
+/// arrives rather than buffered, and framing resynchronises on its newline so
+/// the connection survives it.
+#[tokio::test]
+async fn discards_an_oversized_record_and_resynchronises() {
+    let mut bytes = vec![b'x'; MAX_LINE_BYTES + 1];
+    bytes.push(b'\n');
+    bytes.extend_from_slice(b"{\"after\":true}\n");
+    let mut reader = std::io::Cursor::new(bytes);
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Oversized
+    );
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Line("{\"after\":true}".to_string())
+    );
+}
+
+/// An oversized record that never terminates ends the stream as oversized
+/// rather than as a giant line.
+#[tokio::test]
+async fn reports_an_unterminated_oversized_record_at_eof() {
+    let mut reader = std::io::Cursor::new(vec![b'x'; MAX_LINE_BYTES + 1]);
+    assert_eq!(
+        read_record(&mut reader).await.expect("a record"),
+        Record::Oversized
+    );
+    assert_eq!(read_record(&mut reader).await.expect("eof"), Record::Eof);
+}
+
+/// Pinned argv is part of the sharing key: two runs configured differently must
+/// not land on one process, or one inherits the other's routing.
+#[test]
+fn separates_connections_that_pinned_different_argv() {
+    let mut routed = spec(&[]);
+    routed.args = vec!["-c".to_string(), "model_provider=\"medulla\"".to_string()];
+    assert_ne!(
+        AppServerKey::from_spec(&routed),
+        AppServerKey::from_spec(&spec(&[]))
+    );
 }

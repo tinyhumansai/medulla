@@ -113,7 +113,3 @@ fn frame_line(frame: &str) -> Line<'static> {
         ]),
     }
 }
-
-#[cfg(test)]
-#[path = "live_tests.rs"]
-mod tests;

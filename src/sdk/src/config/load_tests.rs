@@ -52,9 +52,11 @@ fn load_config_applies_staging_switch_to_both_urls() {
         loaded.config.backend.base_url,
         "https://staging-api.tinyhumans.ai"
     );
+    // The forwarder follows the resolved backend rather than naming a second
+    // host, so the staging switch moves both together.
     assert_eq!(
         loaded.config.link.unwrap().forwarder_url,
-        "https://staging-api.tiny.place"
+        "https://staging-api.tinyhumans.ai"
     );
     let _ = std::fs::remove_dir_all(&home);
     let _ = std::fs::remove_dir_all(&cwd);
@@ -382,33 +384,30 @@ fn merge_value_is_recursive() {
 }
 
 #[test]
-fn a_synthesized_link_section_honours_the_staging_switch() {
+fn a_synthesized_link_section_follows_the_resolved_backend() {
     // Regression. `medulla daemon --tui` synthesizes this section when the
     // config file has none, and used to do it with `LinkConfig::default()` —
-    // whose `forwarder_url` is the *constant* prod backend, because a serde
-    // default cannot read the environment. Under `MEDULLA_STAGING=1` that put
-    // the worker on prod while the orchestrator's hub (which resolves from env)
-    // sat on staging: both started cleanly and reported healthy, but a datagram
-    // handed to one forwarder never reaches the other, so the two simply never
-    // heard from each other with nothing logged anywhere.
-    let staging = env(&[("MEDULLA_STAGING", "1"), ("MEDULLA_HOME", "/tmp/mh")]);
+    // whose `forwarder_url` is a *constant*, because a serde default can read
+    // neither the environment nor the rest of the document. Pointed at staging
+    // that put the worker on one forwarder while the orchestrator's hub sat on
+    // another: both started cleanly and reported healthy, but a datagram handed
+    // to one forwarder never reaches the other, so the two simply never heard
+    // from each other with nothing logged anywhere.
+    let home = env(&[("MEDULLA_HOME", "/tmp/mh")]);
     assert_eq!(
-        default_link_config(&staging).forwarder_url,
-        "https://staging-api.tiny.place",
-        "the synthesized section must follow MEDULLA_STAGING, not a constant"
+        default_link_config(&home, "https://staging-api.tinyhumans.ai").forwarder_url,
+        "https://staging-api.tinyhumans.ai",
+        "the synthesized section must follow the resolved backend, not a constant"
     );
     assert_ne!(
         LinkConfig::default().forwarder_url,
-        default_link_config(&staging).forwarder_url,
+        default_link_config(&home, "https://staging-api.tinyhumans.ai").forwarder_url,
         "if these ever agree this test has stopped proving anything"
     );
 
-    // Absent the switch it is still prod, and the state dir is home-derived
-    // either way — the same identity `medulla daemon` would have used.
-    let prod = env(&[("MEDULLA_HOME", "/tmp/mh")]);
     assert_eq!(
-        default_link_config(&prod).forwarder_url,
-        "https://api.tiny.place"
+        default_link_config(&home, "https://api.tinyhumans.ai").forwarder_url,
+        "https://api.tinyhumans.ai"
     );
     // Built with `join` rather than written out: the value is a real path, so
     // on Windows it comes back separated with a backslash.
@@ -417,7 +416,10 @@ fn a_synthesized_link_section_honours_the_staging_switch() {
         .join("link")
         .to_string_lossy()
         .into_owned();
-    assert_eq!(default_link_config(&prod).state_dir, expected);
+    assert_eq!(
+        default_link_config(&home, "https://api.tinyhumans.ai").state_dir,
+        expected
+    );
 }
 
 #[test]

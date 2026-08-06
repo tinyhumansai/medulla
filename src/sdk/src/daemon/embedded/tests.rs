@@ -2,7 +2,7 @@
 //! round-trips, and the observation counters a UI renders.
 //!
 //! Everything here is offline and process-free. Provider *detection* is made
-//! deterministic through the documented `TINYPLACE_*_BIN` overrides pointed at a
+//! deterministic through the documented `MEDULLA_*_BIN` overrides pointed at a
 //! binary every test machine has, and the executor is substituted so no agent
 //! CLI is ever spawned.
 
@@ -39,7 +39,7 @@ fn installed_bin() -> String {
 fn env_with_only_claude() -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
+        ("MEDULLA_CLAUDE_BIN".to_string(), installed_bin()),
     ])
 }
 
@@ -48,15 +48,15 @@ fn env_with_nothing() -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
         (
-            "TINYPLACE_CLAUDE_BIN".to_string(),
+            "MEDULLA_CLAUDE_BIN".to_string(),
             "/nonexistent/claude".to_string(),
         ),
         (
-            "TINYPLACE_CODEX_BIN".to_string(),
+            "MEDULLA_CODEX_BIN".to_string(),
             "/nonexistent/codex".to_string(),
         ),
         (
-            "TINYPLACE_OPENCODE_BIN".to_string(),
+            "MEDULLA_OPENCODE_BIN".to_string(),
             "/nonexistent/opencode".to_string(),
         ),
     ])

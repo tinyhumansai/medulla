@@ -6,7 +6,7 @@ use crossterm::event::{
 
 use super::super::super::pty::PtyManager;
 use super::super::types::{ExecutionMode, SetupStep, WorkerCmd, TAB_MASTER};
-use super::helpers::{app_at_setup, app_with, desk_with, render, render_lines};
+use super::helpers::{app_at_setup, app_with, render, render_lines};
 
 /// Build a synthetic left-click at a terminal cell.
 fn click(column: u16, row: u16) -> Event {
@@ -20,7 +20,7 @@ fn click(column: u16, row: u16) -> Event {
 
 #[test]
 fn ctrl_o_releases_and_recaptures_the_mouse_for_native_copy() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     assert!(app.mouse_capture());
 
     app.on_event(Event::Key(KeyEvent::new(
@@ -40,7 +40,7 @@ fn ctrl_o_releases_and_recaptures_the_mouse_for_native_copy() {
 
 #[test]
 fn a_pasted_address_lands_in_the_prompt_instead_of_being_dropped() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.set_tab(TAB_MASTER);
     // `a` opens the pairing prompt; the address is pasted, not typed.
     app.on_event(Event::Key(KeyEvent::new(
@@ -71,7 +71,7 @@ fn a_pasted_address_lands_in_the_prompt_instead_of_being_dropped() {
 
 #[test]
 fn a_paste_with_no_prompt_open_is_ignored() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
 
     assert!(app.on_event(Event::Paste("stray".into())).is_none());
     assert!(app.prompt.is_none(), "no prompt was conjured");
@@ -79,7 +79,7 @@ fn a_paste_with_no_prompt_open_is_ignored() {
 
 #[test]
 fn repeated_ctrl_o_does_not_flip_mouse_capture() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
 
     app.on_event(Event::Key(KeyEvent::new_with_kind(
         KeyCode::Char('o'),
@@ -90,25 +90,9 @@ fn repeated_ctrl_o_does_not_flip_mouse_capture() {
     assert!(app.mouse_capture());
 }
 
-#[tokio::test]
-async fn repeated_decision_key_does_not_act_on_the_next_request() {
-    let desk = desk_with(&["alice", "bob"]).await;
-    let mut app = app_with(PtyManager::new(), Some(desk));
-    app.set_tab(2);
-
-    let command = app.on_event(Event::Key(KeyEvent::new_with_kind(
-        KeyCode::Char('a'),
-        KeyModifiers::NONE,
-        KeyEventKind::Repeat,
-    )));
-
-    assert!(command.is_none());
-    assert_eq!(app.selected_request().unwrap().agent_id, "alice");
-}
-
 #[test]
 fn buffered_mouse_events_are_ignored_after_capture_is_released() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     let _ = render(&mut app, 100, 30);
     app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char('o'),
@@ -122,7 +106,7 @@ fn buffered_mouse_events_are_ignored_after_capture_is_released() {
 
 #[test]
 fn released_mouse_hint_offers_recapture() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char('o'),
         KeyModifiers::CONTROL,
@@ -136,7 +120,7 @@ fn released_mouse_hint_offers_recapture() {
 
 #[test]
 fn setup_options_can_be_clicked() {
-    let mut app = app_at_setup(PtyManager::new(), None);
+    let mut app = app_at_setup(PtyManager::new());
     let _ = render(&mut app, 100, 30);
 
     let command = app.on_event(click(5, 6));
@@ -148,7 +132,7 @@ fn setup_options_can_be_clicked() {
 
 #[test]
 fn setup_options_stay_on_clickable_rows_in_a_narrow_terminal() {
-    let mut app = app_at_setup(PtyManager::new(), None);
+    let mut app = app_at_setup(PtyManager::new());
     let lines = render_lines(&mut app, 30, 20);
 
     assert!(lines[6].contains("Interactive"), "{}", lines[6]);
@@ -159,31 +143,18 @@ fn setup_options_stay_on_clickable_rows_in_a_narrow_terminal() {
 
 #[test]
 fn tab_labels_can_be_clicked() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     let _ = render(&mut app, 100, 30);
 
     // Row 2: the header is two lines (identity, then what this worker serves).
-    app.on_event(click(37, 2));
+    app.on_event(click(28, 2));
 
-    assert_eq!(app.tab(), "Requests");
-}
-
-#[tokio::test]
-async fn list_rows_can_be_clicked() {
-    let desk = desk_with(&["alice", "bob"]).await;
-    let mut app = app_with(PtyManager::new(), Some(desk));
-    app.set_tab(3);
-    let _ = render(&mut app, 100, 30);
-
-    // Two header rows + tab bar + panel border puts the second row at y=5.
-    app.on_event(click(3, 5));
-
-    assert_eq!(app.selected_request().unwrap().agent_id, "bob");
+    assert_eq!(app.tab(), "Workspaces");
 }
 
 #[test]
 fn narrow_master_rows_stay_aligned_with_their_hitboxes() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.add_master("a-very-long-master-identifier-that-would-wrap".into(), None);
     app.add_master("bob".into(), None);
     app.set_tab(1);

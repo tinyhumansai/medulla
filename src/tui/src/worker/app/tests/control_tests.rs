@@ -8,7 +8,7 @@ use super::helpers::{app_with, key, render};
 
 #[test]
 fn master_add_prompt_emits_a_connect_command() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.set_tab(TAB_MASTER);
 
     assert_eq!(app.on_key(key(KeyCode::Char('a'))), None);
@@ -32,7 +32,7 @@ fn master_add_prompt_emits_a_connect_command() {
 
 #[test]
 fn selected_master_can_be_messaged_from_the_same_screen() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.add_master("master-address".into(), Some("@boss".into()));
     app.set_tab(TAB_MASTER);
 
@@ -52,7 +52,7 @@ fn selected_master_can_be_messaged_from_the_same_screen() {
 
 #[test]
 fn workspace_prompt_and_removal_preserve_the_active_root() {
-    let mut app = app_with(PtyManager::new(), None);
+    let mut app = app_with(PtyManager::new());
     app.set_tab(TAB_WORKSPACES);
     app.on_key(key(KeyCode::Char('a')));
     for ch in "/another".chars() {
@@ -68,11 +68,11 @@ fn workspace_prompt_and_removal_preserve_the_active_root() {
 }
 
 #[test]
-fn daemon_subset_renders_agents_master_workspaces_and_requests() {
-    let mut app = app_with(PtyManager::new(), None);
+fn daemon_subset_renders_agents_master_and_workspaces() {
+    let mut app = app_with(PtyManager::new());
     let out = render(&mut app, 120, 18);
 
-    for tab in ["Agents", "Master", "Workspaces", "Requests"] {
+    for tab in ["Agents", "Master", "Workspaces"] {
         assert!(out.contains(tab), "missing {tab}: {out}");
     }
 }

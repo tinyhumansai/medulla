@@ -17,20 +17,8 @@ pub(super) async fn run_cmd(
 ) {
     match cmd {
         WorkerCmd::Quit => app.should_quit = true,
-        WorkerCmd::Refresh => refresh(app).await,
         WorkerCmd::Start { mode, provider } => {
             start_worker(app, start, inbox, runtime, mode, provider)
-        }
-        WorkerCmd::ContactOp { agent_id, decision } => {
-            let Some(desk) = app.contact_desk() else {
-                app.set_status("No tiny.place identity — contact decisions are unavailable");
-                return;
-            };
-            let status = match desk.decide(&agent_id, decision).await {
-                Ok(status) => status,
-                Err(message) => message,
-            };
-            app.set_status(status);
         }
         WorkerCmd::ConnectMaster(input) => connect_master(app, start, input).await,
         WorkerCmd::MessageMaster { address, text } => {
@@ -39,25 +27,6 @@ pub(super) async fn run_cmd(
         WorkerCmd::AddWorkspace(input) => add_workspace(app, runtime, input).await,
         WorkerCmd::RemoveWorkspace(workspace) => remove_workspace(app, runtime, workspace).await,
     }
-}
-
-/// Force a relay/contact refresh.
-async fn refresh(app: &mut WorkerApp) {
-    let Some(desk) = app.contact_desk() else {
-        app.set_status("No tiny.place identity — nothing to refresh");
-        return;
-    };
-    let health = desk.refresh().await;
-    app.set_status(match &health {
-        medulla::contacts::PollHealth::Failed { error, .. } => {
-            format!("Relay unreachable: {error}")
-        }
-        _ => format!(
-            "Relay checked · {} request(s) known, {} pending",
-            desk.requests().len(),
-            desk.pending_count()
-        ),
-    });
 }
 
 /// Build the selected executor and begin draining encrypted work.
@@ -70,7 +39,7 @@ fn start_worker(
     provider: HarnessProvider,
 ) {
     let Some(transport) = start.transport.clone() else {
-        app.set_status("No tiny.place identity — this worker serves local sessions only");
+        app.set_status("No host-link identity — this worker serves local sessions only");
         return;
     };
     if inbox.is_some() {
@@ -124,32 +93,26 @@ async fn connect_master(app: &mut WorkerApp, start: &StartWiring, input: String)
         .trim()
         .starts_with('@')
         .then(|| input.trim().to_string());
-    let address = if handle.is_some() {
-        match transport.resolve_handle(&input).await {
-            Some(address) => address,
-            None => {
-                app.set_status(format!("Master {input} was not found"));
-                return;
-            }
-        }
-    } else {
-        input.trim().to_string()
+    // Every input goes through `resolve_handle`, not just the `@` form. On the
+    // host link a node name *is* the address, so this is not a directory lookup
+    // — it is the enrollment check, and it is the only one there is. Skipping it
+    // for a bare name persisted whatever was typed: the row said "added", and
+    // the first message failed much later with "no link peer is enrolled",
+    // pointing at the send rather than at the typo that caused it.
+    let Some(address) = transport.resolve_handle(&input).await else {
+        app.set_status(format!("Master {} is not enrolled", input.trim()));
+        return;
     };
-    match transport.request_contact(&address).await {
-        Ok(()) => {
-            app.add_master(address.clone(), handle);
-            if let Err(err) = medulla::config::persist_link_peers(app.config_path(), app.masters())
-            {
-                app.set_status(format!(
-                    "Contact requested, but config was not saved: {err}"
-                ));
-            } else {
-                app.set_status(format!(
-                    "Master {address} added · contact requested, awaiting approval"
-                ));
-            }
-        }
-        Err(err) => app.set_status(format!("Could not connect master: {err}")),
+    // No handshake to perform beyond that: enrollment already established the
+    // pair key, so adding the row is the whole operation
+    // (`docs/host-link-protocol.md` §7).
+    app.add_master(address.clone(), handle);
+    if let Err(err) = medulla::config::persist_link_peers(app.config_path(), app.masters()) {
+        app.set_status(format!(
+            "Master {address} added, but config was not saved: {err}"
+        ));
+    } else {
+        app.set_status(format!("Master {address} added"));
     }
 }
 
@@ -159,10 +122,6 @@ async fn message_master(app: &mut WorkerApp, start: &StartWiring, address: Strin
         app.set_status("Worker identity unavailable — cannot message the master");
         return;
     };
-    if !transport.contact_accepted(&address).await {
-        app.set_status("Master has not accepted this worker's contact request yet");
-        return;
-    }
     match transport.send(&address, &text).await {
         Ok(()) => app.set_status(format!("Sent to master · {} chars", text.chars().count())),
         Err(err) => app.set_status(format!("Message failed: {err}")),

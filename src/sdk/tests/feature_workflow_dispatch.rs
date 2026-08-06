@@ -7,7 +7,7 @@
 //! correlation an ordinary task already uses.
 //!
 //! Offline and process-free: provider detection is pinned through the documented
-//! `TINYPLACE_*_BIN` overrides, and the executor is substituted so no coding
+//! `MEDULLA_*_BIN` overrides, and the executor is substituted so no coding
 //! agent is ever spawned.
 
 #![cfg(feature = "workflows")]
@@ -41,7 +41,7 @@ fn installed_bin() -> String {
 fn env_in(home: &std::path::Path) -> HashMap<String, String> {
     HashMap::from([
         ("PATH".to_string(), String::new()),
-        ("TINYPLACE_CLAUDE_BIN".to_string(), installed_bin()),
+        ("MEDULLA_CLAUDE_BIN".to_string(), installed_bin()),
         (
             "MEDULLA_HOME".to_string(),
             home.to_string_lossy().into_owned(),

@@ -160,7 +160,7 @@ async fn run_provider_attempt(
         ));
     }
 
-    // `TINYPLACE_<P>_ARGS` (whitespace-split) is prepended to any configured
+    // `MEDULLA_<P>_ARGS` (whitespace-split) is prepended to any configured
     // extra args, so a per-provider env override applies to headless daemon runs
     // too — matching the wrapper's child-argv prefix.
     let mut extra_args = crate::protocol::env::provider_args(spec.provider, &spec.env);

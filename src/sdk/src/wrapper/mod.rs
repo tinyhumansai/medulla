@@ -3,7 +3,7 @@
 //!
 //! The wrapper launches the real coding-agent CLI in the user's terminal exactly
 //! as if it were run directly, while
-//! bridging the session to tiny.place underneath: it tails the harness's own
+//! bridging the session to the host link underneath: it tails the harness's own
 //! JSONL transcript, normalizes each record into a typed
 //! [`SessionEnvelopeV2`](crate::protocol::SessionEnvelopeV2) event, and
 //! forwards the stream as encrypted Signal DMs to the configured owner. When
@@ -47,7 +47,7 @@
 //!
 //! Split by responsibility: `types` holds the session data model
 //! ([`WrapperConfig`]), `args` parses the wrapper's own flags, `bridge` owns
-//! the tiny.place `Bridge` and its transcript/inbox I/O, and
+//! the `Bridge` and its transcript/inbox I/O, and
 //! `run` drives the child process and select loop. The `control`, `tail`, and
 //! `envelope` submodules provide frame targeting, transcript tailing, and
 //! envelope construction. All public items are re-exported here so callers use

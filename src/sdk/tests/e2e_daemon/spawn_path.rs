@@ -1,5 +1,5 @@
 //! Daemon e2e over the REAL spawn path ([`run_provider_task`]) driving fake
-//! provider CLIs (shell scripts emitting realistic JSONL) via `TINYPLACE_*_BIN`
+//! provider CLIs (shell scripts emitting realistic JSONL) via `MEDULLA_*_BIN`
 //! overrides: task lifecycle, tool-status mapping, mid-run stdin forwarding,
 //! capabilities merge + digest fallback, plaintext DMs, and the idle watchdog.
 
@@ -17,7 +17,7 @@ use crate::support::wait_until;
 async fn task_lifecycle_ack_status_reply() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &claude_script("intermediate", "final answer"));
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -70,7 +70,7 @@ async fn task_lifecycle_ack_status_reply() {
 async fn opencode_tool_status_details_and_reply() {
     let tmp = TempDir::new();
     let script = tmp.write_script("opencode", &opencode_script("opencode done"));
-    let env = provider_env(&[("TINYPLACE_OPENCODE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_OPENCODE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Opencode, tmp.path_str(), env),
@@ -115,7 +115,7 @@ async fn opencode_tool_status_details_and_reply() {
 async fn input_frame_reaches_provider_stdin() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &claude_stdin_echo_script());
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -171,7 +171,7 @@ async fn input_frame_reaches_provider_stdin() {
 async fn capabilities_result_merges_daemon_and_report() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &claude_capabilities_script());
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -226,7 +226,7 @@ async fn capabilities_summary_falls_back_to_workspace_digest() {
     )
     .unwrap();
     let script = tmp.write_script("claude", &claude_capabilities_script_without_summary());
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -267,7 +267,7 @@ async fn capabilities_summary_falls_back_to_workspace_digest() {
 async fn capabilities_result_advertises_budget_and_readiness() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &claude_capabilities_script());
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -329,7 +329,7 @@ async fn capabilities_result_advertises_budget_and_readiness() {
 async fn plaintext_dm_replies_raw() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &claude_script("ignored", "plain reply"));
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let runtime = DaemonRuntime::new(
         config(HarnessProvider::Claude, tmp.path_str(), env),
@@ -360,7 +360,7 @@ async fn plaintext_dm_replies_raw() {
 async fn idle_watchdog_kills_hung_provider() {
     let tmp = TempDir::new();
     let script = tmp.write_script("claude", &hanging_script());
-    let env = provider_env(&[("TINYPLACE_CLAUDE_BIN", &script)]);
+    let env = provider_env(&[("MEDULLA_CLAUDE_BIN", &script)]);
     let (send, recorded) = recording_send();
     let mut cfg = config(HarnessProvider::Claude, tmp.path_str(), env);
     cfg.task_timeout_ms = 300; // fire fast

@@ -19,7 +19,7 @@ use crate::protocol::HarnessProvider;
 /// **This is the inverse of the JavaScript prior art's vocabulary, and the
 /// inversion is deliberate.** The implementations this was ported from — the
 /// former `core-js` orchestrator (since removed from this repo) and the
-/// tiny.place daemon — call the *long-lived* session "bound" (it
+/// host-link daemon — call the *long-lived* session "bound" (it
 /// is bound to a thread) and the throwaway one "unbound"/"pool". Here the
 /// adjective describes the session's **lifetime**, not its attachment: a
 /// [`SessionClass::Bounded`] session has a bounded life (one turn), a
@@ -212,7 +212,7 @@ impl fmt::Display for SessionDriver {
 /// the other.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionKey {
-    /// The conversation anchor — a peer's tiny.place cryptoId, or a local label
+    /// The conversation anchor — a peer's link node name, or a local label
     /// for an operator-opened session.
     pub conversation: String,
     /// Which coding-agent CLI serves this conversation.

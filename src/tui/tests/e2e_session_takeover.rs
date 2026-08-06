@@ -98,8 +98,8 @@ done
         std::env::var("PATH").unwrap_or_default(),
     );
     env.insert("TERM".to_string(), "xterm-256color".to_string());
-    env.insert("TINYPLACE_CODEX_SESSIONS_DIR".to_string(), cwd.clone());
-    env.insert("TINYPLACE_CODEX_BIN".to_string(), "/bin/sh".to_string());
+    env.insert("MEDULLA_CODEX_SESSIONS_DIR".to_string(), cwd.clone());
+    env.insert("MEDULLA_CODEX_BIN".to_string(), "/bin/sh".to_string());
 
     let sessions = PtyManager::new();
     let run_task =

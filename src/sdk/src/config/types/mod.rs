@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::urls::{PROD_BACKEND_BASE_URL, PROD_TINYPLACE_BASE_URL};
+use super::urls::PROD_BACKEND_BASE_URL;
 use super::AppearanceConfig;
 use crate::harness_hooks::HooksConfig;
 use crate::protocol::{BudgetWindow, HarnessProvider};
@@ -29,7 +29,11 @@ fn d_state_dir() -> String {
     "state".into()
 }
 fn d_forwarder_url() -> String {
-    PROD_TINYPLACE_BASE_URL.into()
+    // Placeholder for bare deserialization; the real value follows the resolved
+    // backend base URL and is filled in by `load_config` (or by
+    // `default_link_config` for a synthesized section). Prod is the safe
+    // constant here because it is also the backend default.
+    PROD_BACKEND_BASE_URL.into()
 }
 fn d_link_state_dir() -> String {
     // Placeholder; the real value is `<medulla_home>/link`, filled in by

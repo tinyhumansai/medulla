@@ -25,7 +25,7 @@ const CAPACITY: usize = 8;
 /// One worker session's screen, as the hub currently holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchedScreen {
-    /// The worker's tiny.place address.
+    /// The worker's link address.
     pub worker: String,
     /// The task whose session this shows.
     pub task_id: String,

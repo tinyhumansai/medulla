@@ -14,15 +14,16 @@ use serde_json::Value;
 use crate::home::medulla_home;
 
 use super::types::{LinkConfig, LoadedConfig, TuiConfig};
-use super::urls::{resolve_backend_base_url, resolve_tinyplace_base_url};
+use super::urls::{resolve_backend_base_url, resolve_forwarder_base_url};
 
 /// The `[link]` section to use when the config file has none.
 ///
-/// [`load_config`] env-resolves `forwarder_url` and the state dir only for a
-/// section that is actually *present*. A caller that synthesizes its own with
-/// [`LinkConfig::default`] therefore gets the **prod** backend even under
-/// `MEDULLA_STAGING=1`, because that field's serde default is a constant and
-/// constants cannot read the environment.
+/// [`load_config`] resolves `forwarder_url` and the state dir only for a section
+/// that is actually *present*. A caller that synthesizes its own with
+/// [`LinkConfig::default`] therefore gets the **prod** backend whatever
+/// `backend.baseUrl` / `MEDULLA_API_URL` / `MEDULLA_STAGING` said, because that
+/// field's serde default is a constant and constants read neither the
+/// environment nor the rest of the document.
 ///
 /// That divergence is not cosmetic: a host pointed at one forwarder and an
 /// orchestrator pointed at another both start cleanly and report healthy — they
@@ -31,9 +32,13 @@ use super::urls::{resolve_backend_base_url, resolve_tinyplace_base_url};
 /// `Default::default()` anywhere a missing section is filled in, so running
 /// without a `[link]` section cannot strand a host on a different forwarder
 /// than the rest of the deployment.
-pub fn default_link_config(env: &HashMap<String, String>) -> LinkConfig {
+///
+/// `backend_url` is the caller's already-resolved backend base URL — normally
+/// `loaded.config.backend.base_url` — since the forwarder is served by that same
+/// backend.
+pub fn default_link_config(env: &HashMap<String, String>, backend_url: &str) -> LinkConfig {
     LinkConfig {
-        forwarder_url: resolve_tinyplace_base_url(env, None),
+        forwarder_url: resolve_forwarder_base_url(backend_url, None),
         state_dir: medulla_home(env)
             .join("link")
             .to_string_lossy()
@@ -178,13 +183,16 @@ pub fn load_config(
         .and_then(|b| b.get("baseUrl"))
         .and_then(|v| v.as_str());
     config.backend.base_url = resolve_backend_base_url(env, backend_url);
+    // Cloned before the `link` borrow below: the forwarder derives from this,
+    // and `config.link.as_mut()` holds `config` mutably for that whole block.
+    let resolved_backend_url = config.backend.base_url.clone();
 
     if let Some(link) = config.link.as_mut() {
         let link_raw = merged.get("link");
         let link_url = link_raw
             .and_then(|t| t.get("forwarderUrl"))
             .and_then(|v| v.as_str());
-        link.forwarder_url = resolve_tinyplace_base_url(env, link_url);
+        link.forwarder_url = resolve_forwarder_base_url(&resolved_backend_url, link_url);
         // Home-derived state dir unless the file set one explicitly.
         let dir_explicit = link_raw
             .and_then(|t| t.get("stateDir"))

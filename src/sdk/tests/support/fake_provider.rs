@@ -4,7 +4,7 @@
 //! realistic provider JSONL on stdout (claude `stream-json`, codex `exec --json`,
 //! opencode `run --format json`). The daemon's real spawn path
 //! ([`medulla::daemon::providers::run_provider_task`]) runs them via the
-//! `TINYPLACE_*_BIN` env overrides, so tests exercise process spawning, JSONL
+//! `MEDULLA_*_BIN` env overrides, so tests exercise process spawning, JSONL
 //! mapping, and reply extraction without any real coding-agent CLI.
 
 use std::collections::HashMap;
@@ -72,7 +72,7 @@ fn now_nanos() -> u128 {
 }
 
 /// Build a provider env map carrying the host `PATH` (so `/bin/sh` builtins and
-/// any spawned tools resolve) plus a `TINYPLACE_*_BIN` override per entry.
+/// any spawned tools resolve) plus a `MEDULLA_*_BIN` override per entry.
 pub fn provider_env(overrides: &[(&str, &str)]) -> HashMap<String, String> {
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {

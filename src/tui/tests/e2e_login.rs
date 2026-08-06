@@ -259,11 +259,8 @@ async fn run_medulla(
             .current_dir(&home)
             .env("MEDULLA_HOME", &home)
             .env("MEDULLA_API_URL", &base_url)
-            .env(
-                "TINYPLACE_CLAUDE_SESSIONS_DIR",
-                home.join("claude-sessions"),
-            )
-            .env("TINYPLACE_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
+            .env("MEDULLA_CLAUDE_SESSIONS_DIR", home.join("claude-sessions"))
+            .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
             .env_remove("MEDULLA_TOKEN")
             .env_remove("MEDULLA_USER")
             .env_remove("MEDULLA_STAGING")

@@ -537,7 +537,7 @@ impl App {
     /// Derive the current agent lanes from the snapshot, harness, and roster.
     ///
     /// The roster is the snapshot's (what the backend advertises, plus any
-    /// tiny.place peers the observation overlays) merged with the runtime's own
+    /// host-link peers the observation overlays) merged with the runtime's own
     /// worker registry. Both are needed: a worker added at runtime lives only in
     /// the registry — which is what resolves a delegated task's address — so
     /// reading the snapshot alone left a live, dispatchable worker off this tab.

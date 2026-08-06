@@ -26,7 +26,7 @@ pub enum OnboardingOutcome {
 /// An async action the pre-run loop must run on the screen's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OnboardingCmd {
-    /// Create/load the tiny.place identity for the chosen worker name.
+    /// Create/load the host-link identity for the chosen worker name.
     LoadIdentity {
         /// The worker name to mint or load the identity for.
         name: String,

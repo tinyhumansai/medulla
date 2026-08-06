@@ -6,9 +6,7 @@
 
 use crossterm::event::{Event, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 
-use super::types::{
-    Screen, WorkerApp, WorkerCmd, TAB_MASTER, TAB_REQUESTS, TAB_SESSIONS, TAB_WORKSPACES,
-};
+use super::types::{Screen, WorkerApp, WorkerCmd, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES};
 
 impl WorkerApp {
     /// Route a terminal event to the worker's keyboard or pointer handler.
@@ -91,9 +89,6 @@ impl WorkerApp {
             }
             TAB_WORKSPACES if index < self.workspaces.len() => {
                 self.workspace_index = index;
-            }
-            TAB_REQUESTS if index < self.pending_requests().len() => {
-                self.request_index = index;
             }
             _ => {}
         }

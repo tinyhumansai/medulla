@@ -26,15 +26,15 @@ fn home_env(dir: &std::path::Path, extra: &[(&str, &str)]) -> HashMap<String, St
 #[test]
 fn env_owner_priority_order() {
     assert_eq!(
-        env_owner(&env(&[("TINYPLACE_OPENHUMAN_OWNER", "@boss")])).as_deref(),
+        env_owner(&env(&[("MEDULLA_OPENHUMAN_OWNER", "@boss")])).as_deref(),
         Some("@boss")
     );
     // The link-native key wins over every legacy one.
     assert_eq!(
         env_owner(&env(&[
             ("MEDULLA_LINK_OWNER", "orchestrator-1"),
-            ("TINYPLACE_HARNESS_DM_TO", "@dm"),
-            ("TINYPLACE_OPENHUMAN_OWNER", "@boss"),
+            ("MEDULLA_HARNESS_DM_TO", "@dm"),
+            ("MEDULLA_OPENHUMAN_OWNER", "@boss"),
         ]))
         .as_deref(),
         Some("orchestrator-1")
@@ -42,8 +42,8 @@ fn env_owner_priority_order() {
     // Harness DM_TO still wins over the generic owner.
     assert_eq!(
         env_owner(&env(&[
-            ("TINYPLACE_HARNESS_DM_TO", "@dm"),
-            ("TINYPLACE_OPENHUMAN_OWNER", "@boss"),
+            ("MEDULLA_HARNESS_DM_TO", "@dm"),
+            ("MEDULLA_OPENHUMAN_OWNER", "@boss"),
         ]))
         .as_deref(),
         Some("@dm")
@@ -57,7 +57,7 @@ fn env_owner_priority_order() {
     assert_eq!(
         env_owner(&env(&[
             ("MEDULLA_LINK_OWNER", "  "),
-            ("TINYPLACE_OPENHUMAN_OWNER", "@boss"),
+            ("MEDULLA_OPENHUMAN_OWNER", "@boss"),
         ]))
         .as_deref(),
         Some("@boss")

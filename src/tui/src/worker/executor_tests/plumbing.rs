@@ -79,7 +79,7 @@ async fn the_configured_model_reaches_the_spawned_harnesss_argv() {
     let (executor, env) = harness_with_env(
         dir.path(),
         &cwd,
-        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+        &[("MEDULLA_CODEX_BIN", &bin.to_string_lossy())],
     );
     let mut opts = options(&env, "peer-model", "unused", &cwd);
     opts.extra_args = Vec::new();
@@ -112,7 +112,7 @@ async fn a_configured_router_layers_its_endpoint_and_resolved_key_into_the_spawn
         dir.path(),
         &cwd,
         &[
-            ("TINYPLACE_CODEX_BIN", &bin.to_string_lossy()),
+            ("MEDULLA_CODEX_BIN", &bin.to_string_lossy()),
             ("MY_ROUTER_KEY", "sekrit-value"),
         ],
     );
@@ -158,7 +158,7 @@ async fn task_scoped_environment_reaches_the_spawned_harness() {
     let (executor, env) = harness_with_env(
         dir.path(),
         &cwd,
-        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+        &[("MEDULLA_CODEX_BIN", &bin.to_string_lossy())],
     );
     let mut opts = options(&env, "peer-task-env", "unused", &cwd);
     opts.extra_args = Vec::new();
@@ -374,7 +374,7 @@ async fn the_pty_spawn_env_carries_commit_attribution() {
     let (executor, env) = harness_with_env(
         dir.path(),
         &cwd,
-        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+        &[("MEDULLA_CODEX_BIN", &bin.to_string_lossy())],
     );
 
     let mut opts = options(&env, "peer-attribution", "unused", &cwd);
@@ -409,7 +409,7 @@ async fn the_pty_spawn_env_omits_attribution_when_configured_off() {
     let (executor, env) = harness_with_env(
         dir.path(),
         &cwd,
-        &[("TINYPLACE_CODEX_BIN", &bin.to_string_lossy())],
+        &[("MEDULLA_CODEX_BIN", &bin.to_string_lossy())],
     );
 
     let mut opts = options(&env, "peer-no-attribution", "unused", &cwd);

@@ -39,7 +39,7 @@ Under the home:
 * `config.toml` — the user-global config file.
 * `state/` — the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
 * `workflows/*.json` — your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.
-* `tinyplace/` — the default [tiny.place](https://tiny.place) identity directory.
+* `link/` — the default host-link identity directory.
 * `worker.json` — the [worker profile](cli-reference.md#first-run-worker-registration).
 
 Point `MEDULLA_HOME` at a scratch directory to run against an isolated store — its own workflows, agent templates, and state rather than yours. That is what the test suites and container runs do.
@@ -53,12 +53,12 @@ Config is merged from lowest to highest precedence (highest wins):
 1. Built-in defaults (production endpoints; `MEDULLA_STAGING` flips the default URLs).
 2. User-global `<home>/config.toml`.
 3. Project-local `./.medulla/config.toml` (else `./medulla.toml`).
-4. Environment variables (`MEDULLA_API_URL`, `MEDULLA_TOKEN` via `tokenEnv`, `MEDULLA_STAGING`, `MEDULLA_STATE_DIR`, `TINYPLACE_*`).
+4. Environment variables (`MEDULLA_API_URL`, `MEDULLA_TOKEN` via `tokenEnv`, `MEDULLA_STAGING`, `MEDULLA_STATE_DIR`, the `MEDULLA_*` harness knobs — whose old `TINYPLACE_*` spelling is deprecated but still read).
 5. CLI flags.
 
 Files are merged field-by-field (a recursive table merge), so a project-local file can override just `backend.baseUrl` without discarding the rest of a global file. [TOML](https://toml.io/) is the primary format; `--config <path>` still accepts either `.toml` or `.json` (parser chosen by extension) and bypasses file discovery, but env vars and CLI flags still override it. The Config tab shows the merged effective config and lists the source files that contributed.
 
-Every section is optional; with no file anywhere, all defaults apply. Sections: `backend`, `host` (whether this device also runs the work it orchestrates, and the workspace and roots it advertises), `tinyplace` (identity/presence + peer roster for the daemon and Overview panel), `hub` (the persisted worker roster and selected default worker, so a fleet survives a restart), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display, model, agent, workspace, concurrency), `workflow` (the daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint), `fleet` (the declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog), `router` (a custom OpenAI-compatible router the daemon spawns harnesses against; absent leaves every harness unrouted), `budget` (operator-declared per-provider budgets; absent leaves every harness advertising an estimate), `onboarding` (welcome-flow completion state), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as [ratatui](https://ratatui.rs/) color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), `statusLine` (how a harness row on the Agents rail is laid out — each of `state`/`harness`/`control`/`branch`/`path` takes a `line1`/`line2`/`line3`/`hidden` placement, a `*When` visibility of `always`/`active`/`alert`, and where it applies a `*Style` spelling; the Settings › Status line subpage edits these with a live preview, and the older `appearance.showHarnessBranch`/`showHarnessPath` booleans are read only when this section is absent), and `medulla.contextWindowTokens` (Context tab usage hint; the orchestration limits section also carries pass/step/depth/task/token bounds). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored.
+Every section is optional; with no file anywhere, all defaults apply. Sections: `backend`, `host` (whether this device also runs the work it orchestrates, and the workspace and roots it advertises), `link` (host-link identity, forwarder, and peer roster for the daemon and Overview panel), `hub` (the persisted worker roster and selected default worker, so a fleet survives a restart), `stateDir` (default `<home>/state`; `MEDULLA_STATE_DIR` overrides), `opencode` (worker display, model, agent, workspace, concurrency), `workflow` (the daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint), `fleet` (the declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog), `router` (a custom OpenAI-compatible router the daemon spawns harnesses against; absent leaves every harness unrouted), `budget` (operator-declared per-provider budgets; absent leaves every harness advertising an estimate), `onboarding` (welcome-flow completion state), `update` (`check = true`/`false` for the background release check; `MEDULLA_NO_UPDATE_CHECK` env kill-switch), `theme` (TUI colors — `primary`/`accent`/`selectionFg`/`dimBorder` as [ratatui](https://ratatui.rs/) color names or `#rrggbb`; the Settings › Appearance subpage edits and persists these), `statusLine` (how a harness row on the Agents rail is laid out — each of `state`/`harness`/`control`/`branch`/`path` takes a `line1`/`line2`/`line3`/`hidden` placement, a `*When` visibility of `always`/`active`/`alert`, and where it applies a `*Style` spelling; the Settings › Status line subpage edits these with a live preview, and the older `appearance.showHarnessBranch`/`showHarnessPath` booleans are read only when this section is absent), and `medulla.contextWindowTokens` (Context tab usage hint; the orchestration limits section also carries pass/step/depth/task/token bounds). Inference and tracing are server-side concerns — the TUI has no config for them; unknown sections are ignored.
 
 There is no `memory` section: the persona-memory layer is out of this build, and its config schema went with it.
 
@@ -66,12 +66,14 @@ See [`config.example.toml`](https://github.com/tinyhumansai/medulla/blob/main/co
 
 ## Endpoints
 
-The backend base URL defaults to production, `https://api.tinyhumans.ai`, and the tiny.place endpoint to `https://api.tiny.place`. Set `MEDULLA_STAGING=1` (or `true`, case-insensitive) to switch both defaults to their staging hosts (`https://staging-api.tinyhumans.ai` and `https://staging-api.tiny.place`).
+The backend base URL defaults to production, `https://api.tinyhumans.ai`. Set `MEDULLA_STAGING=1` (or `true`, case-insensitive) to switch it to `https://staging-api.tinyhumans.ai`.
+
+The link forwarder has no endpoint of its own: it is served by the same backend, so `link.forwarderUrl` defaults to whatever `backend.baseUrl` resolved to and moves with it. Set it explicitly only for a deliberately split deployment.
 
 Base-URL precedence, highest first:
 
 * **Backend:** `MEDULLA_API_URL` env var > config-file `backend.baseUrl` > staging/prod default.
-* **tiny.place:** the `TINYPLACE_ENDPOINT` / `TINYPLACE_API_URL` / `NEXT_PUBLIC_API_URL` env chain > tinyplace config-file `endpoint` > config-file `tinyplace.baseUrl` > staging/prod default.
+* **Link forwarder:** config-file `link.forwarderUrl` > the resolved backend base URL.
 
 Override the base URL (and the token env var name) in the config file — e.g. to point at a local backend:
 
@@ -121,9 +123,9 @@ medulla                # runs on the embedded core
 A plain `medulla` is both halves of the system: the **orchestrator** that decides
 what work to hand out, and a **host** that runs it. The host binds an address on
 an in-process bus that the orchestrator dispatches over, so a task for this
-machine is delivered in memory — no tiny.place identity, no contact request, no
+machine is delivered in memory — no host-link identity, no enrollment, no
 relay round-trip, and no second `medulla daemon` process beside the TUI. Workers
-on other machines still travel over tiny.place; the orchestrator picks per
+on other machines still travel over the host link; the orchestrator picks per
 address, so the two coexist without you configuring anything.
 
 It is on by default and needs no setup. It serves whichever coding-agent CLIs it

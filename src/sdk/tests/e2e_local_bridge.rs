@@ -1,4 +1,4 @@
-//! End-to-end task dispatch over the device-local bridge with no tiny.place
+//! End-to-end task dispatch over the device-local bridge with no remote forwarder
 //! client, identity, contact graph, or network server.
 
 use std::sync::Arc;

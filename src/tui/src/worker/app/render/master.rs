@@ -23,32 +23,27 @@ impl WorkerApp {
         let block = self.panel(format!("Master · {}", masters.len()), true);
         let inner = block.inner(columns[0]);
         f.render_widget(block, columns[0]);
-        let accepted = self.accepted_contacts();
         let mut lines = Vec::new();
         if masters.is_empty() {
             lines.push(dim("No master connected."));
             lines.push(dim(""));
             lines.push(dim("Press a and paste its @handle or worker address."));
-            lines.push(dim(
-                "This worker requests contact; approval stays explicit.",
-            ));
+            lines.push(dim("Enrollment is the handshake; no approval queue."));
         } else {
             self.hit_rows = Some((inner, 0));
             for (index, peer) in masters.iter().enumerate() {
                 let address = peer.address.as_deref().unwrap_or(&peer.id);
-                let online = accepted.iter().any(|contact| contact.agent_id == address);
                 let label = peer
                     .name
                     .as_deref()
                     .or(peer.handle.as_deref())
                     .unwrap_or(address);
-                let mut style =
-                    Style::default().fg(if online { Color::Green } else { Color::Yellow });
+                let mut style = Style::default().fg(Color::Yellow);
                 if index == selected {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("{} {label} · {address}", if online { "●" } else { "◌" }),
+                    format!("◌ {label} · {address}"),
                     style,
                 )));
             }

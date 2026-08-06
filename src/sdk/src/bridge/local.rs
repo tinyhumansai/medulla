@@ -122,13 +122,6 @@ impl Bridge for LocalBridge {
         inbox.drain(..count).collect()
     }
 
-    async fn request_contact(&self, peer: &str) -> Result<(), String> {
-        self.network
-            .contains(peer)
-            .then_some(())
-            .ok_or_else(|| format!("local bridge endpoint is not available: {peer}"))
-    }
-
     async fn resolve_handle(&self, name: &str) -> Option<String> {
         let name = name.trim();
         if self.network.contains(name) {
@@ -143,10 +136,6 @@ impl Bridge for LocalBridge {
     /// Every address this bridge can reach is on this device by construction.
     async fn is_device_local(&self, address: &str) -> bool {
         self.resolve_handle(address).await.is_some()
-    }
-
-    async fn contact_accepted(&self, peer: &str) -> bool {
-        self.network.contains(peer)
     }
 
     async fn reset_session(&self, _peer: &str) {}

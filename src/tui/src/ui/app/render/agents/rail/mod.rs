@@ -273,7 +273,7 @@ impl App {
     /// that — the directory is the only thing telling two harnesses of the same
     /// provider apart, so it has to be readable, and reading it used to cost
     /// the transcript however many columns the path happened to want. Anything
-    /// else that overruns — a lane labelled with a full tiny.place address, a
+    /// else that overruns — a lane labelled with a full link address, a
     /// task row carrying a long work chip — wraps rather than being cut off at
     /// the border or widening the rail for everyone.
     pub(super) fn rail_row_lines(

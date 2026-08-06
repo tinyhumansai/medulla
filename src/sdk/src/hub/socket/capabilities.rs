@@ -20,7 +20,7 @@ use super::{first_obj, str_field};
 /// The static facts (`providers`, `summary`) are established from the roster
 /// without touching the worker, so a probe always answers even if the worker is
 /// unreachable. On top of that, the hub asks the resolved worker for its
-/// [`AgentCapabilities`](crate::protocol::AgentCapabilities) over tiny.place and
+/// [`AgentCapabilities`](crate::protocol::AgentCapabilities) over the host link and
 /// maps its `budgets`/`readiness` onto the backend-shaped keys
 /// (`harnessBudgets`, `ready`, `readyReason`) that the backend's
 /// `sanitizeCapabilities` reads. The probe fails open: any transport error,

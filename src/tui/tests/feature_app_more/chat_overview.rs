@@ -1,4 +1,4 @@
-//! Chat transcript, Overview, Trace, tiny.place merge, and events-seam coverage:
+//! Chat transcript, Overview, Trace, host-link merge, and events-seam coverage:
 //! the `events_changed` baseline seam, observation
 //! merge into the snapshot, error/wrapped/spinner/thread-badge chat rendering,
 //! the Trace JSON detail row, and Overview active-call/completed-task lines.

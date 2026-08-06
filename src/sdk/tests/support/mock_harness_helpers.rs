@@ -5,7 +5,7 @@
 //! ready-made [`MockCli`] scenarios (`success`, `tool_workflow`, …); the
 //! provider-shaped JSONL record builders + shell-emit helpers used while
 //! lowering steps; and [`MockDir`], a temp directory that installs a rendered
-//! mock as an executable and hands back the `TINYPLACE_*_BIN` env override.
+//! mock as an executable and hands back the `MEDULLA_*_BIN` env override.
 
 #![allow(dead_code)]
 
@@ -177,7 +177,7 @@ impl MockDir {
         path.to_string_lossy().into_owned()
     }
 
-    /// Install `mock` and return the `TINYPLACE_*_BIN` env override for it.
+    /// Install `mock` and return the `MEDULLA_*_BIN` env override for it.
     pub fn env_for(&self, mock: &MockCli) -> HashMap<String, String> {
         let bin = self.install(mock);
         provider_env(&[(mock.provider.bin_env(), &bin)])
@@ -196,7 +196,7 @@ impl Drop for MockDir {
     }
 }
 
-/// A provider env map carrying host `PATH` plus each `TINYPLACE_*_BIN` override.
+/// A provider env map carrying host `PATH` plus each `MEDULLA_*_BIN` override.
 pub fn provider_env(overrides: &[(&str, &str)]) -> HashMap<String, String> {
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {

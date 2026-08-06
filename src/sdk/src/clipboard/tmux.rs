@@ -93,6 +93,27 @@ impl Tmux {
         })
     }
 
+    /// The validated socket path, for tests that need to assert what
+    /// [`Tmux::parse`] kept without reaching into the private field.
+    #[cfg(test)]
+    pub(crate) fn socket(&self) -> &str {
+        &self.socket
+    }
+
+    /// Build a `Tmux` naming `socket` without the existence/ownership checks
+    /// in [`Tmux::validated`].
+    ///
+    /// Test-only: exercising [`Tmux::load_buffer`] against a socket nothing is
+    /// listening on (to assert the "dead server" fallback) requires a path
+    /// that predictably fails to validate, which is exactly what production
+    /// code must never construct a `Tmux` from.
+    #[cfg(test)]
+    pub(crate) fn from_raw(socket: impl Into<String>) -> Self {
+        Tmux {
+            socket: socket.into(),
+        }
+    }
+
     /// Put `text` in this server's paste buffer, returning whether tmux took it.
     ///
     /// Tries `-w` first, which additionally asks tmux to hand the buffer to its

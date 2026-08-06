@@ -25,16 +25,32 @@ impl PendingFrame {
     /// Claim a backlog slot, if the sink is not already at its bound.
     ///
     /// `None` means the frame is dropped rather than queued.
+    ///
+    /// The reservation is one compare-and-exchange rather than a load followed
+    /// by an add: a workflow fans out, so several sinks call this at once, and
+    /// separate steps let all of them read a depth under the bound and then
+    /// every one of them queue — the overshoot growing with the fan-out, which
+    /// is precisely when the bound matters.
     pub(super) fn claim(
         depth: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
         limit: usize,
     ) -> Option<Self> {
         use std::sync::atomic::Ordering;
-        if depth.load(Ordering::Relaxed) >= limit {
-            return None;
+        let mut current = depth.load(Ordering::Relaxed);
+        loop {
+            if current >= limit {
+                return None;
+            }
+            match depth.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self(depth.clone())),
+                Err(observed) => current = observed,
+            }
         }
-        depth.fetch_add(1, Ordering::Relaxed);
-        Some(Self(depth.clone()))
     }
 }
 

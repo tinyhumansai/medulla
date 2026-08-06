@@ -603,7 +603,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // returns `None` when there are none, so the gate only duplicated a check it
     // already makes. The hub is tiny.place/harness wiring and stays TUI-side
     // regardless of which runtime backs the session.
-    let hub_session = crate::hub_relay::start(
+    // Held (not read) for the rest of this scope: dropping it early would tear
+    // the hub session down. Whether it started is no longer a gate on the
+    // control plane below — see that call's doc comment.
+    let _hub_session = crate::hub_relay::start(
         &env,
         &home,
         hub_slot.clone(),

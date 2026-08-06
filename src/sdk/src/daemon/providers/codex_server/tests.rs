@@ -11,7 +11,7 @@ use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::SessionClass;
 
 use super::super::types::{Abort, RunTaskOptions};
-use super::execution::{uses_app_server, HARNESS_TRANSPORT_ENV};
+use super::execution::{child_env, process_args, uses_app_server, HARNESS_TRANSPORT_ENV};
 use super::fold::FoldState;
 
 /// Run options carrying a transport and an environment, and nothing else that
@@ -276,4 +276,62 @@ fn advances_the_event_ordering_key() {
     assert!(events
         .iter()
         .all(|event| event.record_type.starts_with("app_server:")));
+}
+
+/// The app-server argv carries the operator's process-level Codex configuration
+/// through, in the same order the CLI seam applies it. An empty list here is
+/// what silently sent a configured run to the wrong account.
+#[test]
+fn carries_configured_codex_argv_onto_the_app_server() {
+    let mut options = options(
+        HarnessTransport::AppServer,
+        &[("TINYPLACE_CODEX_ARGS", "--profile work")],
+    );
+    options.extra_args = vec!["-c".to_string(), "sandbox_mode=\"read-only\"".to_string()];
+    let env = child_env(&options);
+    let args = process_args(&options, &env).expect("argv");
+    assert_eq!(
+        args,
+        vec![
+            "--profile".to_string(),
+            "work".to_string(),
+            "-c".to_string(),
+            "sandbox_mode=\"read-only\"".to_string(),
+        ]
+    );
+}
+
+/// A routed preset's `codexOverrides` reach the pooled process. Without the
+/// provider block and the API-key auth preference, Codex prefers a signed-in
+/// ChatGPT account and never consults the routed endpoint at all.
+#[test]
+fn carries_routed_codex_overrides_onto_the_app_server() {
+    let options = options(
+        HarnessTransport::AppServer,
+        &[
+            (crate::codex_overrides::OVERRIDES_ENV, "1"),
+            ("OPENAI_BASE_URL", "https://router.example/v1"),
+        ],
+    );
+    let env = child_env(&options);
+    let args = process_args(&options, &env).expect("argv");
+    assert!(
+        args.windows(2).any(|pair| pair[0] == "-c"
+            && pair[1] == format!("model_provider=\"{}\"", crate::codex_overrides::PROVIDER_ID)),
+        "expected the routed provider block, got {args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|pair| pair[0] == "-c" && pair[1] == "preferred_auth_method=\"apikey\""),
+        "expected the api-key auth preference, got {args:?}"
+    );
+}
+
+/// An unconfigured run pins nothing, so every plain lane still shares one
+/// process — which is the whole point of the transport.
+#[test]
+fn pins_no_argv_for_an_unconfigured_run() {
+    let options = options(HarnessTransport::AppServer, &[]);
+    let env = child_env(&options);
+    assert!(process_args(&options, &env).expect("argv").is_empty());
 }

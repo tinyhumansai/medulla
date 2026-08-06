@@ -33,6 +33,7 @@ async fn direct_runs_report_the_session_before_workspace_context() {
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let order = Arc::new(Mutex::new(Vec::new()));
     let options = RunTaskOptions {
+        transport: Default::default(),
         conversation: "peer".into(),
         session_class: crate::sessions::SessionClass::Unbound,
         resume_session_id: None,

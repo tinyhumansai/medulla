@@ -29,6 +29,7 @@ async fn workflow_dispatch_waits_for_a_daemon_harness_slot() {
     let task = tokio::spawn(async move {
         dispatch
             .dispatch(TaskRequest {
+                transport: None,
                 task_id: "review-1".into(),
                 abort_id: "run-1".into(),
                 cycle_id: None,
@@ -86,6 +87,7 @@ async fn workflow_dispatch_preserves_the_callers_fleet_depth() {
 
     dispatch
         .dispatch(TaskRequest {
+            transport: None,
             task_id: "child-1".into(),
             abort_id: "child-1".into(),
             cycle_id: None,

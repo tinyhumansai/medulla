@@ -100,16 +100,41 @@ impl DaemonRuntime {
             }
         };
 
+        // The flavor the sender asked for, checked against the provider that was
+        // actually selected. A frame that named `codex-server` but landed on a
+        // host offering only `claude` is refused rather than run on the CLI: the
+        // sender chose a flavor, and a silent substitution is the one outcome
+        // that cannot be noticed from the other end.
+        let transport = frame.transport.unwrap_or_default();
+        if !transport.supported_by(provider) {
+            self.reply(
+                &from,
+                TaskFrameKind::Error,
+                &frame.task_id,
+                &format!(
+                    "requested harness flavor \"{}\" cannot run on \"{}\"",
+                    transport.as_str(),
+                    provider.as_str()
+                ),
+                correlation.as_deref(),
+                None,
+            )
+            .await;
+            return;
+        }
+
         let mut run_env = self.inner.config.env.clone();
         if let Some(harness) = &custom_harness {
             run_env.extend(harness.harness_env());
         }
         let run_env =
             super::with_tool_mode_at_depth(run_env, frame.tool_mode.as_deref(), frame.fleet_depth);
-        // ACP currently has no follow-up-input operation. Record the effective
-        // transport before acknowledging the task so an input frame racing the
-        // harness startup is rejected instead of buffered forever.
+        // Neither ACP nor the app-server has a follow-up-input operation today.
+        // Record the effective transport before acknowledging the task so an
+        // input frame racing the harness startup is rejected instead of buffered
+        // forever.
         let accepts_stdin = super::super::providers::supports_stdin(provider)
+            && transport == crate::protocol::HarnessTransport::Cli
             && !run_env
                 .get(super::super::providers::HARNESS_PROTOCOL_ENV)
                 .is_some_and(|value| value.eq_ignore_ascii_case("acp"));
@@ -425,6 +450,7 @@ impl DaemonRuntime {
             resume_session_id,
             workspace_context,
             provider,
+            transport,
             prompt: frame.text.clone(),
             cwd: self.inner.config.workspace.clone(),
             // Per-task, like the model and provider hints below. A review turn
@@ -669,6 +695,8 @@ impl DaemonRuntime {
             resume_session_id: None,
             workspace_context: Default::default(),
             provider,
+            // A plain DM states no flavor; it runs the host's default transport.
+            transport: crate::protocol::HarnessTransport::Cli,
             prompt: text,
             cwd: self.inner.config.workspace.clone(),
             env: self.inner.config.env.clone(),

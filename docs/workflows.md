@@ -158,7 +158,14 @@ that says `harness: codex` and nothing else runs Codex on Codex's own default
 model rather than inheriting a Claude model id — a model chosen for one harness
 is meaningless, or wrong, on another. Name both when you mean both.
 
-A harness that is not one of the three built-in CLIs is taken as a custom
+`codex-server` is a fourth built-in name: Codex on a shared, long-lived
+`codex app-server` process rather than a fork per step. On a graph that fans out,
+that is one Codex runtime instead of one per branch — the reason it exists. It
+reports less per step in exchange; see
+[codex-app-server.md](./codex-app-server.md) before putting it on a step you
+intend to watch.
+
+A harness that is not one of the built-in names is taken as a custom
 harness preset id — the ones this machine has configured are listed by
 `workflow_host` and in the TUI's Routing → Harness Types screen. Whether the *worker*
 that runs the step exposes that preset is only answered when it runs.

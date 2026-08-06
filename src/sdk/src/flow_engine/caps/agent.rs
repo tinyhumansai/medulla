@@ -224,6 +224,7 @@ impl HarnessAgentRunner {
             instruction,
             worker_address,
             provider: choice.provider,
+            transport: choice.transport,
             custom_harness: choice.custom_harness,
             model: choice.model,
             // No conversation, deliberately. Each node is its own unit of work,

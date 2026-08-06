@@ -3,7 +3,8 @@
 //! tolerant of foreign or malformed input and never panic.
 
 use super::types::{
-    AgentCapabilities, HarnessProvider, TaskFrame, TaskFrameKind, TokenUsage, MEDULLA_TASK_PROTO,
+    AgentCapabilities, HarnessProvider, HarnessTransport, TaskFrame, TaskFrameKind, TokenUsage,
+    MEDULLA_TASK_PROTO,
 };
 
 /// Parse a decrypted body into a [`TaskFrame`], or `None` when it is not one of
@@ -69,6 +70,15 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .map(str::trim)
         .filter(|fingerprint| !fingerprint.is_empty())
         .map(str::to_string);
+    // An unrecognized transport fails closed. A worker that ran the CLI because
+    // it did not understand the flavor would be a silent downgrade — the
+    // operator asked for a shared process and would get a fork per task with no
+    // way to tell. Absent, however, is simply the provider default.
+    let transport = match obj.get("transport") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(value)) => Some(HarnessTransport::from_wire(value.trim())?),
+        Some(_) => return None,
+    };
     let custom_harness = obj
         .get("customHarness")
         .and_then(|value| value.as_str())
@@ -139,6 +149,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         correlation_id,
         harness,
         provider,
+        transport,
         custom_harness,
         model,
         tool_mode,

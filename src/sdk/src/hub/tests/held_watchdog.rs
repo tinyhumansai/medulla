@@ -63,6 +63,7 @@ impl HoldingPeer {
     async fn emit(&self, kind: TaskFrameKind, text: &str) {
         let correlation = self.correlation.lock().await.clone();
         let body = encode_task_frame(EncodeFrameInput {
+            transport: None,
             kind,
             task_id: "t1".to_string(),
             text: text.to_string(),
@@ -164,6 +165,7 @@ impl Relay for HoldingPeer {
 /// The dispatch every test here runs.
 fn req() -> TaskRequest {
     TaskRequest {
+        transport: None,
         task_id: "t1".to_string(),
         abort_id: "t1".to_string(),
         cycle_id: Some("c1".to_string()),

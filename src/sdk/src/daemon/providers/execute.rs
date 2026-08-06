@@ -62,6 +62,13 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     // and for the child to never hold the real key. A no-op for every endpoint
     // that is not OpenRouter.
     crate::inference_proxy::route_spawn(options.provider, &mut options.router, &mut options.env)?;
+    // Ahead of ACP because the two are chosen by different questions and a task
+    // may answer both: ACP is a *protocol* switch on the environment, while the
+    // app-server is the flavor the operator named. Naming `codex-server` is the
+    // more specific statement, so it wins.
+    if super::codex_server::uses_app_server(&options) {
+        return super::codex_server::run_codex_server_task(options).await;
+    }
     if super::acp::uses_acp(&options) {
         // ACP dispatch cannot carry Medulla hooks. Every other path injects them
         // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*

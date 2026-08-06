@@ -12,6 +12,7 @@ use super::super::types::{SessionClass, SessionDriver, SessionPolicy, TurnOrigin
 
 fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
     TaskFrame {
+        transport: None,
         proto: MEDULLA_TASK_PROTO.to_string(),
         kind,
         task_id: task_id.to_string(),

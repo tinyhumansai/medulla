@@ -61,7 +61,15 @@ impl AgentDefaults {
             // at all rather than as the host's.
             workflow: defaults.preference().unwrap_or_default(),
             host: HarnessPreference {
-                harness: config.default_provider.map(HarnessSelector::Builtin),
+                harness: config
+                    .default_provider
+                    .map(|provider| HarnessSelector::Builtin {
+                        provider,
+                        // Host config pins a provider, not a flavor — matching
+                        // `CapabilitySettings::harness_preference`, which this
+                        // preview stands in for.
+                        transport: medulla::protocol::HarnessTransport::Cli,
+                    }),
                 model: (!config.default_model.is_empty()).then(|| config.default_model.clone()),
             },
         }

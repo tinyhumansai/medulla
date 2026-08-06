@@ -113,6 +113,7 @@ fn runtime_over(sessions: PtyManager, script: &'static str) -> DaemonRuntime {
 /// Dispatch a task frame into `runtime` as the hub would.
 fn dispatch(runtime: &DaemonRuntime, task_id: &str) {
     let body = medulla::protocol::encode_task_frame(medulla::protocol::EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: "do the thing".to_string(),

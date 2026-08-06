@@ -109,6 +109,7 @@ fn hosted(run_task: RunTaskFn) -> (EmbeddedDaemon, LocalBridge) {
 /// A `task` frame addressed to the host.
 fn task_frame(task_id: &str, prompt: &str) -> String {
     encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: prompt.to_string(),
@@ -234,6 +235,7 @@ async fn the_host_answers_a_capability_probe_with_what_this_machine_has() {
     peer.send(
         "host",
         &encode_task_frame(EncodeFrameInput {
+            transport: None,
             kind: TaskFrameKind::Capabilities,
             task_id: "probe".to_string(),
             text: String::new(),

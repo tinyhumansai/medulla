@@ -152,9 +152,15 @@ fn apply_defaults(graph: &mut WorkflowGraph, defaults: &WorkflowDefaults) {
 /// *is* that value, just normalized onto the `harness` key even if the node
 /// originally spelled it `provider`.
 fn merge_choice_into_config(config: &mut Value, choice: &HarnessChoice) {
+    // The *flavor* name, so a node resolved to `codex-server` is written back as
+    // `codex-server` rather than silently normalized to plain `codex`.
     let harness = choice
         .provider
-        .map(|provider| provider.as_str().to_string())
+        .map(|provider| {
+            provider
+                .flavor_name(choice.transport.unwrap_or_default())
+                .to_string()
+        })
         .or_else(|| choice.custom_harness.clone());
     let Some(object) = config.as_object_mut() else {
         return;

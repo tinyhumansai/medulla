@@ -99,6 +99,7 @@ fn options(
 ) -> RunTaskOptions {
     RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: conversation.to_string(),
         // The fixture maps its two shapes onto the classes the daemon gives
         // them: a named peer is a conversation (unbound, reuses that peer's

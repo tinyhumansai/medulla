@@ -66,6 +66,7 @@ async fn a_workflow_run_converts_its_parent_grant_into_a_verified_handoff() {
 /// One authoring turn, as the copilot builds it.
 fn request() -> TaskRequest {
     TaskRequest {
+        transport: None,
         task_id: "copilot-1".into(),
         abort_id: "copilot-1".into(),
         cycle_id: None,

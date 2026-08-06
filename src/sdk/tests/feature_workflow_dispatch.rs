@@ -191,6 +191,7 @@ fn frame_with_inputs(
     workflow_inputs: serde_json::Map<String, serde_json::Value>,
 ) -> String {
     encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: text.to_string(),
@@ -407,6 +408,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
     peer.send(
         "host",
         &encode_task_frame(EncodeFrameInput {
+            transport: None,
             kind: TaskFrameKind::Capabilities,
             task_id: "probe".to_string(),
             text: String::new(),

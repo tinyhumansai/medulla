@@ -43,6 +43,7 @@ fn router_options(
     let _ = bin;
     RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,

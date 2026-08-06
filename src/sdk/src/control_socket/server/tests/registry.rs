@@ -64,6 +64,7 @@ impl FleetOps for PanicsBeforeStart {
 /// A unique request for one registry slot.
 fn request(index: usize) -> TaskRequest {
     TaskRequest {
+        transport: None,
         task_id: format!("wire-{index}"),
         abort_id: format!("abort-{index}"),
         cycle_id: None,

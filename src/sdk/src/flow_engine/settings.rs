@@ -180,9 +180,13 @@ impl CapabilitySettings {
                 // A named preset wins: only a workflow's own defaults can set
                 // it, which is more specific than anything host config says.
                 (Some(id), _) => Some(crate::flow_engine::HarnessSelector::Custom(id.clone())),
-                (None, Some(provider)) => {
-                    Some(crate::flow_engine::HarnessSelector::Builtin(provider))
-                }
+                (None, Some(provider)) => Some(crate::flow_engine::HarnessSelector::Builtin {
+                    provider,
+                    // Host config pins a provider, not a flavor: an operator who
+                    // wants the shared process says so per node or in the
+                    // workflow's own defaults, where it is visible in the graph.
+                    transport: crate::protocol::HarnessTransport::Cli,
+                }),
                 (None, None) => None,
             },
             model: self.default_model.clone(),

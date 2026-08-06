@@ -27,7 +27,8 @@ pub use encode::{
     encode_task_frame_with_work,
 };
 pub use types::{
-    AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
-    FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind,
-    TokenUsage, WorkflowAdvert, WorkflowInputAdvert, MEDULLA_TASK_PROTO,
+    dispatchable_flavors, AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert,
+    EncodeFrameInput, FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness,
+    HarnessTransport, TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert,
+    CODEX_SERVER_FLAVOR, MEDULLA_TASK_PROTO,
 };

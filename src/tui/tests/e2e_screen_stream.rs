@@ -117,6 +117,7 @@ fn runtime_serving(sessions: PtyManager, session_id: String) -> DaemonRuntime {
 /// Dispatch a task frame into `runtime` as `from`, and wait until it is running.
 async fn start_task(runtime: &DaemonRuntime, from: &str, task_id: &str) {
     let body = medulla::protocol::encode_task_frame(medulla::protocol::EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: task_id.to_string(),
         text: "watch me".to_string(),

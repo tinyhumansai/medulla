@@ -6,6 +6,7 @@
 //! sprinkling `#[allow]` at each call site.
 #![allow(dead_code)]
 
+pub mod fake_app_server;
 pub mod fake_provider;
 pub mod mock_backend;
 

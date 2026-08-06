@@ -149,9 +149,17 @@ pub(super) async fn handle_task_run(
     let instruction = str_field(&obj, "instruction").unwrap_or_default();
     let cycle_id = str_field(&obj, "cycleId");
     let agent_id = str_field(&obj, "agentId").unwrap_or_default();
-    let requested_provider = str_field(&obj, "provider")
+    // The backend names a harness *flavor*, so `codex-server` resolves here to
+    // Codex plus the shared-process transport rather than failing to parse.
+    let requested_flavor = str_field(&obj, "provider")
         .as_deref()
-        .and_then(crate::protocol::HarnessProvider::from_wire);
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        .and_then(crate::protocol::HarnessProvider::flavor_from_wire);
+    let requested_provider = requested_flavor.map(|(provider, _)| provider);
+    // Only carried when the caller stated one; an automatically selected
+    // provider gets its own default.
+    let requested_transport = requested_flavor.map(|(_, transport)| transport);
     let custom_harness = str_field(&obj, "customHarness").or_else(|| str_field(&obj, "harnessId"));
     let model = str_field(&obj, "model");
     // The frame's own `timeoutMs` is deliberately ignored: that is the BACKEND's
@@ -280,6 +288,7 @@ pub(super) async fn handle_task_run(
         instruction,
         worker_address,
         provider,
+        transport: requested_transport,
         custom_harness,
         model,
         // Forwarded rather than dropped: a worker advertises the workflows it

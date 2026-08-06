@@ -78,6 +78,14 @@ impl HarnessDispatch for RuntimeDispatch {
             resume_session_id: None,
             workspace_context: Default::default(),
             provider,
+            // Dropped when the provider fell back, for the same portability
+            // reason the provider itself falls back: a graph authored against
+            // `codex-server` should still run on a worker that only has
+            // `claude`, rather than failing the node.
+            transport: request
+                .transport
+                .filter(|transport| transport.supported_by(provider))
+                .unwrap_or_default(),
             prompt: request.instruction,
             cwd: inner.config.workspace.clone(),
             env: super::with_tool_mode_at_depth(

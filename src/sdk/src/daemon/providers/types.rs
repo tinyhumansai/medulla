@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
 
 use crate::config::RouterConfig;
-use crate::protocol::HarnessProvider;
+use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::{SessionClass, WorkspaceContext};
 use std::collections::HashMap;
 
@@ -93,6 +93,18 @@ impl Abort {
 pub struct RunTaskOptions {
     /// The coding-agent CLI to spawn.
     pub provider: HarnessProvider,
+    /// The flavor of `provider` this run uses.
+    ///
+    /// [`Cli`](HarnessTransport::Cli) — the default — forks the provider's
+    /// binary for this task alone.
+    /// [`AppServer`](HarnessTransport::AppServer) opens a thread on a pooled
+    /// `codex app-server` instead, so this run shares one process with every
+    /// other lane that can safely share it.
+    ///
+    /// Stated by the caller rather than inferred, exactly as `session_class` is:
+    /// the operator chose a flavor and a run that quietly used another would be
+    /// indistinguishable from the feature working.
+    pub transport: HarnessTransport,
     /// The task text handed to the provider.
     pub prompt: String,
     /// Working directory for the child process.

@@ -49,6 +49,7 @@ async fn run(
     let sink = kinds.clone();
     let options = RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
@@ -172,6 +173,7 @@ async fn spawn_failure_for_missing_binary() {
     );
     let options = RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
@@ -208,6 +210,7 @@ async fn abort_before_start_returns_immediately() {
     abort.abort();
     let options = RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
@@ -248,6 +251,7 @@ async fn abort_mid_run_kills_child() {
     });
     let options = RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         conversation: String::new(),
         session_class: medulla::sessions::SessionClass::Bounded,
         resume_session_id: None,
@@ -288,6 +292,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
         let register = stdin_tx.clone();
         let options = RunTaskOptions {
             hooks: medulla::harness_hooks::HooksConfig::default(),
+            transport: Default::default(),
             conversation: String::new(),
             session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,
@@ -344,6 +349,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
         let register = registered.clone();
         let options = RunTaskOptions {
             hooks: medulla::harness_hooks::HooksConfig::default(),
+            transport: Default::default(),
             conversation: String::new(),
             session_class: medulla::sessions::SessionClass::Bounded,
             resume_session_id: None,

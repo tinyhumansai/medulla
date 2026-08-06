@@ -1,0 +1,273 @@
+//! Folding app-server notifications into Medulla's semantic event stream.
+//!
+//! # Scope
+//!
+//! Deliberately minimal: lifecycle status, the assistant's messages, and token
+//! usage. The app-server reports far more than that — per-item reasoning deltas,
+//! command output streams, patch previews — and the CLI transport's mappers turn
+//! the equivalent into the rich agent-rail detail an operator watches.
+//!
+//! Reproducing that surface here would mean a second implementation of every
+//! mapper, tracking a wire format that is still marked experimental, for a
+//! transport chosen when *throughput* is what matters. So a `codex-server` lane
+//! reports that it is working, what it finally said, and what it cost — and an
+//! operator who wants to watch a lane work runs it on `codex`.
+//!
+//! The one thing this must get right regardless is the idle watchdog: every
+//! notification counts as activity, including the ones that produce no event, or
+//! a long silent command would look like a dead process.
+
+use std::time::Instant;
+
+use serde_json::{json, Value};
+
+use crate::codex_app_server::Notification;
+use crate::daemon::mappers::HarnessSemanticEvent;
+use crate::protocol::{HarnessEvent, TokenUsage};
+
+use super::super::types::OnEvent;
+
+/// What a finished fold reports, without the callback it folded through.
+#[derive(Debug, Clone, Default)]
+pub(super) struct FoldSnapshot {
+    /// Assistant text, concatenated in arrival order.
+    pub(super) reply: String,
+    /// Count of thread items observed.
+    pub(super) items: usize,
+    /// Latest token usage the thread reported.
+    pub(super) usage: Option<TokenUsage>,
+    /// The most recent non-retryable error Codex reported.
+    pub(super) error: Option<String>,
+}
+
+/// Accumulated state for one turn.
+pub(super) struct FoldState {
+    /// Assistant text, concatenated in arrival order.
+    pub(super) reply: String,
+    /// Count of thread items observed.
+    pub(super) items: usize,
+    /// Latest token usage the thread reported.
+    pub(super) usage: Option<TokenUsage>,
+    /// The most recent non-retryable error Codex reported on this turn.
+    ///
+    /// Retained even when the turn goes on to complete, because a `turn/completed`
+    /// carrying `status: failed` names no message of its own — the message
+    /// arrived earlier, on an `error` notification.
+    pub(super) error: Option<String>,
+    /// When the last notification arrived, for the idle watchdog.
+    pub(super) last_activity: Instant,
+    /// Per-event status callback.
+    on_event: Option<OnEvent>,
+    /// Line counter standing in for the CLI transport's transcript offsets.
+    ///
+    /// There is no transcript here, but `HarnessSemanticEvent::line` is the
+    /// ordering key downstream consumers dedupe on, so it must still advance
+    /// monotonically.
+    line: i64,
+}
+
+impl FoldState {
+    /// A fold ready for one turn.
+    pub(super) fn new(on_event: Option<OnEvent>) -> Self {
+        Self {
+            reply: String::new(),
+            items: 0,
+            usage: None,
+            error: None,
+            last_activity: Instant::now(),
+            on_event,
+            line: 0,
+        }
+    }
+
+    /// Fold one notification, emitting whatever events it implies.
+    ///
+    /// Returns `true` once the turn is terminal, which is the caller's signal to
+    /// stop reading.
+    pub(super) fn fold(&mut self, notification: &Notification) -> bool {
+        self.last_activity = Instant::now();
+        let params = &notification.params;
+        match notification.method.as_str() {
+            "turn/started" => {
+                self.emit("turn/started", "status", running_status("working"));
+                false
+            }
+            "item/started" => {
+                self.items += 1;
+                if let Some(detail) = item_detail(params.get("item")) {
+                    self.emit("item/started", "status", running_status(&detail));
+                }
+                false
+            }
+            "item/completed" => {
+                self.items += 1;
+                let item = params.get("item");
+                if let Some(text) = agent_message_text(item) {
+                    if !text.is_empty() {
+                        self.reply.push_str(&text);
+                        self.emit("item/completed", "agent_message", json!({ "text": text }));
+                    }
+                }
+                false
+            }
+            "thread/tokenUsage/updated" => {
+                // Cumulative per thread, so latest-wins is the correct fold —
+                // the same rule the CLI transport applies to codex's
+                // `token_count` events.
+                if let Some(usage) = token_usage(params.get("tokenUsage")) {
+                    self.usage = Some(usage);
+                }
+                false
+            }
+            "turn/completed" => {
+                // A turn may report its assistant text only in the terminal
+                // payload — an interrupted or replayed turn does. Reading it as
+                // a fallback keeps a reply from being lost, while the
+                // emptiness check keeps a normal turn from duplicating text the
+                // item notifications already carried.
+                if self.reply.is_empty() {
+                    if let Some(text) = turn_items_text(params.get("turn")) {
+                        self.reply.push_str(&text);
+                    }
+                }
+                self.emit("turn/completed", "status", idle_status());
+                true
+            }
+            "error" => {
+                // `willRetry` means Codex is handling it; surfacing it as a
+                // failure would end a turn that is about to continue.
+                let will_retry = params
+                    .get("willRetry")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if !will_retry {
+                    let message = params
+                        .get("error")
+                        .and_then(|error| error.get("message"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("codex reported an error")
+                        .to_string();
+                    self.emit("error", "error", json!({ "message": message }));
+                    self.error = Some(message);
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// A copy of everything the caller reads out of a finished fold.
+    ///
+    /// Needed because the fold is shared with the idle watchdog, which may still
+    /// hold a reference when the turn ends; the callback it carries is not
+    /// clonable, and nothing downstream wants it.
+    pub(super) fn snapshot(&self) -> FoldSnapshot {
+        FoldSnapshot {
+            reply: self.reply.clone(),
+            items: self.items,
+            usage: self.usage,
+            error: self.error.clone(),
+        }
+    }
+
+    /// Emit one semantic event to the status callback.
+    fn emit(&mut self, record_type: &str, kind: &str, payload: Value) {
+        self.line += 1;
+        let event = HarnessSemanticEvent {
+            line: self.line,
+            timestamp_ms: crate::clock::now_millis(),
+            record_type: format!("app_server:{record_type}"),
+            event: HarnessEvent {
+                kind: kind.to_string(),
+                role: "agent".to_string(),
+                payload,
+                ..Default::default()
+            },
+        };
+        if let Some(on_event) = self.on_event.as_mut() {
+            on_event(&event);
+        }
+    }
+}
+
+/// A `status` payload saying the lane is working, with a one-line detail.
+fn running_status(detail: &str) -> Value {
+    json!({ "state": "running", "detail": detail })
+}
+
+/// A `status` payload saying the lane has gone quiet.
+fn idle_status() -> Value {
+    json!({ "state": "idle", "detail": "idle" })
+}
+
+/// A short human-readable detail for a started thread item, or `None` for the
+/// item kinds that say nothing worth a status frame.
+fn item_detail(item: Option<&Value>) -> Option<String> {
+    let item = item?;
+    match item.get("type").and_then(Value::as_str)? {
+        "commandExecution" => {
+            let command = item.get("command").and_then(Value::as_str).unwrap_or("");
+            Some(match first_line(command) {
+                Some(line) => format!("running `{line}`"),
+                None => "running a command".to_string(),
+            })
+        }
+        "fileChange" => Some("editing files".to_string()),
+        "mcpToolCall" | "dynamicToolCall" => {
+            let tool = item.get("tool").and_then(Value::as_str).unwrap_or("a tool");
+            Some(format!("calling {tool}"))
+        }
+        "webSearch" => Some("searching the web".to_string()),
+        _ => None,
+    }
+}
+
+/// The first line of a command, bounded so a status detail stays one line.
+fn first_line(command: &str) -> Option<String> {
+    let line = command.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    Some(if line.chars().count() > 80 {
+        let head: String = line.chars().take(79).collect();
+        format!("{head}…")
+    } else {
+        line.to_string()
+    })
+}
+
+/// The text of an `agentMessage` item, or `None` for any other item kind.
+fn agent_message_text(item: Option<&Value>) -> Option<String> {
+    let item = item?;
+    if item.get("type").and_then(Value::as_str) != Some("agentMessage") {
+        return None;
+    }
+    item.get("text").and_then(Value::as_str).map(str::to_string)
+}
+
+/// Every assistant message in a terminal turn payload, concatenated.
+fn turn_items_text(turn: Option<&Value>) -> Option<String> {
+    let items = turn?.get("items")?.as_array()?;
+    let text = items
+        .iter()
+        .filter_map(|item| agent_message_text(Some(item)))
+        .collect::<Vec<_>>()
+        .join("");
+    (!text.is_empty()).then_some(text)
+}
+
+/// Read a `ThreadTokenUsage` into Medulla's two-number shape.
+///
+/// The `total` breakdown is the cumulative one, which is what a task reports.
+/// Missing counts read as zero rather than failing the parse: a run that
+/// produced work but no usable telemetry should still report its work.
+fn token_usage(usage: Option<&Value>) -> Option<TokenUsage> {
+    let total = usage?.get("total")?;
+    let count = |key: &str| total.get(key).and_then(Value::as_i64).unwrap_or(0);
+    let input = count("inputTokens") + count("cachedInputTokens");
+    let output = count("outputTokens") + count("reasoningOutputTokens");
+    (input > 0 || output > 0).then_some(TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+    })
+}

@@ -14,6 +14,7 @@
 //! re-exported here so callers use `medulla::daemon::providers::*`.
 
 mod acp;
+mod codex_server;
 mod detect;
 mod execute;
 mod types;
@@ -22,6 +23,7 @@ mod types;
 mod tests;
 
 pub use acp::{run_acp_task, HARNESS_PROTOCOL_ENV};
+pub use codex_server::{run_codex_server_task, HARNESS_TRANSPORT_ENV};
 pub use detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
     supports_stdin, DAEMON_PROVIDERS,

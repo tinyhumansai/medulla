@@ -296,6 +296,7 @@ impl DaemonRuntime {
                 correlation_id: correlation.map(str::to_string),
                 harness,
                 provider: None,
+                transport: None,
                 custom_harness: None,
                 model: None,
                 tool_mode: None,

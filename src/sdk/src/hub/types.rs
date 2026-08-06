@@ -46,6 +46,13 @@ pub struct TaskRequest {
     pub worker_address: String,
     /// Optional harness hint (`claude`/`codex`/`opencode`).
     pub provider: Option<HarnessProvider>,
+    /// Optional transport hint pairing with [`provider`](Self::provider).
+    ///
+    /// `None` — every dispatch that named a plain provider — leaves the worker
+    /// on that provider's default. `Some(AppServer)` is what naming
+    /// `codex-server` resolves to, and asks the worker to run the task as a
+    /// thread on its shared Codex process.
+    pub transport: Option<crate::protocol::HarnessTransport>,
     /// Optional named custom harness preset exposed by the worker.
     pub custom_harness: Option<String>,
     /// Optional model hint (the worker maps it to `--model`/`-m`, else its

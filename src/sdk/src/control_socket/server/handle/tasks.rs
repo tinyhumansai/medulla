@@ -104,17 +104,31 @@ fn build_request(
              routing on the workflow or its agent nodes",
         ));
     }
-    let provider = match optional_str(params, "harness") {
+    // The whole flavor, not merely the provider: a fleet caller naming
+    // `codex-server` is asking for the shared process, and dropping the suffix
+    // here would hand it a CLI fork that looked identical from the outside.
+    let flavor = match optional_str(params, "harness") {
         Some(name) => Some(
-            HarnessProvider::dispatchable_from_wire(&name).ok_or_else(|| {
-                ControlFailure::new(
-                    ErrorKind::BadRequest,
-                    format!("`{name}` is not a harness; use claude, codex, or opencode"),
-                )
-            })?,
+            HarnessProvider::flavor_from_wire(&name.to_ascii_lowercase())
+                .filter(|(provider, _)| provider.is_dispatchable())
+                .ok_or_else(|| {
+                    ControlFailure::new(
+                        ErrorKind::BadRequest,
+                        format!(
+                            "`{name}` is not a harness; use {}",
+                            crate::protocol::dispatchable_flavors()
+                                .into_iter()
+                                .map(|(provider, transport)| provider.flavor_name(transport))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    )
+                })?,
         ),
         None => None,
     };
+    let provider = flavor.map(|(provider, _)| provider);
+    let transport = flavor.map(|(_, transport)| transport);
     Ok(TaskRequest {
         task_id: format!("mcp-{}", Uuid::new_v4()),
         abort_id: format!("mcp-{}", Uuid::new_v4()),
@@ -122,6 +136,7 @@ fn build_request(
         instruction,
         worker_address,
         provider,
+        transport,
         custom_harness: None,
         model: optional_str(params, "model"),
         // The server-side grant preserves proposal-only scope across delegation.

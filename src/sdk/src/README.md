@@ -9,6 +9,7 @@ The Rust module tree for the `medulla` SDK crate. `lib.rs` defines the public su
 - [`bridge/`](./bridge/) — Message delivery bridges for local and remote agent communication.
 - [`client/`](./client/) — HTTP/SSE client for the Medulla orchestration backend.
 - [`clipboard/`](./clipboard/) — Clipboard writers: try a platform binary (pbcopy / clip / wl-copy / xclip / xsel) then fall back to OSC 52 (hand the text to the terminal). OSC 52 is the only mechanism that survives SSH, so it backstops rather than replaces the spawn path.
+- [`codex_app_server/`](./codex_app_server/) — A pooled client for `codex app-server`: one long-lived Codex process serving many concurrent threads, so a fan-out of lanes costs one runtime rather than one each.
 - [`codex_overrides/`](./codex_overrides/) — Codex `-c` config overrides that make a routed Codex run actually reach a non-OpenAI model: the provider block, the API-key auth preference, and a model catalog derived at spawn time from the one the installed Codex cached for itself.
 - [`config/`](./config/) — `medulla.tui.json`-compatible config — the subset the TUI reads, plus a `backend` section for the HTTP runtime. Permissive: missing fields take defaults, unknown fields are ignored.
 - [`contacts/`](./contacts/) — Incoming contact-request management for tiny.place peers.

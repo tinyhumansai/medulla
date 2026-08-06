@@ -5,6 +5,7 @@ Provider detection + headless one-shot task execution, ported from the supported
 ## Contents
 
 - [`acp.rs`](./acp.rs) — ACP-backed harness execution.
+- [`codex_server/`](./codex_server) — Codex over a shared `codex app-server` process: one long-lived runtime serving a thread per task, selected by naming the `codex-server` harness.
 - [`detect.rs`](./detect.rs) — Provider discovery and invocation shaping: which daemon providers exist, how to resolve a provider's binary, whether a provider accepts mid-run stdin, and how to build the one-shot headless argv for each provider.
 - [`execute.rs`](./execute.rs) — Headless one-shot execution: spawn the provider CLI, stream its JSONL output through the shared semantic-event mappers to derive status updates and the final reply, enforce an idle watchdog + cooperative abort, and retry transient opencode SQLite-lock exits with jittered exponential backoff.
 - [`mod.rs`](./mod.rs) — Provider detection + headless one-shot task execution, ported from the supported local harness providers.

@@ -5,6 +5,7 @@ use crate::protocol::{decode_task_frame, encode_task_frame, EncodeFrameInput, Ta
 #[test]
 fn the_tool_mode_survives_a_frame_round_trip() {
     let body = encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: "t1".into(),
         text: "review it".into(),

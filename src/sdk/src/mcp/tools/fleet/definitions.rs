@@ -84,11 +84,13 @@ pub(crate) fn definitions(
                 },
                 "harness": {
                     "type": "string",
-                    "enum": ["claude", "codex", "opencode"],
+                    "enum": ["claude", "codex", "codex-server", "opencode"],
                     "description":
-                        "Which coding CLI runs it. Omit to let the worker use its own default; \
-                         a worker that does not have the one you name refuses rather than \
-                         substituting another.",
+                        "Which coding harness runs it. Omit to let the worker use its own \
+                         default; a worker that does not have the one you name refuses rather \
+                         than substituting another. `codex-server` is Codex on a shared \
+                         long-lived process — much cheaper to start when several tasks run at \
+                         once, at the cost of the per-step detail a `codex` lane reports.",
                 },
                 "model": {
                     "type": "string",

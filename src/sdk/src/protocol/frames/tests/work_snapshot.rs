@@ -25,6 +25,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
 
     let body = crate::protocol::encode_task_frame_with_work(
         EncodeFrameInput {
+            transport: None,
             kind: TaskFrameKind::Status,
             task_id: "cycle-1".to_string(),
             text: "write the fold · todo 1/2".to_string(),
@@ -52,6 +53,7 @@ fn a_frame_carries_the_workers_work_snapshot_across_the_wire() {
 fn an_empty_work_snapshot_is_left_off_the_wire() {
     let body = crate::protocol::encode_task_frame_with_work(
         EncodeFrameInput {
+            transport: None,
             kind: TaskFrameKind::Status,
             task_id: "cycle-1".to_string(),
             text: "thinking".to_string(),

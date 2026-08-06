@@ -3,14 +3,15 @@
 
 use crate::protocol::{
     decode_task_frame, encode_task_frame, parse_agent_capabilities, BudgetSource, BudgetWindow,
-    EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrameKind,
-    MEDULLA_TASK_PROTO,
+    EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, HarnessTransport,
+    TaskFrameKind, MEDULLA_TASK_PROTO,
 };
 use serde_json::json;
 
 #[test]
 fn encodes_a_minimal_frame() {
     let body = encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: "cycle-1".to_string(),
         text: "do the thing".to_string(),
@@ -58,6 +59,7 @@ fn rejects_a_fleet_depth_that_cannot_fit_the_protocol_type() {
 #[test]
 fn encodes_optional_fields_when_present() {
     let body = encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::CapabilitiesResult,
         task_id: "t".to_string(),
         text: "{}".to_string(),
@@ -109,6 +111,7 @@ fn round_trips_every_kind() {
         (TaskFrameKind::SystemInfoResult, "system_info_result"),
     ] {
         let body = encode_task_frame(EncodeFrameInput {
+            transport: None,
             kind,
             task_id: "t".to_string(),
             text: "x".to_string(),
@@ -155,6 +158,7 @@ fn decodes_a_full_frame() {
 #[test]
 fn carries_a_model_hint_through_encode_and_decode() {
     let body = encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: TaskFrameKind::Task,
         task_id: "t".to_string(),
         text: "x".to_string(),
@@ -510,6 +514,7 @@ fn a_dispatched_task_names_no_session() {
         correlation_id: None,
         harness: None,
         provider: None,
+        transport: None,
         custom_harness: None,
         model: None,
         tool_mode: None,
@@ -533,6 +538,7 @@ fn reply_input() -> EncodeFrameInput {
         correlation_id: None,
         harness: None,
         provider: None,
+        transport: None,
         custom_harness: None,
         model: None,
         tool_mode: None,
@@ -541,5 +547,81 @@ fn reply_input() -> EncodeFrameInput {
         workflow_inputs: Default::default(),
         conversation: None,
         fleet_depth: 0,
+    }
+}
+
+/// The flavor has to survive the wire, or a worker runs the CLI for a sender who
+/// asked for the shared process and neither end can tell.
+#[test]
+fn carries_a_non_default_transport_across_the_wire() {
+    let body = encode_task_frame(EncodeFrameInput {
+        transport: Some(HarnessTransport::AppServer),
+        kind: TaskFrameKind::Task,
+        task_id: "t".to_string(),
+        text: "do it".to_string(),
+        ts: "2026-07-18T00:00:00.000Z".to_string(),
+        correlation_id: None,
+        harness: None,
+        provider: Some(HarnessProvider::Codex),
+        custom_harness: None,
+        model: None,
+        tool_mode: None,
+        workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
+        conversation: None,
+        fleet_depth: 0,
+    });
+    let value: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    assert_eq!(value["transport"], "app_server");
+
+    let decoded = decode_task_frame(&body).expect("decodes");
+    assert_eq!(decoded.transport, Some(HarnessTransport::AppServer));
+}
+
+/// An ordinary task must be byte-identical to what a peer that predates flavors
+/// would send, so the key is dropped when it says nothing.
+#[test]
+fn omits_the_default_transport_from_the_wire() {
+    for transport in [None, Some(HarnessTransport::Cli)] {
+        let body = encode_task_frame(EncodeFrameInput {
+            transport,
+            kind: TaskFrameKind::Task,
+            task_id: "t".to_string(),
+            text: "do it".to_string(),
+            ts: "2026-07-18T00:00:00.000Z".to_string(),
+            correlation_id: None,
+            harness: None,
+            provider: Some(HarnessProvider::Codex),
+            custom_harness: None,
+            model: None,
+            tool_mode: None,
+            workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
+            conversation: None,
+            fleet_depth: 0,
+        });
+        let value: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+        assert!(value.get("transport").is_none(), "{transport:?}: {body}");
+        assert_eq!(decode_task_frame(&body).unwrap().transport, None);
+    }
+}
+
+/// Failing closed, not open: a worker that ran the CLI because it did not
+/// understand the flavor is a silent downgrade the sender cannot detect.
+#[test]
+fn refuses_a_frame_naming_a_transport_it_does_not_understand() {
+    for bad in [json!("quantum"), json!(7), json!({})] {
+        let body = json!({
+            "proto": MEDULLA_TASK_PROTO,
+            "kind": "task",
+            "taskId": "t",
+            "text": "do it",
+            "ts": "2026-07-18T00:00:00.000Z",
+            "transport": bad,
+        })
+        .to_string();
+        assert!(decode_task_frame(&body).is_none(), "{bad}");
     }
 }

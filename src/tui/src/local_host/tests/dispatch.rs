@@ -20,6 +20,7 @@ use super::env_with_only_claude;
 fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOptions {
     RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         provider,
         prompt: "hi".to_string(),
         cwd: ".".to_string(),

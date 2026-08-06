@@ -12,15 +12,24 @@ fn preference(config: serde_json::Value) -> HarnessPreference {
 fn builtin_names_parse_to_providers() {
     assert_eq!(
         HarnessSelector::parse("claude"),
-        Ok(HarnessSelector::Builtin(HarnessProvider::Claude))
+        Ok(HarnessSelector::Builtin {
+            provider: HarnessProvider::Claude,
+            transport: HarnessTransport::Cli,
+        })
     );
     assert_eq!(
         HarnessSelector::parse("  Codex "),
-        Ok(HarnessSelector::Builtin(HarnessProvider::Codex))
+        Ok(HarnessSelector::Builtin {
+            provider: HarnessProvider::Codex,
+            transport: HarnessTransport::Cli,
+        })
     );
     assert_eq!(
         HarnessSelector::parse("opencode"),
-        Ok(HarnessSelector::Builtin(HarnessProvider::Opencode))
+        Ok(HarnessSelector::Builtin {
+            provider: HarnessProvider::Opencode,
+            transport: HarnessTransport::Cli,
+        })
     );
 }
 
@@ -53,7 +62,10 @@ fn config_reads_harness_and_model() {
     let parsed = preference(json!({ "harness": "codex", "model": " gpt-5 " }));
     assert_eq!(
         parsed.harness,
-        Some(HarnessSelector::Builtin(HarnessProvider::Codex))
+        Some(HarnessSelector::Builtin {
+            provider: HarnessProvider::Codex,
+            transport: HarnessTransport::Cli,
+        })
     );
     assert_eq!(parsed.model.as_deref(), Some("gpt-5"));
 }
@@ -63,7 +75,10 @@ fn provider_is_accepted_as_an_alias_for_harness() {
     let parsed = preference(json!({ "provider": "claude" }));
     assert_eq!(
         parsed.harness,
-        Some(HarnessSelector::Builtin(HarnessProvider::Claude))
+        Some(HarnessSelector::Builtin {
+            provider: HarnessProvider::Claude,
+            transport: HarnessTransport::Cli,
+        })
     );
 }
 
@@ -72,7 +87,10 @@ fn harness_wins_over_the_provider_alias() {
     let parsed = preference(json!({ "harness": "codex", "provider": "claude" }));
     assert_eq!(
         parsed.harness,
-        Some(HarnessSelector::Builtin(HarnessProvider::Codex))
+        Some(HarnessSelector::Builtin {
+            provider: HarnessProvider::Codex,
+            transport: HarnessTransport::Cli,
+        })
     );
 }
 
@@ -146,4 +164,59 @@ fn a_custom_preset_resolves_onto_the_custom_harness_field() {
 #[test]
 fn resolving_nothing_chooses_nothing() {
     assert_eq!(HarnessChoice::resolve(&[]), HarnessChoice::default());
+}
+
+/// A flavor is one word an author writes, and it must survive the round trip
+/// from that word to a provider/transport pair and back.
+#[test]
+fn the_codex_server_flavor_names_codex_on_the_shared_process() {
+    for spelling in ["codex-server", "codex_server", "Codex-Server"] {
+        assert_eq!(
+            HarnessSelector::parse(spelling),
+            Ok(HarnessSelector::Builtin {
+                provider: HarnessProvider::Codex,
+                transport: HarnessTransport::AppServer,
+            }),
+            "{spelling}"
+        );
+    }
+    assert_eq!(
+        HarnessSelector::parse("codex-server").unwrap().as_str(),
+        "codex-server"
+    );
+}
+
+/// An author is told what they may write in several places; every one of them
+/// reads this list, so the flavor has to be in it.
+#[test]
+fn builtin_names_offer_the_shared_codex_flavor() {
+    let names = HarnessSelector::builtin_names();
+    assert!(names.contains(&"codex"), "{names:?}");
+    assert!(names.contains(&"codex-server"), "{names:?}");
+    assert!(!names.contains(&"openhuman"), "{names:?}");
+}
+
+#[test]
+fn resolving_a_flavor_carries_its_transport() {
+    let choice = HarnessChoice::resolve(&[preference(json!({ "harness": "codex-server" }))]);
+    assert_eq!(choice.provider, Some(HarnessProvider::Codex));
+    assert_eq!(choice.transport, Some(HarnessTransport::AppServer));
+    assert_eq!(choice.custom_harness, None);
+}
+
+/// A plain provider name must not acquire a transport it did not ask for.
+#[test]
+fn resolving_a_plain_provider_stays_on_the_cli() {
+    let choice = HarnessChoice::resolve(&[preference(json!({ "harness": "codex" }))]);
+    assert_eq!(choice.transport, Some(HarnessTransport::Cli));
+}
+
+/// A custom preset states its transport through its base harness, so the
+/// resolved choice leaves this open rather than guessing.
+#[test]
+fn resolving_a_custom_preset_states_no_transport() {
+    let choice = HarnessChoice::resolve(&[preference(json!({ "harness": "deepseek-claude" }))]);
+    assert_eq!(choice.provider, None);
+    assert_eq!(choice.transport, None);
+    assert_eq!(choice.custom_harness.as_deref(), Some("deepseek-claude"));
 }

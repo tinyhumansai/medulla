@@ -26,7 +26,7 @@
 
 use serde_json::Value;
 
-use crate::protocol::HarnessProvider;
+use crate::protocol::{dispatchable_flavors, HarnessProvider, HarnessTransport};
 
 /// The config keys an `agent` node states a harness under, in the order they
 /// are consulted. `provider` is accepted because that is what the wire frame
@@ -43,8 +43,18 @@ const MAX_CUSTOM_HARNESS_LEN: usize = 64;
 /// preset the worker exposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HarnessSelector {
-    /// A built-in coding CLI — `claude`, `codex`, or `opencode`.
-    Builtin(HarnessProvider),
+    /// A built-in coding harness: one of the CLIs, or a non-default flavor of
+    /// one such as `codex-server`.
+    ///
+    /// The transport rides here rather than in a separate field because the two
+    /// are named together — an author writes one word, `codex` or
+    /// `codex-server`, and it resolves to one pair.
+    Builtin {
+        /// The provider the flavor runs.
+        provider: HarnessProvider,
+        /// The transport it runs over.
+        transport: HarnessTransport,
+    },
     /// A named custom harness preset configured on the worker that runs the
     /// task. Whether the preset exists is the worker's to answer: presets are
     /// per-host config, and a graph authored on one machine may legitimately
@@ -73,9 +83,14 @@ impl HarnessSelector {
                 Self::builtin_names().join(", ")
             ));
         }
-        if let Some(provider) = HarnessProvider::from_wire(&value.to_ascii_lowercase()) {
+        if let Some((provider, transport)) =
+            HarnessProvider::flavor_from_wire(&value.to_ascii_lowercase())
+        {
             if provider.is_dispatchable() {
-                return Ok(Self::Builtin(provider));
+                return Ok(Self::Builtin {
+                    provider,
+                    transport,
+                });
             }
             return Err(format!(
                 "`harness` is `{value}`, but OpenHuman is an operator-facing TUI and cannot run a workflow agent node — use {}, or a custom harness preset id.",
@@ -104,18 +119,23 @@ impl HarnessSelector {
     }
 
     /// The built-in harness names, for error messages and host facts.
+    ///
+    /// Every dispatchable flavor, not merely every provider, so `codex-server`
+    /// appears wherever an author is told what they may write.
     pub fn builtin_names() -> Vec<&'static str> {
-        vec![
-            HarnessProvider::Claude.as_str(),
-            HarnessProvider::Codex.as_str(),
-            HarnessProvider::Opencode.as_str(),
-        ]
+        dispatchable_flavors()
+            .into_iter()
+            .map(|(provider, transport)| provider.flavor_name(transport))
+            .collect()
     }
 
     /// The name this selector was written as.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Builtin(provider) => provider.as_str(),
+            Self::Builtin {
+                provider,
+                transport,
+            } => provider.flavor_name(*transport),
             Self::Custom(id) => id.as_str(),
         }
     }
@@ -178,6 +198,12 @@ impl HarnessPreference {
 pub struct HarnessChoice {
     /// The built-in harness to run on, when one was chosen.
     pub provider: Option<HarnessProvider>,
+    /// The flavor of `provider` to run it over, when a built-in was chosen.
+    ///
+    /// Always `Some` beside a `provider` and always `None` without one, because
+    /// the two are resolved from the same selector. A custom preset states its
+    /// own transport through its base harness, so this stays `None` there.
+    pub transport: Option<HarnessTransport>,
     /// The custom harness preset to run on, when one was named.
     pub custom_harness: Option<String>,
     /// The model hint to send with the dispatch.
@@ -202,13 +228,17 @@ impl HarnessChoice {
             .take(model_depth + 1)
             .find_map(|layer| layer.model.clone());
         let harness = chosen.and_then(|index| layers[index].harness.clone());
-        let (provider, custom_harness) = match harness {
-            Some(HarnessSelector::Builtin(provider)) => (Some(provider), None),
-            Some(HarnessSelector::Custom(id)) => (None, Some(id)),
-            None => (None, None),
+        let (provider, transport, custom_harness) = match harness {
+            Some(HarnessSelector::Builtin {
+                provider,
+                transport,
+            }) => (Some(provider), Some(transport), None),
+            Some(HarnessSelector::Custom(id)) => (None, None, Some(id)),
+            None => (None, None, None),
         };
         Self {
             provider,
+            transport,
             custom_harness,
             model,
         }

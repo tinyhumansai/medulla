@@ -85,6 +85,7 @@ pub(super) fn base_config() -> DaemonConfig {
 /// Build a `Task`-kind frame.
 pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -> TaskFrame {
     TaskFrame {
+        transport: None,
         usage: None,
         work: None,
         session_id: None,

@@ -66,6 +66,9 @@ fn build(input: EncodeFrameInput, attachments: FrameAttachments) -> TaskFrame {
         correlation_id: input.correlation_id,
         harness: input.harness,
         provider: input.provider,
+        // Dropped when it is the provider default, so an ordinary task frame is
+        // byte-identical to what a peer that predates flavors would send.
+        transport: input.transport.filter(|transport| !transport.is_default()),
         custom_harness: input.custom_harness.map(String::into_boxed_str),
         model: input.model,
         tool_mode: input.tool_mode,

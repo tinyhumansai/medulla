@@ -76,6 +76,7 @@ pub async fn run_leg(link: &LinkBridge, owner_id: NodeId, leg: &Leg) -> (i32, se
     }
 
     let frame = encode_task_frame(EncodeFrameInput {
+        transport: None,
         kind: leg.kind,
         task_id: leg.task_id.clone(),
         text: leg.task.clone(),

@@ -10,6 +10,7 @@ pub mod bridge;
 pub mod client;
 pub mod clipboard;
 pub mod clock;
+pub mod codex_app_server;
 pub mod codex_overrides;
 pub mod config;
 pub mod contacts;

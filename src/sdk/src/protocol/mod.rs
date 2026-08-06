@@ -32,11 +32,12 @@ pub use control::{
     HARNESS_CONTROL_VERSION,
 };
 pub use frames::{
-    decode_task_frame, encode_task_frame, encode_task_frame_with_attachments,
+    decode_task_frame, dispatchable_flavors, encode_task_frame, encode_task_frame_with_attachments,
     encode_task_frame_with_usage, encode_task_frame_with_work, parse_agent_capabilities,
     AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
-    FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness, TaskFrame, TaskFrameKind,
-    TokenUsage, WorkflowAdvert, WorkflowInputAdvert, MEDULLA_TASK_PROTO,
+    FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness, HarnessTransport,
+    TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert, CODEX_SERVER_FLAVOR,
+    MEDULLA_TASK_PROTO,
 };
 pub use screen::{
     apply_frame, build_frame, changed_rows, coalesce_runs, encode_screen_message,

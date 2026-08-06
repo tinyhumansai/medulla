@@ -84,6 +84,7 @@ async fn a_task_round_trips_from_the_orchestrator_to_this_device_and_back() {
     let outcome = runner
         .run(
             TaskRequest {
+                transport: None,
                 task_id: "local-1".to_string(),
                 abort_id: "local-1".to_string(),
                 cycle_id: Some("cycle-1".to_string()),
@@ -154,6 +155,7 @@ async fn concurrent_tasks_are_correlated_back_to_the_right_caller() {
                 runner
                     .run(
                         TaskRequest {
+                            transport: None,
                             task_id: format!("task-{index}"),
                             abort_id: format!("task-{index}"),
                             cycle_id: Some("cycle".to_string()),

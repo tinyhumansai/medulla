@@ -11,6 +11,7 @@ use crate::protocol::TokenUsage;
 /// A request naming `worker`, with the ids the control plane would have minted.
 fn request(worker: &str) -> TaskRequest {
     TaskRequest {
+        transport: None,
         task_id: "mcp-wire-1".into(),
         abort_id: "mcp-abort-1".into(),
         cycle_id: Some("mcp:session".into()),

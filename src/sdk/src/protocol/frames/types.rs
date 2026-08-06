@@ -11,6 +11,79 @@ use std::fmt;
 /// Wire version tag stamped on every task frame body.
 pub const MEDULLA_TASK_PROTO: &str = "medulla-task/1";
 
+/// How a provider's process is reached — the *flavor* of a harness, as distinct
+/// from which harness it is.
+///
+/// A provider and a transport are independent choices. [`HarnessProvider`]
+/// answers "which vendor's agent runs this", and stays the answer to every
+/// question that follows from it: which credentials, which config overrides,
+/// which inference endpoint, which seat the tokens are billed to. This answers
+/// the separate question of *how the process is driven*, which changes only the
+/// execution seam.
+///
+/// Keeping them apart is what lets `codex-server` exist without a second Codex
+/// everywhere: an app-server run is still Codex for auth, hooks, attribution,
+/// and budget, and differs only in that it shares one long-lived process instead
+/// of forking a CLI per task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessTransport {
+    /// Spawn the provider's CLI once per task and read its streaming JSONL.
+    ///
+    /// The default, and the only transport every provider supports.
+    #[default]
+    Cli,
+    /// Open a thread on a shared, long-lived `codex app-server` process.
+    ///
+    /// One process serves many concurrent threads, so N lanes cost one model
+    /// runtime rather than N. Codex only — see
+    /// [`HarnessTransport::supported_by`].
+    AppServer,
+}
+
+impl HarnessTransport {
+    /// The wire string for this transport.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HarnessTransport::Cli => "cli",
+            HarnessTransport::AppServer => "app_server",
+        }
+    }
+
+    /// Parse a transport name, returning `None` for anything unrecognized.
+    ///
+    /// Both `app_server` (the wire form) and `app-server` (what an operator
+    /// types) are accepted, because the same word reaches this from a frame and
+    /// from a command line.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "cli" => Some(HarnessTransport::Cli),
+            "app_server" | "app-server" => Some(HarnessTransport::AppServer),
+            _ => None,
+        }
+    }
+
+    /// Whether `provider` can be driven over this transport.
+    ///
+    /// Every provider supports [`Cli`](Self::Cli). Only Codex ships an
+    /// app-server, so pairing [`AppServer`](Self::AppServer) with anything else
+    /// is a configuration error the caller should refuse rather than silently
+    /// downgrade — a run that quietly forks a CLI when the operator asked for
+    /// the shared process would look like the feature working.
+    pub fn supported_by(self, provider: HarnessProvider) -> bool {
+        match self {
+            HarnessTransport::Cli => true,
+            HarnessTransport::AppServer => matches!(provider, HarnessProvider::Codex),
+        }
+    }
+
+    /// Whether this is the provider-default transport, and so need not be
+    /// stated on the wire.
+    pub fn is_default(self) -> bool {
+        matches!(self, HarnessTransport::Cli)
+    }
+}
+
 /// The coding-agent CLI that ran (or should run) a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +166,81 @@ impl HarnessProvider {
     pub fn is_dispatchable(self) -> bool {
         !matches!(self, Self::Openhuman)
     }
+
+    /// Parse a harness *flavor* name into the provider it runs and the transport
+    /// it runs over.
+    ///
+    /// A flavor is how an operator names a provider/transport pair in the one
+    /// place they get to name anything: a workflow node's `harness:`, a config
+    /// key, a fleet tool argument. Plain provider names keep their meaning and
+    /// resolve to [`HarnessTransport::Cli`]; `codex-server` is Codex over the
+    /// shared app-server.
+    ///
+    /// Returns `None` for anything unrecognized, exactly as
+    /// [`from_wire`](Self::from_wire) does, so a caller can fall through to its
+    /// custom-preset handling.
+    pub fn flavor_from_wire(value: &str) -> Option<(Self, HarnessTransport)> {
+        match value {
+            // Both spellings, for the same reason `HarnessTransport::from_wire`
+            // takes both: this name is typed by hand as often as it is decoded.
+            CODEX_SERVER_FLAVOR | "codex_server" => {
+                Some((HarnessProvider::Codex, HarnessTransport::AppServer))
+            }
+            _ => Self::from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
+        }
+    }
+
+    /// The flavor name for this provider/transport pair — the inverse of
+    /// [`flavor_from_wire`](Self::flavor_from_wire).
+    ///
+    /// A default-transport pair is simply the provider name, so round-tripping
+    /// an ordinary harness never invents a suffix nobody wrote.
+    pub fn flavor_name(self, transport: HarnessTransport) -> &'static str {
+        match (self, transport) {
+            (HarnessProvider::Codex, HarnessTransport::AppServer) => CODEX_SERVER_FLAVOR,
+            _ => self.as_str(),
+        }
+    }
+
+    /// The human-readable product name for a flavor, for UI labels.
+    pub fn flavor_display_name(self, transport: HarnessTransport) -> &'static str {
+        match (self, transport) {
+            (HarnessProvider::Codex, HarnessTransport::AppServer) => "Codex (shared server)",
+            _ => self.display_name(),
+        }
+    }
+}
+
+/// The flavor name for Codex over the shared app-server.
+///
+/// Named once because it is simultaneously a wire value, a config value, an
+/// error-message token, and a fleet-tool enum member — four places that must not
+/// drift.
+pub const CODEX_SERVER_FLAVOR: &str = "codex-server";
+
+/// Every harness flavor a task may be dispatched to, in picker order.
+///
+/// Derived from [`HarnessProvider::is_dispatchable`] plus the non-default
+/// transports each provider supports, so a new provider or transport shows up
+/// here without a second list to remember.
+pub fn dispatchable_flavors() -> Vec<(HarnessProvider, HarnessTransport)> {
+    let mut flavors = Vec::new();
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+        HarnessProvider::Openhuman,
+    ] {
+        if !provider.is_dispatchable() {
+            continue;
+        }
+        for transport in [HarnessTransport::Cli, HarnessTransport::AppServer] {
+            if transport.supported_by(provider) {
+                flavors.push((provider, transport));
+            }
+        }
+    }
+    flavors
 }
 
 /// The frame kinds the daemon and orchestrator loop exchange.
@@ -314,6 +462,18 @@ pub struct TaskFrame {
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only hint naming the *flavor* of `provider` to run it over.
+    ///
+    /// Absent means the provider's own default, which is why this is `Option`
+    /// rather than a plain [`HarnessTransport`]: a peer that predates flavors
+    /// omits the key, and a worker that does not understand it drops it and runs
+    /// the CLI — the pre-existing behaviour. Only `codex-server` sets it today.
+    ///
+    /// Separate from `provider` because it is a separate question. A worker
+    /// resolves credentials, config overrides, and the seat this run bills to
+    /// from `provider` alone; this only chooses the execution seam.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub transport: Option<HarnessTransport>,
     /// Inbound-only named custom harness preset to run on the selected host.
     ///
     /// Additive to `provider`: older peers ignore it, while a current worker
@@ -483,6 +643,12 @@ pub struct EncodeFrameInput {
     pub harness: Option<HarnessProvider>,
     /// Inbound-only hint naming the agent the orchestrator wants to run this task.
     pub provider: Option<HarnessProvider>,
+    /// Inbound-only hint naming the flavor of `provider` to run it over; `None`
+    /// selects the provider's default transport. See [`TaskFrame::transport`].
+    ///
+    /// Defaulted so the many call sites that build a response frame — where a
+    /// transport hint is meaningless — need say nothing about it.
+    pub transport: Option<HarnessTransport>,
     /// Inbound-only named custom harness preset.
     pub custom_harness: Option<String>,
     /// Inbound-only advisory model hint (parallels `provider`); `None` on the
@@ -535,6 +701,19 @@ pub struct AgentCapabilities {
     /// Harness providers the agent can run.
     #[serde(default, deserialize_with = "de_providers")]
     pub providers: Vec<HarnessProvider>,
+    /// Non-default harness *flavors* the agent accepts, by flavor name.
+    ///
+    /// Additive to `providers`, which stays the list of CLIs so a peer that
+    /// predates flavors reads an unchanged advert. Only entries that are not
+    /// simply a provider name appear — today, `codex-server` on a host that has
+    /// Codex — so this is empty on most workers and omitted from the wire.
+    #[serde(
+        rename = "harnessFlavors",
+        default,
+        deserialize_with = "de_string_array",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub harness_flavors: Vec<String>,
     /// Named OpenRouter-backed harness presets this host accepts in task frames.
     ///
     /// These descriptors intentionally omit endpoint and credential details.

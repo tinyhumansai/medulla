@@ -101,6 +101,7 @@ pub fn frame(
     correlation: Option<&str>,
 ) -> TaskFrame {
     TaskFrame {
+        transport: None,
         usage: None,
         work: None,
         proto: MEDULLA_TASK_PROTO.to_string(),

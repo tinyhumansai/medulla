@@ -395,6 +395,9 @@ impl SessionManager {
             // across turns comes from `resume`, not from a retained session.
             session_class: SessionClass::Bounded,
             provider,
+            // Interactive session turns are CLI-driven; the shared app-server is
+            // chosen per delegated task, not per operator session.
+            transport: crate::protocol::HarnessTransport::Cli,
             prompt: request.text.clone(),
             cwd: self.inner.config.workspace.clone(),
             env: self.inner.config.env.clone(),

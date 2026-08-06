@@ -36,11 +36,17 @@ operator interacts with is an **agent** or one of its **sessions**).
 In code it also names the runtime adapter that boots, supervises, and talks to
 that CLI:
 
-| Harness type | Transport                                               |
-| ------------ | ------------------------------------------------------- |
-| Claude Code  | ACP (Agent Client Protocol) over stdio, or legacy JSONL |
-| Codex        | ACP over stdio                                          |
-| OpenCode     | ACP over stdio                                          |
+| Harness type   | Transport                                                      |
+| -------------- | -------------------------------------------------------------- |
+| Claude Code    | ACP (Agent Client Protocol) over stdio, or legacy JSONL         |
+| Codex          | ACP over stdio                                                  |
+| `codex-server` | JSON-RPC over stdio to a shared, long-lived `codex app-server`  |
+| OpenCode       | ACP over stdio                                                  |
+
+`codex-server` is a **flavor** of Codex rather than a separate harness type: it
+authenticates, bills, and configures as Codex and differs only in that one
+process serves every lane instead of one being forked per task. See
+[codex-app-server.md](./codex-app-server.md).
 
 The adapter surfaces a **status** (idle / running / stopped), a **task board**
 (tracked tasks with status open → active → blocked → done / cancelled), and an
@@ -209,6 +215,13 @@ A coding-assistant CLI — the same axis as an agent's **harness** type, seen fr
 the process end. The three supported providers are `claude` (Claude Code),
 `codex` (OpenAI Codex), and `opencode`. The daemon spawns the CLI as a subprocess
 and communicates over ACP or legacy JSONL.
+
+A provider is chosen together with a **transport**, and the pair is named by one
+word — a **flavor**. `codex` is Codex on its CLI; `codex-server` is the same
+provider on a shared `codex app-server` process. Anything that follows from
+*which vendor runs the work* — credentials, config overrides, inference
+endpoint, the seat the tokens bill to — follows from the provider alone, which
+is why the two are modelled separately.
 
 ## Daemon
 

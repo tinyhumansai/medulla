@@ -107,6 +107,7 @@ done
     let (session_tx, session_rx) = tokio::sync::oneshot::channel();
     let run = tokio::spawn((run_task)(RunTaskOptions {
         hooks: medulla::harness_hooks::HooksConfig::default(),
+        transport: Default::default(),
         provider: HarnessProvider::Codex,
         prompt: "start delegated work".to_string(),
         cwd,

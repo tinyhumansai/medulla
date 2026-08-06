@@ -82,6 +82,7 @@ impl GatedPeer {
             return;
         }
         let reply = encode_task_frame(EncodeFrameInput {
+            transport: None,
             kind: TaskFrameKind::Reply,
             task_id: frame.task_id.clone(),
             text: "done".to_string(),
@@ -146,6 +147,7 @@ impl Relay for GatedPeer {
 /// The dispatch both tests run.
 fn req() -> TaskRequest {
     TaskRequest {
+        transport: None,
         task_id: "t1".to_string(),
         abort_id: "t1".to_string(),
         cycle_id: Some("c1".to_string()),
@@ -183,6 +185,7 @@ async fn an_outage_longer_than_the_ack_window_does_not_fail_the_task() {
             // The frame the runner sent while the link was down is still in the
             // outbound state: recovery delivers it, it is not re-sent.
             let dispatched = encode_task_frame(EncodeFrameInput {
+                transport: None,
                 kind: TaskFrameKind::Task,
                 task_id: "t1".to_string(),
                 text: "do the thing".to_string(),
@@ -258,6 +261,7 @@ async fn a_degraded_link_pauses_the_clock_just_as_an_offline_one_does() {
             tokio::time::sleep(OUTAGE).await;
             peer.recover().await;
             let dispatched = encode_task_frame(EncodeFrameInput {
+                transport: None,
                 kind: TaskFrameKind::Task,
                 task_id: "t1".to_string(),
                 text: "do the thing".to_string(),

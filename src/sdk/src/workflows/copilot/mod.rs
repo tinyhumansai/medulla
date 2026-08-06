@@ -176,6 +176,8 @@ impl CopilotSession {
             instruction: prompt,
             worker_address: self.worker_address.clone(),
             provider: self.provider,
+            // The copilot runs on whatever the host pinned, in its default flavor.
+            transport: None,
             custom_harness: None,
             model: self.model.clone(),
             // Never a workflow: this dispatch is an *authoring* turn, and
@@ -252,6 +254,8 @@ impl CopilotSession {
             .render(),
             worker_address: self.worker_address.clone(),
             provider: self.provider,
+            // The copilot runs on whatever the host pinned, in its default flavor.
+            transport: None,
             custom_harness: None,
             model: self.model.clone(),
             // Never a workflow, for the same reason an edit is not: this is an

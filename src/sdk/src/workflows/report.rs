@@ -220,7 +220,16 @@ impl RunReporter {
     }
 
     /// Queue one report, ignoring a forwarder that has already stopped.
+    ///
+    /// Counts what it queues for [`MAX_PENDING_PROGRESS`], so the forwarder's
+    /// matching decrement stays balanced whichever producer sent the report.
     fn send(&self, report: Report) {
-        let _ = self.reports.send(report);
+        let counted = !report.terminal;
+        if counted {
+            self.pending.fetch_add(1, Ordering::Relaxed);
+        }
+        if self.reports.send(report).is_err() && counted {
+            self.pending.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }

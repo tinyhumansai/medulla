@@ -242,9 +242,13 @@ const APOSTROPHES: [char; 3] = ['\'', '\u{2019}', '\u{02bc}'];
 /// Reduce any text to a session slug: at most [`SLUG_MAX_WORDS`] lowercase
 /// words joined by hyphens, e.g. `fix-session-handoff`.
 ///
-/// Everything that is not alphanumeric is a word break, which is also what
-/// makes this safe for untrusted text: control bytes, escape sequences, and
-/// newlines cannot survive into a rendered row.
+/// Everything that is not alphanumeric is a word break — except an apostrophe,
+/// which is dropped so a contraction stays one word. That is also what makes
+/// this safe for untrusted text: control bytes, escape sequences, and newlines
+/// cannot survive into a rendered row.
+///
+/// The output is bounded in characters, not terminal cells. A caller rendering
+/// into a fixed number of columns clips the result again.
 ///
 /// Returns an empty string when no word survives — callers decide what an
 /// unnameable session shows instead.

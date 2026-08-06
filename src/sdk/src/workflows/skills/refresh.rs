@@ -179,7 +179,7 @@ impl RefreshLock {
     /// Blocking rather than try-and-skip: the loser of the race still needs the
     /// directory to be current before it hands the path to a harness, and the
     /// pass it is waiting on is a handful of file reads.
-    fn acquire(root: &Path) -> io::Result<Self> {
+    pub(super) fn acquire(root: &Path) -> io::Result<Self> {
         std::fs::create_dir_all(root)?;
         let path = root.join(".refresh.lock");
         let file = std::fs::OpenOptions::new()

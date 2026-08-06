@@ -62,18 +62,24 @@ use super::{InstallOptions, InstallReport, SkillScope, SkillTarget};
 /// `cwd` is the session's working directory, which is what makes a
 /// project-local workflow visible to a session opened inside that project.
 ///
-/// A failed sync is not fatal and is not reported: the skills are a convenience
+/// A failed sync is not fatal to the caller: the skills are a convenience
 /// layered onto a session that is otherwise fine, and refusing to launch a
 /// harness because a file under our own state directory could not be written
-/// would trade a small loss for a total one. Whatever was already installed
-/// stays and is still advertised.
+/// would trade a small loss for a total one. So the error is logged rather than
+/// returned, and the session comes up pointed at whatever the last successful
+/// refresh left behind — current skills in every case but this one, and a
+/// catalog that has since moved on in this one.
 pub fn refresh_managed(
     provider: HarnessProvider,
     env: &HashMap<String, String>,
     cwd: &Path,
 ) -> Vec<String> {
     if let Some(target) = managed_target(provider) {
-        let _ = sync_managed(target, env, cwd);
+        if let Err(source) = sync_managed(target, env, cwd) {
+            tracing::warn!(
+                "could not refresh the managed skills; the session keeps the ones already installed: {source}"
+            );
+        }
     }
     spawn_args(provider, env, cwd)
 }

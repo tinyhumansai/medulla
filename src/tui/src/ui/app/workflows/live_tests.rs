@@ -161,7 +161,7 @@ fn a_reported_run_that_is_still_going_reads_as_live() {
 
 #[test]
 fn the_selected_reported_run_beats_a_local_run_of_the_same_workflow() {
-    use medulla::control_socket::{RunReport, RunStatusWire};
+    use medulla::control_socket::{HarnessRunStatus, RunReport};
 
     let mut app = app();
     // The workflow-level fallback needs a selection to fall back *to*, which is
@@ -186,7 +186,7 @@ fn the_selected_reported_run_beats_a_local_run_of_the_same_workflow() {
         RunReport {
             run_id: "run-remote".to_string(),
             workflow_id: "review".to_string(),
-            status: RunStatusWire::Running,
+            status: HarnessRunStatus::Running,
             node: Some("implement".to_string()),
             detail: Some("remote frame".to_string()),
         },

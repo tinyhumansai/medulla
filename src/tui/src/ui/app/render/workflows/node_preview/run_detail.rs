@@ -95,11 +95,9 @@ pub(super) fn run_header(run: &RunRecord) -> Vec<Line<'static>> {
 
 /// One input value, short enough to sit beside five others on a line.
 fn input_value(value: &Value) -> String {
-    let text = match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    };
-    let flat = text.replace(['\n', '\r'], " ");
+    // The SDK's reading of the value, so a bounded input shows its preview here
+    // as it does in the detail rows rather than the wrapper's metadata.
+    let flat = medulla::ui::workflows::value_text(value).replace(['\n', '\r'], " ");
     if flat.chars().count() <= INPUT_DIGEST_CHARS {
         return flat;
     }

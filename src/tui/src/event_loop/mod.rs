@@ -81,7 +81,7 @@ pub(crate) async fn run(
     // The one animation clock. Every frame-driven effect — spinners, the
     // attention pulse — counts in this unit, so the period is declared beside
     // the theme that converts a configured duration into frames.
-    let mut tick = tokio::time::interval(Duration::from_millis(crate::ui::theme::FRAME_MS));
+    let mut tick = tokio::time::interval(Duration::from_millis(medulla_tui::ui::theme::FRAME_MS));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
 

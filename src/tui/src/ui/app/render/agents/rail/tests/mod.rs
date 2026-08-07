@@ -215,6 +215,7 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         retained: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

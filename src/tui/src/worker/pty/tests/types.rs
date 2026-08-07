@@ -30,6 +30,7 @@ fn row(provider: HarnessProvider, preset: Option<&str>) -> SessionRow {
         retained: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

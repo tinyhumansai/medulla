@@ -95,6 +95,7 @@ fn sample_selected() -> SessionRow {
         retained: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

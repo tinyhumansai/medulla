@@ -294,6 +294,7 @@ fn row(
         retained: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

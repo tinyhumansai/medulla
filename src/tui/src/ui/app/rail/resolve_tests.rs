@@ -30,6 +30,7 @@ fn session(provider: HarnessProvider, cwd: &str) -> SessionRow {
         retained: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

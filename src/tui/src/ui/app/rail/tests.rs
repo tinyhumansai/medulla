@@ -80,6 +80,7 @@ pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionR
         retained: false,
         name: None,
         attention: None,
+        working: false,
         mcp_grant_session: None,
     }
 }

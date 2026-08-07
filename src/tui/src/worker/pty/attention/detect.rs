@@ -84,7 +84,10 @@ fn has_elapsed_timer(line: &str) -> bool {
         }
         let mut after = rest[digits..].chars();
         after.next() == Some('s')
-            && matches!(after.next(), None | Some(' ') | Some(')') | Some('·') | Some('•'))
+            && matches!(
+                after.next(),
+                None | Some(' ') | Some(')') | Some('·') | Some('•')
+            )
     })
 }
 

@@ -400,7 +400,9 @@ fn claudes_queued_message_hint_counts_as_working() {
 /// Codex has not changed, and must not be broken by teaching the matcher Claude.
 #[test]
 fn codex_still_announces_its_turn_the_old_way() {
-    assert!(is_working("• Working (8s • esc to interrupt)\n› Find and fix a bug"));
+    assert!(is_working(
+        "• Working (8s • esc to interrupt)\n› Find and fix a bug"
+    ));
 }
 
 /// Each part of the progress line appears in ordinary output on its own. Only

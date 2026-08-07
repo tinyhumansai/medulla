@@ -260,3 +260,113 @@ fn the_label_states_how_long_it_has_waited() {
     assert_eq!(cue.label(1_400), "claude is asking permission");
     assert_eq!(cue.label(13_000), "claude is asking permission · 12s");
 }
+
+/// A harness that stopped on a usage limit is as blocked as one asking a
+/// question, and nothing on the row said so: the process is alive, the screen is
+/// quiet, and the turn simply never produced anything.
+#[test]
+fn a_blocking_error_is_reported_as_one() {
+    let screen = "\
+  ⏺ Working on it…
+
+  Claude usage limit reached. Your limit will reset at 3pm.
+
+  > ";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Error);
+    assert!(what.contains("usage limit reached"), "{what}");
+}
+
+/// Errors are matched provider-agnostically because they come from the model
+/// API rather than any one CLI's chrome.
+#[test]
+fn a_blocking_error_is_recognised_whichever_harness_printed_it() {
+    for (provider, screen) in [
+        (HarnessProvider::Codex, "You've hit your usage limit.\n> "),
+        (
+            HarnessProvider::Claude,
+            "OAuth token has expired · Please run /login\n> ",
+        ),
+    ] {
+        let (kind, _) = detect(provider, screen).expect("a cue");
+        assert_eq!(kind, AttentionKind::Error, "{screen}");
+    }
+}
+
+/// An error the operator already dealt with sits in scrollback forever. Only the
+/// live tail can be a current one, or a single expired token would leave a row
+/// flagged for the rest of the session.
+#[test]
+fn an_error_scrolled_out_of_the_live_tail_is_not_current() {
+    let mut screen = String::from("Invalid API key · Please run /login\n");
+    for turn in 0..20 {
+        screen.push_str(&format!("  ⏺ did thing {turn}\n"));
+    }
+    screen.push_str("> ");
+
+    assert_eq!(detect(HarnessProvider::Claude, &screen), None, "{screen}");
+}
+
+/// A question outranks the error that prompted it: the harness recovered far
+/// enough to ask, and the question is the thing the operator can act on.
+#[test]
+fn a_prompt_outranks_an_error_printed_above_it() {
+    let screen = "\
+  Invalid API key · Please run /login
+
+  ❯ 1. Yes, and don't ask again
+    2. No, and tell Claude what to do differently";
+    let (kind, _) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+}
+
+/// Ordinary tool output mentioning failure is not a blocking error. The markers
+/// name terminal conditions precisely so a rail does not light up over a test
+/// suite printing the word.
+#[test]
+fn ordinary_error_output_is_not_a_blocking_error() {
+    for screen in [
+        "error[E0432]: unresolved import\nerror: could not compile\n> ",
+        "  2 tests failed, authentication is not the problem\n> ",
+        "  Retrying request after error…\n  Working… (esc to interrupt)",
+    ] {
+        assert_eq!(detect(HarnessProvider::Claude, screen), None, "{screen}");
+    }
+}
+
+/// The plan-exit menu names planning rather than falling back to the generic
+/// permission wording, even when the pane is too narrow for the structural walk
+/// to rejoin "keep planning" across its wrap.
+#[test]
+fn the_plan_exit_menu_is_named_by_its_accept_options() {
+    let screen = "Ready to code?\n  1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+    assert!(what.contains("planning"), "{what}");
+}
+
+/// Precedence across the whole vocabulary, in one place: a cue that names a
+/// harder fact must never be displaced by a vaguer one.
+#[test]
+fn the_cue_vocabulary_is_ordered_from_certain_to_vague() {
+    let kinds = [
+        AttentionKind::Failed,
+        AttentionKind::Dialog,
+        AttentionKind::Approval,
+        AttentionKind::Error,
+        AttentionKind::Choice,
+        AttentionKind::Completed,
+        AttentionKind::Bell,
+    ];
+    for window in kinds.windows(2) {
+        let stronger = HarnessAttention::new(window[0], "a", 0);
+        let weaker = HarnessAttention::new(window[1], "b", 0);
+        assert!(
+            stronger.supersedes(&weaker),
+            "{:?} must outrank {:?}",
+            window[0],
+            window[1]
+        );
+        assert!(!weaker.supersedes(&stronger));
+    }
+}

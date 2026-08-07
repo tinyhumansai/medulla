@@ -188,9 +188,11 @@ fn a_configured_blink_rate_is_read_in_seconds_and_clamped() {
 /// `SLOW_BLINK`, which most terminals ignore.
 #[test]
 fn the_pulse_alternates_at_the_configured_rate() {
-    let mut theme = Theme::default();
-    theme.attention_blink_ms = 1_000;
     // A one-second pulse spends 500ms per phase, which is five 90ms frames.
+    let theme = Theme {
+        attention_blink_ms: 1_000,
+        ..Default::default()
+    };
     let half = 500 / FRAME_MS as usize;
 
     assert!(theme.attention_bright(0));
@@ -203,8 +205,10 @@ fn the_pulse_alternates_at_the_configured_rate() {
 /// Switching blinking off must not leave the cue stuck in its dim phase.
 #[test]
 fn a_theme_that_does_not_blink_is_always_bright() {
-    let mut theme = Theme::default();
-    theme.attention_blink = false;
+    let theme = Theme {
+        attention_blink: false,
+        ..Default::default()
+    };
 
     assert!((0..40).all(|frame| theme.attention_bright(frame)));
 }
@@ -213,8 +217,10 @@ fn a_theme_that_does_not_blink_is_always_bright() {
 /// zero and strobe on every tick.
 #[test]
 fn a_period_below_the_frame_rate_still_holds_each_phase_a_frame() {
-    let mut theme = Theme::default();
-    theme.attention_blink_ms = MIN_BLINK_MS;
+    let theme = Theme {
+        attention_blink_ms: MIN_BLINK_MS,
+        ..Default::default()
+    };
 
     assert!(theme.attention_bright(0));
     assert!(!theme.attention_bright(1));

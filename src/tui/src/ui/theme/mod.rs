@@ -139,7 +139,7 @@ impl Theme {
         // the tick rate would otherwise divide to zero and alternate on every
         // frame regardless of what was configured.
         let half = ((self.attention_blink_ms / 2) / FRAME_MS).max(1) as usize;
-        (frame / half) % 2 == 0
+        (frame / half).is_multiple_of(2)
     }
 
     /// The style for a cue pulsing in `color` on `frame`.

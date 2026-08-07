@@ -8,7 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::stream;
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_seconds, color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
 use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS};

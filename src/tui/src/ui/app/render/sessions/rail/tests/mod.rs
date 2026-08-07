@@ -13,6 +13,7 @@ use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
+use crate::ui::util::SPINNER;
 use crate::worker::pty::{AttentionKind, HarnessAttention, PtyState, SessionControl, SessionRow};
 
 use super::rows::{display_session_title, lane_title};
@@ -196,6 +197,18 @@ fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
         lines[0].to_string(),
         "● codex · unmanaged · main · /workspace/medulla"
     );
+}
+
+/// A working harness uses the animated spinner when no attention cue overrides it.
+#[test]
+fn a_working_operator_harness_uses_the_spinner_glyph() {
+    let app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.working = true;
+
+    let lines = app.own_session_lines(&row, false, 48, NOW);
+
+    assert!(lines[0].to_string().starts_with(SPINNER[0]));
 }
 
 #[test]

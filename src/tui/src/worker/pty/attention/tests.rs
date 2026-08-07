@@ -424,9 +424,9 @@ fn claudes_live_progress_line_counts_as_working() {
         "* Cogitating… (5s · ↓ 193 tokens · thought for 1s)",
         "✻ Cogitated for 5s… (45s · 1 shell still running)",
     ] {
-        let screen = format!(
-            "  ⏺ reading files\n{line}\n❯ Press up to edit queued messages\n  bypass permissions on"
-        );
+        // No composer or phrase marker: the progress line alone carries this
+        // verdict.
+        let screen = format!("  ⏺ reading files\n{line}\n  bypass permissions on");
         assert!(is_working(&screen), "{line}");
     }
 }
@@ -448,6 +448,12 @@ fn claudes_queued_message_hint_counts_as_working() {
     ));
 }
 
+/// A retained interrupt footer above an ordinary composer is not live work.
+#[test]
+fn a_retained_working_marker_above_an_idle_composer_is_not_working() {
+    assert!(!is_working("esc to interrupt\n❯ Write a message"));
+}
+
 /// Codex has not changed, and must not be broken by teaching the matcher Claude.
 #[test]
 fn codex_still_announces_its_turn_the_old_way() {
@@ -463,15 +469,15 @@ fn progress_line_lookalikes_are_not_working() {
     for screen in [
         // A retained progress line, scrolled well above the live composer.
         &format!(
-            "✽ Considering… (7s · ↓ 12 tokens)\n{}\n❯ ",
+            "✽ Considering… (7s · ↓ 12 tokens)\n{}\n> Write a message",
             "  ⏺ done\n".repeat(10)
         ),
         // Elapsed timer, no spinner glyph and no ellipsis.
-        "  Ran tests (12s)\n❯ ",
+        "  Ran tests (12s)\n> Write a message",
         // Spinner glyph and ellipsis, no timer — Claude's idle bullet list.
-        "· Loading…\n❯ ",
+        "· Loading…\n> Write a message",
         // Parenthesised digits that are not an elapsed timer.
-        "✽ Considering… (2s3 build)\n❯ ",
+        "✽ Considering… (2s3 build)\n> Write a message",
     ]
     .map(String::from)
     {

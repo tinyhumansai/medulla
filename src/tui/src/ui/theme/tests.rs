@@ -188,12 +188,12 @@ fn a_configured_blink_rate_is_read_in_seconds_and_clamped() {
 /// `SLOW_BLINK`, which most terminals ignore.
 #[test]
 fn the_pulse_alternates_at_the_configured_rate() {
-    // A one-second pulse spends 500ms per phase, which is five 90ms frames.
+    // A one-second pulse rounds each 500ms phase to six 90ms frames.
     let theme = Theme {
         attention_blink_ms: 1_000,
         ..Default::default()
     };
-    let half = 500 / FRAME_MS as usize;
+    let half = (500 + FRAME_MS as usize / 2) / FRAME_MS as usize;
 
     assert!(theme.attention_bright(0));
     assert!(theme.attention_bright(half - 1));

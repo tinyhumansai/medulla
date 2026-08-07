@@ -249,6 +249,30 @@ fn appearance_cycles_the_attention_blink_rate_in_seconds() {
     assert!(saved.contains("attentionBlinkSeconds = 1.5"), "{saved}");
 }
 
+/// Custom rates enter the offered cycle from the direction the operator chose.
+#[test]
+fn appearance_cycles_custom_attention_blink_rates_from_each_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path);
+    app.theme.attention_blink_ms = 1_100;
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..6 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+
+    let _ = key(&mut app, KeyCode::Right);
+    assert!(app.status().contains("Attention blink rate → 0.3s (saved)"));
+
+    app.theme.attention_blink_ms = 1_100;
+    let _ = key(&mut app, KeyCode::Left);
+    assert!(app.status().contains("Attention blink rate → 3.0s (saved)"));
+
+    let _ = key(&mut app, KeyCode::Left);
+    assert!(app.status().contains("Attention blink rate → 2.0s (saved)"));
+}
+
 #[test]
 fn appearance_cycles_and_persists_process_indicators() {
     let dir = tempfile::tempdir().unwrap();

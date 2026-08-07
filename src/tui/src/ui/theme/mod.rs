@@ -138,7 +138,7 @@ impl Theme {
         // Half a cycle per phase, and never less than one frame: a period below
         // the tick rate would otherwise divide to zero and alternate on every
         // frame regardless of what was configured.
-        let half = ((self.attention_blink_ms / 2) / FRAME_MS).max(1) as usize;
+        let half = ((self.attention_blink_ms / 2 + FRAME_MS / 2) / FRAME_MS).max(1) as usize;
         (frame / half).is_multiple_of(2)
     }
 

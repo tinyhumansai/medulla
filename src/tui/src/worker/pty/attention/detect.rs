@@ -282,8 +282,29 @@ fn squash(text: &str) -> String {
 /// Public because the manager needs it for the bell: a bell that arrives while
 /// the harness is plainly working is a progress chime, not a request.
 pub fn is_working(screen: &str) -> bool {
-    let squashed = squash(screen);
-    WORKING.iter().any(|marker| squashed.contains(marker)) || has_live_progress_line(screen)
+    has_live_working_marker(screen) || has_live_progress_line(screen)
+}
+
+/// Whether a known working footer remains in the live bottom-of-screen region.
+///
+/// A completed turn can leave its old interrupt hint in scrollback. An ordinary
+/// composer below that hint establishes that control has returned to the user.
+fn has_live_working_marker(screen: &str) -> bool {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(PROGRESS_TAIL_LINES);
+    for line in lines[tail_start..].iter().rev() {
+        let squashed = squash(line);
+        if WORKING.iter().any(|marker| squashed.contains(marker)) {
+            return true;
+        }
+        if is_composer(line) {
+            return false;
+        }
+    }
+    false
 }
 
 /// Whether a line is a *numbered* option with the cursor resting on it.
@@ -426,11 +447,15 @@ fn has_yes_no(screen: &str) -> bool {
 /// screen shows no question we can recognise — which is the common case, and
 /// deliberately not the same as "the harness is busy".
 pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
-    let working = is_working(screen);
+    // A harness that is plainly mid-turn wants nothing: retained prompts and
+    // error text must not outlive the active footer as a stale attention cue.
+    if is_working(screen) {
+        return None;
+    }
     // A recognised startup dialog outranks everything: it is the one case where
     // the harness will not take work at all, and it already has wording written
     // for an operator.
-    let dialog = (!working && has_active_dialog_context(screen))
+    let dialog = has_active_dialog_context(screen)
         .then(|| blocking_dialog_for(provider, screen))
         .flatten();
     if let Some(dialog) = dialog {
@@ -438,23 +463,20 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     }
 
     let squashed = squash(screen);
-    if !working {
-        if let Some((_, _, kind, what)) = MARKERS
-            .iter()
-            .filter(|(candidate, ..)| *candidate == provider)
-            .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
-        {
-            return Some((*kind, (*what).to_string()));
-        }
+    if let Some((_, _, kind, what)) = MARKERS
+        .iter()
+        .filter(|(candidate, ..)| *candidate == provider)
+        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
+    {
+        return Some((*kind, (*what).to_string()));
     }
-    if provider == HarnessProvider::Claude && !working && has_claude_plan_exit_menu(screen) {
+    if provider == HarnessProvider::Claude && has_claude_plan_exit_menu(screen) {
         return Some((
             AttentionKind::Approval,
             "claude finished planning and wants a decision".to_string(),
         ));
     }
-    if !working && provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed)
-    {
+    if provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed) {
         return Some((
             AttentionKind::Approval,
             "opencode is asking permission".to_string(),
@@ -465,24 +487,14 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     // after the prompts above: a harness can print "usage limit reached" and then
     // ask what to do about it, and the question is the more useful thing to say.
     //
-    // A transcript can contain an error phrase in the user's prompt. The live
-    // progress footer is authoritative while it is present, so it vetoes error
-    // matching just as it does structural prompt fallbacks.
-    if !working {
-        if let Some(what) = blocking_error(screen) {
-            return Some((
-                AttentionKind::Error,
-                format!("{} stopped: {what}", provider.as_str()),
-            ));
-        }
+    if let Some(what) = blocking_error(screen) {
+        return Some((
+            AttentionKind::Error,
+            format!("{} stopped: {what}", provider.as_str()),
+        ));
     }
 
-    // Unrecognised wording, recognisable shape. Vetoed while the harness is
-    // plainly mid-turn, because a caret can survive on a screen the harness is
-    // still painting over.
-    if working {
-        return None;
-    }
+    // Unrecognised wording, recognisable shape.
     if has_active_selected_option(screen) {
         return Some((
             AttentionKind::Choice,

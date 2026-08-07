@@ -55,7 +55,8 @@ fn the_attached_session_stays_listed_after_it_exits() {
     app.harness_focus = HarnessFocus::Attached("w_1".to_string());
 
     assert!(app.keeps_finished_session(&exited("w_1", 1, None)));
-    assert!(app.keeps_finished_session(&exited("w_2", 1, None)));
+    // A clean exit is kept only while it is the screen being read.
+    assert!(!app.keeps_finished_session(&exited("w_2", 0, None)));
 }
 
 #[test]

@@ -71,7 +71,9 @@ impl App {
             Some(cue) if cue.kind == AttentionKind::Completed => "✓".to_string(),
             Some(_) => ATTENTION_GLYPH.to_string(),
             None if row.working => SPINNER[self.frame % SPINNER.len()].to_string(),
-            None if matches!(row.state, PtyState::Exited { .. }) => "✓".to_string(),
+            // Attached sessions suppress lifecycle cues, but a failed exit
+            // must still retain its state glyph.
+            None if matches!(row.state, PtyState::Exited { .. }) => row.state.glyph().to_string(),
             None => row.state.glyph().to_string(),
         };
         let detail_style = if active {

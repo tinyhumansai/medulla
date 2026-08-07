@@ -51,6 +51,8 @@ impl App {
                 "off"
             };
             self.persist_theme_value_now("Attention blink", value.into());
+        } else if index == THEME_ROLES.len() + 1 {
+            self.cycle_blink_rate(forward);
         } else {
             let option = index - THEME_ROLES.len() - ATTENTION_ROWS;
             if option == 3 {

@@ -96,24 +96,73 @@ the prompt), or cancel a task with `Alt`+`X`, and the operation absorbs the
 change rather than restarting. `Ctrl`+`]` attaches the live harness pane for the
 selected lane.
 
+### What a harness row says it is doing
+
+The glyph at the head of a harness row is the whole state in one character, and
+two of the five move:
+
+| Glyph | State | Animation |
+| --- | --- | --- |
+| `⠋` | a turn is in flight | spins |
+| `●` | alive, idle at its composer | still |
+| `⚠` | waiting on you | pulses in the attention colour |
+| `✕` | failed, or exited non-zero | pulses red |
+| `✓` | exited cleanly, or finished and held for you to read | still |
+
+The spinner is the answer to a question the rail could not previously answer.
+A harness thinking hard writes nothing, so a busy session and an idle one had
+the same dot, the same liveness timestamp, and the same `busy` flag; the only
+way to find out was to open the pane. Medulla now reads the harness's own
+progress line and spins the row for exactly as long as the turn lasts.
+
+The pulse is Medulla's own, counted off the render clock rather than delegated
+to the terminal's blink attribute — most terminals, and every multiplexer,
+ignore that attribute, so a cue that depended on it was invisible to most of the
+people it was for. Its colour and rate are yours:
+
+```toml
+[theme]
+attention = "yellow"
+attentionBlink = true
+attentionBlinkSeconds = 1.0   # one full bright→dim cycle; clamped to 0.2–10.0
+```
+
+Settings › Appearance edits all three live under **Attention cues**. A failure
+pulses red regardless, so "it is asking you something" and "it broke" are never
+the same colour.
+
 ### When a harness needs you
 
 A harness stopped on its own permission prompt looks exactly like one that is
 thinking hard: still running, still holding its session, saying nothing. Medulla
-watches each harness's screen for that state and marks it — the row turns yellow
-and blinks with a `⚠`, says what it is waiting for and for how long
+watches each harness for that state and marks it — the row turns yellow and
+pulses with a `⚠`, says what it is waiting for and for how long
 ("codex is asking permission · 42s"), and the Agents tab carries a `⚠2` badge so
 a stuck pane is visible from whatever tab you are on.
 
-It is recognised from what the harness paints, in order of specificity:
+Most of it is recognised from what the harness paints, in order of specificity:
 
 1. **Startup dialogs** — trust and permissions that gate the whole session.
 2. **Named prompts** — distinctive phrases that each CLI writes when it is asking
    (e.g. `claude` shows "No, and tell Claude what to do differently"; `codex`
-   shows "Allow Codex to…").
+   shows "Allow Codex to…"). Claude's plan-mode exit menu is named as such, so
+   the row says it finished planning rather than merely that it is asking.
 3. **Numbered menus** — a caret resting on a numbered option, or `(y/n)`.
-4. **The terminal bell** — the universal fallback, in case a prompt is worded
+4. **Blocking errors** — a usage limit, an expired sign-in, a rejected
+   credential. These are printed *instead of* a completed turn, so the work did
+   not happen; the row says which, and the count includes it.
+5. **The terminal bell** — the universal fallback, in case a prompt is worded
    differently or not recognised.
+
+Two states cannot be read off a screen at all, and are taken from the session
+itself. A harness that **died** leaves its terminal frozen on whatever it last
+painted, which is often an ordinary composer — the row now goes red and says
+what happened (`codex exited with 137`), where before it went quiet. And a
+dispatched turn that **finished** leaves the session standing for you to read,
+which looks identical to a session nobody has used; that row shows `✓ … finished
+— read and release`. It is shown but not counted in the `⚠` badge: nothing is
+held up while it waits, and a badge that ticks up on every successful task is a
+badge you learn to ignore.
 
 Two things clear the mark: attaching to the pane, and the orchestrator injecting
 a prompt into that session — both mean somebody is now dealing with it. A named

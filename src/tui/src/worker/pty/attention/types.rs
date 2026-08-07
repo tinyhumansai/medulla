@@ -70,6 +70,20 @@ impl AttentionKind {
     pub fn is_failure(self) -> bool {
         matches!(self, AttentionKind::Failed | AttentionKind::Error)
     }
+
+    /// Whether this cue means the harness is *blocked* on the operator.
+    ///
+    /// What the "N waiting on you" counter and the tab badge are asking. Every
+    /// cue is worth drawing on its own row; only these are worth a number in a
+    /// header, because that number is a claim that something has stopped.
+    ///
+    /// [`Completed`](Self::Completed) is the exception: a finished session is
+    /// worth showing and worth reading, but nothing is held up while it waits,
+    /// and counting it would make the badge tick up on every successful task —
+    /// which is the fastest way to teach an operator to ignore a badge.
+    pub fn blocks(self) -> bool {
+        !matches!(self, AttentionKind::Completed)
+    }
 }
 
 /// A harness waiting on the operator, as the rail shows it.

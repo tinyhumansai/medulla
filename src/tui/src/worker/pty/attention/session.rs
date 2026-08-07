@@ -67,6 +67,12 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
 /// Lifecycle first, then the screen: a dead harness's last painted menu is not a
 /// question anyone can answer, and a retained session's idle composer says less
 /// than the fact that its task is done.
+///
+/// The screen half is dropped entirely once the child has gone, for the same
+/// reason. A session that exited while a permission menu was up leaves that menu
+/// frozen on its last frame; answering it is no longer possible, and a row that
+/// keeps asking is a row the operator cannot clear.
 pub fn row_cue(row: &SessionRow, now: i64) -> Option<HarnessAttention> {
-    lifecycle_cue(row, now).or_else(|| row.attention.clone())
+    lifecycle_cue(row, now)
+        .or_else(|| row.state.is_running().then(|| row.attention.clone()).flatten())
 }

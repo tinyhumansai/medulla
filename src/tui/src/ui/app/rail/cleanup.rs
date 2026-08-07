@@ -1,4 +1,4 @@
-//! Retiring finished work from the Agents rail.
+//! Retiring finished work from the Sessions rail.
 //!
 //! The rail is a picture of what is happening on this device, and everything on
 //! it eventually stops happening: a harness exits, a workflow run settles. Kept
@@ -33,6 +33,14 @@ impl App {
     /// rail no longer shows.
     pub(in crate::ui::app) fn keeps_finished_session(&self, row: &SessionRow) -> bool {
         if self.harness_focus.is_attached_to(&row.id) {
+            return true;
+        }
+        // A failed child has lifecycle information the operator needs to see.
+        // Keeping it also prevents the frame sweep from deleting its cue before
+        // the rail has rendered even once.
+        if crate::worker::pty::lifecycle_cue(row, medulla::clock::now_millis())
+            .is_some_and(|cue| cue.kind.is_failure())
+        {
             return true;
         }
         row.mcp_grant_session

@@ -20,7 +20,7 @@ impl App {
         self.draw_changes_into(frame, area, " Git changes · b baseline ");
     }
 
-    /// The same two panes, drawn over the Agents harness pane.
+    /// The same two panes, drawn over the Sessions harness pane.
     ///
     /// Same state, same bindings, different real estate: `d` on a harness row
     /// swaps its terminal for this, so the hint has to say how to get the

@@ -1,20 +1,17 @@
-//! Runtime, prompt, clipboard, slash-command, and settings command dispatch.
+//! Runtime, prompt, and clipboard command dispatch.
 
 use crate::ui::agents::TaskState;
 use crate::ui::clipboard::{copy_for_operator, copy_to_clipboard, current_platform};
-use crate::ui::command::{self, CopyScope, SlashCommand};
+use crate::ui::command::{self, CopyScope};
 use crate::ui::composer::Draft;
 use medulla::runtime::WorkerOp;
 
-use super::super::types::{
-    tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES, SP_APPEARANCE, SP_CONFIG, SP_HELP,
-    SP_USAGE,
-};
+use super::super::types::{tab_pos, App, Cmd, Prompt, PromptKind, SETTINGS_SUBPAGES};
 
 impl App {
-    /// The task under the Agents-list cursor, when a `Sub` (task) row is selected.
+    /// The task under the Sessions rail cursor, when a `Sub` (task) row is selected.
     ///
-    /// Indexes the rail's rows, which is what `agent_index` counts — the lane
+    /// Indexes the rail's rows, which is what `rail_index` counts — the lane
     /// list alone is shorter than the rail and reading it here would answer for
     /// whichever row happened to share the offset.
     pub(in crate::ui::app) fn selected_agent_task(&self) -> Option<TaskState> {
@@ -47,36 +44,6 @@ impl App {
             }
             None => self.set_status("Select a running task (↑↓) to cancel with X"),
         }
-    }
-
-    /// Open the answer prompt for the selected task's pending question.
-    /// Send the composer's text as an answer when the cursor sits on a task with
-    /// an open question, consuming the draft.
-    ///
-    /// Returns `Some(None)` when it handled the key (an answer was sent, or the
-    /// draft was empty and there was nothing to send) and `None` when the caller
-    /// should treat the text as an ordinary instruction instead. The distinction
-    /// matters: typing into an agent's lane must not silently start a new
-    /// orchestrator cycle.
-    pub(in crate::ui::app) fn answer_from_composer(&mut self, text: &str) -> Option<Option<Cmd>> {
-        let task = self.selected_agent_task()?;
-        let question_id = task.question_id.clone()?;
-        let cycle_id = crate::ui::agents::parse_task_key(&task.task_id)
-            .0?
-            .to_string();
-        if text.trim().is_empty() {
-            self.set_status("Type an answer for the pending question");
-            return Some(None);
-        }
-        if !self.runtime.steering_reaches_backend() {
-            self.set_status("Answering a question is not wired to this runtime yet");
-            return Some(None);
-        }
-        self.runtime
-            .answer_question(cycle_id, question_id, text.to_string());
-        self.draft = Draft::new();
-        self.set_status(format!("Answer sent to {}", task.task_id));
-        Some(None)
     }
 
     pub(in crate::ui::app) fn answer_selected_task(&mut self) {
@@ -139,16 +106,6 @@ impl App {
             },
             PromptKind::WorkspaceAdd => {
                 self.add_workspace(&text);
-                None
-            }
-            // Blank is an answer here, not a cancellation: the id minted from
-            // the directory is the name most agents keep.
-            PromptKind::AgentName { harness, workspace } => {
-                self.declare_new_agent(&harness, &workspace, &text);
-                None
-            }
-            PromptKind::SessionName { agent_id, managed } => {
-                self.start_agent_session(&agent_id, &text, managed);
                 None
             }
             PromptKind::CustomHarnessAdd => {
@@ -423,72 +380,6 @@ impl App {
         });
     }
 
-    /// Handle a submitted composer line (a plain turn or a slash command).
-    pub(in crate::ui::app) fn execute(&mut self, value: String) -> Option<Cmd> {
-        let clean = value.trim().to_string();
-        if clean.is_empty() {
-            return None;
-        }
-        self.history.push(clean.clone());
-        self.history_index = -1;
-        self.draft = Draft::new();
-        self.chat_scroll = 0;
-
-        if let Some(command) = SlashCommand::parse(&clean) {
-            return self.dispatch_slash(command);
-        }
-
-        self.set_status("Cycle running…");
-        Some(Cmd::Submit(clean))
-    }
-
-    /// Perform the side effect for a parsed [`SlashCommand`], returning any
-    /// follow-up [`Cmd`] the event loop must run (e.g. a lazy load). Parsing lives
-    /// in the SDK ([`crate::ui::command::parse`]); this method owns only the
-    /// UI-state mutations and runtime calls.
-    pub(in crate::ui::app) fn dispatch_slash(&mut self, command: SlashCommand) -> Option<Cmd> {
-        match command {
-            SlashCommand::Quit => self.should_quit = true,
-            SlashCommand::NewSession => {
-                self.new_thread();
-            }
-            SlashCommand::Resume => return Some(Cmd::ListChats),
-            SlashCommand::StartSession { provider, path } => {
-                self.start_session_command(provider.as_deref(), path.as_deref());
-            }
-            SlashCommand::TakeControl => self.take_session_control(),
-            SlashCommand::HandOff { note } => self.hand_session_back(note),
-            SlashCommand::Abort => {
-                self.runtime.abort();
-                self.set_status("Abort requested");
-            }
-            SlashCommand::ClearView => {
-                self.selected = 0;
-                self.set_status("View reset (runtime history is retained)");
-            }
-            SlashCommand::Help => {
-                self.set_settings_subpage(SP_HELP);
-            }
-            SlashCommand::Config => {
-                self.enter_settings_subpage(SP_CONFIG);
-            }
-            SlashCommand::Settings => {
-                self.enter_settings_subpage(SP_APPEARANCE);
-            }
-            SlashCommand::Usage => return self.set_settings_subpage(SP_USAGE),
-            SlashCommand::Feedback => {
-                self.tab_index = tab_pos("Feedback");
-                self.set_status("Feedback · loading the board…");
-                return self.reload_feedback();
-            }
-            SlashCommand::ToggleMouse => self.toggle_mouse(),
-            SlashCommand::Copy(scope) => self.copy_chat(scope),
-            SlashCommand::BadUsage(usage) => self.set_status(usage),
-            SlashCommand::Unknown(input) => self.set_status(format!("Unknown command: {input}")),
-        }
-        None
-    }
-
     /// Land on the Settings tab at subpage `index`, returning its lazy-load
     /// command (Usage and Context each fetch on entry).
     pub(in crate::ui::app) fn set_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
@@ -501,17 +392,6 @@ impl App {
         // would strand the next arrow key on whatever page you just left.
         self.settings_focused = false;
         self.tab_enter_cmd()
-    }
-
-    /// Jump to a Settings subpage *and* step into its content pane.
-    ///
-    /// Used by the slash commands: `/feedback` is a request to work with the
-    /// board, not to park on the nav next to it, so it should land ready to
-    /// browse.
-    pub(in crate::ui::app) fn enter_settings_subpage(&mut self, index: usize) -> Option<Cmd> {
-        let cmd = self.set_settings_subpage(index);
-        self.settings_focused = true;
-        cmd
     }
 
     /// Persist the operator's routing strategy to config and remember it on the

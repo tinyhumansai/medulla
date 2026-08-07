@@ -20,6 +20,10 @@ an optional name, `roles`, and a workspace `strategy`. Agents are declared, neve
 discovered — an agent exists because somebody wrote it down, not because a
 process happens to be running. One host runs as many agents as you declare.
 
+Declaring one is a **config-only** operation: `[fleet].agentDeclarations` is
+edited by hand, and the TUI reports the resulting tree on the Hosts tab rather
+than offering a flow that writes it.
+
 The orchestrator delegates **tasks** to agents and lists them in `agent_list`;
 each agent has a set of **tools**, an MCP server inventory, and a health snapshot
 (consecutive-ok / consecutive-failed). An agent is **idle** when it has no running
@@ -65,9 +69,11 @@ Host → Agent → Session
 ```
 
 The local host is always present; a remote host is added by tiny.place address
-and contributes the agents declared over there. This tree is what both the Agents
-tab and the Hosts tab render, and its union is what the hub advertises to the
-backend — one projection, rendered twice.
+and contributes the agents declared over there. The Hosts tab renders this tree
+in full, and its union is what the hub advertises to the backend. The Sessions
+tab resolves the same projection but draws only `Host → Session`: the agent tier
+decides which lane a session belongs to and where it sorts, and then gets no row
+of its own.
 
 *(The legacy `[fleet]` capacity snapshot still carries an older
 `Host → Harness → Workspace → Agent` chain in its own types. That describes
@@ -102,7 +108,7 @@ tool calls and agent delegation are internal to the cycle.
 ## Session
 
 **An agent session** is one running instance of an **agent** — what a **task**
-actually executes in, and the row under an agent on the Agents rail. It carries a
+actually executes in, and the row the Sessions rail draws. It carries a
 `sessionId`, its launch anchor and workspace context, and two facts that are
 independent of each other:
 
@@ -139,7 +145,7 @@ status — done, failed, or cancelled — and its result is recorded in the **le
 The record of every **task** ever delegated: its id, instruction, assigned agent,
 status, timings, event count, and budget consumption. The ledger is the system's
 audit trail — `agent_status` queries it, and task digests surface in the TUI's
-Agents view. It is the source of truth for what happened, regardless of whether
+Sessions view. It is the source of truth for what happened, regardless of whether
 the agent that ran the task is still connected.
 
 ## Budget

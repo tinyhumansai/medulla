@@ -334,6 +334,15 @@ fn ordinary_error_output_is_not_a_blocking_error() {
     }
 }
 
+#[test]
+fn an_error_phrase_in_a_live_transcript_does_not_stop_work() {
+    let screen = "\
+> Fix invalid API key handling\n\
+✽ Considering… (7s · ↓ 193 tokens · thinking with medium effort)";
+
+    assert_eq!(detect(HarnessProvider::Claude, screen), None);
+}
+
 /// The plan-exit menu names planning rather than falling back to the generic
 /// permission wording, even when the pane is too narrow for the structural walk
 /// to rejoin "keep planning" across its wrap.

@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 use medulla::protocol::HarnessProvider;
 
-use crate::ui::app::render::agents::RAIL_MAX_CONTENT;
+use crate::ui::app::render::sessions::RAIL_MAX_CONTENT;
 use crate::ui::app::types::App;
 use crate::worker::pty::{PtyState, SessionControl, SessionRow};
 

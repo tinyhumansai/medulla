@@ -19,7 +19,7 @@ fn the_rail_carries_only_what_is_running() {
     // its agents are the lanes themselves, and its hosts and harnesses are the
     // Routing tab's Harnesses page.
     let mut app = app_with_workers(None);
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     let out = render(&mut app, 160, 40);
     assert!(!out.contains("── fleet ──"), "no fleet divider: {out}");
 }
@@ -37,7 +37,7 @@ fn the_hosts_and_harnesses_are_still_reachable_on_routing() {
 #[test]
 fn the_agents_tab_shows_where_the_selected_agent_runs() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     // Walk off the orchestrator lane onto the placed roster agent.
     let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 40);
@@ -50,7 +50,7 @@ fn the_agents_tab_shows_where_the_selected_agent_runs() {
 #[test]
 fn an_unplaced_lane_shows_no_placement_chip() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     // The orchestrator lane has no descriptor, so there is no placement to
     // resolve. The chip is the one-line "host · harness · workspace" summary
     // above the transcript.
@@ -117,7 +117,7 @@ fn the_template_popup_does_not_follow_you_off_the_page_that_owns_it() {
         "the popup is open on its own page: {open}"
     );
 
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
 
     let elsewhere = render(&mut app, 160, 44);
     assert!(
@@ -194,7 +194,7 @@ fn installing_the_defaults_writes_an_editable_store_and_reloads_it() {
 #[test]
 fn the_selected_agent_shows_its_placement_and_compact_meters() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     // Walk onto the placed roster agent.
     let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 44);
@@ -214,19 +214,20 @@ fn the_selected_agent_shows_its_placement_and_compact_meters() {
 #[test]
 fn the_context_meter_splits_input_output_and_cache() {
     let mut app = app_with_workers(None);
-    tab(&mut app, "Agents");
-    // The orchestrator lane carries the scripted cycle's usage.
+    tab(&mut app, "Sessions");
+    // Onto the placed agent's session. The meter used to be read off the
+    // orchestrator's own lane row, which the rail no longer draws — a session
+    // carries its agent's lane, and that is where the usage now surfaces.
+    let _ = app.on_event(alt_key(KeyCode::Down));
     let out = render(&mut app, 160, 44);
     assert!(out.contains("ctx"), "context meter: {out}");
     // The window is named — a bar at 0% means nothing without knowing 0% of
     // what — and the breakdown is one bracket. `1M`, not `1000k`.
     assert!(out.contains("1M window"), "the window is named: {out}");
     assert!(
-        out.contains("(in 1k / out 90 / cached 70%)"),
-        "in/out/cached breakdown: {out}"
+        out.contains("(in 6k / out 420 / cached 80%)"),
+        "in/out/cached breakdown, from the selected agent's own lane: {out}"
     );
-    // The rail row agrees with the meter about the window's size.
-    assert!(out.contains("ctx 1.2k/1M"), "rail row: {out}");
 }
 
 #[test]

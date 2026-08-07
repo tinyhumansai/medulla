@@ -1,4 +1,4 @@
-![Hero Image](./docs/screen.png)
+![Hero Image](./docs/pitch.gif)
 
 # Medulla: The Orchestrator
 
@@ -33,7 +33,7 @@ medulla         # start the orchestrator
 
 Not ready to sign in? `medulla --mock` runs a full offline demo — no account, no network.
 
-Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64). Building from source, pinning a version, and the SDK are covered in [Developers → Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started).
+Prebuilt binaries ship for Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). Building from source, pinning a version, and the SDK are covered in [Developers → Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started).
 
 ## What you get
 
@@ -57,11 +57,11 @@ name only; restart the local host after saving one. See
 
 Full documentation: **[tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla)**
 
-* [Workers and Sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions) — capacity, threads, and what survives.
-* [Workflows](https://tinyhumans.gitbook.io/medulla/features/workflows) — authored multi-step plans and their runs.
-* [MEDULLA.md Workspace Profiles](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles) — telling the orchestrator what a repo is.
-* [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing) — cognitive tiers, harness-type selection, strategies.
-* [Token Efficiency and Budgets](https://tinyhumans.gitbook.io/medulla/features/token-efficiency) — small surfaces and enforced budgets.
+- [Workers and Sessions](https://tinyhumans.gitbook.io/medulla/features/workers-and-sessions) — capacity, threads, and what survives.
+- [Workflows](https://tinyhumans.gitbook.io/medulla/features/workflows) — authored multi-step plans and their runs.
+- [MEDULLA.md Workspace Profiles](https://tinyhumans.gitbook.io/medulla/features/workspace-profiles) — telling the orchestrator what a repo is.
+- [Orchestrator Routing](https://tinyhumans.gitbook.io/medulla/features/routing) — cognitive tiers, harness-type selection, strategies.
+- [Token Efficiency and Budgets](https://tinyhumans.gitbook.io/medulla/features/token-efficiency) — small surfaces and enforced budgets.
 
 Building on Medulla, or running it yourself? Everything technical — the TUI in depth, the CLI, worker daemons, configuration, architecture, and the SDK — is in **[Developers](https://tinyhumans.gitbook.io/medulla/developers)**.
 

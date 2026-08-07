@@ -8,7 +8,7 @@
 //! the catalog.
 //!
 //! The Routing tab's Agent Templates page is the only surface that reaches it;
-//! the Agents rail lists what is running, not what could be.
+//! the Sessions rail lists what is running, not what could be.
 
 use ratatui::layout::Layout;
 use ratatui::layout::{Constraint, Direction, Rect};

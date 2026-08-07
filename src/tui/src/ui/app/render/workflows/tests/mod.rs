@@ -448,7 +448,7 @@ fn the_footer_teaches_this_tabs_bindings_rather_than_the_agents_tabs() {
     assert!(screen.contains("i inspect"), "{screen}");
     assert!(
         !screen.contains("⌥A answer"),
-        "the Agents-tab steering keys do nothing here"
+        "the Sessions-tab steering keys do nothing here"
     );
 }
 

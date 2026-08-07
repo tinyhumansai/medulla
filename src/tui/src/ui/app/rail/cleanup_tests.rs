@@ -38,13 +38,12 @@ fn rail_row(local: crate::worker::pty::SessionRow) -> SessionRailRow {
 }
 
 #[test]
-fn a_finished_session_nothing_is_waiting_on_leaves_the_rail() {
+fn a_failed_session_stays_visible_for_the_operator() {
     let app = hosting_app();
 
     assert!(
-        !app.keeps_finished_session(&exited("w_1", 1, None)),
-        "an exited harness is history: it stops being listed, and the record \
-         it was holding is swept"
+        app.keeps_finished_session(&exited("w_1", 1, None)),
+        "the lifecycle cue must survive the next frame sweep"
     );
 }
 
@@ -56,10 +55,7 @@ fn the_attached_session_stays_listed_after_it_exits() {
     app.harness_focus = HarnessFocus::Attached("w_1".to_string());
 
     assert!(app.keeps_finished_session(&exited("w_1", 1, None)));
-    assert!(
-        !app.keeps_finished_session(&exited("w_2", 1, None)),
-        "only the attached one is pinned"
-    );
+    assert!(app.keeps_finished_session(&exited("w_2", 1, None)));
 }
 
 #[test]
@@ -85,6 +81,13 @@ fn a_finished_session_whose_runs_have_all_settled_leaves() {
         !app.keeps_finished_session(&exited("w_1", 0, Some("grant-1"))),
         "settled runs draw no rows, so they pin nothing"
     );
+}
+
+#[test]
+fn a_cleanly_exited_session_without_runs_leaves() {
+    let app = hosting_app();
+
+    assert!(!app.keeps_finished_session(&exited("w_1", 0, None)));
 }
 
 #[test]

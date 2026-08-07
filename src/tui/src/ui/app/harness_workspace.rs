@@ -4,7 +4,7 @@
 use std::collections::{BinaryHeap, HashSet};
 use std::path::Path;
 
-use super::types::{AgentPickerStep, App, WorkspaceChoice};
+use super::types::{App, SessionPickerStep, WorkspaceChoice};
 use crate::ui::composer::flatten_paste;
 
 const MAX_WORKSPACE_CHOICES: usize = 10;
@@ -16,12 +16,12 @@ impl App {
     /// Advance the launcher to its workspace step and populate the first list.
     pub(super) fn open_harness_workspace_step(&mut self, edit_default: bool) {
         let default = self
-            .agent_picker
+            .session_picker
             .as_ref()
             .map(|picker| picker.cwd.clone())
             .unwrap_or_default();
-        if let Some(picker) = &mut self.agent_picker {
-            picker.step = AgentPickerStep::Workspace;
+        if let Some(picker) = &mut self.session_picker {
+            picker.step = SessionPickerStep::Workspace;
             picker.workspace_query = if edit_default { default } else { String::new() };
             picker.workspace_index = 0;
             picker.workspace_picked = false;
@@ -47,10 +47,10 @@ impl App {
     /// [`resolve_workspace`](crate::ui::harness_pane::LocalSessions::resolve_workspace)
     /// trims before it is used.
     pub(super) fn paste_into_harness_workspace(&mut self, text: &str) {
-        let Some(picker) = &mut self.agent_picker else {
+        let Some(picker) = &mut self.session_picker else {
             return;
         };
-        if picker.step != AgentPickerStep::Workspace {
+        if picker.step != SessionPickerStep::Workspace {
             return;
         }
         picker.workspace_query.push_str(&flatten_paste(text));
@@ -63,12 +63,12 @@ impl App {
 
     /// Recompute cached completions after the query changes.
     pub(super) fn refresh_harness_workspace_choices(&mut self) {
-        let Some(picker) = &self.agent_picker else {
+        let Some(picker) = &self.session_picker else {
             return;
         };
         let query = picker.workspace_query.clone();
         let choices = self.workspace_choices(&query);
-        if let Some(picker) = &mut self.agent_picker {
+        if let Some(picker) = &mut self.session_picker {
             picker.workspace_choices = choices;
             picker.workspace_index = picker
                 .workspace_index
@@ -91,7 +91,7 @@ impl App {
     /// children, and Enter silently started the harness in the first of them
     /// rather than in the directory that was asked for.
     pub(super) fn selected_picker_workspace(&self) -> Option<String> {
-        let picker = self.agent_picker.as_ref()?;
+        let picker = self.session_picker.as_ref()?;
         let resolved = self
             .local_sessions
             .as_ref()
@@ -111,13 +111,13 @@ impl App {
 
     /// Make the highlighted completion the editable query.
     pub(super) fn complete_harness_workspace(&mut self) {
-        let selected = self.agent_picker.as_ref().and_then(|picker| {
+        let selected = self.session_picker.as_ref().and_then(|picker| {
             picker
                 .workspace_choices
                 .get(picker.workspace_index)
                 .map(|choice| choice.path.clone())
         });
-        if let (Some(picker), Some(selected)) = (&mut self.agent_picker, selected) {
+        if let (Some(picker), Some(selected)) = (&mut self.session_picker, selected) {
             picker.workspace_query = selected;
             picker.workspace_index = 0;
             // Completing *is* entering it: the query now names the directory,

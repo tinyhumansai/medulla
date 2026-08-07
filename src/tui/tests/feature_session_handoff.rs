@@ -23,7 +23,7 @@ use ratatui::Terminal;
 fn app_with_harnesses(sessions: PtyManager) -> App {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
-    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Sessions").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),
@@ -169,55 +169,6 @@ fn queued_brief(app: &mut App) -> Option<medulla::hub::HarnessHandoff> {
 }
 
 #[test]
-fn handoff_with_a_note_queues_a_brief_carrying_it() {
-    let sessions = PtyManager::new();
-    let id = user_session_in(&sessions, "/");
-    let mut app = app_with_harnesses(sessions.clone());
-
-    type_str(&mut app, "/handoff migration is half applied, tests RED");
-    let _ = app.on_event(key(KeyCode::Enter));
-
-    let brief = queued_brief(&mut app).expect("a handback must queue a brief");
-    assert_eq!(
-        brief.note.as_deref(),
-        Some("migration is half applied, tests RED"),
-        "the operator's own words, capitalisation and all"
-    );
-    assert_eq!(brief.session_id, id);
-    assert_eq!(brief.provider, "codex");
-    assert_eq!(brief.workspace_path, "/");
-    assert!(
-        brief.transcript.contains("applying the migration"),
-        "the brief must carry what was on the pane: {:?}",
-        brief.transcript
-    );
-    // And the local flag moved, so dispatch can use it again immediately.
-    assert_eq!(
-        sessions.control(&id),
-        Some(SessionControl::Orchestrator),
-        "control flips locally without waiting for the brief to send"
-    );
-
-    sessions.close(&id);
-}
-
-#[test]
-fn handoff_without_a_note_still_queues_a_brief() {
-    let sessions = PtyManager::new();
-    let id = user_session_in(&sessions, "/");
-    let mut app = app_with_harnesses(sessions.clone());
-
-    type_str(&mut app, "/handoff");
-    let _ = app.on_event(key(KeyCode::Enter));
-
-    let brief = queued_brief(&mut app).expect("a note is optional, a brief is not");
-    assert_eq!(brief.note, None);
-    assert!(brief.transcript.contains("applying the migration"));
-
-    sessions.close(&id);
-}
-
-#[test]
 fn handoff_resolves_the_held_harness_with_no_frame_rendered() {
     // The regression. `pane_session` is written inside the Agents draw
     // and cleared at the top of every frame, so `/handoff` used to depend on
@@ -232,13 +183,13 @@ fn handoff_resolves_the_held_harness_with_no_frame_rendered() {
         "this test is only about anything while no frame has resolved a harness"
     );
 
-    type_str(&mut app, "/handoff take it from here");
-    let _ = app.on_event(key(KeyCode::Enter));
+    // Ctrl-G resolves the held harness from the registry rather than from
+    // `pane_session`, so it answers before any frame has drawn the rail.
+    let _ = app.on_event(ctrl('g'));
 
     let brief = queued_brief(&mut app)
         .expect("the one harness the operator holds is not ambiguous, rendered or not");
     assert_eq!(brief.session_id, id);
-    assert_eq!(brief.note.as_deref(), Some("take it from here"));
 
     sessions.close(&id);
 }
@@ -253,8 +204,7 @@ fn handoff_with_two_held_harnesses_asks_rather_than_guessing() {
     let mut app = app_with_harnesses(sessions.clone());
     app.tab_index = TABS.iter().position(|t| *t == "Overview").unwrap();
 
-    type_str(&mut app, "/handoff");
-    let _ = app.on_event(key(KeyCode::Enter));
+    let _ = app.on_event(ctrl('g'));
 
     assert!(
         queued_brief(&mut app).is_none(),

@@ -31,7 +31,7 @@ impl App {
         [
             (Overlay::Decisions, self.decision_open),
             (Overlay::TemplatePopup, self.template_popup_open()),
-            (Overlay::AgentPicker, self.agent_picker.is_some()),
+            (Overlay::SessionPicker, self.session_picker.is_some()),
             (Overlay::HandbackPrompt, self.handback_prompt.is_some()),
             (Overlay::InlinePrompt, self.prompt.is_some()),
             (

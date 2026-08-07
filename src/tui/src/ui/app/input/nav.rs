@@ -9,7 +9,6 @@
 use super::super::rail::RailRow;
 use super::super::types::{App, Cmd};
 use crate::ui::agents::{agent_row_model_paged, AgentRole, AgentRow, TaskStatus};
-use crate::ui::composer::Draft;
 
 /// How many of a lane's task sublanes one page reveals.
 ///
@@ -20,7 +19,7 @@ use crate::ui::composer::Draft;
 pub(in crate::ui::app) const SUBTASK_PAGE: usize = 10;
 
 impl App {
-    /// The current Agents-list rows, each lane paged to whatever the operator
+    /// The current Sessions rail rows, each lane paged to whatever the operator
     /// has expanded it to.
     #[cfg(test)]
     pub(in crate::ui::app) fn agent_rows(&self) -> Vec<AgentRow> {
@@ -52,12 +51,8 @@ impl App {
     pub(in crate::ui::app) fn page_subtasks(&mut self) -> bool {
         let lanes = self.lanes();
         let rows = self.rail_rows_in(&lanes);
-        // The overflow row is a fold row, not an agent row: under the
-        // `Host → Agent → Session` taxonomy an agent's own row is the declared
-        // identity, and everything the fold still owns — the orchestrator lane,
-        // the `── functions ──` divider, this counter — arrives as `Lane`.
         let cursor = self.rail_cursor_in(&rows, &lanes);
-        let Some(RailRow::Lane(AgentRow::More { lane_index, hidden })) = rows.get(cursor) else {
+        let Some(RailRow::Overflow { lane_index, hidden }) = rows.get(cursor) else {
             return false;
         };
         let (lane_index, hidden) = (*lane_index, *hidden);
@@ -102,9 +97,10 @@ impl App {
 
     /// Put the cursor back on a lane's overflow row after its rows have moved.
     ///
-    /// Falls back to the lane's own header, and then to clamping, so a lane that
-    /// no longer has an overflow row cannot strand the cursor past the end of
-    /// the rail.
+    /// Falls back to the lane's first session, and then to clamping, so a lane
+    /// that no longer has an overflow row cannot strand the cursor past the end
+    /// of the rail. The lane header it used to fall back to is gone with the
+    /// agent tier, and the first session of that lane is the nearest row left.
     fn follow_overflow_row(&mut self, lane_key: &str) {
         let lanes = self.lanes();
         let rows = self.rail_rows_in(&lanes);
@@ -112,16 +108,16 @@ impl App {
         let found = rows
             .iter()
             .position(|row| {
-                matches!(row, RailRow::Lane(AgentRow::More { lane_index: l, .. }) if Some(*l) == lane_index)
+                matches!(row, RailRow::Overflow { lane_index: l, .. } if Some(*l) == lane_index)
             })
             .or_else(|| {
                 rows.iter()
-                    .position(|row| matches!(row, RailRow::Agent(agent) if agent.lane_index == lane_index))
+                    .position(|row| row.lane_index().is_some() && row.lane_index() == lane_index)
             });
         self.set_rail_cursor_in(
             &rows,
             &lanes,
-            found.unwrap_or_else(|| self.agent_index.min(rows.len().saturating_sub(1))),
+            found.unwrap_or_else(|| self.rail_index.min(rows.len().saturating_sub(1))),
         );
     }
 
@@ -131,20 +127,20 @@ impl App {
         (self.area.height as usize).saturating_sub(13).max(5)
     }
 
-    /// Move the Agents-rail cursor to the next/previous selectable row.
+    /// Move the Sessions-rail cursor to the next/previous selectable row.
     ///
     /// Not every row can hold the cursor: the `── functions ──` separator is a
     /// label, not a destination. So this steps over it to the next lane or task
     /// rather than stopping on it, and a cursor that would leave the list stays
     /// where it was. The `+N more` row *is* a destination — it is the control
     /// that pages its lane open.
-    pub(in crate::ui::app) fn move_agent_index(&mut self, up: bool) {
+    pub(in crate::ui::app) fn move_rail_index(&mut self, up: bool) {
         let lanes = self.lanes();
         let rows = self.rail_rows_in(&lanes);
         if rows.is_empty() {
             return;
         }
-        // `agent_index` is only the last rendered offset. Resolve the anchor
+        // `rail_index` is only the last rendered offset. Resolve the anchor
         // first: a local session may have appeared above it since that frame,
         // and stepping from the old offset would select the wrong neighbour.
         let clamped = self.rail_cursor_in(&rows, &lanes);
@@ -172,10 +168,9 @@ impl App {
     pub(in crate::ui::app) fn new_thread(&mut self) {
         self.runtime.new_session();
         self.draft = crate::ui::composer::Draft::new();
-        self.chat_scroll = 0;
         self.agent_scroll = 0;
         self.reset_rail_cursor();
-        self.tab_index = super::super::types::tab_pos("Agents");
+        self.tab_index = super::super::types::tab_pos("Sessions");
         self.refresh_snapshot();
         let name = self
             .snapshot
@@ -184,43 +179,6 @@ impl App {
             .map(|t| t.name.clone())
             .unwrap_or_else(|| "main".into());
         self.set_status(format!("Opened {name} · ^↑↓ switches threads"));
-    }
-
-    /// Recall an older prompt from history into the composer.
-    pub(in crate::ui::app) fn recall_older(&mut self) {
-        let next = (self.history.len() as i64 - 1).min(self.history_index + 1);
-        if next >= 0 {
-            self.history_index = next;
-            let recalled = self
-                .history
-                .get(self.history.len() - 1 - next as usize)
-                .cloned()
-                .unwrap_or_default();
-            self.draft = Draft {
-                cursor: recalled.chars().count(),
-                text: recalled,
-            };
-        }
-    }
-
-    /// Recall a newer prompt from history (or clear back to an empty draft).
-    pub(in crate::ui::app) fn recall_newer(&mut self) {
-        if self.history_index >= 0 {
-            let next = self.history_index - 1;
-            self.history_index = next;
-            let recalled = if next >= 0 {
-                self.history
-                    .get(self.history.len() - 1 - next as usize)
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            self.draft = Draft {
-                cursor: recalled.chars().count(),
-                text: recalled,
-            };
-        }
     }
 
     /// Toggle mouse capture and note the new mode in the status line.
@@ -269,8 +227,8 @@ impl App {
         rows: &[RailRow],
         lanes: &[crate::ui::agents::AgentLane],
     ) -> Option<(String, String)> {
-        // Only on the Agents tab: leaving it releases the subscription.
-        if self.tab() != "Agents" {
+        // Only on the Sessions tab: leaving it releases the subscription.
+        if self.tab() != "Sessions" {
             return None;
         }
         let row = rows.get(self.rail_cursor_in(rows, lanes))?;

@@ -99,10 +99,6 @@ impl App {
                 self.open_add_host_prompt();
                 RoutingKey::Handled(None)
             }
-            KeyCode::Char('n') => {
-                self.new_agent_from_hosts();
-                RoutingKey::Handled(None)
-            }
             KeyCode::Char('s') | KeyCode::Enter => {
                 let cmd = self.selected_host().map(|worker| {
                     self.set_status(format!(
@@ -171,35 +167,6 @@ impl App {
         self.host_roles_focus = true;
         self.host_role_index = 0;
         self.set_status("Roles · Space toggles · ← back to the list");
-    }
-
-    /// Point the operator at where an agent is created — and, on a remote host,
-    /// explain why it cannot be created from here.
-    ///
-    /// Declaring an agent is the Agents tab's flow (it needs the harness picker
-    /// and a workspace); this page owns the *capability*, which is why the key
-    /// answers on both kinds of host rather than being silently inert on one.
-    fn new_agent_from_hosts(&mut self) {
-        let Some(host) = self.selected_host_row() else {
-            return;
-        };
-        if !host.accepts_new_agents() {
-            self.set_status(format!(
-                "Agents are declared on {} itself — this end is read-only",
-                host.label
-            ));
-            return;
-        }
-        // Declared here rather than by sending the operator to the Agents tab.
-        // Roles are assigned on *this* page and nowhere else, so a flow that
-        // ended on another tab meant declaring an agent and then navigating back
-        // to say what it is for — with the new row's place in the tree, and the
-        // toggles beside it, both out of sight at the moment the operator had
-        // just decided them.
-        //
-        // The picker is an overlay rather than a page (`visible_overlays`), so
-        // it draws and takes keys over whatever is behind it.
-        self.open_new_agent_picker();
     }
 
     /// Remove what the cursor is on: one agent, or the whole host it sits under.

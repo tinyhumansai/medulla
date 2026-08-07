@@ -28,7 +28,7 @@ use crate::ui::composer::{Draft, TextPrompt};
 use baseline::select_harness_baseline;
 
 impl App {
-    /// Open the Changes tab for the harness currently shown in the Agents pane.
+    /// Open the Changes tab for the harness currently shown in the Sessions pane.
     ///
     /// The draw path records the exact session resolved from the selected rail
     /// row. Keeping that id before changing tabs lets the forced refresh pick

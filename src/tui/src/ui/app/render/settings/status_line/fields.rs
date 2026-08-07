@@ -12,7 +12,7 @@ use medulla::config::StatusLineConfig;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 
-use crate::ui::app::render::agents::RAIL_MAX_CONTENT;
+use crate::ui::app::render::sessions::RAIL_MAX_CONTENT;
 use crate::ui::app::status_line::STATUS_LINE_ROWS;
 use crate::ui::app::types::App;
 

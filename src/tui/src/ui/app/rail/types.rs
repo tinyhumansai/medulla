@@ -1,34 +1,33 @@
-//! The Agents rail's row taxonomy: `Host → Agent → Session`.
+//! The Sessions rail's row taxonomy: `Host → Session`.
 //!
-//! One shape for the whole tree. A row is a host, an agent, one of that agent's
-//! sessions, or the action that declares a new agent — and the lane rows the
-//! event fold still owns for the surfaces that are *not* agents (the
-//! orchestrator's own conversation, the `── functions ──` divider, the function
-//! lanes beneath it).
+//! One shape for the whole tree. A row is a host, one session running on it, a
+//! workflow run that session started, or one of the two controls — the action
+//! that opens a session, and the paging control for a lane whose sessions the
+//! fold hid.
 //!
-//! The taxonomy this replaced carried the split the redefinition removes: an
-//! `AgentRow::Sub` rendered a *task* and a `RailRow::Harness` rendered a
-//! *session*, in two groups separated by a `── your harnesses ──` divider. A
-//! task **is** an agent session — the two differ only in
-//! [`SessionOrigin`](crate::worker::pty::SessionOrigin) — so both collapse into
-//! [`RailRow::Session`] under the agent that owns them, and the divider is gone.
+//! Two levels have been removed since. `AgentRow::Sub` rendered a *task* and
+//! `RailRow::Harness` a *session*, in two groups separated by a
+//! `── your harnesses ──` divider; a task **is** an agent session — the two
+//! differ only in [`SessionOrigin`](crate::worker::pty::SessionOrigin) — so both
+//! collapsed into [`RailRow::Session`]. Then the *agent* tier went the same way:
+//! agents are no longer declared from the TUI, and a row for a `harness ×
+//! workspace` identity that the operator can neither create nor edit is a level
+//! of nesting charged against every session beneath it. Agents still exist —
+//! [`AgentRailRow`] is still resolved, and it is still what gives a session its
+//! lane — they are simply not rendered.
 
 use medulla::ui::hosts::HostAgentRow;
 
-use crate::ui::agents::{AgentRow, TaskState};
+use crate::ui::agents::TaskState;
 use crate::worker::pty::{SessionOrigin, SessionRow};
 
-/// A stable identity for a selectable Agents-rail row.
+/// A stable identity for a selectable Sessions-rail row.
 ///
 /// The rail is rebuilt from live state on every frame. Storing an offset would
 /// select a different row whenever a row is inserted above it, so the app
 /// remembers one of these identities and resolves its current offset instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RailAnchor {
-    /// The action that declares an agent.
-    NewAgent,
-    /// A declared or discovered agent, keyed by roster id.
-    Agent(String),
     /// A local session, keyed by PTY id.
     Session(String),
     /// A dispatched task without a local PTY row, keyed by its lane and task.
@@ -38,13 +37,11 @@ pub enum RailAnchor {
         /// Backend task id within [`Self::Task::lane`].
         task_id: String,
     },
-    /// An action that opens another session for an agent.
-    NewSession(String),
+    /// The action that opens a session. There is one, so it carries no key.
+    NewSession,
     /// A workflow run, keyed by its run id.
     WorkflowRun(String),
-    /// A non-agent lane header, keyed by the fold's stable lane key.
-    Lane(String),
-    /// The paging control for an agent lane, keyed by that lane's stable key.
+    /// The paging control for a lane, keyed by that lane's stable key.
     Overflow(String),
 }
 
@@ -65,7 +62,12 @@ pub struct HostRailRow {
     pub local: bool,
 }
 
-/// One agent in the tree — `harness × workspace` on a host.
+/// One agent — `harness × workspace` on a host — resolved but never rendered.
+///
+/// The rail groups sessions by agent and takes each session's lane from the
+/// agent's, so the tier is still assembled; it simply has no row of its own
+/// since agents stopped being declared from the TUI. Its label, harness and
+/// workspace accessors went with that row.
 ///
 /// Sourced from the shared `Host → Agent` projection
 /// ([`medulla::ui::hosts::host_rows`]), which is the same tree the Hosts tab
@@ -86,28 +88,6 @@ pub struct AgentRailRow {
     /// The lane the event fold produced for it, when it has traffic. `None` for
     /// a declared agent that has not run anything.
     pub lane_index: Option<usize>,
-}
-
-impl AgentRailRow {
-    /// What to call this agent: whatever the shared projection resolved (its
-    /// declared name, else its roster label), falling back to the id itself.
-    pub fn label(&self) -> String {
-        self.agent
-            .as_ref()
-            .map(|agent| agent.label.clone())
-            .filter(|label| !label.trim().is_empty())
-            .unwrap_or_else(|| self.agent_id.clone())
-    }
-
-    /// The harness type this agent runs, when the tree knows one.
-    pub fn harness(&self) -> Option<&str> {
-        self.agent.as_ref()?.harness.as_deref()
-    }
-
-    /// The directory this agent's sessions work in, when the tree knows one.
-    pub fn workspace(&self) -> Option<&str> {
-        self.agent.as_ref()?.workspace.as_deref()
-    }
 }
 
 /// One session of an agent — **one row type, whatever started it**.
@@ -178,63 +158,43 @@ pub struct WorkflowRunRailRow {
     pub last: bool,
 }
 
-/// One row of the Agents rail.
+/// One row of the Sessions rail.
 #[derive(Debug, Clone)]
 pub enum RailRow {
     /// A host header, emitted only once a remote host exists.
     Host(HostRailRow),
-    /// A declared (or folded) agent.
-    Agent(AgentRailRow),
-    /// One session of the agent above it.
+    /// One session running on the host above it.
     ///
     /// Boxed because a session row carries both a whole [`TaskState`] and a
     /// whole [`SessionRow`], which together are several times the size of every
     /// other variant — and a rail is a `Vec<RailRow>` rebuilt each frame, so the
     /// widest variant is what every row costs.
     Session(Box<SessionRailRow>),
-    /// The heading over the agent tree.
+    /// The action row that opens a session, once per hosting machine.
     ///
-    /// Sits under the create action, so the rail reads as "here is the button,
-    /// and here is what it has made". Without it the first agent row followed
-    /// the button directly and the two read as one block — a list whose first
-    /// entry happened to be green.
-    ///
-    /// Emitted only when there is a tree to head: a heading over nothing
-    /// announces a section the operator cannot see.
-    AgentsHeader,
-    /// The action row that declares a new agent on this machine.
-    ///
-    /// Sits directly above the tree it produces, because a machine with no
-    /// agents declared has nothing else on that half of the rail to suggest the
-    /// flow exists — which is the same as not having it.
-    NewAgent,
-    /// The action row that opens a new session under the agent above it.
-    ///
-    /// The last row of an agent's group, under its sessions, because that is
-    /// where "and one more" belongs: the list you are reading is what the agent
-    /// is running, and this adds to it. Emitted only for an agent this machine
-    /// declares — a session is started on the host that owns the agent, so
-    /// offering the action on a remote one would be a button that refuses.
-    ///
-    /// `open_new_session` has existed since the tree landed and was reachable
-    /// only by `Ctrl-T`, i.e. only by an operator who already knew it was there.
-    NewSession {
-        /// The agent whose harness and workspace the session inherits.
-        agent_id: String,
-    },
+    /// One row at the top of the rail, not one per agent. The picker it opens
+    /// asks for the harness type and the directory itself, so there is nothing
+    /// left for the row's *position* to contribute — and a per-agent copy was
+    /// only ever a way of pre-answering those two questions.
+    NewSession,
     /// A workflow run one of the sessions above started over MCP.
     ///
     /// Directly beneath the session that triggered it, because that is the
     /// context that makes it legible: the same workflow run means something
     /// different started from a review session than from a release one.
     WorkflowRun(WorkflowRunRailRow),
-    /// A fold row that is not an agent: the orchestrator's own conversation, the
-    /// `── functions ──` divider, a function lane, or a `+N more` counter.
+    /// The `+N more` paging control for a lane whose sessions the fold hid.
     ///
-    /// The one variant the topology does not name, because the orchestrator is
-    /// not an agent and still needs somewhere to live. Everything in it is
-    /// either the conversation or a label.
-    Lane(AgentRow),
+    /// Its own variant rather than a fold row carried through: paging is the
+    /// only thing the rail still takes from [`AgentRow`], and keeping the whole
+    /// enum for it meant every consumer matched arms — lane headers, dividers,
+    /// task sublanes — that the flattened rail can never produce.
+    Overflow {
+        /// The lane whose page this control opens and closes.
+        lane_index: usize,
+        /// How many of its sessions are hidden right now.
+        hidden: usize,
+    },
 }
 
 impl RailRow {
@@ -242,17 +202,15 @@ impl RailRow {
     pub fn selectable(&self) -> bool {
         match self {
             RailRow::Host(_) => false,
-            RailRow::Agent(_) => true,
             RailRow::Session(_) => true,
-            RailRow::NewAgent => true,
-            // A label, not a row: the cursor skips it like a host header.
-            RailRow::AgentsHeader => false,
-            RailRow::NewSession { .. } => true,
+            RailRow::NewSession => true,
             // Selectable so `Enter` can open the workflow it belongs to; the
             // rail is where the operator finds out a run exists, and a row they
             // cannot act on would make them go looking for it by name.
             RailRow::WorkflowRun(_) => true,
-            RailRow::Lane(row) => row.selectable(),
+            // Selectable so `Enter` pages the lane open, and folds it back once
+            // it is fully revealed.
+            RailRow::Overflow { .. } => true,
         }
     }
 
@@ -293,37 +251,14 @@ impl RailRow {
     /// The lane index behind this row, for the transcript pane.
     pub fn lane_index(&self) -> Option<usize> {
         match self {
-            RailRow::Agent(row) => row.lane_index,
             RailRow::Session(row) => row.lane_index,
-            RailRow::Lane(row) => row.lane_index(),
-            RailRow::Host(_)
-            | RailRow::NewAgent
-            | RailRow::AgentsHeader
-            | RailRow::NewSession { .. }
-            | RailRow::WorkflowRun(_) => None,
+            RailRow::Overflow { lane_index, .. } => Some(*lane_index),
+            RailRow::Host(_) | RailRow::NewSession | RailRow::WorkflowRun(_) => None,
         }
     }
 
-    /// The agent this row is about, when it is about one.
-    pub fn agent_id(&self) -> Option<&str> {
-        match self {
-            RailRow::Agent(row) => Some(row.agent_id.as_str()),
-            RailRow::Session(row) => row.agent_id.as_deref(),
-            RailRow::NewSession { agent_id } => Some(agent_id.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Whether this row is the "declare an agent" action.
-    pub fn is_new_agent(&self) -> bool {
-        matches!(self, RailRow::NewAgent)
-    }
-
-    /// The agent a "start a session" action row would open one under.
-    pub fn new_session_agent(&self) -> Option<&str> {
-        match self {
-            RailRow::NewSession { agent_id } => Some(agent_id.as_str()),
-            _ => None,
-        }
+    /// Whether this row is the action that opens a session.
+    pub fn is_new_session(&self) -> bool {
+        matches!(self, RailRow::NewSession)
     }
 }

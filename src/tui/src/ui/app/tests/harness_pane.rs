@@ -23,8 +23,7 @@ fn tab(name: &str) -> usize {
 #[test]
 fn shift_d_on_a_selected_harness_opens_its_changes_tab() {
     let mut app = app();
-    app.tab_index = tab("Agents");
-    app.focus_agents_rail();
+    app.tab_index = tab("Sessions");
     app.pane_session = Some("selected-harness".to_owned());
 
     let cmd = app.on_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT));
@@ -38,8 +37,7 @@ fn shift_d_on_a_selected_harness_opens_its_changes_tab() {
 #[test]
 fn k_on_a_selected_harness_asks_before_closing_it() {
     let mut app = app();
-    app.tab_index = tab("Agents");
-    app.focus_agents_rail();
+    app.tab_index = tab("Sessions");
     app.pane_session = Some("selected-harness".to_owned());
 
     let cmd = app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
@@ -51,38 +49,41 @@ fn k_on_a_selected_harness_asks_before_closing_it() {
 }
 
 #[test]
-fn k_without_a_selected_harness_remains_composer_input() {
+fn k_without_a_selected_harness_arms_nothing() {
     let mut app = app();
-    app.tab_index = tab("Agents");
-    app.focus_agents_rail();
+    app.tab_index = tab("Sessions");
 
     app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
 
-    assert!(app.harness_close_armed.is_none());
-    assert_eq!(app.draft.text, "k");
+    assert!(
+        app.harness_close_armed.is_none(),
+        "there is no harness under the cursor to close"
+    );
 }
 
 #[test]
 fn an_armed_harness_close_takes_only_y() {
     let mut app = app();
-    app.tab_index = tab("Agents");
+    app.tab_index = tab("Sessions");
     app.arm_harness_close("selected-harness".to_owned());
 
     app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
 
     assert!(app.harness_close_armed.is_none());
     assert!(app.status().contains("cancelled"), "{}", app.status());
-    assert_eq!(app.draft.text, "", "the answer must not reach the composer");
 }
 
 #[test]
-fn d_without_a_selected_harness_remains_composer_input() {
+fn d_without_a_selected_harness_opens_no_diff() {
     let mut app = app();
-    app.tab_index = tab("Agents");
-    app.focus_agents_rail();
+    app.tab_index = tab("Sessions");
 
     app.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
-    assert_eq!(app.tab(), "Agents");
-    assert_eq!(app.draft.text, "d");
+    assert_eq!(app.tab(), "Sessions", "the key must not navigate anywhere");
+    assert_eq!(
+        app.pane_view,
+        super::super::types::PaneView::Harness,
+        "with no session under the cursor there is no diff to swap to"
+    );
 }

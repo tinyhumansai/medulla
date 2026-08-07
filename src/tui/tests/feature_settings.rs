@@ -87,7 +87,7 @@ fn number_keys_jump_subpages() {
     // Render the full help page: this test verifies numeric subpage navigation,
     // while short-viewport scrolling has its own focused coverage.
     let out = text_of(&draw(&mut app, 140, 64));
-    assert!(out.contains("Commands"), "help subpage: {out}");
+    assert!(out.contains("Keyboard & REPL help"), "help subpage: {out}");
     // Jumping to Usage requests an account-usage fetch.
     let cmd = key(&mut app, KeyCode::Char('1'));
     assert!(
@@ -309,7 +309,7 @@ fn agents_app(appearance: AppearanceConfig) -> App {
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);
     app.set_device_snapshot(device_sample());
-    app.tab_index = TABS.iter().position(|tab| *tab == "Agents").unwrap();
+    app.tab_index = TABS.iter().position(|tab| *tab == "Sessions").unwrap();
     app
 }
 
@@ -347,8 +347,9 @@ fn a_narrow_sidebar_keeps_navigation_and_drops_device_detail() {
     // collapse to percentages rather than spilling past the border.
     assert!(out.contains("Device CPU"), "{out}");
     assert!(out.contains("Device RAM 25%"), "{out}");
-    // Navigation survives: the lane rows are still on screen above the footer.
-    assert!(out.contains("orchestrator"), "{out}");
+    // Navigation survives: the rail's own rows are still on screen above the
+    // footer rather than being crowded out by it.
+    assert!(out.contains("task-1"), "{out}");
 }
 
 #[test]

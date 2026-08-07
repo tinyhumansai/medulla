@@ -455,16 +455,16 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     // after the prompts above: a harness can print "usage limit reached" and then
     // ask what to do about it, and the question is the more useful thing to say.
     //
-    // Not vetoed by `is_working`, unlike everything that follows. The others are
-    // shapes a working screen can wear by accident; this is wording no harness
-    // prints while a turn is still going, and a retry footer left on screen
-    // beneath a dead credential would otherwise suppress the one cue that
-    // explains why nothing is happening.
-    if let Some(what) = blocking_error(screen) {
-        return Some((
-            AttentionKind::Error,
-            format!("{} stopped: {what}", provider.as_str()),
-        ));
+    // A transcript can contain an error phrase in the user's prompt. The live
+    // progress footer is authoritative while it is present, so it vetoes error
+    // matching just as it does structural prompt fallbacks.
+    if !is_working(screen) {
+        if let Some(what) = blocking_error(screen) {
+            return Some((
+                AttentionKind::Error,
+                format!("{} stopped: {what}", provider.as_str()),
+            ));
+        }
     }
 
     // Unrecognised wording, recognisable shape. Vetoed while the harness is

@@ -150,7 +150,7 @@ impl App {
                 3 => {
                     lines.push(TLine::from(""));
                     lines.push(TLine::from(Span::styled(
-                        "  This device · Agents sidebar",
+                        "  This device · Sessions sidebar",
                         description,
                     )));
                     let title_index = THEME_ROLES.len() + ATTENTION_ROWS + 3;

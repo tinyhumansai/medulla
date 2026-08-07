@@ -136,7 +136,7 @@ fn the_wheel_walks_the_picker_and_a_click_off_a_row_starts_nothing() {
     let (column, row) = label_at(&lines, "Choose workspace");
     let _ = app.on_event(click(column, row));
     assert!(
-        app.agent_picker_open_for_test(),
+        app.session_picker_open_for_test(),
         "a click off a row leaves the picker up: {}",
         app.status()
     );

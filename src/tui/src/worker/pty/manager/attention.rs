@@ -115,6 +115,7 @@ fn refresh(session: &SessionHandle, now: i64) {
         state.completion_deadline = None;
     }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
+    state.working = working;
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),
         (Some((kind, what)), None) => Some(HarnessAttention::new(kind, what, now)),

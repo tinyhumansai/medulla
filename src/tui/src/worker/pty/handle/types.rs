@@ -132,6 +132,15 @@ pub(crate) struct AttentionState {
     pub(crate) completion_deadline: Option<std::time::Instant>,
     /// Epoch ms of the last classification attempt.
     pub(crate) checked_at: i64,
+    /// Whether the last classified screen said the harness was mid-turn.
+    ///
+    /// The complement of [`cue`](Self::cue) and just as unobtainable from
+    /// anywhere else: a harness thinking hard writes nothing, so `busy`,
+    /// `last_output_at`, and `state` cannot tell it apart from one sitting at an
+    /// idle composer. The classifier already computes this to veto vague cues,
+    /// so keeping it is free and is what lets the rail animate a working row
+    /// instead of drawing every live session the same static dot.
+    pub(crate) working: bool,
 }
 
 /// The parts of a session that never change after it is opened.

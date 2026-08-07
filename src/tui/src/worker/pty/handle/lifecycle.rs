@@ -70,6 +70,7 @@ impl SessionHandle {
                 pending_completion_bells: 0,
                 completion_deadline: None,
                 checked_at: started_at,
+                working: false,
             }),
             screen: Mutex::new(screen),
             modes: Mutex::new(TerminalModes::default()),

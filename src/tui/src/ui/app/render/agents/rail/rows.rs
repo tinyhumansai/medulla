@@ -13,7 +13,7 @@ use crate::worker::pty::{HarnessAttention, SessionControl, SessionRow, ATTENTION
 use super::super::super::super::types::App;
 use super::super::super::color;
 use super::harness_line;
-use super::status::HarnessVisualState;
+use super::status::{self, HarnessVisualState};
 use super::wrap::{home_dir, wrap_line};
 use super::CONT_INDENT;
 
@@ -27,9 +27,10 @@ const SESSION_TITLE_MAX_CELLS: usize = 48;
 impl App {
     /// Format one operator-started harness using the configured status-line layout.
     ///
-    /// PTY attention overrides the ordinary state glyph and adds a textual cue,
-    /// while the operator's field placement and visibility choices remain in
-    /// force for the status line itself.
+    /// The row's lifecycle state chooses the glyph and the colour, and drives the
+    /// two animations: a spinner while the harness is working, and a pulse while
+    /// it is stuck. The operator's field placement and visibility choices remain
+    /// in force for the status line itself.
     pub(in crate::ui::app::render) fn own_session_lines(
         &self,
         row: &SessionRow,
@@ -37,31 +38,37 @@ impl App {
         width: usize,
         now: i64,
     ) -> Vec<TLine<'static>> {
-        let waiting = self.harness_attention(row);
-        let alerting = waiting.is_some();
-        let style = if waiting.is_some() {
-            let mut attention = Style::default()
-                .fg(self.theme.attention)
-                .add_modifier(Modifier::BOLD);
-            if self.theme.attention_blink {
-                attention = attention.add_modifier(Modifier::SLOW_BLINK);
-            }
-            if active {
-                attention.add_modifier(Modifier::REVERSED)
+        let waiting = self.harness_attention(row, now);
+        let state = status::classify_local(row, waiting.as_ref());
+        // What `FieldVisibility::Alert` keys off. Any state the operator has to
+        // act on counts, not just the screen-derived prompt it used to mean: a
+        // harness that died should show its working directory for the same
+        // reason one asking permission does.
+        let alerting = state == HarnessVisualState::NeedsInput || state == HarnessVisualState::Errored;
+        let style = if state.pulses() {
+            // Errored pulses in red and needs-input in the configured attention
+            // colour, so which of the two it is is legible before the wording is.
+            let colour = if state == HarnessVisualState::Errored {
+                color("red")
             } else {
-                attention
+                self.theme.attention
+            };
+            let pulse = self.theme.pulse(colour, self.frame);
+            if active {
+                pulse.add_modifier(Modifier::REVERSED)
+            } else {
+                pulse
             }
         } else if active {
             self.theme.selection()
+        } else if state == HarnessVisualState::Working {
+            Style::default().fg(state.color())
         } else if row.control == SessionControl::User {
             Style::default().fg(color("cyan"))
         } else {
             Style::default()
         };
-        let glyph = match &waiting {
-            Some(_) => ATTENTION_GLYPH,
-            None => row.state.glyph(),
-        };
+        let glyph = state.glyph(self.frame);
         let detail_style = if active {
             style
         } else {
@@ -82,7 +89,10 @@ impl App {
             render,
         );
         if let Some(cue) = waiting {
-            let text = format!("  {ATTENTION_GLYPH} {}", cue.label(now));
+            // The glyph on the cue line matches the row's, so a red `✕ codex
+            // exited with 1` and a yellow `⚠ claude is asking permission` are
+            // told apart at a glance rather than both reading as a warning.
+            let text = format!("  {} {}", state.glyph(self.frame), cue.label(now));
             lines.extend(wrap_line(
                 &TLine::from(Span::styled(text, style)),
                 width,
@@ -92,12 +102,21 @@ impl App {
         lines
     }
 
-    /// The cue a harness row should blink about, if it should.
-    pub(super) fn harness_attention(&self, row: &SessionRow) -> Option<HarnessAttention> {
-        if !row.state.is_running() || self.harness_focus.is_attached_to(&row.id) {
+    /// The cue a harness row should draw, if it has one.
+    ///
+    /// Lifecycle cues (died, finished-and-retained) are added to the screen-derived
+    /// one here rather than in the classifier, because only this layer knows
+    /// which pane the operator is looking at — and a harness cannot be waiting on
+    /// someone who is already sitting in front of it.
+    pub(super) fn harness_attention(
+        &self,
+        row: &SessionRow,
+        now: i64,
+    ) -> Option<HarnessAttention> {
+        if self.harness_focus.is_attached_to(&row.id) {
             return None;
         }
-        row.attention.clone()
+        crate::worker::pty::row_cue(row, now)
     }
 
     /// Format one Agents-list row (separator, "more", sub-task, or lane).

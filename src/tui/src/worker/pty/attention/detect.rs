@@ -28,7 +28,17 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         // These are option labels unique to Claude's permission menu. Generic
         // question wording is deliberately absent: it can appear in ordinary
         // conversation while Claude is still working.
-        &["noandtellclaudewhattodo", "yesanddontaskagain"],
+        //
+        // The last two are the plan-mode exit menu's accept options. The menu is
+        // also matched structurally below, by its "keep planning" option; these
+        // catch the same menu when its wording is reflowed past what the
+        // numbered-option walk can rejoin, which a narrow pane does routinely.
+        &[
+            "noandtellclaudewhattodo",
+            "yesanddontaskagain",
+            "yesandautoacceptedits",
+            "yesandmanuallyapproveedits",
+        ],
         AttentionKind::Approval,
         "claude is asking permission",
     ),
@@ -39,6 +49,54 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         "codex is asking permission",
     ),
 ];
+
+/// Screens that mean the harness stopped because something is wrong.
+///
+/// Read as: if the squashed screen contains the marker, the harness is blocked
+/// for the stated reason. All of these are printed *instead of* a completed
+/// turn — the work did not happen — and every one of them needs a person: a new
+/// credential, a wait for a quota window, a retry.
+///
+/// Provider-agnostic on purpose. These phrases come from the model APIs rather
+/// than from any one CLI's chrome, so they read the same whichever harness
+/// surfaced them, and a new provider inherits the detection for free.
+///
+/// Deliberately narrow. "error" alone appears in every second line of ordinary
+/// tool output; each marker here names a *terminal* condition and nothing that a
+/// harness routinely prints while recovering on its own.
+const ERRORS: &[(&str, &str)] = &[
+    ("usagelimitreached", "usage limit reached"),
+    ("youvehityourusagelimit", "usage limit reached"),
+    ("creditbalanceistoolow", "credit balance too low"),
+    ("invalidapikey", "credential rejected — needs sign-in"),
+    ("oauthtokenhasexpired", "sign-in expired"),
+    ("pleaserunlogin", "needs sign-in"),
+    ("signinwithchatgpt", "needs sign-in"),
+    ("authenticationfailed", "authentication failed"),
+    ("accountdoesnothaveaccess", "account lacks access"),
+];
+
+/// Whether the harness has already recovered from an error it printed earlier.
+///
+/// A terminal retains everything: an expired-token message from an hour ago sits
+/// in the same scrollback as the turn that succeeded after the operator signed
+/// back in. Only the live tail can be a *current* error, so the search is bound
+/// to it the same way the menu detectors bind theirs.
+const ERROR_TAIL_LINES: usize = 12;
+
+/// The blocking error on the live tail of `screen`, if there is one.
+fn blocking_error(screen: &str) -> Option<&'static str> {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(ERROR_TAIL_LINES);
+    let tail = squash(&lines[tail_start..].join("\n"));
+    ERRORS
+        .iter()
+        .find(|(marker, _)| tail.contains(marker))
+        .map(|(_, what)| *what)
+}
 
 /// Whether OpenCode drew its permission action menu.
 ///
@@ -310,6 +368,22 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         return Some((
             AttentionKind::Approval,
             "opencode is asking permission".to_string(),
+        ));
+    }
+
+    // A blocking error outranks the structural fallbacks below it and is checked
+    // after the prompts above: a harness can print "usage limit reached" and then
+    // ask what to do about it, and the question is the more useful thing to say.
+    //
+    // Not vetoed by `is_working`, unlike everything that follows. The others are
+    // shapes a working screen can wear by accident; this is wording no harness
+    // prints while a turn is still going, and a retry footer left on screen
+    // beneath a dead credential would otherwise suppress the one cue that
+    // explains why nothing is happening.
+    if let Some(what) = blocking_error(screen) {
+        return Some((
+            AttentionKind::Error,
+            format!("{} stopped: {what}", provider.as_str()),
         ));
     }
 

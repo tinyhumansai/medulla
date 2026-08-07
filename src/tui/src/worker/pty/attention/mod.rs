@@ -42,12 +42,14 @@
 //! structural fallback be as liberal as it is.
 
 mod detect;
+mod session;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
 pub use detect::{bell_cue, detect, is_working};
+pub use session::{lifecycle_cue, row_cue};
 pub use types::{AttentionKind, HarnessAttention};
 
 /// The glyph a waiting harness is marked with, in both TUIs.

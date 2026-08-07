@@ -270,6 +270,14 @@ pub struct SessionRow {
     ///
     /// `None` is the ordinary state: working, idle at a composer, or exited.
     pub attention: Option<HarnessAttention>,
+    /// Whether the harness is mid-turn right now, per its own screen.
+    ///
+    /// The other half of what [`attention`](SessionRow::attention) cannot say.
+    /// Together they separate the three things a live session can be doing —
+    /// working, waiting on you, or idle at a composer — which `state` alone
+    /// renders identically. Recomputed as the screen paints; always `false`
+    /// once the child has gone.
+    pub working: bool,
     /// The key this session's fleet grant was minted under, when it was given
     /// one — see [`LaunchSpec::mcp_grant_session`].
     ///

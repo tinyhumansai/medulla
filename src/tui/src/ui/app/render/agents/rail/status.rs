@@ -7,6 +7,8 @@
 use ratatui::style::Color;
 
 use crate::ui::agents::{AgentLane, TaskStatus};
+use crate::ui::util::SPINNER;
+use crate::worker::pty::{AttentionKind, HarnessAttention, PtyState, SessionRow, ATTENTION_GLYPH};
 
 /// The five lifecycle states shown by harness-backed rows in the Agents rail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,69 @@ impl HarnessVisualState {
     /// Terminal states stay solid: nothing about them is waiting.
     pub(super) fn flashes(self) -> bool {
         matches!(self, Self::Working | Self::NeedsInput)
+    }
+
+    /// Whether this state should *pulse* — brighten and dim on the frame clock.
+    ///
+    /// Narrower than [`flashes`](Self::flashes), and the difference is the point.
+    /// Working now has an animation of its own — a spinner, which says "moving"
+    /// far better than a colour change can — so the pulse is spent only on the
+    /// states that will not resolve themselves. Errored joins needs-input there:
+    /// a harness that fell over is exactly as stuck, and used to sit on the rail
+    /// as still as a healthy one.
+    pub(super) fn pulses(self) -> bool {
+        matches!(self, Self::NeedsInput | Self::Errored)
+    }
+
+    /// The glyph for this state on animation frame `frame`.
+    ///
+    /// Working spins. That is the whole reason this takes a frame: a live
+    /// harness and an idle one both drew `●`, so the rail could say a session was
+    /// *alive* but never that it was *doing something* — which is the thing an
+    /// operator actually watches a rail for.
+    pub(super) fn glyph(self, frame: usize) -> String {
+        match self {
+            Self::Working => SPINNER[frame % SPINNER.len()].to_string(),
+            Self::NeedsInput => ATTENTION_GLYPH.to_string(),
+            Self::Errored => "✕".to_string(),
+            Self::Completed => "✓".to_string(),
+            Self::Inactive => "○".to_string(),
+        }
+    }
+}
+
+/// Classify one operator-started local harness from its row and resolved cue.
+///
+/// The rail's five states, sourced for a session this device runs itself. The
+/// row carries facts no peer session has — a live screen classification, an exit
+/// code, a recorded write error — and until now used almost none of them: every
+/// running session drew the same dot whatever it was doing, and a failed one
+/// drew a cross nobody was told to look at.
+///
+/// `cue` is passed in already resolved rather than read off the row, because the
+/// caller suppresses it for the pane the operator is currently attached to —
+/// a harness cannot be waiting on you while you are sitting in front of it.
+pub(super) fn classify_local(row: &SessionRow, cue: Option<&HarnessAttention>) -> HarnessVisualState {
+    // A failure cue outranks the exit status it was derived from *and* anything
+    // still on screen: it is the reason the session stopped mattering.
+    if let Some(cue) = cue {
+        return if cue.kind.is_failure() {
+            HarnessVisualState::Errored
+        } else if cue.kind == AttentionKind::Completed {
+            HarnessVisualState::Completed
+        } else {
+            HarnessVisualState::NeedsInput
+        };
+    }
+    match row.state {
+        PtyState::Failed => HarnessVisualState::Errored,
+        PtyState::Exited { code: Some(code) } if code != 0 => HarnessVisualState::Errored,
+        PtyState::Exited { .. } => HarnessVisualState::Completed,
+        // Live, and its own screen says a turn is in flight. Everything else
+        // running is a composer waiting for someone to type in it, which is
+        // presence rather than activity.
+        PtyState::Running if row.working => HarnessVisualState::Working,
+        PtyState::Running => HarnessVisualState::Inactive,
     }
 }
 

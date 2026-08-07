@@ -133,6 +133,7 @@ impl SessionHandle {
     /// The operator-facing projection of this session, for the list pane.
     pub fn row(&self) -> SessionRow {
         let cold = lock(&self.cold);
+        let attention = lock(&self.attention);
         SessionRow {
             id: self.meta.id.clone(),
             label: cold.label.clone(),
@@ -154,7 +155,12 @@ impl SessionHandle {
             origin: self.meta.origin,
             retained: self.is_retained(),
             name: cold.name.clone(),
-            attention: lock(&self.attention).cue.clone(),
+            attention: attention.cue.clone(),
+            // Only meaningful while the child is alive: the last screen a dead
+            // session painted may still carry "esc to interrupt", and a row
+            // spinning forever after its harness exited is a lie the rail
+            // cannot recover from.
+            working: attention.working && self.is_running(),
             mcp_grant_session: self.meta.mcp_grant_session.clone(),
         }
     }

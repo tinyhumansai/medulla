@@ -37,6 +37,31 @@ pub const PALETTE: [Color; 10] = [
     Color::DarkGray,
 ];
 
+/// Milliseconds between event-loop ticks, and so between animation frames.
+///
+/// Every frame-driven effect in the TUI counts in this unit, which is why it is
+/// declared beside the theme rather than inside the loop that advances it: a
+/// pulse configured in seconds has to be converted into frames somewhere, and
+/// that conversion must use the same number the loop actually ticks at.
+pub const FRAME_MS: u64 = 90;
+
+/// The shortest attention pulse an operator may configure.
+///
+/// Below about a fifth of a second a pulse stops reading as a rhythm and starts
+/// reading as a rendering fault — and at two frames per phase there is nothing
+/// left to slow down.
+const MIN_BLINK_MS: u64 = 200;
+
+/// The longest attention pulse an operator may configure.
+///
+/// A cue that spends fifteen seconds dim is a cue nobody notices, which is the
+/// same as no cue at all. Ten seconds is generous and still visibly alive.
+const MAX_BLINK_MS: u64 = 10_000;
+
+/// The default attention pulse: one second, so a waiting harness reads as a
+/// heartbeat rather than as a strobe.
+const DEFAULT_BLINK_MS: u64 = 1_000;
+
 impl Default for Theme {
     fn default() -> Self {
         Theme {
@@ -46,8 +71,29 @@ impl Default for Theme {
             dim_border: Color::DarkGray,
             attention: Color::Yellow,
             attention_blink: true,
+            attention_blink_ms: DEFAULT_BLINK_MS,
         }
     }
+}
+
+/// Convert a configured pulse length in seconds into whole milliseconds.
+///
+/// Clamped rather than rejected: a config that asks for a 0.001-second blink has
+/// asked for something, and the nearest thing we can draw is better than
+/// silently falling back to the default and leaving the operator to wonder why
+/// their key did nothing. Non-finite values have asked for nothing at all and
+/// take the default.
+pub fn blink_ms_from_seconds(seconds: f64) -> u64 {
+    if !seconds.is_finite() {
+        return DEFAULT_BLINK_MS;
+    }
+    let ms = (seconds * 1_000.0).round();
+    (ms.clamp(MIN_BLINK_MS as f64, MAX_BLINK_MS as f64)) as u64
+}
+
+/// Render a pulse length back into the seconds the config is written in.
+pub fn blink_seconds(ms: u64) -> f64 {
+    (ms as f64) / 1_000.0
 }
 
 impl Theme {
@@ -65,6 +111,50 @@ impl Theme {
             dim_border: pick(&cfg.dim_border, d.dim_border),
             attention: pick(&cfg.attention, d.attention),
             attention_blink: cfg.attention_blink.unwrap_or(d.attention_blink),
+            attention_blink_ms: cfg
+                .attention_blink_seconds
+                .map(blink_ms_from_seconds)
+                .unwrap_or(d.attention_blink_ms),
+        }
+    }
+
+    /// Whether the attention pulse is in its bright phase on `frame`.
+    ///
+    /// The pulse is driven off the event loop's frame counter rather than
+    /// `Modifier::SLOW_BLINK`, and that is the whole point of it existing. The
+    /// modifier delegates the decision to the terminal, and most terminals —
+    /// every one built on the common emulator cores, and every multiplexer in
+    /// front of them — drop it on the floor. A cue that blinks on one operator's
+    /// machine and sits still on another's is not a cue. Counting frames
+    /// ourselves means the same rhythm everywhere, at the rate the operator
+    /// asked for.
+    ///
+    /// A pulse with blinking switched off is permanently bright, so callers can
+    /// use this unconditionally.
+    pub fn attention_bright(&self, frame: usize) -> bool {
+        if !self.attention_blink {
+            return true;
+        }
+        // Half a cycle per phase, and never less than one frame: a period below
+        // the tick rate would otherwise divide to zero and alternate on every
+        // frame regardless of what was configured.
+        let half = ((self.attention_blink_ms / 2) / FRAME_MS).max(1) as usize;
+        (frame / half) % 2 == 0
+    }
+
+    /// The style for a cue pulsing in `color` on `frame`.
+    ///
+    /// Bright is bold and dim is dimmed, rather than bright and *absent*: text
+    /// that vanishes for half a second is text an operator has to wait to read,
+    /// and the rail's cues carry the wording that says what the harness wants.
+    /// The pulse is meant to catch an eye moving past, not to hide the answer
+    /// once it arrives.
+    pub fn pulse(&self, color: Color, frame: usize) -> Style {
+        let base = Style::default().fg(color);
+        if self.attention_bright(frame) {
+            base.add_modifier(Modifier::BOLD)
+        } else {
+            base.add_modifier(Modifier::DIM)
         }
     }
 
@@ -216,6 +306,10 @@ pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
     section.insert(
         "attentionBlink".into(),
         Value::Boolean(theme.attention_blink),
+    );
+    section.insert(
+        "attentionBlinkSeconds".into(),
+        Value::Float(blink_seconds(theme.attention_blink_ms)),
     );
     medulla::config::persist_section(path, "theme", section)
 }

@@ -141,7 +141,7 @@ pub(in crate::ui::app::render::agents::rail) fn harness_lines(
             index,
             render.width,
             indent,
-            render.state_glyph,
+            &render.state_glyph,
             render.primary,
             render.detail,
         );
@@ -175,7 +175,7 @@ fn layout_line(
     line: usize,
     width: usize,
     indent: &str,
-    state_glyph: char,
+    state_glyph: &str,
     style: Style,
     detail_style: Style,
 ) -> Vec<Span<'static>> {
@@ -203,7 +203,7 @@ fn layout_line(
         let room = width.saturating_sub(used + separator.width());
 
         let text = match field {
-            Field::State => fit(&state_glyph.to_string(), room),
+            Field::State => fit(state_glyph, room),
             Field::Harness => fit(&harness_text(row, cfg.harness_style), room),
             Field::Control => fit(&control_text(row.control, cfg.control_style), room),
             // The harness advertises a sentence; the status line, like the

@@ -272,7 +272,7 @@ fn squash(text: &str) -> String {
 /// the harness is plainly working is a progress chime, not a request.
 pub fn is_working(screen: &str) -> bool {
     let squashed = squash(screen);
-    WORKING.iter().any(|marker| squashed.contains(marker))
+    WORKING.iter().any(|marker| squashed.contains(marker)) || has_live_progress_line(screen)
 }
 
 /// Whether a line is a *numbered* option with the cursor resting on it.

@@ -29,18 +29,21 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         // question wording is deliberately absent: it can appear in ordinary
         // conversation while Claude is still working.
         //
-        // The last two are the plan-mode exit menu's accept options. The menu is
-        // also matched structurally below, by its "keep planning" option; these
-        // catch the same menu when its wording is reflowed past what the
-        // numbered-option walk can rejoin, which a narrow pane does routinely.
-        &[
-            "noandtellclaudewhattodo",
-            "yesanddontaskagain",
-            "yesandautoacceptedits",
-            "yesandmanuallyapproveedits",
-        ],
+        &["noandtellclaudewhattodo", "yesanddontaskagain"],
         AttentionKind::Approval,
         "claude is asking permission",
+    ),
+    (
+        HarnessProvider::Claude,
+        // The plan-mode exit menu's accept options, which appear on no other
+        // prompt. The same menu is matched structurally below by its "keep
+        // planning" option; this catches it when the pane is narrow enough that
+        // the wording reflows past what the numbered-option walk can rejoin, and
+        // it names planning rather than falling through to the generic
+        // permission wording.
+        &["yesandautoacceptedits", "yesandmanuallyapproveedits"],
+        AttentionKind::Approval,
+        "claude finished planning and wants a decision",
     ),
     (
         HarnessProvider::Codex,

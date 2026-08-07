@@ -78,13 +78,18 @@ impl HarnessVisualState {
     /// harness and an idle one both drew `●`, so the rail could say a session was
     /// *alive* but never that it was *doing something* — which is the thing an
     /// operator actually watches a rail for.
+    ///
+    /// Inactive keeps `●`. It still means what it always meant here — the child
+    /// is up — and the new information is carried entirely by the states around
+    /// it. Giving the resting case a new glyph too would have rewritten the one
+    /// symbol on the rail an operator already knows in order to say nothing new.
     pub(super) fn glyph(self, frame: usize) -> String {
         match self {
             Self::Working => SPINNER[frame % SPINNER.len()].to_string(),
             Self::NeedsInput => ATTENTION_GLYPH.to_string(),
             Self::Errored => "✕".to_string(),
             Self::Completed => "✓".to_string(),
-            Self::Inactive => "○".to_string(),
+            Self::Inactive => "●".to_string(),
         }
     }
 }

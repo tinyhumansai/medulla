@@ -230,8 +230,8 @@ fn appearance_cycles_and_persists_process_indicators() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows and the attention blink toggle precede resources.
-    for _ in 0..6 {
+    // Five color rows and the two attention controls precede resources.
+    for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -252,8 +252,8 @@ fn appearance_persists_process_indicators_to_json() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows and the attention blink toggle precede resources.
-    for _ in 0..6 {
+    // Five color rows and the two attention controls precede resources.
+    for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -332,9 +332,9 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows, attention blink, three process indicators, and Session titles
-    // lands on Device CPU.
-    for _ in 0..10 {
+    // Five color rows, the two attention controls, three process indicators,
+    // and Session titles lands on Device CPU.
+    for _ in 0..11 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);

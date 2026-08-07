@@ -8,7 +8,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskStatus};
 use crate::ui::util::{fmt_tokens, slug};
-use crate::worker::pty::{HarnessAttention, SessionControl, SessionRow, ATTENTION_GLYPH};
+use crate::worker::pty::{HarnessAttention, SessionControl, SessionRow};
 
 use super::super::super::super::types::App;
 use super::super::super::color;

@@ -106,7 +106,6 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         // These are option labels unique to Claude's permission menu. Generic
         // question wording is deliberately absent: it can appear in ordinary
         // conversation while Claude is still working.
-        //
         &["noandtellclaudewhattodo", "yesanddontaskagain"],
         AttentionKind::Approval,
         "claude is asking permission",

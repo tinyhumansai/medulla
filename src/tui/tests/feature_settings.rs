@@ -223,6 +223,32 @@ fn appearance_blink_status_reports_the_boolean_value() {
     assert!(saved.contains("attentionBlink = false"), "{saved}");
 }
 
+/// The pulse rate is configured, reported, and persisted in seconds — the unit
+/// the effect is actually judged in.
+#[test]
+fn appearance_cycles_the_attention_blink_rate_in_seconds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    // Five colour rows and the blink toggle land on the rate.
+    for _ in 0..6 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    assert!(
+        app.status().contains("Attention blink rate → 1.5s (saved)"),
+        "status note: {}",
+        app.status()
+    );
+    let out = text_of(&draw(&mut app, 180, 45));
+    assert!(out.contains("Blink rate        1.5s"), "{out}");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("attentionBlinkSeconds = 1.5"), "{saved}");
+}
+
 #[test]
 fn appearance_cycles_and_persists_process_indicators() {
     let dir = tempfile::tempdir().unwrap();

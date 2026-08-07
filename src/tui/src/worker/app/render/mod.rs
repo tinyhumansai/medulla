@@ -10,6 +10,8 @@ use ratatui::Frame;
 use super::super::pty::{PtyState, SessionRow, ATTENTION_GLYPH};
 use super::super::screen::screen_lines;
 use super::types::{Screen, WorkerApp, TABS, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES};
+use crate::ui::theme::FRAME_MS;
+use crate::ui::util::SPINNER;
 
 mod master;
 mod prompt;
@@ -381,20 +383,20 @@ fn session_line(
         .as_ref()
         .filter(|_| row.state.is_running())
         .map(|cue| format!(" · {ATTENTION_GLYPH} {}", cue.label(now)));
+    let frame = (now.max(0) as u64 / FRAME_MS) as usize;
     let mut style = Style::default().fg(state_color(row.state));
     if waiting.is_some() {
-        style = Style::default()
-            .fg(theme.attention)
-            .add_modifier(Modifier::BOLD);
-        if theme.attention_blink {
-            style = style.add_modifier(Modifier::SLOW_BLINK);
-        }
+        // Use the same software pulse as the main rail. Terminal blink
+        // modifiers are commonly ignored by tmux and cannot honor the
+        // operator's configured attention cadence.
+        style = theme.pulse(theme.attention, frame);
     }
     if selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
     let glyph = match &waiting {
         Some(_) => ATTENTION_GLYPH.to_string(),
+        None if row.working => SPINNER[frame % SPINNER.len()].to_string(),
         None => row.state.glyph().to_string(),
     };
     crate::ui::agent_lane::line(glyph, row.label.clone(), waiting.unwrap_or(quiet), style)

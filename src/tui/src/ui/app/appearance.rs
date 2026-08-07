@@ -64,6 +64,27 @@ impl App {
         }
     }
 
+    /// Step the attention pulse to the next offered length and persist it.
+    ///
+    /// A hand-configured value that is not one of the offered steps enters the
+    /// list from whichever end the operator moved towards, so a first press
+    /// changes the rate by a predictable amount instead of jumping to whatever
+    /// happens to be nearest.
+    fn cycle_blink_rate(&mut self, forward: bool) {
+        let current = blink_seconds(self.theme.attention_blink_ms);
+        let position = BLINK_SECONDS
+            .iter()
+            .position(|choice| (choice - current).abs() < f64::EPSILON);
+        let next = match position {
+            Some(index) if forward => BLINK_SECONDS[(index + 1) % BLINK_SECONDS.len()],
+            Some(index) => BLINK_SECONDS[(index + BLINK_SECONDS.len() - 1) % BLINK_SECONDS.len()],
+            None if forward => BLINK_SECONDS[0],
+            None => BLINK_SECONDS[BLINK_SECONDS.len() - 1],
+        };
+        self.theme.attention_blink_ms = blink_ms_from_seconds(next);
+        self.persist_theme_value_now("Attention blink rate", format!("{next:.1}s"));
+    }
+
     /// Toggle extracted harness titles on orchestrator-managed agent rows.
     fn toggle_session_titles(&mut self) {
         let appearance = &mut self.loaded.config.appearance;

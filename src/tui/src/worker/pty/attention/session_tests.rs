@@ -66,7 +66,10 @@ fn a_pty_that_never_started_reports_a_failure() {
     let mut row = row();
     row.state = PtyState::Failed;
 
-    assert_eq!(lifecycle_cue(&row, NOW).expect("a cue").kind, AttentionKind::Failed);
+    assert_eq!(
+        lifecycle_cue(&row, NOW).expect("a cue").kind,
+        AttentionKind::Failed
+    );
 }
 
 /// The recorded error names *what* happened; an exit code can only say that

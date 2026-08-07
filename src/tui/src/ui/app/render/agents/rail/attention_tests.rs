@@ -198,7 +198,10 @@ fn a_working_harness_spins_through_the_frames() {
     app.frame = 1;
     let second = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
 
-    assert_ne!(first, second, "the working glyph must advance with the frame");
+    assert_ne!(
+        first, second,
+        "the working glyph must advance with the frame"
+    );
     assert!(
         crate::ui::util::SPINNER
             .iter()

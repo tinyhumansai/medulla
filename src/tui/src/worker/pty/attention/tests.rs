@@ -339,7 +339,8 @@ fn ordinary_error_output_is_not_a_blocking_error() {
 /// to rejoin "keep planning" across its wrap.
 #[test]
 fn the_plan_exit_menu_is_named_by_its_accept_options() {
-    let screen = "Ready to code?\n  1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
+    let screen =
+        "Ready to code?\n  1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
     let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
     assert_eq!(kind, AttentionKind::Approval);
     assert!(what.contains("planning"), "{what}");

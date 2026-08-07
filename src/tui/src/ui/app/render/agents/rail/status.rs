@@ -105,7 +105,10 @@ impl HarnessVisualState {
 /// `cue` is passed in already resolved rather than read off the row, because the
 /// caller suppresses it for the pane the operator is currently attached to —
 /// a harness cannot be waiting on you while you are sitting in front of it.
-pub(super) fn classify_local(row: &SessionRow, cue: Option<&HarnessAttention>) -> HarnessVisualState {
+pub(super) fn classify_local(
+    row: &SessionRow,
+    cue: Option<&HarnessAttention>,
+) -> HarnessVisualState {
     // A failure cue outranks the exit status it was derived from *and* anything
     // still on screen: it is the reason the session stopped mattering.
     if let Some(cue) = cue {

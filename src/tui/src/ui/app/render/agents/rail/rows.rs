@@ -44,7 +44,8 @@ impl App {
         // act on counts, not just the screen-derived prompt it used to mean: a
         // harness that died should show its working directory for the same
         // reason one asking permission does.
-        let alerting = state == HarnessVisualState::NeedsInput || state == HarnessVisualState::Errored;
+        let alerting =
+            state == HarnessVisualState::NeedsInput || state == HarnessVisualState::Errored;
         let style = if state.pulses() {
             // Errored pulses in red and needs-input in the configured attention
             // colour, so which of the two it is is legible before the wording is.
@@ -108,11 +109,7 @@ impl App {
     /// one here rather than in the classifier, because only this layer knows
     /// which pane the operator is looking at — and a harness cannot be waiting on
     /// someone who is already sitting in front of it.
-    pub(super) fn harness_attention(
-        &self,
-        row: &SessionRow,
-        now: i64,
-    ) -> Option<HarnessAttention> {
+    pub(super) fn harness_attention(&self, row: &SessionRow, now: i64) -> Option<HarnessAttention> {
         if self.harness_focus.is_attached_to(&row.id) {
             return None;
         }

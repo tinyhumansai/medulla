@@ -73,6 +73,10 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
 /// frozen on its last frame; answering it is no longer possible, and a row that
 /// keeps asking is a row the operator cannot clear.
 pub fn row_cue(row: &SessionRow, now: i64) -> Option<HarnessAttention> {
-    lifecycle_cue(row, now)
-        .or_else(|| row.state.is_running().then(|| row.attention.clone()).flatten())
+    lifecycle_cue(row, now).or_else(|| {
+        row.state
+            .is_running()
+            .then(|| row.attention.clone())
+            .flatten()
+    })
 }

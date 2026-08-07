@@ -371,3 +371,57 @@ fn the_cue_vocabulary_is_ordered_from_certain_to_vague() {
         assert!(!weaker.supersedes(&stronger));
     }
 }
+
+/// Current Claude Code prints no "esc to interrupt" at all — it draws a spinner,
+/// a gerund, and an elapsed timer. Captured from a live session; without this the
+/// working veto was dead for every recent Claude, and no row could say a harness
+/// was busy rather than merely alive.
+#[test]
+fn claudes_live_progress_line_counts_as_working() {
+    for line in [
+        "✽ Considering… (7s · ↓ 193 tokens · thinking with medium effort)",
+        "· Considering… (12s · ↓ 568 tokens)",
+        "* Cogitating… (5s · ↓ 193 tokens · thought for 1s)",
+        "✻ Cogitated for 5s… (45s · 1 shell still running)",
+    ] {
+        let screen = format!("  ⏺ reading files\n{line}\n❯ \n  bypass permissions on");
+        assert!(is_working(&screen), "{line}");
+    }
+}
+
+/// The composer placeholder Claude swaps in for the duration of a turn.
+#[test]
+fn claudes_queued_message_hint_counts_as_working() {
+    assert!(is_working(
+        "  ⏺ working\n❯ Press up to edit queued messages\n  medulla-public Opus 5"
+    ));
+}
+
+/// Codex has not changed, and must not be broken by teaching the matcher Claude.
+#[test]
+fn codex_still_announces_its_turn_the_old_way() {
+    assert!(is_working("• Working (8s • esc to interrupt)\n› Find and fix a bug"));
+}
+
+/// Each part of the progress line appears in ordinary output on its own. Only
+/// the three together mean a turn is in flight.
+#[test]
+fn progress_line_lookalikes_are_not_working() {
+    for screen in [
+        // A retained progress line, scrolled well above the live composer.
+        &format!(
+            "✽ Considering… (7s · ↓ 12 tokens)\n{}\n❯ ",
+            "  ⏺ done\n".repeat(10)
+        ),
+        // Elapsed timer, no spinner glyph and no ellipsis.
+        "  Ran tests (12s)\n❯ ",
+        // Spinner glyph and ellipsis, no timer — Claude's idle bullet list.
+        "· Loading…\n❯ ",
+        // Parenthesised digits that are not an elapsed timer.
+        "✽ Considering… (2s3 build)\n❯ ",
+    ]
+    .map(String::from)
+    {
+        assert!(!is_working(&screen), "{screen}");
+    }
+}

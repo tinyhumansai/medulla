@@ -12,7 +12,7 @@
 //! that move: see
 //! [`StatusLineConfig::from_appearance`](medulla::config::StatusLineConfig::from_appearance).
 
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_ms_from_seconds, blink_seconds, color_to_string, THEME_ROLES};
 
 use super::types::App;
 

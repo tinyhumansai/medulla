@@ -219,7 +219,7 @@ fn an_idle_harness_does_not_spin() {
     let second = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
 
     assert_eq!(first, second);
-    assert!(first.starts_with('○'), "{first}");
+    assert!(first.starts_with('●'), "{first}");
 }
 
 #[test]

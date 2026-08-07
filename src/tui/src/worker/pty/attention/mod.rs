@@ -29,10 +29,23 @@
 //!    of these harnesses draws its questions that way, so this keeps working
 //!    when a CLI rewords a prompt — which they do, often, and silently.
 //!
-//! A fourth signal lives in the manager rather than here, because it is not on
+//! 4. **Blocking errors** — a usage limit, a dead credential, an API failure the
+//!    harness will not retry past. Printed *instead of* a completed turn, so the
+//!    work did not happen and a person has to intervene. Matched
+//!    provider-agnostically, because the wording comes from the model API rather
+//!    than from any one CLI's chrome.
+//!
+//! A fifth signal lives in the manager rather than here, because it is not on
 //! the screen: the **terminal bell**. It is the vaguest cue and the most
 //! universal one, so it is kept as the fallback that loses to anything named
 //! ([`AttentionKind`] is ordered for exactly that).
+//!
+//! Two more come from the session's *life* rather than its screen, and live in
+//! [`session`]: the harness **died**, and a dispatched turn **finished** and is
+//! being held for someone to read. Neither can be seen in a terminal — a dead
+//! harness's screen is frozen on whatever it last painted, and a settled one
+//! looks exactly like a session nobody has used — so a row that consulted only
+//! the screen went quiet at precisely the two moments it should not have.
 //!
 //! Matching screen text is a heuristic and is treated as one. A false negative
 //! costs an operator the blink they would have got; a false positive costs a row

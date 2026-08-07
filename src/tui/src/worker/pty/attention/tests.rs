@@ -110,6 +110,16 @@ fn retained_plan_options_do_not_override_active_work() {
 }
 
 #[test]
+fn a_plan_menu_above_an_idle_composer_is_not_current() {
+    let screen = "Would you like to proceed?\n\
+                  ❯ 1. Yes, and auto-accept edits\n\
+                    3. No, keep planning\n\
+                    >";
+
+    assert!(detect(HarnessProvider::Claude, screen).is_none());
+}
+
+#[test]
 fn codex_approval_is_recognised() {
     let (kind, what) = detect(HarnessProvider::Codex, CODEX_APPROVAL).expect("a cue");
     assert_eq!(kind, AttentionKind::Approval);
@@ -362,7 +372,7 @@ fn an_error_phrase_in_a_live_transcript_does_not_stop_work() {
 #[test]
 fn the_plan_exit_menu_is_named_by_its_accept_options() {
     let screen =
-        "Ready to code?\n  1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
+        "Ready to code?\n❯ 1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
     let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
     assert_eq!(kind, AttentionKind::Approval);
     assert!(what.contains("planning"), "{what}");

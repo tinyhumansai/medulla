@@ -152,7 +152,14 @@ impl App {
             Style::default()
         };
         if needs_input {
-            style = self.theme.pulse(self.theme.attention, self.frame);
+            let pulse = self.theme.pulse(self.theme.attention, self.frame);
+            style = if active {
+                // Preserve the selected-row background while letting the
+                // waiting state pulse its foreground and cadence.
+                self.theme.selection().patch(pulse)
+            } else {
+                pulse
+            };
         }
         let status_style = if active || needs_input {
             style

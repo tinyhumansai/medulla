@@ -111,18 +111,6 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
         "claude is asking permission",
     ),
     (
-        HarnessProvider::Claude,
-        // The plan-mode exit menu's accept options, which appear on no other
-        // prompt. The same menu is matched structurally below by its "keep
-        // planning" option; this catches it when the pane is narrow enough that
-        // the wording reflows past what the numbered-option walk can rejoin, and
-        // it names planning rather than falling through to the generic
-        // permission wording.
-        &["yesandautoacceptedits", "yesandmanuallyapproveedits"],
-        AttentionKind::Approval,
-        "claude finished planning and wants a decision",
-    ),
-    (
         HarnessProvider::Codex,
         &["andtellcodexwhattodo"],
         AttentionKind::Approval,
@@ -205,11 +193,18 @@ fn has_claude_plan_exit_menu(screen: &str) -> bool {
     };
     // The selected row starts the actionable portion of the live menu. A
     // matching row above it belongs to retained output (or an older menu), so
-    // it must not relabel the current choice as a plan-exit decision.
-    tail[selected..]
-        .iter()
-        .enumerate()
-        .any(|(offset, _)| numbered_option_contains(tail, selected + offset, "keepplanning"))
+    // it must not relabel the current choice as a plan-exit decision. Likewise,
+    // a composer below the selected option means Claude accepted the menu and
+    // returned to idle input; those retained options are no longer actionable.
+    if tail[selected + 1..].iter().any(|line| is_composer(line)) {
+        return false;
+    }
+    tail[selected..].iter().enumerate().any(|(offset, _)| {
+        let index = selected + offset;
+        numbered_option_contains(tail, index, "keepplanning")
+            || numbered_option_contains(tail, index, "yesandautoacceptedits")
+            || numbered_option_contains(tail, index, "yesandmanuallyapproveedits")
+    })
 }
 
 /// Whether a numbered option and its wrapped continuation contain `marker`.

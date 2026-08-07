@@ -386,11 +386,18 @@ fn session_line(
     let completed = cue
         .as_ref()
         .is_some_and(|cue| cue.kind == AttentionKind::Completed);
+    let failed = cue.as_ref().is_some_and(|cue| cue.kind.is_failure());
     let alerting = cue.as_ref().is_some_and(|_| !completed);
     let detail = cue.as_ref().map(|cue| {
         format!(
             " · {} {}",
-            if completed { '✓' } else { ATTENTION_GLYPH },
+            if failed {
+                '✕'
+            } else if completed {
+                '✓'
+            } else {
+                ATTENTION_GLYPH
+            },
             cue.label(now)
         )
     });
@@ -400,7 +407,7 @@ fn session_line(
         // Use the same software pulse as the main rail. Terminal blink
         // modifiers are commonly ignored by tmux and cannot honor the
         // operator's configured attention cadence.
-        style = theme.pulse(theme.attention, frame);
+        style = theme.pulse(if failed { Color::Red } else { theme.attention }, frame);
     }
     if selected {
         style = style.add_modifier(Modifier::REVERSED);

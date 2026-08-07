@@ -63,8 +63,62 @@ fn a_harness_waiting_on_you_blinks_and_says_what_it_wants() {
     assert!(lines[0].to_string().starts_with("⚠ codex"), "{}", lines[0]);
     let style = lines[0].spans[0].style;
     assert_eq!(style.fg, Some(Color::Yellow));
-    assert!(style.add_modifier.contains(Modifier::SLOW_BLINK));
+    assert!(style.add_modifier.contains(Modifier::BOLD));
     assert!(lines[1].to_string().contains("asking permission"));
+}
+
+/// The pulse is driven off the frame counter rather than `SLOW_BLINK`, so it has
+/// to be observable by stepping frames — which is also the only way it is
+/// observable to an operator whose terminal ignores the modifier, which is most
+/// of them.
+#[test]
+fn a_waiting_harness_alternates_bright_and_dim_across_frames() {
+    let mut app = app();
+    let row = waiting_row("/workspace/medulla");
+    let half = (app.theme.attention_blink_ms / 2) / crate::ui::theme::FRAME_MS;
+
+    let bright = app.own_session_lines(&row, false, 48, NOW)[0].spans[0].style;
+    app.frame = half as usize;
+    let dim = app.own_session_lines(&row, false, 48, NOW)[0].spans[0].style;
+    app.frame = (half * 2) as usize;
+    let bright_again = app.own_session_lines(&row, false, 48, NOW)[0].spans[0].style;
+
+    assert!(bright.add_modifier.contains(Modifier::BOLD));
+    assert!(dim.add_modifier.contains(Modifier::DIM));
+    assert!(bright_again.add_modifier.contains(Modifier::BOLD));
+}
+
+/// A slower configured pulse holds each phase for proportionally longer. Without
+/// this the rate control could be persisted and read back while changing nothing
+/// anyone can see.
+#[test]
+fn the_configured_rate_sets_how_long_a_phase_lasts() {
+    let mut app = app();
+    let row = waiting_row("/workspace/medulla");
+    app.theme.attention_blink_ms = 4_000;
+    // Where a one-second pulse would already have gone dim.
+    app.frame = ((1_000 / 2) / crate::ui::theme::FRAME_MS) as usize;
+
+    let style = app.own_session_lines(&row, false, 48, NOW)[0].spans[0].style;
+
+    assert!(
+        style.add_modifier.contains(Modifier::BOLD),
+        "a four-second pulse is still bright half a second in"
+    );
+}
+
+#[test]
+fn blinking_switched_off_holds_the_cue_bright() {
+    let mut app = app();
+    let row = waiting_row("/workspace/medulla");
+    app.theme.attention_blink = false;
+    app.frame = 7;
+
+    let style = app.own_session_lines(&row, false, 48, NOW)[0].spans[0].style;
+
+    assert_eq!(style.fg, Some(Color::Yellow));
+    assert!(style.add_modifier.contains(Modifier::BOLD));
+    assert!(!style.add_modifier.contains(Modifier::DIM));
 }
 
 #[test]
@@ -74,8 +128,98 @@ fn a_selected_harness_waiting_on_you_stays_blinking_yellow() {
     let style = lines[0].spans[0].style;
 
     assert_eq!(style.fg, Some(Color::Yellow));
-    assert!(style.add_modifier.contains(Modifier::SLOW_BLINK));
+    assert!(style.add_modifier.contains(Modifier::BOLD));
     assert!(style.add_modifier.contains(Modifier::REVERSED));
+}
+
+/// The two states that pulse must not pulse the same colour: one is a question
+/// and the other is a failure, and an operator triaging a rail needs to know
+/// which before reading any words.
+#[test]
+fn a_failed_harness_pulses_red_and_says_why() {
+    let app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.state = PtyState::Exited { code: Some(2) };
+
+    let lines = app.own_session_lines(&row, false, 48, NOW);
+
+    assert!(lines[0].to_string().starts_with("✕ codex"), "{}", lines[0]);
+    assert_eq!(lines[0].spans[0].style.fg, Some(Color::Red));
+    assert!(lines
+        .iter()
+        .any(|line| line.to_string().contains("exited with 2")));
+}
+
+/// A write that never reached the child is the most specific thing we know about
+/// why a session is dead, so it wins over the exit status.
+#[test]
+fn a_recorded_error_is_reported_over_the_exit_status() {
+    let app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.state = PtyState::Failed;
+    row.last_error = Some("pty closed".into());
+
+    let rendered = app
+        .own_session_lines(&row, false, 48, NOW)
+        .iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(rendered.contains("pty closed"), "{rendered}");
+}
+
+/// A dispatched turn that settled leaves the session standing for someone to
+/// read. Nothing else on the row says so — it is running, unbusy, and idle at a
+/// composer, exactly like a session nobody has used yet.
+#[test]
+fn a_retained_session_says_its_work_is_finished() {
+    let app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.retained = true;
+
+    let lines = app.own_session_lines(&row, false, 48, NOW);
+
+    assert!(lines[0].to_string().starts_with("✓ codex"), "{}", lines[0]);
+    assert!(lines
+        .iter()
+        .any(|line| line.to_string().contains("finished")));
+}
+
+/// A live harness mid-turn spins. Every running session drew the same dot
+/// before, so the rail could say a harness was alive but never that it was busy.
+#[test]
+fn a_working_harness_spins_through_the_frames() {
+    let mut app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.working = true;
+
+    let first = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
+    app.frame = 1;
+    let second = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
+
+    assert_ne!(first, second, "the working glyph must advance with the frame");
+    assert!(
+        crate::ui::util::SPINNER
+            .iter()
+            .any(|frame| first.starts_with(frame)),
+        "{first}"
+    );
+}
+
+/// The complement: a live session nobody is asking anything of stays still.
+/// An animation on every row is the same as an animation on none.
+#[test]
+fn an_idle_harness_does_not_spin() {
+    let mut app = app();
+    let row = harness_row("/workspace/medulla");
+
+    let first = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
+    app.frame = 5;
+    let second = app.own_session_lines(&row, false, 48, NOW)[0].to_string();
+
+    assert_eq!(first, second);
+    assert!(first.starts_with('○'), "{first}");
 }
 
 #[test]

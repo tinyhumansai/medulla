@@ -59,6 +59,10 @@ fn has_live_progress_line(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .rev()
         .take(PROGRESS_TAIL_LINES)
+        // A normal composer below a retained spinner means Claude has returned
+        // control to the operator. Do not let that old line keep the session
+        // marked busy forever.
+        .take_while(|line| !is_composer(line))
         .any(is_progress_line)
 }
 
@@ -159,7 +163,17 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         .filter(|line| !line.trim().is_empty())
         .collect();
     let tail_start = lines.len().saturating_sub(ERROR_TAIL_LINES);
-    let tail = squash(&lines[tail_start..].join("\n"));
+    // The prompt is part of the terminal viewport too, but it is operator
+    // input rather than harness output. In particular, a draft such as
+    // `> fix invalid API key` must not turn an otherwise idle session red.
+    let tail = squash(
+        &lines[tail_start..]
+            .iter()
+            .copied()
+            .filter(|line| !is_composer(line))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
     ERRORS
         .iter()
         .find(|(marker, _)| tail.contains(marker))

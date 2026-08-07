@@ -366,6 +366,14 @@ fn an_error_phrase_in_a_live_transcript_does_not_stop_work() {
     assert_eq!(detect(HarnessProvider::Claude, screen), None);
 }
 
+/// Draft text in an idle composer is operator input, not a harness error.
+#[test]
+fn an_error_phrase_in_an_idle_composer_does_not_stop_the_session() {
+    let screen = "> fix invalid API key handling";
+
+    assert_eq!(detect(HarnessProvider::Claude, screen), None);
+}
+
 /// The plan-exit menu names planning rather than falling back to the generic
 /// permission wording, even when the pane is too narrow for the structural walk
 /// to rejoin "keep planning" across its wrap.
@@ -416,9 +424,20 @@ fn claudes_live_progress_line_counts_as_working() {
         "* Cogitating… (5s · ↓ 193 tokens · thought for 1s)",
         "✻ Cogitated for 5s… (45s · 1 shell still running)",
     ] {
-        let screen = format!("  ⏺ reading files\n{line}\n❯ \n  bypass permissions on");
+        let screen = format!(
+            "  ⏺ reading files\n{line}\n❯ Press up to edit queued messages\n  bypass permissions on"
+        );
         assert!(is_working(&screen), "{line}");
     }
+}
+
+/// A restored idle composer ends the live region, even if the final spinner
+/// line remains close by in Claude's scrollback.
+#[test]
+fn a_progress_line_above_an_idle_composer_is_not_working() {
+    let screen = "✽ Considering… (7s · ↓ 193 tokens)\n❯ ";
+
+    assert!(!is_working(screen));
 }
 
 /// The composer placeholder Claude swaps in for the duration of a turn.

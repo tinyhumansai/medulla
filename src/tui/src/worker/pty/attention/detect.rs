@@ -417,10 +417,11 @@ fn has_yes_no(screen: &str) -> bool {
 /// screen shows no question we can recognise — which is the common case, and
 /// deliberately not the same as "the harness is busy".
 pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    let working = is_working(screen);
     // A recognised startup dialog outranks everything: it is the one case where
     // the harness will not take work at all, and it already has wording written
     // for an operator.
-    let dialog = (!is_working(screen) && has_active_dialog_context(screen))
+    let dialog = (!working && has_active_dialog_context(screen))
         .then(|| blocking_dialog_for(provider, screen))
         .flatten();
     if let Some(dialog) = dialog {
@@ -428,23 +429,23 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     }
 
     let squashed = squash(screen);
-    if let Some((_, _, kind, what)) = MARKERS
-        .iter()
-        .filter(|(candidate, ..)| *candidate == provider)
-        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
-    {
-        return Some((*kind, (*what).to_string()));
+    if !working {
+        if let Some((_, _, kind, what)) = MARKERS
+            .iter()
+            .filter(|(candidate, ..)| *candidate == provider)
+            .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
+        {
+            return Some((*kind, (*what).to_string()));
+        }
     }
-    if provider == HarnessProvider::Claude
-        && !is_working(screen)
-        && has_claude_plan_exit_menu(screen)
-    {
+    if provider == HarnessProvider::Claude && !working && has_claude_plan_exit_menu(screen) {
         return Some((
             AttentionKind::Approval,
             "claude finished planning and wants a decision".to_string(),
         ));
     }
-    if provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed) {
+    if !working && provider == HarnessProvider::Opencode && has_opencode_permission_menu(&squashed)
+    {
         return Some((
             AttentionKind::Approval,
             "opencode is asking permission".to_string(),
@@ -458,7 +459,7 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     // A transcript can contain an error phrase in the user's prompt. The live
     // progress footer is authoritative while it is present, so it vetoes error
     // matching just as it does structural prompt fallbacks.
-    if !is_working(screen) {
+    if !working {
         if let Some(what) = blocking_error(screen) {
             return Some((
                 AttentionKind::Error,
@@ -470,7 +471,7 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     // Unrecognised wording, recognisable shape. Vetoed while the harness is
     // plainly mid-turn, because a caret can survive on a screen the harness is
     // still painting over.
-    if is_working(screen) {
+    if working {
         return None;
     }
     if has_active_selected_option(screen) {

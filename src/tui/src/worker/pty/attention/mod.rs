@@ -59,9 +59,6 @@ mod session;
 mod types;
 
 #[cfg(test)]
-#[path = "session_tests.rs"]
-mod session_tests;
-#[cfg(test)]
 mod tests;
 
 pub use detect::{bell_cue, detect, is_working};

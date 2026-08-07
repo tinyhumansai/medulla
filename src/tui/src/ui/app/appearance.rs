@@ -19,8 +19,18 @@ use super::types::App;
 /// Non-theme rows: session titles, then process and device resource indicators.
 pub(super) const APPEARANCE_OPTION_ROWS: usize = 7;
 
-/// Number of behavior controls shown after the editable theme colors.
-pub(super) const ATTENTION_ROWS: usize = 1;
+/// Number of behavior controls shown after the editable theme colors: the blink
+/// toggle and the rate it blinks at.
+pub(super) const ATTENTION_ROWS: usize = 2;
+
+/// The pulse lengths the Appearance editor offers, in seconds.
+///
+/// A short list rather than a free-text field, because the useful range is
+/// narrow and every value in it is a judgement about how insistent a stuck
+/// harness should be. Anything else remains configurable by hand — the config
+/// key takes any number and clamps it — and a hand-set value that is not on this
+/// list steps into it from the nearest end rather than being lost.
+const BLINK_SECONDS: [f64; 6] = [0.3, 0.5, 1.0, 1.5, 2.0, 3.0];
 
 /// Number of selectable rows: theme colors, attention behavior, and options.
 pub(super) const APPEARANCE_ROWS: usize =

@@ -62,11 +62,16 @@ impl PtyManager {
     /// the rail flags a harness that died or finished, and this counted only the
     /// ones with something on screen, so a badge could read zero above a rail
     /// with two rows blinking on it.
+    ///
+    /// Only *blocking* cues count — see [`AttentionKind::blocks`]. A finished
+    /// session is drawn on its row and left out of the number.
     pub fn waiting_sessions(&self) -> std::collections::HashSet<String> {
         let now = (self.inner.now)();
         self.handles()
             .into_iter()
-            .filter(|session| attention::row_cue(&session.row(), now).is_some())
+            .filter(|session| {
+                attention::row_cue(&session.row(), now).is_some_and(|cue| cue.kind.blocks())
+            })
             .map(|session| session.id().to_string())
             .collect()
     }

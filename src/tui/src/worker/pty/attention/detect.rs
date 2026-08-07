@@ -7,11 +7,86 @@ use super::AttentionKind;
 
 /// Phrases that mean the harness is *working*, not waiting.
 ///
-/// Claude and Codex both footer their running turn with "esc to interrupt". A
-/// screen carrying one of these is busy, which is what vetoes the vaguest cues:
-/// a bell rung as a tool finishes must not leave a working harness flagged as
-/// blocked for the rest of its turn.
-const WORKING: &[&str] = &["esctointerrupt", "esctocancel", "ctrlctostop"];
+/// Codex still footers its running turn with "esc to interrupt", and so do the
+/// older Claude builds. A screen carrying one of these is busy, which is what
+/// vetoes the vaguest cues: a bell rung as a tool finishes must not leave a
+/// working harness flagged as blocked for the rest of its turn.
+///
+/// The last entry is Claude's composer placeholder while a turn is in flight —
+/// it replaces the ordinary hint text for exactly as long as the harness is
+/// busy, which makes it the one *phrase* current Claude reliably offers.
+const WORKING: &[&str] = &[
+    "esctointerrupt",
+    "esctocancel",
+    "ctrlctostop",
+    "pressuptoeditqueuedmessages",
+];
+
+/// Glyphs Claude cycles at the head of its live progress line.
+///
+/// It animates, so no single one of them can be required; membership in the set
+/// is what identifies the line.
+const PROGRESS_GLYPHS: &[char] = &['·', '*', '✢', '✳', '∗', '✻', '✽', '✶', '✴'];
+
+/// How far up from the live tail a progress line may be found.
+///
+/// It is drawn immediately above the composer, so a short window is enough — and
+/// necessary, because a transcript is full of retained progress lines from turns
+/// that finished long ago.
+const PROGRESS_TAIL_LINES: usize = 6;
+
+/// Whether Claude's animated progress line is on the live tail of `screen`.
+///
+/// Current Claude Code does *not* print "esc to interrupt". It draws a spinner,
+/// a gerund, and a parenthesised elapsed timer:
+///
+/// ```text
+/// ✽ Considering… (7s · ↓ 193 tokens · thinking with medium effort)
+/// ```
+///
+/// That mattered more than it looks: [`is_working`] is what vetoes the vague
+/// cues, so a Claude whose working state we could not recognise had no veto at
+/// all — and no way to say a harness was busy rather than merely alive.
+///
+/// Matched structurally, on the shape rather than the wording, because the
+/// gerund is drawn from a long and cheerfully unstable list ("Considering",
+/// "Cogitating", "Puzzling"). Three things are required together — the spinner
+/// glyph, the ellipsis, and the elapsed timer — because each alone appears in
+/// ordinary output and the combination does not.
+fn has_live_progress_line(screen: &str) -> bool {
+    screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(PROGRESS_TAIL_LINES)
+        .any(is_progress_line)
+}
+
+/// Whether one line is a spinner-led progress line with an elapsed timer.
+fn is_progress_line(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    let Some(first) = trimmed.chars().next() else {
+        return false;
+    };
+    PROGRESS_GLYPHS.contains(&first) && trimmed.contains('…') && has_elapsed_timer(trimmed)
+}
+
+/// Whether `line` carries a `(12s` style elapsed counter.
+///
+/// The digits must be followed by `s` and then the end of the group or a
+/// separator, so a version string like `(2s3)` or a path fragment cannot match.
+fn has_elapsed_timer(line: &str) -> bool {
+    line.match_indices('(').any(|(at, _)| {
+        let rest = &line[at + 1..];
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 {
+            return false;
+        }
+        let mut after = rest[digits..].chars();
+        after.next() == Some('s')
+            && matches!(after.next(), None | Some(' ') | Some(')') | Some('·') | Some('•'))
+    })
+}
 
 /// What each harness puts on screen when it is asking the operator something.
 ///

@@ -65,7 +65,7 @@ pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionR
         preset: None,
         state: crate::worker::pty::PtyState::Running,
         cwd: "/".to_string(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,

@@ -223,6 +223,13 @@ pub(crate) async fn call(
                     launch: &policy.launch,
                     env: &env,
                     cwd: &cwd,
+                    // Where the run works, when the caller says. Refused inside
+                    // `start` rather than here, so a bad path fails the same way
+                    // whichever door started the run.
+                    workspace: arguments
+                        .get("workspace")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     workflow_id: id,
                     input: tinyflows::engine::RunInput::new(input).with_inputs(inputs),
                     // Only for a call that is holding itself open. A run that

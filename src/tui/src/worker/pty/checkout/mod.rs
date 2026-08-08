@@ -1,4 +1,13 @@
-//! Captures a non-reusable identity for the Git checkout behind a harness.
+//! The Git checkout behind a harness: which one it is, and which one it *is
+//! still*.
+//!
+//! Two questions that sound alike and are not. This module answers the second —
+//! a non-reusable launch marker, so a checkout deleted and recreated under the
+//! same path is not mistaken for the one a session was launched in. The first,
+//! "which repository, worktree, and branch is this", is [`inspect`], which
+//! reads facts that legitimately change while a session runs.
+
+pub(crate) mod inspect;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

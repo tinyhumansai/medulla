@@ -64,6 +64,10 @@ pub(in crate::ui::app) enum StatusLineField {
     Branch,
     /// When the Git branch is drawn.
     BranchWhen,
+    /// Where the linked worktree's name sits.
+    Worktree,
+    /// When the linked worktree's name is drawn.
+    WorktreeWhen,
     /// Where the working directory sits.
     Path,
     /// When the working directory is drawn.

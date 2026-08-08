@@ -112,9 +112,10 @@ fn arrow_keys_move_subpage_selector() {
 fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('3'));
-    // Walk to the final path-style qualifier. Thread name adds two rows ahead
-    // of the path group, so this must cover the complete status-line catalog.
-    for _ in 0..14 {
+    // Walk to the final path-style qualifier. Thread name and worktree each add
+    // two rows ahead of the path group, so this must cover the complete
+    // status-line catalog.
+    for _ in 0..16 {
         let _ = key(&mut app, KeyCode::Down);
     }
 

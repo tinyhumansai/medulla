@@ -124,7 +124,15 @@ pub(in crate::daemon::providers) fn uses_acp(options: &RunTaskOptions) -> bool {
 
 /// Execute one task through the standard Agent Client Protocol.
 pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
-    let agent = agent_for(&options)?;
+    // The operator's hooks, in the form this transport can carry them: for
+    // Claude Code an `_meta` passenger on the session request, and for the rest
+    // a note saying they are not running here. Built before anything is spawned
+    // so the note reaches the log even if the session never opens.
+    let delivery = crate::harness_hooks::acp_delivery(options.provider, &options.hooks);
+    for note in &delivery.notes {
+        tracing::warn!(provider = options.provider.as_str(), "{note}");
+    }
+    let session_meta = delivery.session_meta;
     // Read before `options` is picked apart below, and cloned because the
     // session setup runs inside an async move closure.
     #[cfg(feature = "workflows")]
@@ -142,6 +150,14 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // Kept outside the closure, which moves its copy, so the grant can be
     // revoked once the session is over however it ended.
     let revoke_key = session_key.clone();
+    // ACP starts a server which then starts the harness. Seed its environment
+    // before that server launches, so built-in hook commands inherit the
+    // per-session reporting capability just as direct spawn paths do. Keep the
+    // guard alive for the complete ACP run so a late hook cannot lose its
+    // authority while the harness is still running.
+    let mut agent_env = acp_env(&options)?;
+    let _hook_grant = crate::harness_hooks::seed_hook_grant(&session_key, &mut agent_env);
+    let agent = agent_for_with_env(&options, agent_env)?;
     let task_env = options.env.clone();
     let state = Arc::new(Mutex::new(FoldState::with_workspace(
         options.on_event,
@@ -206,6 +222,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // what it would have done.
                     request.mcp_servers =
                         medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
+                    // A loaded session gets the hooks a new one gets. The ACP
+                    // server rebuilds the underlying harness query from these
+                    // params, so omitting them here would mean a resumed run —
+                    // every retry, every continued workflow step — silently
+                    // stopped checkpointing where the first turn did not.
+                    request.meta = session_meta;
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -217,6 +239,11 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // agent author a workflow rather than only run one.
                     request.mcp_servers =
                         medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
+                    // Medulla's hooks, for the harnesses whose ACP server takes
+                    // its configuration this way (see
+                    // [`crate::harness_hooks::acp`]). `None` for the rest, which
+                    // leaves the request exactly as it was.
+                    request.meta = session_meta;
                     connection
                         .send_request(request)
                         .block_task()
@@ -295,11 +322,24 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 }
 
 /// Construct the ACP server command for a supported harness.
+#[cfg(test)]
 pub(super) fn agent_for(options: &RunTaskOptions) -> Result<AcpAgent, String> {
     // Built once and shared: the model flags below are derived from the same
     // map the child receives, and `router_env` writing `OPENAI_BASE_URL` into it
     // is what tells `codex_overrides` the run is routed at all.
     let env = acp_env(options)?;
+    agent_for_with_env(options, env)
+}
+
+/// Construct an ACP server command using a fully prepared child environment.
+///
+/// The execution path supplies a per-session hook grant in addition to the
+/// ordinary ACP environment. Keeping this helper separate preserves
+/// [`agent_for`] as the pure configuration entry point used by focused tests.
+fn agent_for_with_env(
+    options: &RunTaskOptions,
+    env: HashMap<String, String>,
+) -> Result<AcpAgent, String> {
     let config = match options.provider {
         HarnessProvider::Claude => {
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])

@@ -18,8 +18,10 @@
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
 //! other caller reads, [`screen`] is the emulator surface the UI renders,
-//! [`attention`] keeps each row's "this harness wants you" flag current, and
-//! [`clipboard`] carries a harness's own copies out to the operator's terminal.
+//! [`attention`] keeps each row's "this harness wants you" flag current,
+//! [`checkout`] does the same for the repository, worktree, and branch it is
+//! working in, and [`clipboard`] carries a harness's own copies out to the
+//! operator's terminal.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -197,6 +199,7 @@ impl PtyManager {
 }
 
 mod attention;
+mod checkout;
 mod clipboard;
 mod open;
 mod screen;

@@ -69,8 +69,8 @@ impl App {
     }
 }
 
-/// A running, operator-held harness in a Git checkout — the common case, and the
-/// one whose path is long enough to show what the layout costs it.
+/// A running, operator-held harness in a linked worktree — the common case, and
+/// the one whose path is long enough to show what the layout costs it.
 fn sample_selected() -> SessionRow {
     SessionRow {
         mcp_grant_session: None,
@@ -79,8 +79,13 @@ fn sample_selected() -> SessionRow {
         provider: HarnessProvider::Claude,
         preset: None,
         state: PtyState::Running,
-        cwd: "/home/you/work/tinyhumans/medulla-public".into(),
-        branch: Some("feat/status-line".into()),
+        cwd: "/home/you/work/worktrees/status-line/medulla-public".into(),
+        checkout: medulla::ui::checkout::Checkout {
+            repo: Some("medulla-public".into()),
+            worktree: Some("status-line".into()),
+            branch: Some("feat/status-line".into()),
+            head: Some("a1b2c3d".into()),
+        },
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,
@@ -100,14 +105,14 @@ fn sample_selected() -> SessionRow {
 }
 
 /// A finished, orchestrator-held harness outside a repository — the other half
-/// of what the state, control, and branch rows can produce.
+/// of what the state, control, branch, and worktree rows can produce.
 fn sample_orchestrator() -> SessionRow {
     SessionRow {
         provider: HarnessProvider::Codex,
         preset: None,
         state: PtyState::Exited { code: Some(0) },
         cwd: "/tmp/scratch".into(),
-        branch: None,
+        checkout: medulla::ui::checkout::Checkout::default(),
         control: SessionControl::Orchestrator,
         ..sample_selected()
     }

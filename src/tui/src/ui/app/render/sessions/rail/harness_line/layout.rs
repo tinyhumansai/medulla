@@ -48,11 +48,19 @@ const CONT_INDENT: &str = "  ";
 /// The separator between two fields on the same line.
 const SEPARATOR: &str = " · ";
 
-/// The widest a branch name is ever allowed to be.
+/// The widest a branch or worktree name is ever allowed to be.
 ///
-/// A branch is one identifier among four fields; a long ticket-numbered branch
-/// left alone would eat the working directory whole.
-const BRANCH_MAX: usize = 16;
+/// A branch is one identifier among five fields; a long ticket-numbered branch
+/// left alone would eat the working directory whole. A worktree name is drawn
+/// from the same vocabulary — usually the branch's own slug — so it is held to
+/// the same cap.
+const NAME_MAX: usize = 16;
+
+/// Marks the worktree field, so a bare slug beside a branch is not read as one.
+///
+/// A glyph rather than the word: `⑂ fix-login` is three columns of label where
+/// `worktree fix-login` is nine, on a row whose whole budget is the rail width.
+const WORKTREE_MARK: &str = "⑂ ";
 
 /// Columns held back from the branch for a working directory sharing its line.
 ///
@@ -60,15 +68,34 @@ const BRANCH_MAX: usize = 16;
 /// checkout. Without it a long branch renders first and leaves the path nothing.
 const PATH_RESERVE: usize = 7;
 
+/// Columns held back from the worktree for a branch sharing its line.
+///
+/// The branch is the finer and more perishable fact — it moves several times
+/// an hour where a worktree is fixed for the life of the checkout — so a long
+/// worktree name must not render first and leave it nothing. Enough for `mai…`
+/// or a clipped detached commit.
+const BRANCH_RESERVE: usize = 5;
+
 /// The least room a working directory is drawn in at all.
 const PATH_MIN: usize = 4;
 
+/// The least room a worktree name is drawn in at all.
+///
+/// Two columns of that are the marker, so anything below this is a glyph and an
+/// ellipsis: it says a worktree exists without saying which, while spending
+/// room the branch beside it could have used to say something true.
+const WORKTREE_MIN: usize = 7;
+
 /// Every field, in draw order.
-const ORDER: [Field; 6] = [
+///
+/// The worktree precedes the branch because it is the coarser fact: which
+/// checkout, then what is checked out in it.
+const ORDER: [Field; 7] = [
     Field::State,
     Field::Harness,
     Field::Control,
     Field::Thread,
+    Field::Worktree,
     Field::Branch,
     Field::Path,
 ];
@@ -82,6 +109,7 @@ impl Field {
             Field::Control => cfg.control,
             Field::Thread => cfg.thread,
             Field::Branch => cfg.branch,
+            Field::Worktree => cfg.worktree,
             Field::Path => cfg.path,
         }
     }
@@ -94,6 +122,7 @@ impl Field {
             Field::Control => cfg.control_when,
             Field::Thread => cfg.thread_when,
             Field::Branch => cfg.branch_when,
+            Field::Worktree => cfg.worktree_when,
             Field::Path => cfg.path_when,
         }
     }
@@ -104,7 +133,10 @@ impl Field {
     /// branch and path say where it is pointed. Dimming the latter is what lets
     /// a column of harness rows be scanned for the former.
     fn is_detail(self) -> bool {
-        matches!(self, Field::Thread | Field::Branch | Field::Path)
+        matches!(
+            self,
+            Field::Thread | Field::Worktree | Field::Branch | Field::Path
+        )
     }
 }
 
@@ -181,6 +213,7 @@ fn layout_line(
 ) -> Vec<Span<'static>> {
     let on_this_line = |field: Field| field.placement(cfg).line() == Some(line) && shown(field);
     let path_shares_line = on_this_line(Field::Path);
+    let branch_shares_line = on_this_line(Field::Branch);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut used = 0usize;
@@ -215,6 +248,7 @@ fn layout_line(
                 .filter(|name| !name.is_empty())
                 .and_then(|name| fit(&name, room)),
             Field::Branch => branch_text(row, room, path_shares_line),
+            Field::Worktree => worktree_text(row, room, path_shares_line, branch_shares_line),
             Field::Path => path_text(row, home, cfg.path_style, room),
         };
         let Some(text) = text else { continue };
@@ -263,14 +297,44 @@ fn control_text(control: SessionControl, style: ControlStyle) -> String {
     .to_string()
 }
 
-/// The branch name, capped and clipped, or `None` when there is no branch or no
-/// usable room for one.
+/// The branch name, capped and clipped, or `None` when there is nothing to name
+/// or no usable room to name it in.
+///
+/// A detached `HEAD` is spelled as its commit (`@a1b2c3d`) rather than drawn as
+/// nothing: an agent that checked out a tag or a review commit is in a state the
+/// operator needs to see, and an empty field is indistinguishable from a session
+/// running outside Git.
 fn branch_text(row: &SessionRow, room: usize, path_shares_line: bool) -> Option<String> {
-    let branch = row.branch.as_deref()?;
     let reserve = if path_shares_line { PATH_RESERVE } else { 0 };
-    let budget = room.saturating_sub(reserve).min(BRANCH_MAX);
     // Below two columns all that fits is the ellipsis, which says nothing.
-    (budget >= 2).then(|| clip_cells(branch, budget))
+    fit_name(&row.checkout.branch_label()?, room, reserve, 2)
+}
+
+/// The linked worktree's name, marked and capped, or `None` in the primary
+/// checkout — where there is no worktree to name and a field saying so would
+/// put the same word on every row.
+fn worktree_text(
+    row: &SessionRow,
+    room: usize,
+    path_shares_line: bool,
+    branch_shares_line: bool,
+) -> Option<String> {
+    let worktree = row.checkout.worktree.as_deref()?;
+    let marked = format!("{WORKTREE_MARK}{worktree}");
+    let reserve = if path_shares_line { PATH_RESERVE } else { 0 }
+        + if branch_shares_line {
+            BRANCH_RESERVE
+        } else {
+            0
+        };
+    fit_name(&marked, room, reserve, WORKTREE_MIN)
+}
+
+/// Fit one identifier into the room left once `reserve` is held back for the
+/// fields that follow it, or drop it when what remains is below `minimum`.
+fn fit_name(name: &str, room: usize, reserve: usize, minimum: usize) -> Option<String> {
+    let budget = room.saturating_sub(reserve).min(NAME_MAX);
+    (budget >= minimum).then(|| clip_cells(name, budget))
 }
 
 /// The working directory in the operator's chosen spelling, or `None` when it

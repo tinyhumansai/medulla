@@ -43,6 +43,21 @@ const RUN_TOOL: &str = "mcp__medulla__workflow_run";
 /// how it went.
 const GET_TOOL: &str = "mcp__medulla__workflow_run_get";
 
+/// How a session says which checkout the run should work in.
+///
+/// Written into every generated skill because the alternative is worse than not
+/// knowing: a session that cannot say where a run works either starts it against
+/// whatever directory the server happens to be in, or invents a declared input
+/// for the path — which the script policy then refuses for leaving the
+/// workspace.
+/// Kept tight on purpose: this rides in every generated skill body, which is
+/// held to a token budget the render tests enforce.
+const WORKSPACE_SECTION: &str = "## Where it runs\n\n\
+     The run works in the directory Medulla's MCP server started in. To point it \
+     at another checkout, add `\"workspace\": \"<path>\"` to the call — absolute, or \
+     relative to that one. That is the only way to move a run; a path passed as \
+     an ordinary input cannot leave the workspace, and a workspace that is not a \
+     directory is refused.\n";
 /// The tool that serves the full text this rendering condensed.
 ///
 /// Named wherever a note is shortened, so the shortening is a pointer rather
@@ -166,6 +181,11 @@ pub fn render_command(skill: &super::RenderedSkill, summary: &WorkflowSummary) -
     out.push_str(&inputs_section(summary));
     // The command is typed by an operator who wants it *run*, so it says the one
     // thing the skill's fallback line does not: what to do with their words.
+    //
+    // `$ARGUMENTS` now rides in the header line above, so the separate paragraph
+    // this branch used to add here would say it twice.
+    out.push('\n');
+    out.push_str(WORKSPACE_SECTION);
     out.push_str(&format!(
         "\nMap the typed text onto those inputs, then follow the run with `{GET_TOOL}`.\n\n{}",
         fallback_line(summary)
@@ -513,6 +533,8 @@ fn skill_content(summary: &WorkflowSummary, slug: &str, description: &str) -> St
     ));
 
     out.push_str(&inputs_section(summary));
+    out.push('\n');
+    out.push_str(WORKSPACE_SECTION);
     out.push('\n');
 
     out.push_str(&fallback_line(summary));

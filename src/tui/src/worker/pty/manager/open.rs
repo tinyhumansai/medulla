@@ -123,8 +123,10 @@ impl PtyManager {
         let mut guard = LaunchGuard::new(spec.mcp_grant_session.clone());
 
         // Before the pty, because it shells out to `git`: one more reason this
-        // whole function belongs on a blocking thread.
-        let branch = git_branch(&spec.cwd);
+        // whole function belongs on a blocking thread. The checkout is read
+        // once here so the row is right on its very first frame; from then on
+        // the poller keeps it current, because a harness can move it.
+        let checkout = super::super::checkout::inspect::resolve(&spec.cwd);
         let launch_root = git_root(&spec.cwd);
         let launch_commit = launch_root.as_deref().and_then(git_head);
         let launch_checkout_identity = super::super::checkout::capture(spec.cwd.as_ref());
@@ -194,7 +196,6 @@ impl PtyManager {
                 provider: spec.provider,
                 preset: spec.preset,
                 cwd: spec.cwd,
-                branch,
                 gh_repo_is_set: spec.env.contains_key("GH_REPO"),
                 launch_root,
                 launch_commit,
@@ -216,6 +217,9 @@ impl PtyManager {
             queued_bytes.clone(),
             child,
         ));
+        // Seeded before the handle is published, so no caller ever sees a row
+        // whose checkout is momentarily blank for a session that has one.
+        handle.set_checkout(checkout);
 
         write(&self.inner.sessions).push(handle.clone());
 
@@ -225,6 +229,7 @@ impl PtyManager {
         // `last_output_at` that idle detection reads.
         self.spawn_writer(Arc::downgrade(&handle), writer, queued, queued_bytes);
         self.spawn_attention_poller(Arc::downgrade(&handle));
+        self.spawn_checkout_poller(Arc::downgrade(&handle));
         self.spawn_reader(handle, reader);
 
         Ok(id)
@@ -333,20 +338,6 @@ impl PtyManager {
             handle.record_error(format!("{}: {err}{lost}", handle.id()));
         });
     }
-}
-
-/// Resolve the checked-out branch without treating a non-repository or
-/// detached `HEAD` as an error.
-fn git_branch(cwd: &str) -> Option<String> {
-    let output = Command::new("git")
-        .args(["-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|branch| !branch.is_empty())
 }
 
 /// Snapshot the repository commit before the harness can mutate the checkout.

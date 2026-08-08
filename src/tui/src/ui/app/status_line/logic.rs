@@ -9,7 +9,7 @@ use super::super::types::App;
 use super::{StatusLineField, StatusLineGroup, StatusLineRow};
 
 /// The page's rows, in display order, grouped by the field they describe.
-pub(in crate::ui::app) const STATUS_LINE_ROWS: [StatusLineRow; 15] = [
+pub(in crate::ui::app) const STATUS_LINE_ROWS: [StatusLineRow; 17] = [
     row(
         "position",
         StatusLineField::State,
@@ -87,6 +87,21 @@ pub(in crate::ui::app) const STATUS_LINE_ROWS: [StatusLineRow; 15] = [
     ),
     row(
         "position",
+        StatusLineField::Worktree,
+        head(
+            "Worktree",
+            "the linked worktree the checkout is, when it is one",
+        ),
+        "Which line the worktree name sits on, or hide it.",
+    ),
+    row(
+        "shown",
+        StatusLineField::WorktreeWhen,
+        None,
+        "On every row, only the selected one, or only alerts.",
+    ),
+    row(
+        "position",
         StatusLineField::Path,
         head("Working path", "the checkout the harness is running in"),
         "Which line the working path sits on, or hide it.",
@@ -134,12 +149,14 @@ impl StatusLineField {
             | Self::Control
             | Self::Thread
             | Self::Branch
+            | Self::Worktree
             | Self::Path => FieldPlacement::ALL.iter().map(|v| v.label()).collect(),
             Self::StateWhen
             | Self::HarnessWhen
             | Self::ControlWhen
             | Self::ThreadWhen
             | Self::BranchWhen
+            | Self::WorktreeWhen
             | Self::PathWhen => FieldVisibility::ALL.iter().map(|v| v.label()).collect(),
             Self::HarnessStyle => HarnessNameStyle::ALL.iter().map(|v| v.label()).collect(),
             Self::ControlStyle => ControlStyle::ALL.iter().map(|v| v.label()).collect(),
@@ -161,6 +178,8 @@ impl StatusLineField {
             Self::ThreadWhen => "threadWhen",
             Self::Branch => "branch",
             Self::BranchWhen => "branchWhen",
+            Self::Worktree => "worktree",
+            Self::WorktreeWhen => "worktreeWhen",
             Self::Path => "path",
             Self::PathWhen => "pathWhen",
             Self::PathStyle => "pathStyle",
@@ -181,6 +200,8 @@ impl StatusLineField {
             Self::ThreadWhen => "thread name shown",
             Self::Branch => "git branch",
             Self::BranchWhen => "git branch shown",
+            Self::Worktree => "worktree",
+            Self::WorktreeWhen => "worktree shown",
             Self::Path => "working path",
             Self::PathWhen => "working path shown",
             Self::PathStyle => "working path spelled",
@@ -201,6 +222,8 @@ impl StatusLineField {
             Self::ThreadWhen => (cfg.thread_when.label(), wire_value(&cfg.thread_when)),
             Self::Branch => (cfg.branch.label(), wire_value(&cfg.branch)),
             Self::BranchWhen => (cfg.branch_when.label(), wire_value(&cfg.branch_when)),
+            Self::Worktree => (cfg.worktree.label(), wire_value(&cfg.worktree)),
+            Self::WorktreeWhen => (cfg.worktree_when.label(), wire_value(&cfg.worktree_when)),
             Self::Path => (cfg.path.label(), wire_value(&cfg.path)),
             Self::PathWhen => (cfg.path_when.label(), wire_value(&cfg.path_when)),
             Self::PathStyle => (cfg.path_style.label(), wire_value(&cfg.path_style)),
@@ -221,6 +244,8 @@ impl StatusLineField {
             Self::ThreadWhen => cfg.thread_when = cfg.thread_when.cycled(forward),
             Self::Branch => cfg.branch = cfg.branch.cycled(forward),
             Self::BranchWhen => cfg.branch_when = cfg.branch_when.cycled(forward),
+            Self::Worktree => cfg.worktree = cfg.worktree.cycled(forward),
+            Self::WorktreeWhen => cfg.worktree_when = cfg.worktree_when.cycled(forward),
             Self::Path => cfg.path = cfg.path.cycled(forward),
             Self::PathWhen => cfg.path_when = cfg.path_when.cycled(forward),
             Self::PathStyle => cfg.path_style = cfg.path_style.cycled(forward),

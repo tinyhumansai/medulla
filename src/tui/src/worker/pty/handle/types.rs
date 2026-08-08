@@ -111,6 +111,17 @@ pub(crate) struct ColdFields {
     pub(super) name: Option<String>,
     /// The non-empty terminal title last advertised by the harness.
     pub(super) thread_name: Option<String>,
+    /// Which repository, worktree, and branch the working directory sits in.
+    ///
+    /// Mutable, and the reason this is not in [`SessionMeta`] beside the
+    /// working directory it is read from: a harness that creates a branch, or
+    /// an operator who switches one under it, changes the answer while the
+    /// session runs, and a launch-time snapshot went on naming the branch the
+    /// work started from for as long as the session lived. Refreshed by
+    /// `PtyManager::spawn_checkout_poller`; the checkout *identity* that pins
+    /// the diff baseline is a different, deliberately immutable fact — see
+    /// [`SessionMeta::launch_checkout_identity`].
+    pub(super) checkout: medulla::ui::checkout::Checkout,
     /// Why the session failed, when it did.
     pub(super) last_error: Option<String>,
 }
@@ -158,11 +169,6 @@ pub(crate) struct SessionMeta {
     pub(crate) preset: Option<String>,
     /// The working directory the child runs in.
     pub(crate) cwd: String,
-    /// Git branch resolved from the working directory when the session opened.
-    ///
-    /// `None` means the directory is not in a repository or has a detached
-    /// `HEAD`.
-    pub(crate) branch: Option<String>,
     /// Whether the child environment contains a GitHub repository override.
     pub(crate) gh_repo_is_set: bool,
     /// Repository root captured immediately before the harness was spawned.

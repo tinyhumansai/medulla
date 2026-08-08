@@ -15,7 +15,7 @@ fn row(provider: HarnessProvider, preset: Option<&str>) -> SessionRow {
         preset: preset.map(str::to_string),
         state: PtyState::Running,
         cwd: "/work".into(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,

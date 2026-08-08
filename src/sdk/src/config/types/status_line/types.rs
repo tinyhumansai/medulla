@@ -99,6 +99,14 @@ pub struct StatusLineConfig {
     pub branch: FieldPlacement,
     /// When the Git branch is drawn.
     pub branch_when: FieldVisibility,
+    /// Where the linked worktree's name is drawn.
+    ///
+    /// Costs nothing on a row that has no worktree to name: a session in a
+    /// repository's primary checkout draws this field as nothing at all, which
+    /// is the whole reason it can default to visible.
+    pub worktree: FieldPlacement,
+    /// When the linked worktree's name is drawn.
+    pub worktree_when: FieldVisibility,
     /// Where the working directory is drawn.
     pub path: FieldPlacement,
     /// When the working directory is drawn.
@@ -251,6 +259,8 @@ impl Default for StatusLineConfig {
             thread_when: FieldVisibility::Always,
             branch: FieldPlacement::Line1,
             branch_when: FieldVisibility::Always,
+            worktree: FieldPlacement::Line1,
+            worktree_when: FieldVisibility::Always,
             path: FieldPlacement::Line1,
             path_when: FieldVisibility::Always,
             path_style: PathStyle::Shortened,
@@ -262,6 +272,11 @@ impl StatusLineConfig {
     pub fn from_appearance(appearance: &AppearanceConfig) -> Self {
         Self {
             branch: placement_of(appearance.show_harness_branch),
+            // Follows the branch rather than defaulting to shown: an operator
+            // who turned the Git detail off on the legacy switch meant the Git
+            // detail, and a worktree name appearing where a branch used to be
+            // suppressed would read as the setting having stopped working.
+            worktree: placement_of(appearance.show_harness_branch),
             path: placement_of(appearance.show_harness_path),
             ..Self::default()
         }

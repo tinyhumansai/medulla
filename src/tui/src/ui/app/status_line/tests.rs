@@ -115,6 +115,10 @@ fn the_legacy_appearance_toggles_are_read_as_placements() {
     let derived = StatusLineConfig::from_appearance(&hidden);
 
     assert_eq!(derived.branch, FieldPlacement::Hidden);
+    // The worktree follows the branch: the old switch turned the Git detail
+    // off, and a worktree name appearing in its place would read as the setting
+    // having stopped working.
+    assert_eq!(derived.worktree, FieldPlacement::Hidden);
     assert_eq!(derived.path, FieldPlacement::Line1);
     assert_eq!(
         derived.state,
@@ -222,6 +226,7 @@ fn every_row_explains_itself_and_every_field_is_headed_once() {
             "Managed / unmanaged",
             "Thread name",
             "Git branch",
+            "Worktree",
             "Working path",
         ],
         "each field is headed exactly once, in page order"
@@ -268,4 +273,20 @@ fn the_advertised_choices_are_the_ones_cycling_visits() {
             visited
         );
     }
+}
+
+#[test]
+fn the_worktree_row_moves_and_persists_on_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = app(&path);
+
+    app.status_line_index = row_of(StatusLineField::Worktree);
+    app.cycle_status_line_row(true);
+
+    assert_eq!(app.status_line_config().worktree, FieldPlacement::Line2);
+    assert_eq!(saved(&path).status_line().worktree, FieldPlacement::Line2);
+    // Its neighbour is untouched: the two are separate facts and separate keys.
+    assert_eq!(saved(&path).status_line().branch, FieldPlacement::Line1);
+    assert!(app.status().contains("worktree"));
 }

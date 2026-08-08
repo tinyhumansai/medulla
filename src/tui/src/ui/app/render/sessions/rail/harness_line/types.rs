@@ -35,8 +35,10 @@ pub(super) enum Field {
     Control,
     /// The name assigned to the harness conversation with `/rename`.
     Thread,
-    /// The Git branch of the working directory.
+    /// The Git branch of the working directory, or its detached commit.
     Branch,
+    /// The linked worktree the working directory belongs to, when it is one.
+    Worktree,
     /// The working directory.
     Path,
 }

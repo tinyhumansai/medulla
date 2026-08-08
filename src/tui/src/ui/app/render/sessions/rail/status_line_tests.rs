@@ -71,7 +71,7 @@ fn every_line_is_still_bounded_by_the_rail_width() {
         ..StatusLineConfig::default()
     });
     let mut row = harness_row("/workspace/tinyhumans/products/medulla-public");
-    row.branch = Some("feat/a-very-long-branch-name-indeed".into());
+    row.checkout.branch = Some("feat/a-very-long-branch-name-indeed".into());
 
     for width in [0, 1, 4, 8, 12, 36] {
         for line in app.own_session_lines(&row, false, width, NOW) {
@@ -83,7 +83,7 @@ fn every_line_is_still_bounded_by_the_rail_width() {
 #[test]
 fn wide_branch_and_path_glyphs_stay_within_their_cell_budget() {
     let mut row = harness_row("/workspace/项目/medulla界面");
-    row.branch = Some("功能/状态显示分支".into());
+    row.checkout.branch = Some("功能/状态显示分支".into());
 
     for path_style in [PathStyle::Full, PathStyle::Last] {
         let app = app_with(StatusLineConfig {
@@ -240,6 +240,7 @@ fn hiding_every_field_still_leaves_one_selectable_line() {
         harness: FieldPlacement::Hidden,
         control: FieldPlacement::Hidden,
         branch: FieldPlacement::Hidden,
+        worktree: FieldPlacement::Hidden,
         path: FieldPlacement::Hidden,
         ..StatusLineConfig::default()
     });
@@ -247,4 +248,120 @@ fn hiding_every_field_still_leaves_one_selectable_line() {
 
     assert_eq!(lines.len(), 1, "the row must still occupy a clickable line");
     assert_eq!(lines[0].to_string(), "");
+}
+
+/// A row working in a linked worktree of the repository.
+fn worktree_row(cwd: &str, worktree: &str, branch: &str) -> crate::worker::pty::SessionRow {
+    let mut row = harness_row(cwd);
+    row.checkout.worktree = Some(worktree.into());
+    row.checkout.branch = Some(branch.into());
+    row
+}
+
+#[test]
+fn a_linked_worktree_is_named_ahead_of_the_branch() {
+    let app = app_with(StatusLineConfig::default());
+    let row = worktree_row("/workspace/worktrees/fix-login", "fix-login", "fix/login");
+
+    let lines = app.own_session_lines(&row, false, 80, NOW);
+
+    // Coarse fact first: which checkout, then what is checked out in it.
+    assert_eq!(
+        lines[0].to_string(),
+        "● codex · unmanaged · ⑂ fix-login · fix/login · /workspace/worktrees/fix-login"
+    );
+}
+
+#[test]
+fn the_primary_checkout_draws_no_worktree_field_at_all() {
+    let app = app_with(StatusLineConfig::default());
+    // The same layout, on a session that is not in a linked worktree: the field
+    // is configured to show and still costs the row nothing, which is what lets
+    // it default to visible.
+    let lines = app.own_session_lines(&harness_row("/workspace/medulla"), false, 64, NOW);
+
+    assert_eq!(
+        lines[0].to_string(),
+        "● codex · unmanaged · main · /workspace/medulla"
+    );
+}
+
+#[test]
+fn hiding_the_worktree_field_drops_it_from_a_worktree_row() {
+    let app = app_with(StatusLineConfig {
+        worktree: FieldPlacement::Hidden,
+        ..StatusLineConfig::default()
+    });
+    let row = worktree_row("/workspace/worktrees/fix-login", "fix-login", "fix/login");
+
+    let line = app.own_session_lines(&row, false, 64, NOW)[0].to_string();
+
+    assert!(!line.contains("fix-login ·"), "{line}");
+    assert!(line.contains("fix/login"), "{line}");
+}
+
+#[test]
+fn a_detached_head_is_named_by_its_commit_rather_than_left_blank() {
+    // Otherwise a harness sitting on a checked-out review commit is
+    // indistinguishable from one running outside Git entirely.
+    let app = app_with(StatusLineConfig::default());
+    let mut row = harness_row("/workspace/medulla");
+    row.checkout.branch = None;
+    row.checkout.head = Some("a1b2c3d".into());
+
+    let lines = app.own_session_lines(&row, false, 64, NOW);
+
+    assert_eq!(
+        lines[0].to_string(),
+        "● codex · unmanaged · @a1b2c3d · /workspace/medulla"
+    );
+}
+
+#[test]
+fn a_session_outside_git_still_draws_neither_branch_nor_worktree() {
+    let app = app_with(StatusLineConfig::default());
+    let mut row = harness_row("/tmp/scratch");
+    row.checkout = Default::default();
+
+    let lines = app.own_session_lines(&row, false, 64, NOW);
+
+    assert_eq!(lines[0].to_string(), "● codex · unmanaged · /tmp/scratch");
+}
+
+#[test]
+fn a_worktree_name_is_capped_like_a_branch_name() {
+    let app = app_with(StatusLineConfig {
+        path: FieldPlacement::Hidden,
+        ..StatusLineConfig::default()
+    });
+    let row = worktree_row(
+        "/workspace/worktrees/x",
+        "a-very-long-worktree-name-indeed",
+        "main",
+    );
+
+    let line = app.own_session_lines(&row, false, 96, NOW)[0].to_string();
+
+    // Capped at the shared name budget, ellipsis included, so one worktree
+    // cannot spend the whole row.
+    assert!(line.contains("⑂ a-very-long-w…"), "{line}");
+}
+
+#[test]
+fn a_narrow_row_keeps_the_branch_and_drops_the_worktree() {
+    // The two are not equally perishable: a branch moves several times an hour
+    // where a worktree is fixed for the life of the checkout, so the branch is
+    // what a row too narrow for both must keep. A clipped `⑂ st…` would spend
+    // the same columns saying only that a worktree exists.
+    let app = app_with(StatusLineConfig::default());
+    let row = worktree_row("/workspace/worktrees/fix-login", "fix-login", "fix/login");
+
+    let narrow = app.own_session_lines(&row, false, 36, NOW)[0].to_string();
+    assert!(narrow.contains("fix/"), "the branch survives: {narrow}");
+    assert!(!narrow.contains('⑂'), "the worktree gives way: {narrow}");
+
+    // Given the room, both are drawn.
+    let wide = app.own_session_lines(&row, false, 80, NOW)[0].to_string();
+    assert!(wide.contains("⑂ fix-login"), "{wide}");
+    assert!(wide.contains("fix/login"), "{wide}");
 }

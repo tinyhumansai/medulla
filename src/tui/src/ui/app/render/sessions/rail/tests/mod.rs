@@ -160,7 +160,11 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         preset: None,
         state: PtyState::Running,
         cwd: cwd.into(),
-        branch: Some("main".into()),
+        checkout: medulla::ui::checkout::Checkout {
+            repo: Some("medulla-public".into()),
+            branch: Some("main".into()),
+            ..Default::default()
+        },
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,
@@ -261,7 +265,7 @@ fn harness_branch_and_path_can_be_hidden_independently() {
 fn a_non_git_harness_omits_the_branch_without_a_placeholder() {
     let app = app();
     let mut row = harness_row("/workspace/medulla");
-    row.branch = None;
+    row.checkout.branch = None;
 
     assert_eq!(
         app.own_session_lines(&row, false, 48, NOW)[0].to_string(),

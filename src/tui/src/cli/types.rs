@@ -294,6 +294,10 @@ pub struct WorkflowArgs {
     /// the common case where hand-writing a JSON object at a shell prompt is
     /// more quoting than the value is worth. Merged over `--inputs`.
     pub set: Vec<String>,
+    /// `--workspace <path>`: the directory a `run` (or `resume`) works in —
+    /// where its shell steps run and which checkout its `agent` steps open.
+    /// Absolute, or relative to the current directory, which is the default.
+    pub workspace: Option<String>,
     /// `--approve <node-id>`, repeatable: gates to release on `resume`.
     pub approve: Vec<String>,
     /// `--reject <node-id>`, repeatable: gates to refuse on `resume`.
@@ -327,6 +331,7 @@ impl Default for WorkflowArgs {
             input: None,
             inputs: None,
             set: Vec::new(),
+            workspace: None,
             approve: Vec::new(),
             reject: Vec::new(),
             run_id: None,

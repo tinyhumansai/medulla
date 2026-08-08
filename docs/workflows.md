@@ -83,7 +83,9 @@ operator's project directory:
   `python`. `args.cwd` narrows the directory (the workspace root by default) and
   `args.env` adds environment variables as an object of strings.
 - `args.input` is handed to the script on stdin as JSON, and written to a file
-  at `argv[1]` and `$MEDULLA_INPUT`.
+  at `argv[1]` and `$MEDULLA_INPUT`. `$MEDULLA_WORKSPACE` names the run's
+  workspace, which is the checkout the caller pointed this run at — see
+  [Which checkout it works in](#which-checkout-it-works-in).
 - A non-zero exit fails the step, with the script's own stderr in the run
   record. A step that succeeds returns `{ output, stderr }`, where `output` is
   stdout parsed as JSON when it is JSON and a string otherwise.
@@ -209,6 +211,31 @@ capability stand-ins, with nothing dispatched.
 
 Every verb prints JSON and reads bulk input from stdin, so the command is usable
 by a person and by an agent without either being a special case.
+
+### Which checkout it works in
+
+A run's **workspace** is where its `medulla:shell` steps run, the root their
+`args.cwd` and `args.script_path` resolve inside, and the checkout every `agent`
+step's harness opens. It defaults to the directory the run was started from, and
+`--workspace` (or `workflow_run`'s `workspace` parameter) points it somewhere
+else:
+
+```sh
+medulla workflow run pr-babysitter --set pr=412 --workspace ~/work/other-repo
+```
+
+The path is absolute or relative to the current directory, `~` is expanded, and
+one that is not a directory on this host is refused before anything spawns —
+rather than falling back to the caller's own directory and working on the wrong
+repository. The resolved path lands on the run record's `origin.workspace`, so a
+run can always say which checkout it touched, and every script step reads it from
+`$MEDULLA_WORKSPACE`.
+
+This is deliberately a run parameter and not something a workflow declares. A
+workflow that took the checkout as an input could only ever *describe* it: a
+step's `args.cwd` may not leave the workspace (see [Configuration](#configuration)),
+so a path passed that way can only name somewhere already inside it. Write the
+graph as if it were standing in the repository, and let the caller say which one.
 
 ## Triggering one from your own harness
 
@@ -654,7 +681,9 @@ These guards are not configurable:
   symlinks are followed, so a link inside the workspace cannot point out of it.
   A host with no workspace configured refuses both, leaving `args.script`. This
   bounds *which file runs and where*; it is not a sandbox, and nothing bounds
-  what a script does once it has started.
+  what a script does once it has started. The workspace itself is whatever the
+  caller pointed the run at, so this bounds a step against a root chosen per run,
+  not against a fixed one.
 
 Workflow ids and run ids both become filenames and are validated as single path
 components before use: a document's `id` overrides the caller's, and a run id can

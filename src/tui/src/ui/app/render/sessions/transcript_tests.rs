@@ -386,6 +386,62 @@ fn selecting_a_run_points_the_workflow_state_at_it() {
 }
 
 #[test]
+fn the_pane_diff_says_which_checkout_it_is_reading() {
+    // The diff is the one surface where an operator acts on what they read, and
+    // two worktrees of one repository produce diffs that look alike and are
+    // not. The patch pane carries it, not the rail: the rail's title is where
+    // the way back to the harness lives, and a long repository name would push
+    // that hint off a narrow edge.
+    use crate::ui::app::changes::types::ChangedFile;
+    use crate::ui::app::types::PaneView;
+
+    let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
+    let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
+    app.changes.root = Some(std::path::PathBuf::from("/repo"));
+    app.changes.baseline = Some("baseline".to_owned());
+    app.changes.checkout = medulla::ui::checkout::Checkout {
+        repo: Some("medulla-public".into()),
+        worktree: Some("fix-login".into()),
+        branch: Some("fix/login".into()),
+        head: Some("a1b2c3d".into()),
+    };
+    app.changes.files = vec![ChangedFile {
+        status: "M".into(),
+        path: std::path::PathBuf::from("src/lib.rs"),
+        origins: Vec::new(),
+    }];
+    app.pane_view = PaneView::Diff;
+
+    let selection = Selection {
+        rows: Vec::new(),
+        active: 0,
+        lanes: Vec::new(),
+        lane_index: None,
+        task: None,
+        session: Some("live-session".to_owned()),
+        workflow_run: None,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(160, 20)).unwrap();
+    terminal
+        .draw(|frame| app.draw_sessions_pane(frame, Rect::new(0, 0, 160, 20), &selection))
+        .unwrap();
+    let output: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+
+    assert!(
+        output.contains("src/lib.rs · medulla-public ⑂ fix-login · fix/login"),
+        "{output}"
+    );
+    // And the way back is still on the rail, unshortened.
+    assert!(output.contains("d harness"), "{output}");
+}
+
+#[test]
 fn the_pane_diff_takes_the_harness_screens_real_estate() {
     // The swap is a tab switch inside one pane: the same rectangle that was
     // painting the terminal now paints the diff, titled with the way back. A
@@ -397,6 +453,9 @@ fn the_pane_diff_takes_the_harness_screens_real_estate() {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::empty());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
     app.changes.root = Some(std::path::PathBuf::from("/repo"));
+    // The app-start capture read this process's own checkout; the root above
+    // replaces it, so the checkout label has to be replaced with it.
+    app.changes.checkout = Default::default();
     app.changes.baseline = Some("baseline".to_owned());
     app.changes.files = vec![ChangedFile {
         status: "M".into(),

@@ -75,22 +75,11 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         return super::codex_server::run_codex_server_task(options).await;
     }
     if super::acp::uses_acp(&options) {
-        // ACP dispatch cannot carry Medulla hooks. Every other path injects them
-        // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*
-        // (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`)
-        // which spawns the harness itself, so there is no argv to add to. Claude
-        // Code's env-based settings paths were checked as an alternative and do
-        // not deliver hooks either. Say so rather than let the operator believe a
-        // configured hook is running.
-        let configured = options.hooks.for_provider(options.provider).len();
-        if configured > 0 {
-            tracing::warn!(
-                provider = options.provider.as_str(),
-                hooks = configured,
-                "medulla hooks are not installed for ACP dispatch: the harness CLI is \
-                 launched by the ACP server, not by Medulla",
-            );
-        }
+        // Hooks are installed inside `run_acp_task` rather than here. This path
+        // has no harness argv to add them to — Medulla spawns an ACP *server*
+        // which spawns the harness — so delivery is per-transport and belongs
+        // where the session request and the server's environment are built. See
+        // `crate::harness_hooks::acp`.
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;

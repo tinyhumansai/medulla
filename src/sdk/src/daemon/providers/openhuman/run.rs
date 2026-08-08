@@ -35,7 +35,7 @@ pub fn uses_embedded_core(options: &RunTaskOptions) -> bool {
 /// so a node pointed elsewhere would silently write to the wrong place while
 /// the run record reports the selection. Paths are canonicalized so a symlinked
 /// checkout still matches the canonical action directory.
-fn workspace_mismatch(cwd: &str, action_dir: &str) -> Option<String> {
+pub(super) fn workspace_mismatch(cwd: &str, action_dir: &str) -> Option<String> {
     let resolve = |path: &str| std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
     if resolve(cwd) == resolve(action_dir) {
         return None;

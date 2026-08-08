@@ -105,6 +105,17 @@ fn a_retained_session_asks_to_be_read_and_released() {
 }
 
 #[test]
+fn a_retained_session_that_failed_reports_the_failure() {
+    let mut row = lifecycle_row();
+    row.retained = true;
+    row.state = PtyState::Failed;
+    assert_eq!(
+        lifecycle_cue(&row, LIFECYCLE_NOW).expect("a cue").kind,
+        AttentionKind::Failed
+    );
+}
+
+#[test]
 fn a_screen_cue_does_not_outlive_the_child_that_painted_it() {
     let mut row = lifecycle_row();
     row.attention = Some(HarnessAttention::new(

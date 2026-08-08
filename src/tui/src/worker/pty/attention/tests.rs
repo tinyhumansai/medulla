@@ -396,6 +396,20 @@ fn a_continuation_that_describes_the_failure_is_not_recovery() {
     );
 }
 
+/// The final line of a completed turn can itself name an error marker while
+/// describing its resolution. The matched line is no more a live error than a
+/// continuation row is: "The invalid API key has been replaced." says the
+/// problem is over, so the idle session must not turn red.
+#[test]
+fn a_completed_turn_that_names_the_marker_is_not_a_live_error() {
+    for screen in [
+        "The invalid API key has been replaced.\n> ",
+        "Authentication failed, then succeeded on retry.\n> ",
+    ] {
+        assert_eq!(detect(HarnessProvider::Codex, screen), None, "{screen}");
+    }
+}
+
 /// A question outranks the error that prompted it: the harness recovered far
 /// enough to ask, and the question is the thing the operator can act on.
 #[test]

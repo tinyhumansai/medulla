@@ -184,14 +184,18 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         return None;
     }
     // An error is terminal only when the harness printed it and then went
-    // idle. Output below the error line that shows the harness kept going — a
-    // tool that echoed "authentication failed" and continued, the tail of a
-    // turn that completed anyway — proves the phrase was part of a turn's
-    // output, not the reason the harness stopped. A wrapped continuation of
-    // the error message itself is not such evidence: a narrow pane breaks
-    // "Your limit will reset at 3pm." onto its own row, and that row must not
-    // read as a recovered turn.
-    if tail[error_index + 1..]
+    // idle. The scan covers the matched line onward, because the matched line
+    // itself can be the final line of a completed turn that merely mentions
+    // the phrase — "The invalid API key has been replaced." names the marker
+    // and describes the resolution, so it is not a live error. Any line, the
+    // match or what follows it, that shows the harness kept going — a tool that
+    // echoed "authentication failed" and continued, the tail of a turn that
+    // completed anyway — proves the phrase was part of a turn's output, not the
+    // reason the harness stopped. A wrapped continuation of the error message
+    // itself is not such evidence: a narrow pane breaks "Your limit will reset
+    // at 3pm." onto its own row, and that row must not read as a recovered
+    // turn.
+    if tail[error_index..]
         .iter()
         .filter(|line| !is_composer(line))
         .any(|line| is_recovery_evidence(line))
@@ -224,8 +228,10 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
 /// a plain-prose continuation row that names no error marker. Such a row is
 /// layout, not recovery. Status lines, by contrast, are marked: they lead with
 /// an activity glyph (`✓ done`, `⏺ Working on it…`, `• Working (8s …)`) or say
-/// in words that the harness is working or finished — a completed action, which
-/// a wrapped error message never claims about itself.
+/// in words that the harness is working or finished. That also covers a line
+/// that mentions an error phrase while *describing* its resolution — "The
+/// invalid API key has been replaced." — which names a marker yet says the
+/// problem is over, the opposite of a terminal message.
 fn is_recovery_evidence(line: &str) -> bool {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
     if trimmed
@@ -244,6 +250,10 @@ fn is_recovery_evidence(line: &str) -> bool {
             "finished",
             "completed",
             "succeeded",
+            "replaced",
+            "resolved",
+            "fixed",
+            "recovered",
             "retried",
             "retrying",
         ]

@@ -337,6 +337,13 @@ fn an_error_does_not_resurface_after_a_successful_retry() {
     assert_eq!(detect(HarnessProvider::Codex, screen), None);
 }
 
+#[test]
+fn a_draft_error_phrase_does_not_revive_a_recovered_error() {
+    let screen = "Invalid API key\n› retry with the refreshed token\n✓ Retried successfully\n› explain invalid API key handling";
+
+    assert_eq!(detect(HarnessProvider::Codex, screen), None);
+}
+
 /// A question outranks the error that prompted it: the harness recovered far
 /// enough to ask, and the question is the thing the operator can act on.
 #[test]

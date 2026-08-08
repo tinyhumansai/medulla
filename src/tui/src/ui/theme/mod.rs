@@ -88,7 +88,12 @@ pub fn blink_ms_from_seconds(seconds: f64) -> u64 {
         return DEFAULT_BLINK_MS;
     }
     let ms = (seconds * 1_000.0).round();
-    (ms.clamp(MIN_BLINK_MS as f64, MAX_BLINK_MS as f64)) as u64
+    clamp_blink_ms(ms as u64)
+}
+
+/// Clamp an already-millisecond pulse duration to the supported range.
+pub fn clamp_blink_ms(ms: u64) -> u64 {
+    ms.clamp(MIN_BLINK_MS, MAX_BLINK_MS)
 }
 
 /// Render a pulse length back into the seconds the config is written in.

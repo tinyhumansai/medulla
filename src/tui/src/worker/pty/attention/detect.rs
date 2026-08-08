@@ -165,6 +165,9 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
     let tail_start = lines.len().saturating_sub(ERROR_TAIL_LINES);
     let tail = &lines[tail_start..];
     let error_index = tail.iter().rposition(|line| {
+        if is_composer(line) {
+            return false;
+        }
         let squashed = squash(line);
         ERRORS.iter().any(|(marker, _)| squashed.contains(marker))
     })?;

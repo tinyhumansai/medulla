@@ -226,7 +226,7 @@ impl App {
     /// state through the keyboard. `theme` stays private, as the rest of the
     /// app's state does, and this is the one door opened for that case.
     pub fn set_attention_blink_ms(&mut self, blink_ms: u64) {
-        self.theme.attention_blink_ms = blink_ms;
+        self.theme.attention_blink_ms = crate::ui::theme::clamp_blink_ms(blink_ms);
     }
 
     /// The active Settings subpage name. Test/inspection seam.

@@ -125,7 +125,7 @@ for the selected lane.
 ### What a harness row says it is doing
 
 The glyph at the head of a harness row is the whole state in one character, and
-two of the five move:
+three of the five move:
 
 | Glyph | State | Animation |
 | --- | --- | --- |

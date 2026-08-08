@@ -165,7 +165,12 @@ impl App {
             self.set_status("Favorites must point to an existing directory");
             return;
         }
-        let favorites = &mut self.loaded.config.harness.favorite_workspaces;
+        // Build the candidate list without touching the live one: persistence
+        // is the commit point, so a write failure must not leave a favorite in
+        // memory that the config file never recorded — the picker would then
+        // offer a save that is not there, and a later successful save could
+        // silently persist it.
+        let mut favorites = self.loaded.config.harness.favorite_workspaces.clone();
         favorites
             .retain(|favorite| !favorite.name.eq_ignore_ascii_case(name) && favorite.path != path);
         favorites.insert(
@@ -176,6 +181,7 @@ impl App {
             },
         );
         let Some(config_path) = &self.config_path else {
+            self.loaded.config.harness.favorite_workspaces = favorites;
             self.set_status(format!(
                 "Saved favorite {name} · this run only — no config file"
             ));
@@ -189,6 +195,7 @@ impl App {
             toml::Value::try_from(favorites.clone()).expect("favorite workspaces serialize"),
         ) {
             Ok(()) => {
+                self.loaded.config.harness.favorite_workspaces = favorites;
                 self.set_status(format!("Saved favorite {name} · {path}"));
                 self.refresh_harness_workspace_choices();
             }

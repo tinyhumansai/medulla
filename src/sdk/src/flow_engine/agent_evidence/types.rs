@@ -67,10 +67,11 @@ impl AgentEvidence {
     ///
     /// An empty transcript is still queued — as a placeholder rather than a
     /// dropped position. The queue is the Nth activation's slot:
-    /// [`attach_transcripts`](Self::attach_transcripts) pops one entry onto the
-    /// Nth step of the same node, so a dispatch that folded to nothing (only
-    /// status events, say) must keep its slot or every later transcript would
-    /// shift one step early and be misattributed to the wrong activation.
+    /// [`attach_transcripts`](Self::attach_transcripts) drains each step's
+    /// entries onto the Nth step of the same node, so a dispatch that folded to
+    /// nothing (only status events, say) must keep its slot or every later
+    /// transcript would shift one step early and be misattributed to the wrong
+    /// activation.
     pub(crate) fn record_transcript(&self, node_id: &str, transcript: Vec<TranscriptEntry>) {
         let mut transcripts = self.transcripts.lock().expect("agent evidence lock");
         let queue = transcripts.entry(node_id.to_string()).or_default();

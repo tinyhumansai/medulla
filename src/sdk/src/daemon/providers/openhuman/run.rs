@@ -1,5 +1,6 @@
 //! Executing one task as an in-process OpenHuman agent turn.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{json, Value};

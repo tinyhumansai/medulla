@@ -154,10 +154,9 @@ impl App {
                                     &format!("★ {label} · {}", choice.path),
                                     WORKSPACE_ROW_WIDTH,
                                 ),
-                                None => medulla::ui::util::clip_left(
-                                    &choice.path,
-                                    WORKSPACE_ROW_WIDTH,
-                                ),
+                                None => {
+                                    medulla::ui::util::clip_left(&choice.path, WORKSPACE_ROW_WIDTH)
+                                }
                             };
                             TLine::from(vec![
                                 Span::styled(format!("{marker}{display}"), style),

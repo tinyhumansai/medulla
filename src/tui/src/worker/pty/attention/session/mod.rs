@@ -19,6 +19,9 @@
 use super::super::types::{PtyState, SessionRow};
 use super::{AttentionKind, HarnessAttention};
 
+#[cfg(test)]
+mod tests;
+
 /// The cue this row's lifecycle warrants, ignoring anything on its screen.
 ///
 /// Returns `None` for the ordinary cases — running, or exited cleanly with

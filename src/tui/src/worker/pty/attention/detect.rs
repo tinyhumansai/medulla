@@ -184,18 +184,17 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         return None;
     }
     // An error is terminal only when the harness printed it and then went
-    // idle. Substantive output below the error line — a tool that echoed
-    // "authentication failed" and kept going, the tail of a turn that
-    // completed anyway — proves the phrase was part of a turn's output, not
-    // the reason the harness stopped. Continuation lines that themselves name
-    // an error stay part of the error screen.
+    // idle. Output below the error line that shows the harness kept going — a
+    // tool that echoed "authentication failed" and continued, the tail of a
+    // turn that completed anyway — proves the phrase was part of a turn's
+    // output, not the reason the harness stopped. A wrapped continuation of
+    // the error message itself is not such evidence: a narrow pane breaks
+    // "Your limit will reset at 3pm." onto its own row, and that row must not
+    // read as a recovered turn.
     if tail[error_index + 1..]
         .iter()
         .filter(|line| !is_composer(line))
-        .any(|line| {
-            let squashed = squash(line);
-            !ERRORS.iter().any(|(marker, _)| squashed.contains(marker))
-        })
+        .any(|line| is_recovery_evidence(line))
     {
         return None;
     }
@@ -214,6 +213,42 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         .iter()
         .find(|(marker, _)| tail.contains(marker))
         .map(|(_, what)| *what)
+}
+
+/// Whether a non-composer line below a matched error proves the harness went
+/// on — a live status/activity line rather than a wrapped continuation of the
+/// error text itself.
+///
+/// A terminal error message wraps in a narrow pane: "Claude usage limit
+/// reached. Your limit will reset at 3pm." can break after "reached", leaving
+/// a plain-prose continuation row that names no error marker. Such a row is
+/// layout, not recovery. Status lines, by contrast, are marked: they lead with
+/// an activity glyph (`✓ done`, `⏺ Working on it…`, `• Working (8s …)`) or say
+/// in words that the harness is working or finished — a completed action, which
+/// a wrapped error message never claims about itself.
+fn is_recovery_evidence(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    if trimmed
+        .chars()
+        .next()
+        .is_some_and(|first| PROGRESS_GLYPHS.contains(&first) || "✓⏺•".contains(first))
+    {
+        return true;
+    }
+    let squashed = squash(trimmed);
+    let lower = trimmed.to_lowercase();
+    WORKING.iter().any(|marker| squashed.contains(marker))
+        || [
+            "working",
+            "done",
+            "finished",
+            "completed",
+            "success",
+            "retried",
+            "retrying",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
 }
 
 /// Whether OpenCode drew its permission action menu.
@@ -483,6 +518,35 @@ fn has_yes_no(screen: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// The permission-marker cue when the menu carrying the marker is still live.
+///
+/// The markers are the option labels of each harness's permission menu, matched
+/// on squashed text so a wrap in a narrow pane cannot hide them. But a menu the
+/// operator already answered stays in scrollback above the restored composer,
+/// and a whole-screen search alone would keep matching its labels — recreating
+/// the approval cue after acknowledgement and leaving the row pulsing
+/// indefinitely. Binding the match to the live region below the last composer
+/// rejects those retained labels while keeping the wrap-tolerant whole-screen
+/// match for a menu with no composer beneath it (the active case).
+fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let live = match lines.iter().rposition(|line| is_composer(line)) {
+        // No composer anywhere means the harness is mid-menu: the whole screen
+        // is the live region.
+        None => &lines[..],
+        // A composer is the current idle prompt; anything below it is its own
+        // chrome, and everything above it is history that must not re-raise a
+        // cue the operator already answered.
+        Some(index) => &lines[index + 1..],
+    };
+    let squashed = squash(&live.join("\n"));
+    MARKERS
+        .iter()
+        .filter(|(candidate, ..)| *candidate == provider)
+        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
+        .map(|(_, _, kind, what)| (*kind, (*what).to_string()))
+}
+
 /// What `screen` says this harness is waiting for, if anything.
 ///
 /// Returns the cue *and* its wording; the caller stamps it with a time and
@@ -506,12 +570,8 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
     }
 
     let squashed = squash(screen);
-    if let Some((_, _, kind, what)) = MARKERS
-        .iter()
-        .filter(|(candidate, ..)| *candidate == provider)
-        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
-    {
-        return Some((*kind, (*what).to_string()));
+    if let Some(cue) = marker_cue(provider, screen) {
+        return Some(cue);
     }
     if provider == HarnessProvider::Claude && has_claude_plan_exit_menu(screen) {
         return Some((

@@ -241,6 +241,14 @@ fn a_retained_numbered_menu_above_the_composer_is_not_a_choice() {
     assert!(detect(HarnessProvider::Codex, screen).is_none());
 }
 
+/// A permission menu the operator already answered stays in scrollback above
+/// the restored composer; its marker labels must not recreate the approval cue.
+#[test]
+fn an_answered_permission_menu_above_an_idle_composer_is_not_an_approval() {
+    let screen = "  ❯ 1. Yes\n    2. Yes, and don't ask again\n    3. No, and tell Claude what to do\n  ✓ Ran the command\n  > ";
+    assert_eq!(detect(HarnessProvider::Claude, screen), None);
+}
+
 #[test]
 fn a_composer_caret_is_not_an_option() {
     // A caret with prose after it is a composer, which is what a harness shows
@@ -353,6 +361,23 @@ fn a_successful_turn_that_mentions_an_error_phrase_is_not_a_blocking_error() {
         "Invalid API key\nFinished in 2.1s\n> ",
     ] {
         assert_eq!(detect(HarnessProvider::Codex, screen), None, "{screen}");
+    }
+}
+
+/// A terminal error that wraps in a narrow pane is still terminal: the
+/// continuation row is part of the message, not evidence of a recovered turn.
+#[test]
+fn a_wrapped_blocking_error_is_still_blocking() {
+    for screen in [
+        "Claude usage limit reached.\nYour limit will reset at 3pm.\n> ",
+        "Invalid API key.\nPlease run /login to sign in again.\n> ",
+    ] {
+        let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+        assert_eq!(kind, AttentionKind::Error, "{screen}");
+        assert!(
+            what.contains("usage limit") || what.contains("sign-in"),
+            "{what}"
+        );
     }
 }
 

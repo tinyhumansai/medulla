@@ -59,8 +59,6 @@ mod session;
 mod types;
 
 #[cfg(test)]
-mod lifecycle_tests;
-#[cfg(test)]
 mod tests;
 
 pub use detect::{bell_cue, detect, is_working};

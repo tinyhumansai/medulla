@@ -2,13 +2,13 @@
 //!
 //! These cover [`super::lifecycle_cue`] and [`super::row_cue`]: the cues a row
 //! derives from a session's *life* (it died, or a dispatched turn finished)
-//! rather than from the screen it painted. Kept out of `tests.rs` so that file
-//! stays under the repository's 500-line ceiling.
+//! rather than from the screen it painted. Housed in this module's own
+//! canonical `tests.rs`, as the directory-module layout requires.
 
 use medulla::protocol::HarnessProvider;
 
-use super::super::types::{PtyState, SessionControl, SessionOrigin, SessionRow};
-use super::types::{AttentionKind, HarnessAttention};
+use super::super::super::types::{PtyState, SessionControl, SessionOrigin, SessionRow};
+use super::super::types::{AttentionKind, HarnessAttention};
 use super::{lifecycle_cue, row_cue};
 
 /// Epoch ms used for every lifecycle cue stamp, so elapsed times are exact.

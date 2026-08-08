@@ -319,10 +319,13 @@ fn has_live_working_marker(screen: &str) -> bool {
     for line in lines[tail_start..].iter().rev() {
         let squashed = squash(line);
         if WORKING.iter().any(|marker| squashed.contains(marker)) {
-            // Codex keeps its composer on screen while it works. Its active
-            // footer includes a live elapsed counter, unlike a stale bare
-            // interrupt hint in scrollback above an idle composer.
-            return !composer_below || (squashed.contains("working") && has_elapsed_timer(line));
+            // A working footer above a composer is stale only when it is bare.
+            // Codex keeps its composer on screen while it works, so its active
+            // footer — `• Working (8s • esc to interrupt)` — carries a live
+            // elapsed counter, and Claude's progress line (`✻ Reticulating
+            // splines… (12s · esc to interrupt)`) is shaped the same way. A
+            // retained interrupt hint in scrollback has no counter at all.
+            return !composer_below || has_elapsed_timer(line);
         }
         if is_composer(line) {
             composer_below = true;

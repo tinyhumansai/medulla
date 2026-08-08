@@ -175,3 +175,43 @@ fn arrowing_onto_a_completion_still_wins_over_the_typed_query() {
         "a deliberately chosen completion is still what Enter uses"
     );
 }
+
+#[test]
+fn saving_a_named_favorite_persists_it_and_makes_its_name_searchable() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    app.set_config_path(config.clone());
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    assert_eq!(app.loaded.config.harness.favorite_workspaces.len(), 1);
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].name,
+        "Daily Medulla"
+    );
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].path,
+        workspace.to_string_lossy()
+    );
+    assert!(std::fs::read_to_string(config)
+        .unwrap()
+        .contains("favoriteWorkspaces"));
+
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_query = "daily".into();
+    picker.workspace_picked = false;
+    app.refresh_harness_workspace_choices();
+    let choice = app
+        .session_picker
+        .as_ref()
+        .unwrap()
+        .workspace_choices
+        .first()
+        .unwrap();
+    assert_eq!(choice.label.as_deref(), Some("Daily Medulla"));
+    assert_eq!(choice.path, workspace.to_string_lossy());
+}

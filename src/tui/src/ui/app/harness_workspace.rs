@@ -296,7 +296,7 @@ impl App {
 }
 
 /// Match a saved name first, falling back to the directory path's normal score.
-fn workspace_match_score(path: &str, label: Option<&str>, query: &str) -> Option<usize> {
+pub(super) fn workspace_match_score(path: &str, label: Option<&str>, query: &str) -> Option<usize> {
     label
         .and_then(|label| match_score(label, query))
         .or_else(|| match_score(path, query))

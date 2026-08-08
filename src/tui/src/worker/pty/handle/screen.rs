@@ -89,13 +89,19 @@ impl SessionHandle {
             }
             modes.parser = parser;
         }
+        // Only update the thread name when the terminal title is non-empty.
+        // Codex does not emit OSC title escapes, so ordinary PTY output
+        // leaves the title empty and would otherwise erase a name that was
+        // discovered from the Codex session index.
         let thread_name = {
             let mut parser = lock(&self.screen);
             parser.process(bytes);
             let title = parser.screen().title().trim().to_string();
             (!title.is_empty()).then_some(title)
         };
-        lock(&self.cold).thread_name = thread_name;
+        if let Some(name) = thread_name {
+            lock(&self.cold).thread_name = Some(name);
+        }
     }
 
     /// Move the emulator's scrollback by `rows`, towards the history when `up`.

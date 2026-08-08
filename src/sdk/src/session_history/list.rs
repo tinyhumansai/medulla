@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use super::scan::{
     claude_sessions_dir, codex_sessions_dir, collect_session_files, is_here, safe_resolve,
 };
-use super::summary::{codex_thread_label, read_session_summary};
+use super::summary::{codex_index_map, read_session_summary};
 use super::types::{RawSessionFile, RecentSession, SessionAgentKind};
 
 /// Default number of ranked sessions returned when no limit is given.
@@ -43,6 +43,10 @@ pub fn list_recent_sessions(
     raw.truncate(scan_limit);
 
     let here = safe_resolve(cwd);
+    // Load the Codex session index once into an id-to-label map so
+    // every session below does not re-parse the index file on each call.
+    let codex_labels = codex_index_map(env);
+
     // Dedupe by agent+id, keeping the freshest file.
     let mut by_id: HashMap<String, RecentSession> = HashMap::new();
     for file in &raw {
@@ -57,7 +61,10 @@ pub fn list_recent_sessions(
             }
         }
         let label = if file.agent == SessionAgentKind::Codex {
-            codex_thread_label(env, &summary.id).unwrap_or(summary.label)
+            codex_labels
+                .get(&summary.id)
+                .cloned()
+                .unwrap_or(summary.label)
         } else {
             summary.label
         };

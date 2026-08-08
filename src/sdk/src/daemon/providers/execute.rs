@@ -429,12 +429,22 @@ async fn run_provider_attempt(
                 // stderr arrives on its own task, so it cannot push the deadline
                 // out directly; the deadline firing is where it is claimed. A
                 // beat since the deadline was armed means the child spoke during
-                // the window and is not idle — re-arm rather than kill.
+                // the window and is not idle.
                 let beat = stderr_beat.load(Ordering::Relaxed);
                 if beat != seen_stderr {
                     seen_stderr = beat;
-                    deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
-                    continue;
+                    // Re-arm from the beat's *own* timestamp, not from now: a
+                    // beat may have gone stale while stdout kept pushing the
+                    // window out, and a stale beat must not grant the child a
+                    // second full timeout once it finally hangs. If even the
+                    // beat's window has lapsed, the child is idle after all.
+                    let beat_deadline = beat_base
+                        + Duration::from_micros(beat)
+                        + Duration::from_millis(spec.timeout_ms);
+                    if beat_deadline > Instant::now() {
+                        deadline = beat_deadline;
+                        continue;
+                    }
                 }
                 let _ = child.start_kill();
                 let _ = child.wait().await;

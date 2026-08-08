@@ -1,5 +1,6 @@
 //! Unit-test fixtures and focused coverage for the Sessions rail.
 
+mod task_row_tests;
 mod workflow_run_tests;
 mod wrap_tests;
 

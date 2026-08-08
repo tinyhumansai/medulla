@@ -97,7 +97,7 @@ impl App {
             RailRow::WorkflowRun(run) => self.workflow_run_line(run, active, now),
             RailRow::Session(session) => match (&session.task, &session.local) {
                 (Some(task), _) => {
-                    self.task_session_line(task, session.last, active, waiting_sessions)
+                    self.task_session_line(task, session.last, active, waiting_sessions, now)
                 }
                 (None, Some(local)) => self
                     .own_session_lines(local, active, super::RAIL_MAX_CONTENT, now)
@@ -243,16 +243,32 @@ impl App {
         last: bool,
         active: bool,
         waiting_sessions: &HashSet<String>,
+        now: i64,
     ) -> TLine<'static> {
         let branch = if last { "└" } else { "├" };
-        let needs_input = self.task_attention(&task.task_id, waiting_sessions);
+        let cue = self.task_attention_cue(&task.task_id, waiting_sessions, now);
+        let failed = cue.as_ref().is_some_and(|cue| cue.kind.is_failure());
+        // Only a cue that blocks counts as waiting. The waiting-set was built
+        // from blocking cues, but the recomputed cue can have shifted to a
+        // non-blocking one (a prompt answered, a turn settled) by the time the
+        // row is drawn; a `Completed` retention is not "needs input".
+        let waiting = cue.as_ref().is_some_and(|cue| cue.kind.blocks());
         let mut style = if active {
             self.theme.selection()
         } else {
             Style::default()
         };
-        if needs_input {
-            let pulse = self.theme.pulse(self.theme.attention, self.frame);
+        if waiting {
+            // A harness that died is bad news and draws red, exactly as every
+            // other failed-session surface draws it; anything else the harness
+            // is waiting on keeps the configured attention colour. The two are
+            // told apart before either is read.
+            let colour = if failed {
+                color("red")
+            } else {
+                self.theme.attention
+            };
+            let pulse = self.theme.pulse(colour, self.frame);
             style = if active {
                 // Preserve the selected-row background while letting the
                 // waiting state pulse its foreground and cadence.
@@ -261,18 +277,22 @@ impl App {
                 pulse
             };
         }
-        let status_style = if active || needs_input {
+        let status_style = if active || waiting {
             style
         } else {
             style.fg(color(task.status.color()))
         };
-        let status = if needs_input {
+        let status = match &cue {
+            // A harness that died is not "needs input": nothing a person can
+            // type will bring it back, and the generic waiting label would hide
+            // the explanation this row is the only surface left to give. Say
+            // what failed and how long ago, like the operator-owned rows do.
+            Some(cue) if failed => cue.label(now),
             // The one state the task's own status cannot express: the harness
             // has stopped on something only a person can answer, which the
             // backend never sees and so never reports.
-            NEEDS_INPUT_LABEL
-        } else {
-            task.status.label()
+            Some(_) => NEEDS_INPUT_LABEL.to_string(),
+            None => task.status.label().to_string(),
         };
         let chip = task
             .work
@@ -291,7 +311,7 @@ impl App {
             .unwrap_or_default();
         TLine::from(vec![
             Span::styled(format!("   {branch} {} · ", task.task_id), style),
-            Span::styled(status.to_string(), status_style),
+            Span::styled(status, status_style),
             Span::styled(format!("{chip}{title}"), style),
         ])
     }

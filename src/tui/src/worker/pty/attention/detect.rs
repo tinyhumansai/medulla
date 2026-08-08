@@ -587,7 +587,7 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         return Some((AttentionKind::Dialog, dialog.what.to_string()));
     }
 
-    let squashed = squash(screen);
+    let squashed = live_region_squash(screen);
     if let Some(cue) = marker_cue(provider, screen) {
         return Some(cue);
     }

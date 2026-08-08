@@ -1,9 +1,9 @@
-//! The Sessions rail's row taxonomy: `Host → Session`.
+//! The Sessions rail's row taxonomy: `Host → Group → Session`.
 //!
-//! One shape for the whole tree. A row is a host, one session running on it, a
-//! workflow run that session started, or one of the two controls — the action
-//! that opens a session, and the paging control for a lane whose sessions the
-//! fold hid.
+//! One shape for the whole tree. A row is a host, a grouping heading, one
+//! session running on it, a workflow run that session started, or one of the
+//! two controls — the action that opens a session, and the paging control for a
+//! lane whose sessions the fold hid.
 //!
 //! Two levels have been removed since. `AgentRow::Sub` rendered a *task* and
 //! `RailRow::Harness` a *session*, in two groups separated by a
@@ -62,6 +62,13 @@ pub struct HostRailRow {
     pub local: bool,
 }
 
+/// A section heading when sessions are grouped by workspace or harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRailRow {
+    /// The workspace or harness shared by the sessions below this heading.
+    pub label: String,
+}
+
 /// One agent — `harness × workspace` on a host — resolved but never rendered.
 ///
 /// The rail groups sessions by agent and takes each session's lane from the
@@ -88,6 +95,71 @@ pub struct AgentRailRow {
     /// The lane the event fold produced for it, when it has traffic. `None` for
     /// a declared agent that has not run anything.
     pub lane_index: Option<usize>,
+}
+
+/// One agent and its sessions before grouping and sorting flatten the rail.
+#[derive(Debug, Clone)]
+pub(super) struct AgentGroup {
+    /// The resolved agent identity.
+    pub(super) row: AgentRailRow,
+    /// Sessions belonging to the agent.
+    pub(super) sessions: Vec<SessionRailRow>,
+    /// Latest lane activity, including peer-lane activity without a task row.
+    pub(super) last_at: i64,
+    /// Display label supplied by a lane-only peer agent.
+    pub(super) lane_label: Option<String>,
+    /// Harness label supplied by a lane-only peer agent.
+    pub(super) harness_label: Option<String>,
+    /// Number of task-backed sessions currently revealed by the lane pager.
+    pub(super) visible_tasks: usize,
+    /// Sessions hidden by the fold's paging boundary.
+    pub(super) hidden: usize,
+    /// Whether the fold supplied an overflow control for this group.
+    pub(super) overflow: bool,
+}
+
+impl AgentGroup {
+    /// The ordering label, preferring a peer lane's display label when needed.
+    pub(super) fn label(&self) -> String {
+        if self.row.agent.is_some() {
+            self.row.label()
+        } else {
+            self.lane_label
+                .clone()
+                .filter(|label| !label.trim().is_empty())
+                .unwrap_or_else(|| self.row.label())
+        }
+    }
+}
+
+/// One host and its resolved agents before the rail is flattened.
+#[derive(Debug, Clone)]
+pub(super) struct HostGroup {
+    /// The host header.
+    pub(super) row: HostRailRow,
+    /// Agents that belong to the host.
+    pub(super) agents: Vec<AgentGroup>,
+}
+
+impl AgentRailRow {
+    /// The resolved display label, falling back to the stable agent id.
+    pub fn label(&self) -> String {
+        self.agent
+            .as_ref()
+            .map(|agent| agent.label.clone())
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| self.agent_id.clone())
+    }
+
+    /// The declared harness, when the shared host projection knows it.
+    pub fn harness(&self) -> Option<&str> {
+        self.agent.as_ref()?.harness.as_deref()
+    }
+
+    /// The declared workspace, when the shared host projection knows it.
+    pub fn workspace(&self) -> Option<&str> {
+        self.agent.as_ref()?.workspace.as_deref()
+    }
 }
 
 /// One session of an agent — **one row type, whatever started it**.
@@ -163,6 +235,8 @@ pub struct WorkflowRunRailRow {
 pub enum RailRow {
     /// A host header, emitted only once a remote host exists.
     Host(HostRailRow),
+    /// A workspace or harness grouping header.
+    Group(GroupRailRow),
     /// One session running on the host above it.
     ///
     /// Boxed because a session row carries both a whole [`TaskState`] and a
@@ -201,7 +275,7 @@ impl RailRow {
     /// Whether the cursor may land on this row.
     pub fn selectable(&self) -> bool {
         match self {
-            RailRow::Host(_) => false,
+            RailRow::Host(_) | RailRow::Group(_) => false,
             RailRow::Session(_) => true,
             RailRow::NewSession => true,
             // Selectable so `Enter` can open the workflow it belongs to; the
@@ -253,7 +327,10 @@ impl RailRow {
         match self {
             RailRow::Session(row) => row.lane_index,
             RailRow::Overflow { lane_index, .. } => Some(*lane_index),
-            RailRow::Host(_) | RailRow::NewSession | RailRow::WorkflowRun(_) => None,
+            RailRow::Host(_)
+            | RailRow::Group(_)
+            | RailRow::NewSession
+            | RailRow::WorkflowRun(_) => None,
         }
     }
 

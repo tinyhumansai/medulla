@@ -6,11 +6,13 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::ui::agents::AgentLane;
 use crate::ui::util::{slug, SPINNER};
 use crate::worker::pty::{
     AttentionKind, HarnessAttention, PtyState, SessionControl, SessionRow, ATTENTION_GLYPH,
 };
 
+use super::super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
 use super::super::super::super::types::App;
 use super::super::super::color;
 use super::harness_line;
@@ -26,6 +28,102 @@ const SESSION_TITLE_MAX_CELLS: usize = 48;
 
 /// What a row says when its harness is blocked on the operator.
 const NEEDS_INPUT_LABEL: &str = "needs input";
+
+impl App {
+    /// Render a rail row as the lines it occupies, wrapped to `width`.
+    pub(super) fn rail_row_lines(
+        &self,
+        row: &RailRow,
+        lanes: &[AgentLane],
+        active: bool,
+        width: usize,
+        waiting_sessions: &HashSet<String>,
+        now: i64,
+    ) -> Vec<TLine<'static>> {
+        match row {
+            RailRow::Session(session) if session.task.is_none() => {
+                let Some(local) = &session.local else {
+                    return Vec::new();
+                };
+                let mut lines = Vec::new();
+                if let Some(name) = session.name() {
+                    let style = if active {
+                        self.theme.selection()
+                    } else {
+                        Style::default().fg(color("cyan"))
+                    };
+                    lines.extend(wrap_line(
+                        &TLine::from(Span::styled(format!("  {name}"), style)),
+                        width,
+                        CONT_INDENT,
+                    ));
+                }
+                lines.extend(self.own_session_lines(local, active, width, now));
+                lines
+            }
+            other => wrap_line(
+                &self.rail_row_line(other, lanes, active, waiting_sessions, now),
+                width,
+                CONT_INDENT,
+            ),
+        }
+    }
+
+    /// Format one single-line rail row.
+    pub(super) fn rail_row_line(
+        &self,
+        row: &RailRow,
+        lanes: &[AgentLane],
+        active: bool,
+        waiting_sessions: &HashSet<String>,
+        now: i64,
+    ) -> TLine<'static> {
+        let _ = lanes;
+        match row {
+            RailRow::Host(host) => TLine::from(Span::styled(
+                format!("▸ {}", host.label),
+                Style::default()
+                    .fg(color("blue"))
+                    .add_modifier(Modifier::BOLD),
+            )),
+            RailRow::Group(group) => TLine::from(Span::styled(
+                format!("▸ {}", group.label),
+                Style::default()
+                    .fg(color("blue"))
+                    .add_modifier(Modifier::BOLD),
+            )),
+            RailRow::NewSession => self.new_session_line(active),
+            RailRow::Overflow { hidden, .. } => self.overflow_line(*hidden, active),
+            RailRow::WorkflowRun(run) => self.workflow_run_line(run, active, now),
+            RailRow::Session(session) => match (&session.task, &session.local) {
+                (Some(task), _) => {
+                    self.task_session_line(task, session.last, active, waiting_sessions)
+                }
+                (None, Some(local)) => self
+                    .own_session_lines(local, active, super::RAIL_MAX_CONTENT, now)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default(),
+                (None, None) => TLine::from(""),
+            },
+        }
+    }
+
+    /// Format the `+ New session` action row at the top of the rail.
+    fn new_session_line(&self, active: bool) -> TLine<'static> {
+        let style = if active {
+            self.theme.selection()
+        } else {
+            Style::default()
+                .fg(color("cyan"))
+                .add_modifier(Modifier::BOLD)
+        };
+        TLine::from(vec![
+            Span::styled(format!(" {NEW_SESSION_LABEL} "), style),
+            Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
+        ])
+    }
+}
 
 impl App {
     /// Format one operator-started harness using the configured status-line layout.

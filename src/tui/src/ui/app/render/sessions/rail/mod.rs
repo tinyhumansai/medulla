@@ -8,17 +8,16 @@
 //! says rather than how it is laid out across columns.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line as TLine, Span, Text};
+use ratatui::style::Style;
+use ratatui::text::{Line as TLine, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::ui::agents::{AgentLane, TaskStatus};
 use crate::worker::pty::ATTENTION_GLYPH;
 
-use super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
+use super::super::super::rail::RailRow;
 use super::super::super::types::{App, RailHit};
-use super::super::color;
 use super::types::{Selection, SessionsPanes};
 
 mod device_footer;
@@ -35,7 +34,6 @@ mod wrap;
 
 use types::DeviceFooter;
 pub(super) use workflow_run::workflow_run_elapsed;
-use wrap::wrap_line;
 
 /// The most content columns the Sessions rail ever takes.
 ///
@@ -196,115 +194,6 @@ impl App {
         let mut view: Vec<TLine> = lines.into_iter().skip(start).take(capacity).collect();
         device_footer.append_to(&mut view, Style::default().fg(self.theme.accent));
         f.render_widget(Paragraph::new(Text::from(view)), inner);
-    }
-
-    /// One row per open thread, with its running/attention badges. Built apart
-    /// Render one rail row as the lines it occupies, wrapped to `width`.
-    ///
-    /// A row is not always one line: an operator's own session carries a name
-    /// above its status line, and either can wrap. Continuations are indented so
-    /// a row that took two lines still reads as one row.
-    pub(super) fn rail_row_lines(
-        &self,
-        row: &RailRow,
-        lanes: &[AgentLane],
-        active: bool,
-        width: usize,
-        waiting_sessions: &std::collections::HashSet<String>,
-        now: i64,
-    ) -> Vec<TLine<'static>> {
-        match row {
-            // A session this device runs and no task describes is the operator's
-            // own: it gets the multi-line status-line treatment, because its
-            // working directory is the only thing telling two of them apart.
-            //
-            // A name goes above that rather than into it. The status line is
-            // configurable and describes the *harness*; the name is what the
-            // person who opened the session called it, and it is the first thing
-            // they look for.
-            RailRow::Session(session) if session.task.is_none() => {
-                let Some(local) = &session.local else {
-                    return Vec::new();
-                };
-                let mut lines = Vec::new();
-                if let Some(name) = session.name() {
-                    let style = if active {
-                        self.theme.selection()
-                    } else {
-                        Style::default().fg(color("cyan"))
-                    };
-                    lines.extend(wrap_line(
-                        &TLine::from(Span::styled(format!("  {name}"), style)),
-                        width,
-                        CONT_INDENT,
-                    ));
-                }
-                lines.extend(self.own_session_lines(local, active, width, now));
-                lines
-            }
-            other => wrap_line(
-                &self.rail_row_line(other, lanes, active, waiting_sessions, now),
-                width,
-                CONT_INDENT,
-            ),
-        }
-    }
-
-    /// Format one single-line rail row.
-    pub(super) fn rail_row_line(
-        &self,
-        row: &RailRow,
-        lanes: &[AgentLane],
-        active: bool,
-        waiting_sessions: &std::collections::HashSet<String>,
-        now: i64,
-    ) -> TLine<'static> {
-        let _ = lanes;
-        match row {
-            RailRow::Host(host) => TLine::from(Span::styled(
-                format!("▸ {}", host.label),
-                Style::default()
-                    .fg(color("blue"))
-                    .add_modifier(Modifier::BOLD),
-            )),
-            RailRow::NewSession => self.new_session_line(active),
-            RailRow::Overflow { hidden, .. } => self.overflow_line(*hidden, active),
-            RailRow::WorkflowRun(run) => self.workflow_run_line(run, active, now),
-            RailRow::Session(session) => match (&session.task, &session.local) {
-                (Some(task), _) => {
-                    self.task_session_line(task, session.last, active, waiting_sessions)
-                }
-                // Only reached through `rail_row_lines`, which draws a local
-                // session over several lines; kept total so measurement can call
-                // either.
-                (None, Some(local)) => self
-                    .own_session_lines(local, active, RAIL_MAX_CONTENT, now)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_default(),
-                (None, None) => TLine::from(""),
-            },
-        }
-    }
-
-    /// Format the `+ New session` action row at the top of the rail.
-    ///
-    /// Drawn as a button rather than as another list entry — bold and coloured,
-    /// with its chord beside it — because it is the one row on the rail that
-    /// *does* something rather than selecting something. It is no longer a leaf
-    /// of an agent's group, so it takes the top level and loses the `└`.
-    fn new_session_line(&self, active: bool) -> TLine<'static> {
-        let style = if active {
-            self.theme.selection()
-        } else {
-            Style::default()
-                .fg(color("cyan"))
-                .add_modifier(Modifier::BOLD)
-        };
-        TLine::from(vec![
-            Span::styled(format!(" {NEW_SESSION_LABEL} "), style),
-            Span::styled(" ⏎ / ^T", Style::default().add_modifier(Modifier::DIM)),
-        ])
     }
 }
 

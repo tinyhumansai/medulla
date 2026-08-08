@@ -35,7 +35,7 @@ pub(in crate::ui::app) fn rail_anchor(row: &RailRow, lanes: &[AgentLane]) -> Opt
         RailRow::Overflow { lane_index, .. } => lanes
             .get(*lane_index)
             .map(|lane| RailAnchor::Overflow(lane.key.clone())),
-        RailRow::Host(_) => None,
+        RailRow::Host(_) | RailRow::Group(_) => None,
     }
 }
 
@@ -53,6 +53,18 @@ pub(in crate::ui::app) fn resolve_rail_cursor(
         .and_then(|anchor| {
             rows.iter()
                 .position(|row| rail_anchor(row, lanes).as_ref() == Some(anchor))
+        })
+        // Retaining a task can consume the final hidden row. In that case the
+        // overflow anchor cannot be retained, but resolving by its old offset
+        // would select the newly revealed task. Relocate to the lane's first
+        // remaining row instead, which is stable as sessions appear beneath it.
+        .or_else(|| match anchor {
+            Some(RailAnchor::Overflow(lane)) => rows.iter().position(|row| {
+                row.lane_index()
+                    .and_then(|index| lanes.get(index))
+                    .is_some_and(|candidate| candidate.key == *lane)
+            }),
+            _ => None,
         })
         .unwrap_or_else(|| fallback.min(rows.len() - 1))
 }

@@ -83,6 +83,39 @@ fn an_overflow_anchor_uses_its_lanes_stable_key() {
 }
 
 #[test]
+fn a_removed_overflow_anchor_relocates_to_its_lanes_first_session() {
+    let lanes = vec![lane("builder")];
+    let task = |id: &str| {
+        RailRow::Session(Box::new(SessionRailRow {
+            agent_id: Some("builder".to_string()),
+            lane_index: Some(0),
+            task: Some(TaskState {
+                task_id: id.to_string(),
+                status: TaskStatus::Running,
+                turns: 0,
+                last_at: 0,
+                turn_blocks: Vec::new(),
+                attention: None,
+                question_id: None,
+                work: None,
+            }),
+            local: None,
+            last: false,
+        }))
+    };
+
+    assert_eq!(
+        resolve_rail_cursor(
+            &[RailRow::NewSession, task("first"), task("retained")],
+            &lanes,
+            Some(&RailAnchor::Overflow("builder".to_string())),
+            2,
+        ),
+        1,
+    );
+}
+
+#[test]
 fn a_task_anchor_survives_local_pty_enrichment() {
     let lanes = vec![lane("builder")];
     let task = TaskState {

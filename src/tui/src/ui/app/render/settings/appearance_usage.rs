@@ -11,7 +11,7 @@ use crate::ui::stream;
 use crate::ui::theme::{blink_seconds, color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
-use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS};
+use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS, SIDEBAR_GROUPING_OPTION};
 use super::super::super::types::App;
 
 impl App {
@@ -195,6 +195,49 @@ impl App {
                 ),
                 style,
             )));
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled("Agents sidebar", heading)));
+        lines.push(TLine::from(Span::styled(
+            "  How the sidebar sections its agents, and what order rows come in.",
+            description,
+        )));
+        lines.push(TLine::from(""));
+        for (offset, (label, value, hint)) in [
+            (
+                "Group by",
+                self.loaded.config.appearance.sidebar_grouping.label(),
+                "host · path · harness · none",
+            ),
+            (
+                "Sort by",
+                self.loaded.config.appearance.sidebar_sort.label(),
+                "created · recent · name",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let index = THEME_ROLES.len() + ATTENTION_ROWS + SIDEBAR_GROUPING_OPTION + offset;
+            if index == sel {
+                selected_line_index = lines.len();
+            }
+            let style = if index == sel {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            let marker = if index == sel { "  ▸ " } else { "    " };
+            lines.push(TLine::from(vec![
+                Span::styled(format!("{marker}{label:<20} {value:<10}"), style),
+                // The other rows on this page cycle between two or three states
+                // an operator can guess at; these cycle between four named ones,
+                // and a row reading only "path" gives no clue what else there is.
+                Span::styled(
+                    hint.to_string(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+            ]));
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(

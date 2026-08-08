@@ -8,9 +8,9 @@ use std::sync::Arc;
 use medulla::config::LoadedConfig;
 use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
-use medulla::runtime::{AgentDeclaration, Runtime};
+use medulla::runtime::{AgentDeclaration, Runtime, WorkerInfo};
 
-use super::{RailRow, NEW_SESSION_LABEL};
+use super::{AgentGroup, AgentRailRow, GroupRailRow, RailRow, NEW_SESSION_LABEL};
 use crate::ui::app::App;
 use crate::worker::pty::PtyManager;
 
@@ -114,6 +114,39 @@ fn the_sessions_of_one_agent_stay_contiguous() {
     assert!(
         !seen.is_empty(),
         "the demo fixture dispatches at least one task"
+    );
+}
+
+#[test]
+fn empty_grouped_sections_do_not_emit_a_header() {
+    let rows = app().flatten(
+        vec![super::organize::Section {
+            header: super::organize::SectionHeader::Group(GroupRailRow {
+                label: "/quiet".to_string(),
+            }),
+            agents: vec![AgentGroup {
+                row: AgentRailRow {
+                    agent_id: "quiet".to_string(),
+                    host_id: String::new(),
+                    agent: None,
+                    lane_index: None,
+                },
+                sessions: Vec::new(),
+                last_at: 0,
+                lane_label: None,
+                harness_label: None,
+                visible_tasks: 0,
+                hidden: 0,
+                overflow: false,
+            }],
+        }],
+        Vec::new(),
+        &[],
+    );
+
+    assert!(
+        !rows.iter().any(|row| matches!(row, RailRow::Group(_))),
+        "a group without a rendered session must not leave an empty heading"
     );
 }
 
@@ -234,8 +267,28 @@ fn a_session_in_an_undeclared_directory_is_still_listed() {
 }
 
 #[test]
-fn host_rows_appear_only_once_a_second_host_exists() {
-    let mut app = app();
+fn the_host_tree_keeps_a_second_declared_host() {
+    let runtime = MockRuntime::empty();
+    runtime.set_workers(vec![WorkerInfo {
+        id: "studio-claude".into(),
+        address: "studio".into(),
+        handle: None,
+        label: None,
+        harness: Some("claude".into()),
+        workspace: Some("/work".into()),
+        peer_id: None,
+        cpu_cores: None,
+        memory_total_bytes: None,
+        memory_available_bytes: None,
+        ip_address: None,
+        selected: false,
+        roles: Vec::new(),
+        budgets: Vec::new(),
+        readiness: Vec::new(),
+    }]);
+    let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
+    loaded.config.link = Some(medulla::config::LinkConfig::default());
+    let mut app = App::new(Arc::new(runtime), loaded);
     app.loaded.config.fleet.agent_declarations =
         vec![AgentDeclaration::new("local-claude", "", "claude", "/work")];
     assert!(
@@ -256,20 +309,21 @@ fn host_rows_appear_only_once_a_second_host_exists() {
             "/work",
         ));
     let hosts: Vec<(String, bool)> = app
-        .rail_rows()
+        .host_tree()
         .into_iter()
-        .filter_map(|row| match row {
-            RailRow::Host(host) => Some((host.host_id, host.local)),
-            _ => None,
-        })
+        .map(|host| (host.id, host.kind == medulla::ui::hosts::HostKind::Local))
         .collect();
     assert!(
         hosts.iter().any(|(host_id, _)| host_id == "studio"),
-        "the second machine gets a header: {hosts:?}"
+        "the second declared machine stays in the shared tree: {hosts:?}"
+    );
+    assert!(
+        hosts.iter().any(|(_, is_local)| *is_local),
+        "the local machine remains in the shared tree: {hosts:?}"
     );
     assert!(
         hosts.len() >= 2,
-        "so does this one, once there is a second: {hosts:?}"
+        "the local and second declared machines both remain: {hosts:?}"
     );
     let local = app.local_host_refs();
     assert_eq!(
@@ -311,7 +365,7 @@ fn a_row_answers_for_the_lane_behind_it() {
             }
             // The host header and the action row are about no lane and no
             // session.
-            RailRow::Host(_) | RailRow::NewSession => {
+            RailRow::Host(_) | RailRow::Group(_) | RailRow::NewSession => {
                 assert_eq!(row.lane_index(), None);
                 assert_eq!(row.session_id(), None);
                 assert!(row.task().is_none());
@@ -342,7 +396,9 @@ fn only_the_rows_that_name_something_take_the_cursor() {
     )];
     for row in app.rail_rows() {
         match row {
-            RailRow::Host(_) => assert!(!row.selectable(), "a host header is a label"),
+            RailRow::Host(_) | RailRow::Group(_) => {
+                assert!(!row.selectable(), "a section header is a label")
+            }
             RailRow::Session(_)
             | RailRow::NewSession
             | RailRow::WorkflowRun(_)

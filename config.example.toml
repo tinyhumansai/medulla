@@ -273,10 +273,33 @@ tokenEnv = "MEDULLA_TOKEN"
 # attentionBlink = true         # false holds those cues steady and bright
 # attentionBlinkSeconds = 1.0   # one full pulse; clamped to 0.2–10.0
 
-# Legacy harness-row toggles, kept so an older config keeps working. They are
-# read only when [statusLine] below is absent, in which case `false` means that
-# field is hidden. Settings › Status line writes [statusLine] and takes over.
+# ---------------------------------------------------------------------------
+# appearance — how the Agents sidebar arranges itself, plus the legacy
+# harness-row toggles. Settings › Appearance edits all of these live.
+#
+# sidebarGrouping picks what heads the sidebar's sections:
+#   "host"     one section per machine, drawn only once a second host exists
+#              (the default)
+#   "path"     one per workspace directory, so a checkout's agents read together
+#   "harness"  one per coding-agent CLI
+#   "none"     one flat list, no headers
+#
+# sidebarSort orders the agents in a section and the sessions under an agent:
+#   "created"  declaration order for agents, oldest-first for sessions (default)
+#   "recent"   most recently active first
+#   "name"     alphabetical
+#
+# Grouping only moves the headers: every agent keeps its own sessions, so no row
+# disappears whichever way these are set.
+#
+# showHarnessBranch/showHarnessPath are legacy, kept so an older config keeps
+# working. They are read only when [statusLine] below is absent, in which case
+# `false` means that field is hidden. Settings › Status line writes
+# [statusLine] and takes over.
+# ---------------------------------------------------------------------------
 # [appearance]
+# sidebarGrouping = "host"
+# sidebarSort = "created"
 # showHarnessBranch = true
 # showHarnessPath = true
 

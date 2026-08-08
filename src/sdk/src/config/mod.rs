@@ -40,7 +40,7 @@ pub use agent_declarations::{
     agent_declaration, agent_declarations_for_host, declare_agent, declared_agent_ids,
     load_agent_declarations, remove_agent_declaration, undeclare_agent, upsert_agent_declaration,
 };
-pub use appearance::{AppearanceConfig, ResourceDisplay};
+pub use appearance::{AppearanceConfig, ResourceDisplay, SidebarGrouping, SidebarSort};
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use custom_harnesses::{
     load_custom_harnesses, load_layered_custom_harnesses, CustomHarnessConfig,

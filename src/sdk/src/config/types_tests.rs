@@ -60,6 +60,30 @@ fn appearance_session_titles_can_be_hidden() {
 }
 
 #[test]
+fn sidebar_layout_defaults_to_the_tree_in_declaration_order() {
+    let cfg: TuiConfig = serde_json::from_str("{}").unwrap();
+
+    assert_eq!(
+        cfg.appearance.sidebar_grouping,
+        super::SidebarGrouping::Host
+    );
+    assert_eq!(cfg.appearance.sidebar_sort, super::SidebarSort::Created);
+}
+
+#[test]
+fn sidebar_layout_parses_the_operators_choice() {
+    let cfg: TuiConfig =
+        serde_json::from_str(r#"{"appearance":{"sidebarGrouping":"path","sidebarSort":"recent"}}"#)
+            .unwrap();
+
+    assert_eq!(
+        cfg.appearance.sidebar_grouping,
+        super::SidebarGrouping::Path
+    );
+    assert_eq!(cfg.appearance.sidebar_sort, super::SidebarSort::Recent);
+}
+
+#[test]
 fn appearance_harness_details_parse_independently() {
     let cfg: TuiConfig = serde_json::from_str(
         r#"{"appearance":{"showHarnessBranch":false,"showHarnessPath":true}}"#,

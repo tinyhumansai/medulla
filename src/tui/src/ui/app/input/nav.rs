@@ -8,7 +8,9 @@
 
 use super::super::rail::RailRow;
 use super::super::types::{App, Cmd};
-use crate::ui::agents::{agent_row_model_paged, AgentRole, AgentRow, TaskStatus};
+#[cfg(test)]
+use crate::ui::agents::{agent_row_model_paged, AgentRow};
+use crate::ui::agents::{AgentRole, TaskStatus};
 
 /// How many of a lane's task sublanes one page reveals.
 ///
@@ -24,15 +26,7 @@ impl App {
     #[cfg(test)]
     pub(in crate::ui::app) fn agent_rows(&self) -> Vec<AgentRow> {
         let lanes = self.lanes();
-        self.agent_rows_in(&lanes)
-    }
-
-    /// Build paged fold rows from one already-captured lane snapshot.
-    pub(in crate::ui::app) fn agent_rows_in(
-        &self,
-        lanes: &[crate::ui::agents::AgentLane],
-    ) -> Vec<AgentRow> {
-        agent_row_model_paged(lanes, SUBTASK_PAGE, |lane| {
+        agent_row_model_paged(&lanes, SUBTASK_PAGE, |lane| {
             self.subtask_pages.get(&lane.key).copied().unwrap_or(0)
         })
     }
@@ -85,7 +79,7 @@ impl App {
     }
 
     /// How many sublanes a lane reveals at its current expansion.
-    fn revealed_subtasks(&self, key: &str) -> usize {
+    pub(in crate::ui::app) fn revealed_subtasks(&self, key: &str) -> usize {
         SUBTASK_PAGE.saturating_mul(
             self.subtask_pages
                 .get(key)

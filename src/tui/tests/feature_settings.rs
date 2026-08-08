@@ -295,6 +295,58 @@ fn appearance_cycles_and_persists_process_indicators() {
 }
 
 #[test]
+fn appearance_cycles_and_persists_the_sidebar_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    // Five color rows, the blink toggle, and the seven option rows before it.
+    for _ in 0..13 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    let out = text_of(&draw(&mut app, 180, 60));
+    assert!(out.contains("Group by             path"), "{out}");
+    assert!(
+        app.status().contains("Sidebar grouping \u{2192} path"),
+        "status names the setting and its new value: {}",
+        app.status()
+    );
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("sidebarGrouping = \"path\""), "{saved}");
+
+    // The sort row is the next one down, and cycles independently.
+    let _ = key(&mut app, KeyCode::Char('j'));
+    let _ = key(&mut app, KeyCode::Right);
+
+    let out = text_of(&draw(&mut app, 180, 60));
+    assert!(out.contains("Sort by              recent"), "{out}");
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("sidebarSort = \"recent\""), "{saved}");
+    assert!(
+        saved.contains("sidebarGrouping = \"path\""),
+        "the grouping survives the next write: {saved}"
+    );
+}
+
+#[test]
+fn appearance_sidebar_grouping_wraps_backwards() {
+    // Left from the default is the last value, not a stuck row: the cycle is
+    // how every other control on this page behaves.
+    let mut app = settings_app();
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..13 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Left);
+
+    let out = text_of(&draw(&mut app, 180, 60));
+    assert!(out.contains("Group by             none"), "{out}");
+}
+
+#[test]
 fn appearance_persists_process_indicators_to_json() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("medulla.tui.json");

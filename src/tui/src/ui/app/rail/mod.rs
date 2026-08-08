@@ -1,13 +1,19 @@
-//! The Sessions rail: one cursor over the `Host → Session` tree.
+//! The Sessions rail: one cursor over configured `Host → Group → Session`
+//! sections.
 //!
 //! ```text
 //! + New session             ← the one action, when this device hosts
 //! ▸ this device             ← host row, only when a remote host exists
-//!   ├ t_41 · running        ← a session the orchestrator dispatched
-//!   ├ debug login           ← a session the operator started
+//!   ├ /workspace            ← optional path or harness group heading
+//!   │ ├ t_41 · running      ← a session the orchestrator dispatched
+//!   │ └ debug login         ← a session the operator started
 //!   │   └ wf run · deploy   ← a workflow run that session started
 //!   └ +3 more               ← the fold's paging control
 //! ```
+//!
+//! Appearance preferences organize the sections by host, path, harness, or no
+//! heading, and order their agents and sessions by creation time, recent
+//! activity, or name.
 //!
 //! The rail lists **what is running**. It used to render the whole
 //! `Host → Agent → Session` tree, with a row per declared agent, because
@@ -35,7 +41,7 @@ use medulla::runtime::AgentDeclaration;
 use medulla::ui::hosts::{HostAgentRow, HostKind, HostRow};
 
 use super::types::App;
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow};
+use crate::ui::agents::{ordered_tasks, AgentLane, AgentRole};
 use crate::worker::pty::SessionRow;
 
 mod cleanup;
@@ -44,6 +50,8 @@ mod cleanup_tests;
 mod cursor;
 #[cfg(test)]
 mod cursor_tests;
+mod organize;
+mod paging;
 pub(in crate::ui::app) mod resolve;
 // Kept apart from `tests` rather than nested inside it: the assembly rules and
 // the served-dispatch merge are separate responsibilities, and one file for
@@ -57,8 +65,10 @@ mod types;
 pub(in crate::ui::app) use cursor::rail_anchor;
 #[cfg(test)]
 pub(in crate::ui::app) use cursor::resolve_rail_cursor;
+use types::{AgentGroup, HostGroup};
 pub use types::{
-    AgentRailRow, HostRailRow, RailAnchor, RailRow, SessionRailRow, WorkflowRunRailRow,
+    AgentRailRow, GroupRailRow, HostRailRow, RailAnchor, RailRow, SessionRailRow,
+    WorkflowRunRailRow,
 };
 
 /// The label on the rail's "open a session" row.
@@ -66,33 +76,6 @@ pub use types::{
 /// The only action on the rail, so it sits at the top level and is capitalised
 /// as one: it acts on the machine, not on a row beneath it.
 pub(in crate::ui::app) const NEW_SESSION_LABEL: &str = "+ New session";
-
-/// One agent and the sessions hanging off it, before the tree is flattened.
-struct AgentGroup {
-    /// The agent row itself.
-    row: AgentRailRow,
-    /// Its sessions, dispatched and operator-started alike.
-    sessions: Vec<SessionRailRow>,
-    /// Sessions the fold's own page already hid, carried so the counts add up.
-    hidden: usize,
-    /// Whether the fold drew an overflow row under this agent's lane.
-    ///
-    /// The rail does **not** re-cap what the fold already paged (#171): the fold
-    /// reveals `SUBTASK_PAGE` sessions per page and decides when the `+N more`
-    /// row exists, including the fully-revealed case where it is instead the
-    /// `show less` control and `hidden` is zero. A second cap here would clip
-    /// below the page the operator just asked for, so this only records that the
-    /// row is owed.
-    overflow: bool,
-}
-
-/// One host and the agents placed on it, before the tree is flattened.
-struct HostGroup {
-    /// The host row, drawn only once there is more than one of them.
-    row: HostRailRow,
-    /// Its agents, in the order the shared projection lists them.
-    agents: Vec<AgentGroup>,
-}
 
 impl App {
     /// The agent declarations this machine's config records.
@@ -149,8 +132,16 @@ impl App {
     pub(super) fn rail_rows_in(&self, lanes: &[AgentLane]) -> Vec<RailRow> {
         let folded = self.split_fold(lanes);
         let mut hosts = place_agents(&self.host_tree(), folded);
-        let orphans = self.attach_sessions(&mut hosts);
-        self.flatten(hosts, orphans)
+        let mut orphans = self.attach_sessions(&mut hosts);
+        let appearance = &self.loaded.config.appearance;
+        let sections = organize::organize(
+            hosts,
+            self.agent_declarations(),
+            appearance.sidebar_grouping,
+            appearance.sidebar_sort,
+        );
+        organize::sort_sessions(&mut orphans, appearance.sidebar_sort);
+        self.flatten(sections, orphans, lanes)
     }
 
     /// Fold the lane rows into per-agent groups.
@@ -160,42 +151,29 @@ impl App {
     /// carried through as rows of their own; the rail lists sessions now, and
     /// none of those is one.
     fn split_fold(&self, lanes: &[AgentLane]) -> Vec<AgentGroup> {
-        let mut groups: Vec<AgentGroup> = Vec::new();
-        for row in self.agent_rows_in(lanes) {
-            match row {
-                AgentRow::Lane { lane_index } => {
-                    let Some(lane) = lanes.get(lane_index) else {
-                        continue;
-                    };
-                    if lane.role != AgentRole::Agent {
-                        continue;
-                    }
-                    groups.push(self.group_for_lane(lane, lane_index));
-                }
-                AgentRow::Sub {
-                    lane_index, task, ..
-                } => {
-                    let Some(group) = groups.last_mut() else {
-                        continue;
-                    };
-                    group.sessions.push(SessionRailRow {
+        lanes
+            .iter()
+            .enumerate()
+            .filter(|(_, lane)| lane.role == AgentRole::Agent)
+            .map(|(lane_index, lane)| {
+                let mut group = self.group_for_lane(lane, lane_index);
+                group.sessions = ordered_tasks(&lane.tasks)
+                    .into_iter()
+                    .map(|task| SessionRailRow {
                         agent_id: Some(group.row.agent_id.clone()),
                         lane_index: Some(lane_index),
                         task: Some(task),
                         local: None,
                         last: false,
-                    });
-                }
-                AgentRow::More { hidden, .. } => {
-                    if let Some(group) = groups.last_mut() {
-                        group.hidden += hidden;
-                        group.overflow = true;
-                    }
-                }
-                AgentRow::Separator => continue,
-            }
-        }
-        groups
+                    })
+                    .collect();
+                group.visible_tasks = self.revealed_subtasks(&lane.key).min(group.sessions.len());
+                group.hidden = group.sessions.len().saturating_sub(group.visible_tasks);
+                group.overflow =
+                    group.hidden > 0 || group.visible_tasks > crate::ui::app::input::SUBTASK_PAGE;
+                group
+            })
+            .collect()
     }
 
     /// The group an agent-role lane opens.
@@ -223,6 +201,10 @@ impl App {
                 lane_index: Some(lane_index),
             },
             sessions: Vec::new(),
+            last_at: lane.last_at,
+            lane_label: Some(lane.label.clone()),
+            harness_label: lane.harness_label.clone(),
+            visible_tasks: 0,
             hidden: 0,
             overflow: false,
         }
@@ -302,7 +284,12 @@ impl App {
     /// The agent groups survive the flattening without being rendered: they are
     /// what decides a session's order and its lane, and the sessions of one
     /// agent still come out contiguous. What they no longer get is a row.
-    fn flatten(&self, hosts: Vec<HostGroup>, orphans: Vec<SessionRailRow>) -> Vec<RailRow> {
+    fn flatten(
+        &self,
+        sections: Vec<organize::Section>,
+        orphans: Vec<SessionRailRow>,
+        lanes: &[AgentLane],
+    ) -> Vec<RailRow> {
         let mut rows: Vec<RailRow> = Vec::new();
         // A device that hosts nothing has nowhere to start a session, so the
         // action is absent there rather than present and refusing.
@@ -312,13 +299,25 @@ impl App {
         // Progressive disclosure: one host is the common case, and a permanent
         // `mac-studio ▸` wrapper would add a level of nesting to the surface an
         // operator uses most.
-        let show_hosts = hosts.len() > 1;
-        for mut host in hosts {
-            if show_hosts {
-                rows.push(RailRow::Host(host.row));
+        for mut section in sections.into_iter().filter(|section| {
+            section
+                .agents
+                .iter()
+                .any(|group| !group.sessions.is_empty() || group.overflow)
+        }) {
+            match section.header {
+                organize::SectionHeader::Host(host) => rows.push(RailRow::Host(host)),
+                organize::SectionHeader::Group(group) => rows.push(RailRow::Group(group)),
+                organize::SectionHeader::None => {}
             }
-            for group in &mut host.agents {
-                push_sessions(&mut rows, group, &self.harness_runs);
+            for group in &mut section.agents {
+                paging::push_group(
+                    &mut rows,
+                    group,
+                    &self.harness_runs,
+                    lanes,
+                    self.agent_anchor.as_ref(),
+                );
             }
         }
         for mut session in orphans {
@@ -498,6 +497,10 @@ fn placed_agent(
             lane_index: None,
         },
         sessions: Vec::new(),
+        last_at: 0,
+        lane_label: None,
+        harness_label: None,
+        visible_tasks: 0,
         hidden: 0,
         overflow: false,
     });
@@ -579,34 +582,4 @@ fn run_rows_under(
             })
         })
         .collect()
-}
-
-/// Push one agent's sessions, tree-marked. The agent itself gets no row.
-///
-/// Paging is the fold's, not the rail's (#171): `agent_rows` reveals a page of
-/// task sublanes at a time and marks the rest with an overflow row, so a second
-/// cap here would clip the page the operator just asked to see. The overflow row
-/// is re-emitted under the sessions and stays selectable, which is what makes
-/// `Enter` on it page the lane open — and, once the lane is fully revealed, fold
-/// it back.
-fn push_sessions(
-    rows: &mut Vec<RailRow>,
-    group: &mut AgentGroup,
-    runs: &medulla::control_socket::HarnessRunRegistry,
-) {
-    let shown = group.sessions.len();
-    for (index, session) in group.sessions.iter_mut().enumerate() {
-        // Only the tree's last leaf when the overflow row does not follow it.
-        session.last = !group.overflow && index + 1 == shown;
-        let session = Box::new(session.clone());
-        let run_rows = run_rows_under(&session, runs);
-        rows.push(RailRow::Session(session));
-        rows.extend(run_rows);
-    }
-    if group.overflow {
-        rows.push(RailRow::Overflow {
-            lane_index: group.row.lane_index.unwrap_or(0),
-            hidden: group.hidden,
-        });
-    }
 }

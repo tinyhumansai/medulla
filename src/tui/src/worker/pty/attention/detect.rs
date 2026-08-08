@@ -380,6 +380,15 @@ fn has_live_working_marker(screen: &str) -> bool {
     for line in lines[tail_start..].iter().rev() {
         let squashed = squash(line);
         if WORKING.iter().any(|marker| squashed.contains(marker)) {
+            // A composer row is operator input, not a harness footer — except
+            // Claude's working placeholder, whose *whole* text is a marker
+            // ("Press up to edit queued messages"). A draft that merely echoes
+            // a footer phrase ("document esc to interrupt behavior") must not
+            // spin the row or veto real attention cues until the draft clears.
+            if is_composer(line) && !WORKING.iter().any(|marker| squashed == *marker) {
+                composer_below = true;
+                continue;
+            }
             // A working footer above a composer is stale only when it is bare.
             // Codex keeps its composer on screen while it works, so its active
             // footer — `• Working (8s • esc to interrupt)` — carries a live

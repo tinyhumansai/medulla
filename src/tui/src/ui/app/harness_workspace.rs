@@ -185,7 +185,7 @@ impl App {
             self.set_status(format!(
                 "Saved favorite {name} · this run only — no config file"
             ));
-            self.refresh_harness_workspace_choices();
+            self.after_saving_favorite();
             return;
         };
         match medulla::config::persist_setting(
@@ -197,9 +197,25 @@ impl App {
             Ok(()) => {
                 self.loaded.config.harness.favorite_workspaces = favorites;
                 self.set_status(format!("Saved favorite {name} · {path}"));
-                self.refresh_harness_workspace_choices();
+                self.after_saving_favorite();
             }
             Err(error) => self.set_status(format!("Could not save favorite ({error})")),
+        }
+    }
+
+    /// Re-anchor the launcher on the workspace that was just favorited.
+    ///
+    /// Saving promotes the new favorite to the head of the ranked list, so the
+    /// arrowed cursor (which pointed at the saved row beforehand) would otherwise
+    /// keep its old index and silently select a *different* directory now parked
+    /// in that row — and Enter would start the harness there instead of the
+    /// workspace the operator just saved. Re-run the completions and set the
+    /// selection onto the head row, so the highlight follows the favorite.
+    fn after_saving_favorite(&mut self) {
+        self.refresh_harness_workspace_choices();
+        if let Some(picker) = &mut self.session_picker {
+            picker.workspace_index = 0;
+            picker.workspace_picked = true;
         }
     }
 

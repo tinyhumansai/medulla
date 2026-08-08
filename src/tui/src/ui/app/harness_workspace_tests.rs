@@ -235,6 +235,44 @@ fn saving_a_named_favorite_persists_it_and_makes_its_name_searchable() {
 }
 
 #[test]
+fn saving_a_favorite_reanchors_the_cursor_on_the_saved_workspace() {
+    // Saving promotes the new favorite to the head of the list, so the arrowed
+    // cursor must follow it (index 0) rather than keep pointing at the row it
+    // covered before — otherwise Enter starts the harness in whatever directory
+    // landed in that row instead of the workspace just favorited.
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    app.set_config_path(config.clone());
+
+    // The operator arrows onto a non-first completion before saving.
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_index = 3;
+    picker.workspace_picked = true;
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    let picker = app.session_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.workspace_index, 0,
+        "the cursor follows the promoted favorite to the head row"
+    );
+    assert!(
+        picker.workspace_picked,
+        "Enter must still honour the highlighted row after the refresh"
+    );
+    assert_eq!(
+        app.selected_picker_workspace()
+            .map(std::path::PathBuf::from),
+        Some(workspace.clone()),
+        "Enter starts in the workspace that was just favorited"
+    );
+}
+
+#[test]
 fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("medulla");

@@ -415,18 +415,16 @@ fn a_bullet_prefixed_error_is_still_blocking() {
     }
 }
 
-/// A bullet-led line that really shows an in-flight activity shape — an
-/// ellipsis or a live elapsed counter — is still recovery evidence, so the
-/// glyph tightening above must not re-flag a harness that kept working.
+/// A glyph-led line that carries the full in-flight activity shape — an
+/// animated ellipsis or a live elapsed counter — is still recovery evidence.
+/// A spinner gerund names no recovery word ("Cogitating" is in no marker list)
+/// and its composer below hides it from `is_working`, so only the shaped-glyph
+/// branch can clear the error above it: the tightening must not throw away
+/// genuine progress lines with the bullet noise.
 #[test]
 fn an_activity_shaped_bullet_line_is_still_recovery() {
-    for screen in [
-        // The mid-dot animated list item that Claude draws while working.
-        "✽ Reticulating splines… (12s · esc to interrupt)\nInvalid API key\n> ",
-        "• Working (8s · esc to interrupt)\n> ",
-    ] {
-        assert_eq!(detect(HarnessProvider::Claude, screen), None, "{screen}");
-    }
+    let screen = "Invalid API key\n✽ Cogitating… (7s)\n> ";
+    assert_eq!(detect(HarnessProvider::Claude, screen), None, "{screen}");
 }
 
 /// A continuation is only recovery evidence when it carries a live status

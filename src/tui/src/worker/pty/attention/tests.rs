@@ -506,7 +506,7 @@ fn lifecycle_row() -> SessionRow {
         preset: None,
         state: PtyState::Running,
         cwd: "/workspace/medulla".into(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,

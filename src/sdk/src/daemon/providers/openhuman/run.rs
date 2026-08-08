@@ -27,6 +27,26 @@ pub fn uses_embedded_core(options: &RunTaskOptions) -> bool {
     options.provider == HarnessProvider::Openhuman
 }
 
+/// Whether `cwd` differs from the workspace the shared core is bound to.
+///
+/// Returns `Some(message)` when the task names a checkout other than the action
+/// directory the process-wide core resolved at boot. The embedded agent edits
+/// files against that one directory — `AgentChatParams` has no per-turn cwd —
+/// so a node pointed elsewhere would silently write to the wrong place while
+/// the run record reports the selection. Paths are canonicalized so a symlinked
+/// checkout still matches the canonical action directory.
+fn workspace_mismatch(cwd: &str, action_dir: &str) -> Option<String> {
+    let resolve = |path: &str| std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    if resolve(cwd) == resolve(action_dir) {
+        return None;
+    }
+    Some(format!(
+        "openhuman task workspace '{cwd}' differs from the shared core's action directory \
+         '{action_dir}': the embedded core edits one workspace per process and cannot honor \
+         a run pointed at another"
+    ))
+}
+
 /// Run one task as an OpenHuman agent turn in this process.
 ///
 /// # Errors

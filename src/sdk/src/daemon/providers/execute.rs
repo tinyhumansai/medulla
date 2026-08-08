@@ -360,10 +360,8 @@ async fn run_provider_attempt(
                     Ok(0) => break,
                     Ok(_) => {
                         let chunk = String::from_utf8_lossy(&buf);
-                        stderr_beat.store(
-                            beat_base.elapsed().as_micros() as u64,
-                            Ordering::Relaxed,
-                        );
+                        stderr_beat
+                            .store(beat_base.elapsed().as_micros() as u64, Ordering::Relaxed);
                         let mut tail = stderr_tail.lock().unwrap();
                         tail.push_str(&chunk);
                         *tail = tail_bytes(&tail);

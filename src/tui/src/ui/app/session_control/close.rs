@@ -58,7 +58,6 @@ impl App {
         }
         if self.harness_focus.is_attached_to(session) {
             self.release_session();
-            self.focus_agents_rail();
         }
         self.sessions_taken.remove(session);
         self.set_status("Closed the harness");

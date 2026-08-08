@@ -1,4 +1,4 @@
-//! Retiring finished work from the Agents rail.
+//! Retiring finished work from the Sessions rail.
 //!
 //! The rail is a picture of what is happening on this device, and everything on
 //! it eventually stops happening: a harness exits, a workflow run settles. Kept

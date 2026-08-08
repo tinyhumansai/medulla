@@ -216,10 +216,23 @@ fn local_context(
     }
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
+    // The embedded core this command may boot — an `agent` node that names
+    // `openhuman`, or the review spawned for a failed run — reads its
+    // environment during construction. The TUI binds the core at startup; this
+    // command is its own process, so it binds the same four variables from the
+    // same config here. Without it a lazily booted core would fall back to
+    // ambient `~/.openhuman` and the production backend instead of this
+    // account's state and configured deployment.
+    medulla::core_host::bind_from_config(env, &loaded.config, &home);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
     // A `medulla:shell` step runs where the command was invoked, matching what
-    // an operator running it by hand would expect.
-    settings.workspace = cwd.to_string_lossy().to_string();
+    // an operator running it by hand would expect — unless `--workspace` named
+    // another checkout, which is how one command runs a workflow against a
+    // repository the operator is not standing in.
+    let workspace = medulla::workflows::workspace::resolve(parsed.workspace.as_deref(), cwd, env)?
+        .to_string_lossy()
+        .to_string();
+    settings.workspace = workspace.clone();
     // Nodes that name no worker go to the loopback host this command starts,
     // unless the operator pinned a different default.
     if settings.default_worker_address.trim().is_empty() {
@@ -241,7 +254,7 @@ fn local_context(
         medulla::harness_hooks::LaunchPolicy::from_config(&loaded.config).without_builtin_hooks();
     let host = LocalWorkflowHost::start(
         EmbeddedDaemonOptions {
-            workspace: cwd.to_string_lossy().to_string(),
+            workspace: workspace.clone(),
             model: (!loaded.config.workflows.default_model.is_empty())
                 .then(|| loaded.config.workflows.default_model.clone()),
             default_provider: loaded.config.workflows.default_provider,
@@ -289,7 +302,7 @@ fn local_context(
             origin: Some(
                 medulla::workflows::RunOrigin::of_kind(medulla::workflows::RunOrigin::CLI)
                     .labelled("medulla workflow run")
-                    .in_workspace(cwd.to_string_lossy()),
+                    .in_workspace(workspace),
             ),
         },
         run_id,

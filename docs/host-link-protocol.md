@@ -6,7 +6,7 @@ relay and polling it back down, endpoints exchange UDP datagrams carrying
 **mosh-style state synchronisation** through a backend that forwards bytes it
 cannot read.
 
-This document is **normative**. Three implementations code against it — the
+This document is **normative**. Three implementations code against it: the
 orchestrator endpoint, the host endpoint (both in the `medulla-link` crate) and
 the forwarder that relays between them. Where this document and an
 implementation disagree, this document is right.
@@ -29,7 +29,7 @@ Two layers, deliberately separated:
 | **Inner payload** | pair key | endpoints only | the actual messages |
 
 The backend holds forwarder keys and **never** holds a pair key. It therefore
-knows who talks to whom, when, and how much — and nothing else. The pair key is
+knows who talks to whom, when, and how much, and nothing else. The pair key is
 generated on the orchestrator, displayed to the user, and typed in by hand on the
 host (§7). It never appears in a request body, a response, a log line or the
 database.
@@ -42,13 +42,15 @@ given datagram.
 
 ## 2. Identifiers
 
-- **`node_id`** — 16 random bytes, issued by the backend at enrollment. This is
-  what travels on the wire.
-- **`node_name`** — human-readable, unique within a team, shown in the TUI and
-  used as a `Bridge` address. It lives in the registry and **never** on the wire;
-  endpoints resolve name → id once, at enrollment.
-- **`team`** — the tenancy boundary. The forwarder refuses to move a datagram
-  between teams (§5, rule 6).
+`node_id` is 16 random bytes, issued by the backend at enrollment. This is what
+travels on the wire.
+
+`node_name` is human-readable, unique within a team, shown in the TUI and used as
+a `Bridge` address. It lives in the registry and **never** on the wire; endpoints
+resolve name → id once, at enrollment.
+
+`team` is the tenancy boundary. The forwarder refuses to move a datagram between
+teams (§5, rule 6).
 
 ## 3. Outer header
 
@@ -58,7 +60,7 @@ parses.
 | Offset | Size | Field | Notes |
 |---:|---:|---|---|
 | 0 | 1 | `version` | `2`. Anything else is dropped |
-| 1 | 1 | `flags` | bit 0 = heartbeat (no state change). Bits 1–7 reserved, MUST be 0 |
+| 1 | 1 | `flags` | bit 0 = heartbeat (no state change). Bits 1-7 reserved, MUST be 0 |
 | 2 | 16 | `src_node_id` | |
 | 18 | 16 | `dst_node_id` | |
 | 34 | 8 | `seq` | §3.1 |
@@ -73,27 +75,28 @@ regardless of destination. It starts at 1 and never repeats for the life of the
 node's key material. Bit 63 is the direction bit (§4.2) and is therefore constant
 for a given node; the low 63 bits are the counter.
 
-`seq` serves two purposes at once, which is why it is in the cleartext header:
+`seq` has two purposes at once, which is why it is in the cleartext header:
 
 1. the forwarder's replay window and rebinding rule (§5), and
 2. the AEAD nonce for the payload (§4.2).
 
 A node MUST persist enough of its counter to guarantee it never rewinds across
-restarts. `medulla-link` does this by persisting a *reservation* — it writes
-`counter + 10_000` to disk and only rewrites after consuming the reservation — so
-a crash costs at most one skipped block, never a reused nonce. **Nonce reuse
-under a shared AEAD key is a confidentiality break, not a bug to fix later.**
+restarts. `medulla-link` does this by persisting a *reservation*: it writes
+`counter + 10_000` to disk and only rewrites after consuming the reservation, so
+a crash costs at most one skipped block, never a reused nonce. **A nonce MUST
+never repeat under a shared AEAD key, because reuse breaks confidentiality of
+the payload.**
 
 ### 3.2 Size
 
 A datagram MUST NOT exceed **1400 bytes** total. This keeps it inside a typical
 1500-byte path MTU with room for IPv6 and any tunnelling, so datagrams are never
-fragmented — a fragmented UDP datagram is dropped whole if any fragment is lost,
+fragmented. A fragmented UDP datagram is dropped whole if any fragment is lost,
 which would defeat the loss-tolerance the design is built on.
 
 The payload budget is therefore `1400 − 66 (header) − 16 (AEAD tag) − 4
 (timestamps) = 1322` bytes per Instruction, diff included. Senders MUST fragment
-at the *state* layer — send a smaller diff — never at the datagram layer.
+at the *state* layer (by sending a smaller diff), never at the datagram layer.
 
 ## 4. Payload
 
@@ -109,17 +112,18 @@ rather than a delivered message.
 
 | Offset | Size | Field |
 |---:|---:|---|
-| 0 | 2 | `send_ts` — sender's clock in ms, mod 2^16 |
-| 2 | 2 | `reply_ts` — the last `send_ts` received from the peer, or 0 |
+| 0 | 2 | `send_ts`: sender's clock in ms, mod 2^16 |
+| 2 | 2 | `reply_ts`: the last `send_ts` received from the peer, or 0 |
 | 4 | … | `Instruction` (§4.3) |
 
 `send_ts`/`reply_ts` are mosh's RTT probe. The receiver echoes `send_ts` back in
 its next `reply_ts`; the original sender computes RTT as `now − reply_ts`, which
-feeds SRTT and RTTVAR (§6.1). A `reply_ts` of 0 means "no sample", not "zero RTT".
+feeds SRTT and RTTVAR (§6.1). A `reply_ts` of 0 means there is no sample yet, and
+must not be read as an RTT of zero.
 
 ### 4.2 Nonce
 
-12 bytes: 4 zero bytes followed by `seq` as a 64-bit big-endian integer — the same
+12 bytes: 4 zero bytes followed by `seq` as a 64-bit big-endian integer, the same
 `seq` as the outer header, direction bit included.
 
 ```
@@ -144,11 +148,11 @@ collide with the other. This is mosh's construction and the reason for it.
 | … | `diff` | channel-specific (§4.4) |
 
 The receiver applies a diff **only** when `old_num` equals the number of the state
-it currently holds. Otherwise it drops the Instruction and does nothing — the
+it currently holds. Otherwise it drops the Instruction and does nothing; the
 sender learns the true state from the next `ack_num` and re-diffs from there.
-That is the whole reliability mechanism, and it is why loss, reordering and
-duplication need no special handling: applying the same Instruction twice is a
-no-op, and applying a stale one is refused.
+This is the whole reliability mechanism. Loss, reordering and duplication need no
+special handling, because applying the same Instruction twice is a no-op and
+applying a stale one is refused.
 
 `throwaway_num` lets each side bound its history. A state below the peer's
 `throwaway_num` can never be diffed from again, so it is freed.
@@ -156,7 +160,7 @@ no-op, and applying a stale one is refused.
 ### 4.4 Channels
 
 One link multiplexes independent state streams. Each channel keeps its **own**
-`sent_states` history, numbering, and ack — an Instruction on channel 0 says
+`sent_states` history, numbering, and ack, so an Instruction on channel 0 says
 nothing about channel 1.
 
 | Id | Channel | Semantics | Diff |
@@ -164,10 +168,10 @@ nothing about channel 1.
 | 0 | `messages` | reliable, ordered, nothing dropped | append-only (§4.5) |
 | 1 | `screen` | **latest-wins** | changed rows |
 
-The split is the reason SSP fits medulla rather than merely working for it. Task
-frames must all arrive: channel 0 is an append-only queue and a peer that was
-away receives everything it missed. A terminal has the opposite requirement:
-after a 40-second outage the host should send the *current* screen, not 40
+The split exists because the two streams have opposite requirements. Task frames
+must all arrive: channel 0 is an append-only queue and a peer that was away
+receives everything it missed. A terminal wants only the latest state: after a
+40-second outage the host should send the *current* screen rather than 40
 seconds of scrollback. Channel 1 diffs the grid, so catching up costs one diff
 regardless of how long the link was down. `src/sdk/src/protocol/screen/` already
 models exactly this (`build_frame`, `apply_frame`, `changed_rows`) and supplies
@@ -207,13 +211,13 @@ dropping silently unless stated:
 
    This rule is load-bearing. A forwarder that rebinds on *any* datagram with a
    valid tag can have a node's binding stolen by an attacker replaying one
-   captured datagram from their own address — turning roaming support into a
+   captured datagram from their own address, turning roaming support into a
    traffic-hijacking primitive. Requiring a strictly-higher sequence means an
    attacker must produce a datagram the legitimate node has not sent yet, which
    the tag prevents.
 6. `dst_node_id` resolves to a node **in the same team** as the source. Cross-team
-   → drop and increment a counter; this is a security event, not noise.
-7. `dst` has a live binding. If not, drop — the sender's SSP will retransmit.
+   → drop and increment a counter; record it as a security event.
+7. `dst` has a live binding. If not, drop; the sender's SSP will retransmit.
 8. Forward `bytes` **verbatim**. The forwarder MUST NOT rewrite any field,
    including `seq`. Rewriting would break both the AAD binding and the receiver's
    nonce.
@@ -224,24 +228,29 @@ by the heartbeat interval rather than by an operator.
 
 ### 5.1 Limits
 
-Rate limiting is **two layers**, and which side of the HMAC each falls on is a
-correctness question, not an optimisation:
+Rate limiting has two layers, and which side of the HMAC each one falls on is a
+matter of correctness.
 
-- **Datagram size cap** (§3.2) — first, before anything else. Costs nothing.
-- **Per-source-address token bucket — *before* the HMAC.** Everything up to the
-  HMAC (a header parse and a node lookup) is attacker-triggerable work, so it
-  must be metered by something available at that point. Set it well above the
-  per-node rate: several of a user's hosts can share one NAT address.
-- **Per-node token bucket — *after* the HMAC verifies.** Charging it earlier
-  would mean anyone who learns a node id could exhaust that node's quota with
-  forged packets, turning the rate limit into a denial of service against the
-  very node it protects.
-- **A node id that does not resolve MUST be cached as unresolved**, briefly.
-  Otherwise a flood of random node ids costs one registry lookup each, and an
-  unauthenticated flood converts directly into database load.
-- Both of those caches are keyed by attacker-chosen values, so **both MUST be
-  bounded** with eviction. An unbounded map is itself the denial of service the
-  buckets exist to prevent.
+The datagram size cap (§3.2) is applied first, before anything else, and costs
+nothing.
+
+A per-source-address token bucket is charged *before* the HMAC. Everything up to
+the HMAC (a header parse and a node lookup) is attacker-triggerable work, so it
+must be metered by something available at that point. Set it well above the
+per-node rate: several of a user's hosts can share one NAT address.
+
+A per-node token bucket is charged *after* the HMAC verifies. Charging it earlier
+would mean anyone who learns a node id could exhaust that node's quota with
+forged packets, turning the rate limit into a denial of service against the very
+node it protects.
+
+A node id that does not resolve MUST be cached as unresolved, briefly. Otherwise
+a flood of random node ids costs one registry lookup each, and an unauthenticated
+flood converts directly into database load.
+
+Both of those caches are keyed by attacker-chosen values, so **both MUST be
+bounded** with eviction. An unbounded map lets an attacker exhaust memory, which
+is the denial of service the buckets are there to prevent.
 
 `online` is derived from recent traffic, not asserted by the endpoint.
 
@@ -276,25 +285,25 @@ Derived from the last datagram received from the peer, and exposed on
 | State | Condition |
 |---|---|
 | `Live` | heard within `3 × HEARTBEAT` (9 s) |
-| `Degraded` | 9 s – 60 s |
+| `Degraded` | 9 s to 60 s |
 | `Offline` | over 60 s |
 
-Liveness is **advisory**. SSP keeps retransmitting through all three states — an
-`Offline` peer is not a failed one, and recovery requires no reconnect, no
-handshake and no re-enrollment. Nothing above the link may treat `Offline` as
+Liveness is **advisory**. SSP keeps retransmitting through all three states, so
+an `Offline` peer can still come back, and recovery requires no reconnect,
+handshake or re-enrollment. Nothing above the link may treat `Offline` as
 terminal on its own.
 
 ### 6.3 Timeouts above the link
 
 `TaskRunner` owns `ACK_WINDOW` (12 s) and `IDLE_WINDOW` (240 s). Those exist
-because the tiny.place mailbox could silently black-hole a frame — a failure mode
-this protocol does not have.
+because the tiny.place mailbox could silently black-hole a frame. This protocol
+has no such failure mode.
 
 **Both clocks MUST be paused while liveness is not `Live`.** Otherwise a
 30-second network blip fails a task that the transport was in the middle of
 recovering, which would forfeit the entire reason for adopting SSP. They resume,
 rather than reset, when liveness returns to `Live`: `ACK_WINDOW` measures *peer
-processing*, and a peer that was unreachable was not thinking.
+processing*, and an unreachable peer is not processing anything.
 
 **The gate is per peer, not per link.** An orchestrator holds sessions with many
 hosts, and §6.2 liveness is a property of one peer's session. Gating on an
@@ -315,7 +324,7 @@ peer that observes the epoch change rebases its outbound state onto the shared
 state 0, preserves any unconsumed messages and latest screen state, and resets
 its inbound state to 0 before applying the restarted peer's instruction. This
 prevents the old state-*n*/state-0 mismatch from wedging the link while retaining
-work that was still awaiting delivery. The epoch was added with wire version 2;
+work that was still awaiting delivery. The epoch is part of wire version 2;
 version-1 datagrams are rejected rather than ambiguously interpreted.
 
 ## 7. Enrollment
@@ -361,8 +370,7 @@ POST /medulla/v1/hosts/enroll   { token, name }
   it (`§9`).
 
 There is no key recovery. Since the backend never holds the pair key, a lost key
-means re-enrolling the host. That is the cost of the property, and it is the
-right trade.
+means re-enrolling the host.
 
 ### 7.3 State file
 
@@ -371,15 +379,18 @@ forwarder key, forwarder endpoint and the persisted sequence reservation (§3.1)
 Created and loaded under the same file lock used by the existing identity
 bootstrap.
 
-## 8. What this protocol is not
+## 8. Scope
 
-- **Not a mesh.** Every datagram goes through the forwarder. There is no peer
-  discovery, no NAT traversal and no direct path.
-- **Not metadata-private.** The backend sees the full social graph and traffic
-  volumes. Only payloads are opaque.
-- **Not predictive.** Mosh's local echo — typed characters appearing instantly
-  and reconciling against server truth — is a separate terminal layer, not SSP.
-  It would sit above this protocol and requires no change to it.
+Every datagram goes through the forwarder. The protocol has no peer discovery, no
+NAT traversal and no direct path between endpoints, so it is a relay topology
+rather than a mesh.
+
+Confidentiality covers payloads only. The backend sees the full social graph and
+traffic volumes, so the protocol offers no metadata privacy.
+
+Prediction sits outside this protocol. Mosh's local echo, where typed characters
+appear instantly and reconcile against server truth, belongs to a terminal layer
+above SSP. It can be built on top of this protocol and requires no change to it.
 
 ## 9. Conformance tests
 
@@ -395,7 +406,7 @@ than in a test file because they are part of the contract.
 - A 60-second total blackout mid-task completes without error and without
   re-enrolling.
 - Channel 1 catch-up after a 40-second outage converges in **one** diff to the
-  current grid — not a replay.
+  current grid, rather than replaying the outage.
 - Outbound queue overflow surfaces a retryable transport error.
 
 **Forwarder**
@@ -406,7 +417,7 @@ than in a test file because they are part of the contract.
 - A datagram addressed across teams is dropped and counted.
 - Given a captured datagram, the forwarder cannot recover the payload.
 - **A flood of forged datagrams naming a real node does not consume that node's
-  quota** — the node keeps working throughout. (§5.1.)
+  quota**, and the node keeps working throughout. (§5.1.)
 - Per-source metering engages under a flood, and one flooding source does not
   starve another source.
 - A node id repeatedly presented and never resolved is looked up **once**, not
@@ -421,5 +432,5 @@ than in a test file because they are part of the contract.
 
 **Integration**
 - A transient outage longer than `ACK_WINDOW` does **not** fail the task.
-- A genuinely hung peer on a `Live` link **does** still time out — proving §6.3
+- A genuinely hung peer on a `Live` link **does** still time out, proving §6.3
   gates the clocks rather than disabling them.

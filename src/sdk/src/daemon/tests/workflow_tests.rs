@@ -380,3 +380,129 @@ async fn workflow_dispatch_refuses_a_preset_with_an_unavailable_base_provider() 
         "worker error: no available provider for requested \"claude\"; daemon offers: codex"
     );
 }
+
+/// Every harness a workflow node opens is served no Medulla tools.
+///
+/// The environment is the carrier the four launch seams share, so this asserts
+/// on what actually reaches them: the withholding marker set, and — the half
+/// that matters for a run started *by* a harness session — the inherited grant
+/// cleared rather than merely unused. A node that kept its parent's capability
+/// could exchange its way back to the `fleet_*` verbs and dispatch into the
+/// very worker pool its own run is competing for.
+#[tokio::test]
+async fn workflow_dispatch_withholds_medulla_tools_from_every_node() {
+    let (captured_tx, mut captured_rx) = tokio::sync::mpsc::unbounded_channel();
+    let runner: RunTaskFn = Arc::new(move |options| {
+        let captured_tx = captured_tx.clone();
+        Box::pin(async move {
+            captured_tx.send(options.env.clone()).unwrap();
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: options.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, _) = recording_send();
+    let mut config = base_config();
+    // What a run started from a harness session inherits.
+    config.env.insert(
+        crate::control_socket::MCP_GRANT_ENV.to_string(),
+        "inherited-token".to_string(),
+    );
+    let runtime = crate::daemon::DaemonRuntime::new(config, runner, send);
+    let dispatch = RuntimeDispatch::new(runtime, "peer".into());
+
+    dispatch
+        .dispatch(TaskRequest {
+            transport: None,
+            task_id: "child-tools".into(),
+            abort_id: "child-tools".into(),
+            cycle_id: None,
+            instruction: "do the child work".into(),
+            worker_address: "claude".into(),
+            provider: None,
+            custom_harness: None,
+            model: None,
+            // Even asked for explicitly, a node gets none.
+            tool_mode: Some("full".into()),
+            workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
+            conversation: None,
+            fleet_depth: 0,
+        })
+        .await
+        .unwrap();
+
+    let env = captured_rx.recv().await.unwrap();
+    assert!(
+        crate::harness_tools::withheld(&env),
+        "a workflow node's harness must be marked tool-less: {env:?}"
+    );
+    assert!(
+        !env.contains_key(crate::control_socket::MCP_GRANT_ENV),
+        "the inherited grant must be cleared, not merely unused: {env:?}"
+    );
+    assert!(
+        !env.contains_key(crate::mcp::TOOL_MODE_ENV),
+        "a requested tool mode must not survive the withholding: {env:?}"
+    );
+}
+
+/// A node that names the embedded core reaches it even though no host ever
+/// lists OpenHuman among its providers.
+///
+/// `config.providers` is the set of coding CLIs found on PATH, and OpenHuman
+/// has no binary to find — so the ordinary "anything this worker does not
+/// offer falls back to the default" rule would silently send a node that asked
+/// for the operator's own core to a coding CLI instead.
+#[tokio::test]
+async fn a_node_naming_the_embedded_core_is_not_fallen_back_to_a_cli() {
+    let (captured_tx, mut captured_rx) = tokio::sync::mpsc::unbounded_channel();
+    let runner: RunTaskFn = Arc::new(move |options| {
+        let captured_tx = captured_tx.clone();
+        Box::pin(async move {
+            captured_tx.send(options.provider).unwrap();
+            Ok(RunTaskResult {
+                session_id: None,
+                usage: None,
+                provider: options.provider,
+                reply: "done".to_string(),
+                events: 0,
+            })
+        })
+    });
+    let (send, _) = recording_send();
+    let runtime = crate::daemon::DaemonRuntime::new(base_config(), runner, send);
+    let dispatch = RuntimeDispatch::new(runtime, "peer".into());
+
+    dispatch
+        .dispatch(TaskRequest {
+            transport: None,
+            task_id: "child-openhuman".into(),
+            abort_id: "child-openhuman".into(),
+            cycle_id: None,
+            instruction: "ask my own core".into(),
+            worker_address: "openhuman".into(),
+            provider: Some(crate::protocol::HarnessProvider::Openhuman),
+            custom_harness: None,
+            model: None,
+            tool_mode: None,
+            workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
+            conversation: None,
+            fleet_depth: 0,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        captured_rx.recv().await.unwrap(),
+        crate::protocol::HarnessProvider::Openhuman,
+        "a node that named the embedded core must not be redirected to a CLI"
+    );
+}

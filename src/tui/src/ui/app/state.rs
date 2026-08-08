@@ -5,9 +5,7 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::agents::{
-    derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane, AgentRole, AgentRow,
-};
+use crate::ui::agents::{derive_agent_lanes, merge_host_activity, merge_host_roster, AgentLane};
 use crate::ui::command::CommandSpec;
 use crate::ui::composer::Draft;
 use crate::ui::fleet::{merge_capacity, registry_capacity};
@@ -57,8 +55,6 @@ impl App {
             tab_index: 0,
             changes: super::changes::GitChangesState::capture(),
             draft: Draft::new(),
-            history: Vec::new(),
-            history_index: -1,
             selected: 0,
             frame: 0,
             graph: Default::default(),
@@ -66,14 +62,12 @@ impl App {
             update_notice: None,
             contexts: Vec::new(),
             context_index: 0,
-            agent_index: 0,
+            rail_index: 0,
             agent_anchor: None,
             subtask_pages: std::collections::HashMap::new(),
             watching: None,
             kill_armed: None,
-            agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
-            chat_scroll: 0,
             command_index: 0,
             host_index: 0,
             host_roles_focus: false,
@@ -162,11 +156,11 @@ impl App {
             harness_close_armed: None,
             pane_remote_session: None,
             rail_session: None,
-            agent_picker: None,
+            session_picker: None,
             handback_prompt: None,
             pointer_grab: None,
             hit_handback: Vec::new(),
-            hit_agent_picker: None,
+            hit_session_picker: None,
             help_scroll: 0,
             handback_policy,
             sessions_taken: std::collections::HashMap::new(),
@@ -268,8 +262,8 @@ impl App {
         self.update_notice.as_deref()
     }
 
-    /// Where the Agents rail cursor is. Test/inspection seam.
-    pub fn agent_index(&self) -> usize {
+    /// Where the Sessions rail cursor is. Test/inspection seam.
+    pub fn rail_index(&self) -> usize {
         self.rail_cursor()
     }
 
@@ -283,9 +277,9 @@ impl App {
         self.draft.cursor
     }
 
-    /// The chat transcript scroll offset from the bottom. Test/inspection seam.
-    pub fn chat_scroll(&self) -> usize {
-        self.chat_scroll
+    /// How far the pane's transcript is scrolled back. Test/inspection seam.
+    pub fn transcript_scroll(&self) -> usize {
+        self.agent_scroll
     }
 
     /// Whether the resume-picker modal is open. Test/inspection seam.
@@ -293,7 +287,7 @@ impl App {
         self.resume_picker.is_some()
     }
 
-    /// Whether an inline prompt overlay (Workers add/edit, Agents answer) is open,
+    /// Whether an inline prompt overlay (Workers add/edit, task answer) is open,
     /// and its current draft text. Test/inspection seam.
     pub fn prompt_state(&self) -> Option<(String, String)> {
         self.prompt
@@ -301,7 +295,7 @@ impl App {
             .map(|p| (p.title.clone(), p.draft.text.clone()))
     }
 
-    /// The `task_id` of the currently selected Agents-list task row, if any.
+    /// The `task_id` of the currently selected Sessions rail task row, if any.
     /// Test/inspection seam for the X/A steering flows.
     pub fn selected_task_id(&self) -> Option<String> {
         self.selected_agent_task().map(|t| t.task_id)
@@ -418,8 +412,17 @@ impl App {
     /// the picker must *absorb* — one off a row, one outside its box — and
     /// "nothing happened" is only distinguishable from "the modal closed" by
     /// being able to ask.
-    pub fn agent_picker_open_for_test(&self) -> bool {
-        self.agent_picker.is_some()
+    pub fn session_picker_open_for_test(&self) -> bool {
+        self.session_picker.is_some()
+    }
+
+    /// Whether the hand-back question is on screen.
+    ///
+    /// Inspection seam for the same reason as the picker above: the question is
+    /// what asks for a handback note, and a test that types one has to know it
+    /// was asked rather than inferring it from where the characters landed.
+    pub fn handback_prompt_open_for_test(&self) -> bool {
+        self.handback_prompt.is_some()
     }
 
     /// The session currently receiving the operator's keystrokes.
@@ -517,7 +520,7 @@ impl App {
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         // Arriving at a tab should put the keyboard on the thing the tab is
         // *about*. Both of these used to land it somewhere else — Hosts on its
-        // two-item menu, Agents on the composer — so the first arrow press did
+        // two-item menu — so the first arrow press did
         // nothing visible and the list had to be clicked before it would move.
         match self.tab() {
             "Changes" => {
@@ -529,7 +532,6 @@ impl App {
             // Safe because the rail forwards typing: a printable key moves focus
             // to the composer and lands the character there, so nothing is lost
             // by not starting in it.
-            "Agents" => self.focus_agents_rail(),
             _ => {}
         }
         match self.tab() {
@@ -576,7 +578,7 @@ impl App {
     /// command can be typed, so offering the catalog anywhere else would be
     /// advertising an input that is not there.
     pub(super) fn command_suggestions(&self) -> Option<Vec<&'static CommandSpec>> {
-        if self.tab() != "Agents" || self.prompt.is_some() {
+        if self.tab() != "Sessions" || self.prompt.is_some() {
             return None;
         }
         crate::ui::command::suggestions(&self.draft.text)
@@ -596,106 +598,9 @@ impl App {
             .copied()
     }
 
-    /// Move the peek's cursor, wrapping at both ends so a short list is quick to
-    /// walk in either direction.
-    pub(super) fn move_command_index(&mut self, up: bool) {
-        let Some(len) = self.command_suggestions().map(|s| s.len()) else {
-            return;
-        };
-        if len == 0 {
-            return;
-        }
-        self.command_index = if up {
-            (self.command_index + len - 1) % len
-        } else {
-            (self.command_index + 1) % len
-        };
-    }
-
-    /// Replace the draft with the peeked command, ready for its argument.
-    ///
-    /// A command that takes an argument gets a trailing space — which also
-    /// closes the peek, since the choice has been made.
-    pub(super) fn complete_command(&mut self) {
-        let Some(spec) = self.peeked_command() else {
-            return;
-        };
-        let text = if spec.args.is_empty() {
-            format!("/{}", spec.name)
-        } else {
-            format!("/{} ", spec.name)
-        };
-        self.draft = Draft {
-            cursor: text.chars().count(),
-            text,
-        };
-        self.command_index = 0;
-    }
-
-    /// Whether the Agents cursor sits on the orchestrator lane.
-    ///
-    /// That lane is the conversation with the operator, so it scrolls the chat
-    /// transcript and its composer submits an instruction; every other lane
-    /// shows an agent's own turns and answers its questions.
-    ///
-    /// Reads the *rail's* rows, not the lane list's: `agent_index` walks the
-    /// rail, which carries the `+ New session` action and the operator's own
-    /// harness rows as well as the lanes. Indexing the shorter list with it
-    /// reported a lane for rows that name none, and the composer's visibility
-    /// hangs off this answer — so a session row claimed a text box that was
-    /// never drawn, and every keystroke went into it.
-    pub fn on_orchestrator_lane(&self) -> bool {
-        let lanes = self.lanes();
-        let rows = self.rail_rows_in(&lanes);
-        match rows.get(self.rail_cursor_in(&rows, &lanes)) {
-            // Only a lane's *own* row is a conversation. `AgentRow` also wraps
-            // the `+N more` overflow control, which carries the lane index of
-            // the lane it pages — matching it here would have read that index
-            // out of a row that is a button, and an overflow row on a rail with
-            // no folded lanes yet would fall through to the `true` below and
-            // hand the orchestrator's composer to it.
-            Some(super::rail::RailRow::Lane(AgentRow::Lane { lane_index })) => lanes
-                .get(*lane_index)
-                .map(|lane| lane.role == AgentRole::Orchestrator)
-                // An empty lane list means the orchestrator lane is all there is.
-                .unwrap_or(true),
-            // Hosts, agents, sessions, the overflow control and the action row
-            // are not lanes and have no conversation of their own.
-            Some(_) => false,
-            None => true,
-        }
-    }
-
-    /// The rail index of the orchestrator's own lane row, when the rail has one.
-    ///
-    /// The inverse of [`on_orchestrator_lane`](Self::on_orchestrator_lane): that
-    /// asks whether the cursor is already there, this says where "there" is so
-    /// the cursor can be put on it. Only a `Lane` row ever matches — a task
-    /// sublane under the orchestrator is not the conversation, and the action
-    /// and harness rows are not lanes at all.
-    ///
-    /// `None` before the first fold has produced any lane row, which is the one
-    /// state with no conversation to move to.
-    pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
-        let lanes = self.lanes();
-        self.rail_rows().iter().position(|row| match row {
-            super::rail::RailRow::Lane(AgentRow::Lane { lane_index }) => lanes
-                .get(*lane_index)
-                .map(|lane| lane.role == AgentRole::Orchestrator)
-                // Matches the same fallback `on_orchestrator_lane` makes: with
-                // no lanes folded yet, the sole lane row is the orchestrator's.
-                .unwrap_or(true),
-            _ => false,
-        })
-    }
-
-    /// Scroll whichever transcript the Agents cursor is reading.
+    /// Scroll the transcript the Sessions cursor is reading.
     pub(super) fn scroll_transcript(&mut self, up: bool, step: usize) {
-        let target = if self.on_orchestrator_lane() {
-            &mut self.chat_scroll
-        } else {
-            &mut self.agent_scroll
-        };
+        let target = &mut self.agent_scroll;
         *target = if up {
             target.saturating_add(step)
         } else {

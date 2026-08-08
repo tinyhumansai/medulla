@@ -73,10 +73,10 @@ fn folder_completion_keeps_only_the_best_bounded_set() {
     assert!(results.windows(2).all(|pair| pair[0] <= pair[1]));
 }
 
-/// An Agents-tab app with a picker parked on its workspace step, whose default
+/// An Sessions-tab app with a picker parked on its workspace step, whose default
 /// workspace is `workspace`.
 fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
-    use super::types::{AgentPicker, AgentPickerStep, App};
+    use super::types::{App, SessionPicker, SessionPickerStep};
 
     let mut loaded = medulla::config::LoadedConfig::defaults("medulla.tui.json".into());
     loaded.config.link = Some(medulla::config::LinkConfig::default());
@@ -97,11 +97,10 @@ fn picker_on_workspace_step(workspace: &std::path::Path) -> super::types::App {
         router: None,
         attribution: true,
     });
-    app.agent_picker = Some(AgentPicker {
-        purpose: super::types::PickerPurpose::Spawn,
+    app.session_picker = Some(SessionPicker {
         choices: Vec::new(),
         index: 0,
-        step: AgentPickerStep::Workspace,
+        step: SessionPickerStep::Workspace,
         cwd: workspace.to_string_lossy().into_owned(),
         workspace_query: String::new(),
         workspace_choices: Vec::new(),
@@ -126,7 +125,7 @@ fn a_pasted_directory_starts_there_rather_than_in_its_first_child() {
     app.on_event(crossterm::event::Event::Paste(pasted));
 
     assert!(
-        !app.agent_picker
+        !app.session_picker
             .as_ref()
             .unwrap()
             .workspace_choices

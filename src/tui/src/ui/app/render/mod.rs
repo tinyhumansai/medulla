@@ -1,7 +1,7 @@
 //! The ratatui render surface for [`App`]. This module owns the outer chrome —
 //! the [`App::draw`] layout, hints/tabs/status line, the shared [`App::panel`] block
 //! builder, and content dispatch — plus the small styling helpers ([`color`],
-//! [`styled_to_tline`], [`event_color`], [`chat_lines`], [`App::event_line`])
+//! [`styled_to_tline`], [`event_color`], [`App::event_line`])
 //! reused by the per-tab submodules. Each tab's body lives in a sibling module,
 //! and [`frame_state`] owns the per-frame reset every draw opens with.
 
@@ -12,14 +12,12 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::agents::Line as StyledLine;
-use crate::ui::chat::tool_call;
 use crate::ui::events::{describe_event, EventEnvelope, TuiEvent};
-use crate::ui::util::{clip, clock, wrap};
+use crate::ui::util::{clip, clock};
 use crate::worker::pty::ATTENTION_GLYPH;
 
 use super::types::{App, Overlay, PaneView, TABS};
 
-mod agents;
 mod changes;
 mod decisions;
 mod feedback;
@@ -31,8 +29,12 @@ mod prompt;
 mod routing;
 mod selection;
 mod session_modals;
+mod sessions;
 mod settings;
 mod status_line;
+mod subconscious;
+#[cfg(test)]
+mod subconscious_tests;
 mod template_modal;
 #[cfg(feature = "workflows")]
 pub(super) mod workflows;
@@ -89,196 +91,6 @@ pub(super) fn event_color(env: &EventEnvelope) -> Option<&'static str> {
     }
 }
 
-/// Render the assembled tool calls, newest last, and clear them.
-fn flush_calls(pending: &mut Vec<(i64, PendingCall)>, cols: usize, out: &mut Vec<StyledLine>) {
-    for (_, call) in pending.drain(..) {
-        // A nameless call is not worth a line. Some providers never send
-        // `tool_call_start`, so a whole inference streams as anonymous argument
-        // fragments — rendering those gave a column of identical "calling a
-        // tool" rows that said nothing the spinner did not. They are replaced
-        // by the named list when the inference closes; until then the spinner
-        // is the liveness signal.
-        if call.name.trim().is_empty() {
-            continue;
-        }
-        // A one-line summary, not the payload: the arguments are frequently
-        // kilobytes of JSON, and a transcript that reproduces them whole buries
-        // the answer the user is reading for.
-        //
-        // Streamed arguments are parsed leniently — a call still in flight has
-        // a half-written object, which is normal rather than an error, and
-        // `summarize` degrades to the verb alone.
-        let args = serde_json::from_str::<serde_json::Value>(call.args.trim())
-            .unwrap_or(serde_json::Value::Null);
-        let text = format!("⏺ {}", tool_call::summarize(&call.name, &args));
-        let text = truncate(&text, cols.saturating_sub(2));
-        out.push(StyledLine {
-            text,
-            color: Some("magenta".into()),
-            dim: true,
-        });
-    }
-}
-
-/// Clip to `max` display columns, marking that it was clipped.
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(max.saturating_sub(1)).collect();
-    format!("{head}…")
-}
-
-pub(super) fn chat_lines(events: &[EventEnvelope], width: usize) -> Vec<StyledLine> {
-    let cols = width.max(20);
-    let mut out = Vec::new();
-    // Tool calls are assembled across several events and flushed in stream
-    // order, so they appear between the turns they happened between.
-    let mut pending: Vec<(i64, PendingCall)> = Vec::new();
-    for env in events {
-        // `InferenceEnd` is excluded because it *supersedes* the streamed
-        // assembly rather than following it: flushing here would render every
-        // call twice, once from the deltas and once from the authoritative list.
-        if !matches!(
-            env.event,
-            TuiEvent::ToolCallDelta { .. }
-                | TuiEvent::Unknown { .. }
-                | TuiEvent::InferenceEnd { .. }
-        ) {
-            flush_calls(&mut pending, cols, &mut out);
-        }
-        match &env.event {
-            // The name arrives once, ahead of its argument fragments.
-            // `inference_end` carries the tool calls the model actually made,
-            // each with its name and complete arguments. On the backend runtime
-            // it arrives untyped — `EventKind` models no variant for it — so it
-            // is read from the raw payload here as well as from the typed event
-            // below. Either way the named list supersedes the streamed
-            // fragments, which are the same calls seen in pieces and often
-            // without names.
-            TuiEvent::Unknown { kind, data } if kind == "inference_end" => {
-                let calls = tool_call::calls_from_payload(data);
-                if calls.is_empty() {
-                    flush_calls(&mut pending, cols, &mut out);
-                } else {
-                    pending.clear();
-                    for (name, args) in calls {
-                        let text = format!("⏺ {}", tool_call::summarize(&name, &args));
-                        out.push(StyledLine {
-                            text: truncate(&text, cols.saturating_sub(2)),
-                            color: Some("magenta".into()),
-                            dim: true,
-                        });
-                    }
-                }
-            }
-            TuiEvent::Unknown { kind, data } if kind == "tool_call_start" => {
-                let index = data
-                    .get("index")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
-                let name = data
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                match pending.iter_mut().find(|(i, _)| *i == index) {
-                    // A start re-announcing a live index is a *new* call taking
-                    // that slot — providers reuse indices across calls. Keeping
-                    // the args would render the new call with the old one's
-                    // arguments.
-                    Some((_, call)) => {
-                        call.name = name;
-                        call.args.clear();
-                    }
-                    None => pending.push((
-                        index,
-                        PendingCall {
-                            name,
-                            args: String::new(),
-                        },
-                    )),
-                }
-            }
-            TuiEvent::ToolCallDelta { index, args_delta } => {
-                match pending.iter_mut().find(|(i, _)| i == index) {
-                    Some((_, call)) => call.args.push_str(args_delta),
-                    None => pending.push((
-                        *index,
-                        PendingCall {
-                            name: String::new(),
-                            args: args_delta.clone(),
-                        },
-                    )),
-                }
-            }
-            // The close of an inference carries the tool calls it actually
-            // made, each with its name and complete arguments. The streamed
-            // deltas are the same calls seen in pieces — and lossily, since a
-            // provider may omit `tool_call_start` and leave the name blank — so
-            // the authoritative list replaces them outright.
-            TuiEvent::InferenceEnd { tool_calls, .. } => {
-                match tool_calls.as_ref().filter(|calls| !calls.is_empty()) {
-                    Some(calls) => {
-                        pending.clear();
-                        for call in calls {
-                            let text =
-                                format!("⏺ {}", tool_call::summarize(&call.name, &call.args));
-                            out.push(StyledLine {
-                                text: truncate(&text, cols.saturating_sub(2)),
-                                color: Some("magenta".into()),
-                                dim: true,
-                            });
-                        }
-                    }
-                    // No tool calls reported: whatever the deltas assembled is
-                    // all there is, so let it stand.
-                    None => flush_calls(&mut pending, cols, &mut out),
-                }
-            }
-            TuiEvent::User { body } => {
-                out.push(StyledLine::default());
-                for (i, row) in wrap(body, cols.saturating_sub(2)).into_iter().enumerate() {
-                    out.push(StyledLine {
-                        text: if i == 0 {
-                            format!("❯ {row}")
-                        } else {
-                            format!("  {row}")
-                        },
-                        color: Some("cyan".into()),
-                        dim: false,
-                    });
-                }
-            }
-            TuiEvent::Assistant { body } => {
-                for (i, row) in wrap(body, cols.saturating_sub(2)).into_iter().enumerate() {
-                    out.push(StyledLine {
-                        text: if i == 0 {
-                            format!("⏺ {row}")
-                        } else {
-                            format!("  {row}")
-                        },
-                        color: Some("green".into()),
-                        dim: false,
-                    });
-                }
-            }
-            TuiEvent::Error { source, message } => {
-                for row in wrap(&format!("{source}: {message}"), cols) {
-                    out.push(StyledLine {
-                        text: row,
-                        color: Some("red".into()),
-                        dim: false,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    flush_calls(&mut pending, cols, &mut out);
-    out
-}
-
 impl App {
     /// Draw the whole screen: the shortcut hints, tabs, the active tab's
     /// content, the composer/prompt/resume overlay when applicable, and the
@@ -293,7 +105,7 @@ impl App {
         // Everything the last frame recorded for the next key press, dropped
         // before this one records its own — see [`frame_state`].
         self.reset_frame_state();
-        // The composer now lives inside the Agents pane, so the only things that
+        // The composer now lives inside the Sessions pane, so the only things that
         // still claim a row of their own below the content are the inline prompt
         // and the resume picker.
         let has_prompt = self.prompt.is_some();
@@ -335,7 +147,7 @@ impl App {
             match overlay {
                 Overlay::Decisions => self.draw_decisions(f, rows[2]),
                 Overlay::TemplatePopup => self.draw_template_modal(f, rows[2]),
-                Overlay::AgentPicker => self.draw_harness_picker(f, rows[2]),
+                Overlay::SessionPicker => self.draw_harness_picker(f, rows[2]),
                 Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
                 Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
                 Overlay::ResumePicker => self.draw_resume(f, rows[3]),
@@ -364,7 +176,7 @@ impl App {
         self.hit_tabs_row = area.y;
         let mut spans = Vec::new();
         let mut col = area.x;
-        // A harness waiting on the operator is only visible on the Agents rail,
+        // A harness waiting on the operator is only visible on the Sessions rail,
         // and an operator reading Workflows or Settings is exactly the person
         // who does not know a pane has stopped. The count rides on the tab so
         // the signal survives leaving the tab that carries it.
@@ -377,7 +189,7 @@ impl App {
         let badges: Vec<String> = TABS
             .iter()
             .map(|name| {
-                if *name == "Agents" && waiting > 0 {
+                if *name == "Sessions" && waiting > 0 {
                     format!(" {ATTENTION_GLYPH}{waiting}")
                 } else {
                     String::new()
@@ -435,10 +247,10 @@ impl App {
     /// Draw the keyboard-shortcut hint line that heads the screen.
     ///
     /// Only keys that act on the surface in front of you — which is also why it
-    /// differs per tab: the Agents steering chords do nothing on Workflows, and
-    /// advertising them there teaches keys that are not bound. `^O` and `/help`
-    /// are still bound; they are just discoverable elsewhere, and a hint line
-    /// long enough to wrap stops being read at all.
+    /// differs per tab: the Sessions steering chords do nothing on Workflows, and
+    /// advertising them there teaches keys that are not bound. A hint line long
+    /// enough to wrap stops being read at all, so the rest live in Settings ›
+    /// Help.
     pub(super) fn draw_shortcuts(&mut self, f: &mut Frame, area: Rect) {
         #[cfg(feature = "workflows")]
         let workflows = self.tab() == "Workflows";
@@ -465,17 +277,21 @@ impl App {
             "Tab views · TokenMaxxxing coming soon"
         } else if self.tab() == "TokenMaxxxing" {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
+        } else if self.tab() == "Subconscious" {
+            // Its own line, and a short one: the placeholder binds nothing, and
+            // the default hint below advertises the session steering chords.
+            "Tab views · Subconscious coming soon"
         } else if self.tab() == "Changes" {
             "Tab views · ↑↓ files · j/k line · [ ] hunk · b baseline · c comment · C file · e edit · r refresh"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
-        } else if self.tab() == "Agents" && self.pane_view == PaneView::Diff {
+        } else if self.tab() == "Sessions" && self.pane_view == PaneView::Diff {
             // The pane is showing a session's diff, so it binds the Changes
             // keys — read from `pane_view` rather than from `pane_session`,
             // which the content draw has not filled in yet this frame.
             "Tab views · ↑↓ files · j/k line · [ ] hunk · b baseline · c comment · d/Esc harness"
         } else {
-            "Tab views · Esc/↑↓ rail · ⏎/^] session · d session diff · k close session · ⌥X cancel · ⌥A answer · ^N thread · ^Y copy · ^X abort"
+            "Tab views · ↑↓ rail · ^T new session · ⏎/^] session · d session diff · k close session · ⌥X cancel · ⌥A answer · ^X abort"
         };
         f.render_widget(
             Paragraph::new(TLine::from(Span::styled(
@@ -496,10 +312,13 @@ impl App {
     pub(super) fn draw_content(&mut self, f: &mut Frame, area: Rect) {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
-            "Agents" => self.draw_agents(f, area),
+            "Sessions" => self.draw_sessions_tab(f, area),
             "Changes" => self.draw_changes(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
+            // Not feature-gated: the tab exists in the slim build too, and a
+            // placeholder has nothing to draw that the workflow engine provides.
+            "Subconscious" => self.draw_subconscious(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
             "Hosts" => self.draw_routing(f, area),
             "Feedback" => self.draw_feedback(f, area),
@@ -536,8 +355,9 @@ fn compact_tab_label(name: &str, compact: bool) -> &str {
     }
     match name {
         "Overview" => "Over",
-        "Agents" => "Agts",
+        "Sessions" => "Sess",
         "Workflows" => "Flows",
+        "Subconscious" => "Sub",
         "Changes" => "Diff",
         "Feedback" => "Feed",
         "Settings" => "Set",
@@ -547,6 +367,3 @@ fn compact_tab_label(name: &str, compact: bool) -> &str {
 
 #[cfg(test)]
 mod tests;
-
-mod types;
-use types::PendingCall;

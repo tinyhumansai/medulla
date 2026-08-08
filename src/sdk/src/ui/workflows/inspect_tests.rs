@@ -44,6 +44,7 @@ fn step(node_id: &str, status: &str) -> RunStep {
         input: None,
         output: None,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }
 }
 

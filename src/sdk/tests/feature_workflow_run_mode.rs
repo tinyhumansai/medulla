@@ -108,7 +108,7 @@ static SERIAL: Mutex<()> = Mutex::const_new(());
 /// It also *removes* the control-plane grant, which is the other half of reading
 /// the real process environment. A test binary is routinely launched inside a
 /// harness session Medulla itself started — `cargo test` run by a coding agent
-/// under the Agents tab — and inherits that session's socket and token.
+/// under the Sessions tab — and inherits that session's socket and token.
 /// [`medulla::workflows::RunReporter`] reports to whatever grant the run's
 /// environment names, so without this the fixture below files five runs of a
 /// workflow called `double` into the *operator's* live rail, where they sit

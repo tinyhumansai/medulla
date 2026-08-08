@@ -206,11 +206,13 @@ pub struct SessionRow {
     pub state: PtyState,
     /// The working directory the child runs in.
     pub cwd: String,
-    /// Git branch resolved from the working directory when the session opened.
+    /// Which repository, worktree, and branch the working directory sits in.
     ///
-    /// `None` means the directory is not in a repository or has a detached
-    /// `HEAD`.
-    pub branch: Option<String>,
+    /// Kept current while the session runs rather than captured at launch: an
+    /// agent whose first act is to cut a branch spends the rest of its life on
+    /// one the launch snapshot had never heard of, and several worktrees of one
+    /// repository are otherwise told apart only by a path segment.
+    pub checkout: medulla::ui::checkout::Checkout,
     /// Repository root captured immediately before launch.
     pub launch_root: Option<String>,
     /// Commit checked out in the working directory immediately before launch.

@@ -277,7 +277,7 @@ fn row(
         preset: None,
         state: PtyState::Running,
         cwd: cwd.to_string_lossy().into_owned(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: repository::discover_in(cwd)
             .ok()
             .map(|(root, _)| root.to_string_lossy().into_owned()),

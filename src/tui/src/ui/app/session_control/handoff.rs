@@ -7,14 +7,6 @@ use crossterm::event::KeyCode;
 use super::super::types::{App, Cmd, HandbackPolicy, HandbackPrompt, TakeOrigin};
 
 impl App {
-    /// Take the selected session from the orchestrator.
-    pub(crate) fn take_session_control(&mut self) {
-        let Some((_, session)) = self.selected_session() else {
-            return;
-        };
-        self.take_session(&session, TakeOrigin::Explicit);
-    }
-
     /// Take one named session from the orchestrator and record why.
     pub(super) fn take_session(&mut self, session: &str, origin: TakeOrigin) {
         let Some(harnesses) = self.local_sessions.clone() else {
@@ -41,18 +33,6 @@ impl App {
             });
         }
         self.set_status("You have this session · the orchestrator will not dispatch into it");
-    }
-
-    /// Give the selected session back to the orchestrator with an optional note.
-    pub(crate) fn hand_session_back(&mut self, note: Option<String>) {
-        let Some((harnesses, session)) = self.handoff_target() else {
-            return;
-        };
-        if harnesses.control(&session) == Some(SessionControl::Orchestrator) {
-            self.set_status("The orchestrator already has this session");
-            return;
-        }
-        self.hand_back_session(&session, note);
     }
 
     /// Toggle the owner of the session selected by the handoff command.
@@ -89,16 +69,21 @@ impl App {
 
     /// Resolve the session a global handoff command applies to.
     fn handoff_target(&mut self) -> Option<(crate::ui::harness_pane::LocalSessions, String)> {
+        // Ahead of the hosting check, and deliberately: a cursor on a session
+        // that runs elsewhere is the more specific fact, and it is true whether
+        // or not this device hosts anything of its own. Answering "not hosting"
+        // to an operator plainly looking at a running session reads as a broken
+        // feature rather than as the boundary it is.
+        if let Some(agent) = self.pane_remote_session.clone() {
+            self.set_status(format!("{agent} runs on another host — you can watch this session, but taking control is local-only for now"));
+            return None;
+        }
         let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions");
             return None;
         };
         if let Some(session) = self.harness_focus.attached_to() {
             return Some((harnesses, session.to_string()));
-        }
-        if let Some(agent) = self.pane_remote_session.clone() {
-            self.set_status(format!("{agent} runs on another host — you can watch this session, but taking control is local-only for now"));
-            return None;
         }
         if let Some(session) = self.pane_session.clone() {
             return Some((harnesses, session));
@@ -158,9 +143,7 @@ impl App {
                 true
             }
             HandbackPolicy::Never => {
-                self.set_status(
-                    "Released · you still hold this session (/handoff to give it back)",
-                );
+                self.set_status("Released · you still hold this session (^G gives it back)");
                 true
             }
             HandbackPolicy::Ask => {
@@ -319,9 +302,7 @@ impl App {
             KeyCode::Char('n' | 'N') => {
                 self.handback_prompt = None;
                 self.release_session();
-                self.set_status(
-                    "Released · you still hold this session (/handoff to give it back)",
-                );
+                self.set_status("Released · you still hold this session (^G gives it back)");
             }
             KeyCode::Esc => {
                 self.handback_prompt = None;

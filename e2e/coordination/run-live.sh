@@ -97,6 +97,14 @@ unavailable() {
 # Every check here fails closed. A live suite that runs by accident — in CI, in
 # a loop, against prod — is worse than one that is annoying to start.
 preflight() {
+  # This suite writes its own opencode provider block against a live OpenRouter
+  # key, so it is opencode-only. The other harnesses reach a live endpoint
+  # through a Medulla preset instead, which is a different arrangement than the
+  # one written below — running it here would silently test neither.
+  [ "$HARNESS" = "opencode" ] || {
+    printf 'refusing to run: run-live.sh is opencode-only (E2E_HARNESS=%s)\n' "$HARNESS" >&2
+    exit 2
+  }
   [ "${E2E_LIVE:-0}" = "1" ] || {
     printf '%s\n' \
       "refusing to run: this suite bills a real OpenRouter key and talks to real" \

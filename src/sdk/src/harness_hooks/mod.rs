@@ -51,9 +51,15 @@
 //! Both delivery paths were verified end-to-end against the versions named
 //! above: a `SessionStart` hook injected this way fires on Claude Code, and on
 //! Codex fires alongside the operator's own once trusted.
+//!
+//! All of that assumes Medulla spawns the harness CLI itself. Under ACP
+//! dispatch it spawns an ACP *server* which spawns the harness, so there is no
+//! argv to add to and these two paths deliver nothing at all — see [`acp`],
+//! which carries the same document over that transport's own channels.
 
 use crate::protocol::HarnessProvider;
 
+pub mod acp;
 pub mod builtin;
 mod claude;
 mod codex;
@@ -63,8 +69,11 @@ mod report;
 mod types;
 
 #[cfg(test)]
+mod acp_tests;
+#[cfg(test)]
 mod tests;
 
+pub use acp::{delivery as acp_delivery, AcpDelivery};
 pub use grant::{seed_hook_grant, HookGrantGuard};
 pub use report::{HookEventLog, HookReport};
 pub use types::{

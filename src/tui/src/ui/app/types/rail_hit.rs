@@ -1,4 +1,4 @@
-//! Compact, identity-bearing pointer targets for the rendered Agents rail.
+//! Compact, identity-bearing pointer targets for the rendered Sessions rail.
 
 /// The compact pointer action a rendered rail line represents.
 ///
@@ -11,10 +11,11 @@ pub(in crate::ui::app) enum RailHitTarget {
     Inert,
     /// A selectable row with no direct pointer action.
     Selectable,
-    /// The action that opens the new-agent picker.
-    NewAgent,
-    /// The action that starts a session for this agent.
-    NewSession(String),
+    /// An action row that opens the session picker.
+    ///
+    /// Carries nothing: the picker asks for the harness and the directory
+    /// itself, so which `+` row was clicked no longer changes what happens.
+    NewSession,
     /// The action that pages an agent lane's tasks.
     Overflow,
     /// A row attached to this local harness session.
@@ -38,7 +39,7 @@ impl RailHitTarget {
     }
 }
 
-/// One rendered Agents-rail line and the stable cursor state it represented.
+/// One rendered Sessions-rail line and the stable cursor state it represented.
 ///
 /// Pointer input happens after drawing, when live lanes may have changed. The
 /// hit map therefore retains the row and its anchor from that frame instead of
@@ -65,11 +66,9 @@ impl RailHit {
     ) -> Self {
         use super::super::rail::RailRow;
 
-        let target = if row.is_new_agent() {
-            RailHitTarget::NewAgent
-        } else if let Some(agent_id) = row.new_session_agent() {
-            RailHitTarget::NewSession(agent_id.to_string())
-        } else if matches!(row, RailRow::Lane(crate::ui::agents::AgentRow::More { .. })) {
+        let target = if row.is_new_session() {
+            RailHitTarget::NewSession
+        } else if matches!(row, RailRow::Overflow { .. }) {
             RailHitTarget::Overflow
         } else if let Some(run) = row.workflow_run() {
             RailHitTarget::WorkflowRun {

@@ -163,11 +163,11 @@ fn authoring_a_workflow_and_installing_its_skill_writes_a_harness_readable_file(
     );
     // The declared input survives store round-tripping into the summary.
     assert!(
-        skill.contains("| `pr` | number | yes | The pull request to babysit | — |"),
+        skill.contains("- `pr`* number — The pull request to babysit."),
         "{skill}"
     );
     assert!(skill.contains("mcp__medulla__workflow_run"), "{skill}");
-    assert!(skill.contains("\"id\": \"babysit\""), "{skill}");
+    assert!(skill.contains("\"id\":\"babysit\""), "{skill}");
 
     // Rendering is target-independent: Codex gets the same bytes, and a change
     // that made one target's body drift would be a bug, not a feature.
@@ -179,7 +179,7 @@ fn authoring_a_workflow_and_installing_its_skill_writes_a_harness_readable_file(
     // A workflow with no inputs says so rather than rendering an empty table.
     let audit = fs::read_to_string(home.path().join(".claude/skills/medulla-audit/SKILL.md"))
         .expect("the audit skill is readable");
-    assert!(audit.contains("This workflow takes no inputs"), "{audit}");
+    assert!(audit.contains("No inputs — pass"), "{audit}");
 
     // The command variant is the operator-typed door onto the same call.
     let command = fs::read_to_string(home.path().join(".claude/commands/medulla-babysit.md"))
@@ -233,14 +233,13 @@ fn editing_one_workflow_and_syncing_rewrites_only_that_workflows_files() {
     let babysit_after = fs::read_to_string(&babysit_skill).expect("still installed");
     assert_ne!(babysit_before, babysit_after);
     assert!(
-        babysit_after.contains(
-            "| `repo` | string | no | Repository the pull request is in | `\"acme/api\"` |"
-        ),
+        babysit_after
+            .contains("- `repo` string = `\"acme/api\"` — Repository the pull request is in."),
         "{babysit_after}"
     );
     // The new default is runnable as written in the example call.
     assert!(
-        babysit_after.contains("\"repo\": \"acme/api\""),
+        babysit_after.contains("\"repo\":\"acme/api\""),
         "{babysit_after}"
     );
 

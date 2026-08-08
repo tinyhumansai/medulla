@@ -13,22 +13,22 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use super::super::types::{AgentPickerStep, App};
+use super::super::types::{App, SessionPickerStep};
 
 const HARNESS_TRAILER_LINES: usize = 3;
 
 impl App {
     /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {
-        let Some(picker) = &self.agent_picker else {
+        let Some(picker) = &self.session_picker else {
             return;
         };
         let (rows, title) = match picker.step {
-            AgentPickerStep::Harness => (
+            SessionPickerStep::Harness => (
                 picker.choices.len(),
                 "Choose a harness type — ↑/↓ · Enter workspace · Esc cancel",
             ),
-            AgentPickerStep::Workspace => (
+            SessionPickerStep::Workspace => (
                 picker.workspace_choices.len(),
                 "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
             ),
@@ -76,7 +76,7 @@ impl App {
         };
         let mut lines =
             match picker.step {
-                AgentPickerStep::Harness => {
+                SessionPickerStep::Harness => {
                     let capacity = (inner.height as usize).saturating_sub(HARNESS_TRAILER_LINES);
                     let range = harness_choice_window(picker.choices.len(), picker.index, capacity);
                     picker.choices[range.clone()]
@@ -98,7 +98,7 @@ impl App {
                         })
                         .collect()
                 }
-                AgentPickerStep::Workspace => {
+                SessionPickerStep::Workspace => {
                     let selected_session = picker
                         .choices
                         .get(picker.index)
@@ -157,9 +157,9 @@ impl App {
                     lines
                 }
             };
-        self.hit_agent_picker = Some((area, hits));
-        let picker = self.agent_picker.as_ref().expect("picker is present");
-        if picker.step == AgentPickerStep::Harness {
+        self.hit_session_picker = Some((area, hits));
+        let picker = self.session_picker.as_ref().expect("picker is present");
+        if picker.step == SessionPickerStep::Harness {
             lines.push(TLine::from(""));
             lines.push(TLine::from(Span::styled(
                 "  Next: choose a workspace",

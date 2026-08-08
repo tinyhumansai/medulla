@@ -119,6 +119,21 @@ impl SessionHandle {
         lock(&self.cold).name = name.filter(|name| !name.trim().is_empty());
     }
 
+    /// Record a freshly read checkout, reporting whether anything moved.
+    ///
+    /// The answer is compared rather than stored blindly so the poller can stay
+    /// silent while nothing changes: a redraw per session per tick, for four
+    /// sessions that are all still on the branch they started on, is a cost
+    /// paid for no new information.
+    pub(in super::super) fn set_checkout(&self, checkout: medulla::ui::checkout::Checkout) -> bool {
+        let mut cold = lock(&self.cold);
+        if cold.checkout == checkout {
+            return false;
+        }
+        cold.checkout = checkout;
+        true
+    }
+
     /// Record why a queued write never reached the child.
     ///
     /// The write half is drained by a thread (see the manager's `spawn_writer`),
@@ -140,7 +155,7 @@ impl SessionHandle {
             preset: self.meta.preset.clone(),
             state: self.state(),
             cwd: self.meta.cwd.clone(),
-            branch: self.meta.branch.clone(),
+            checkout: cold.checkout.clone(),
             launch_root: self.meta.launch_root.clone(),
             launch_commit: self.meta.launch_commit.clone(),
             launch_checkout_identity: self.meta.launch_checkout_identity.clone(),

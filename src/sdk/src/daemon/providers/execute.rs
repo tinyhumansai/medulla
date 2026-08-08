@@ -57,6 +57,14 @@ pub fn with_auth_hint(message: &str) -> String {
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
 pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    // Ahead of everything, including the credential scrub below. Every line
+    // after this one prepares a *child process* — its environment, its router,
+    // its argv — and OpenHuman has no child: the turn runs in this process
+    // against the embedded core. Scrubbing the core's own workspace out of the
+    // environment on its way to the core would be exactly backwards.
+    if super::openhuman::uses_embedded_core(&options) {
+        return super::openhuman::run_openhuman_task(options).await;
+    }
     // This has to precede every transport choice below. ACP and the pooled
     // app-server return before the CLI spawn seam, but each child is still an
     // external harness and must never inherit the embedded core's credential
@@ -76,22 +84,11 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         return super::codex_server::run_codex_server_task(options).await;
     }
     if super::acp::uses_acp(&options) {
-        // ACP dispatch cannot carry Medulla hooks. Every other path injects them
-        // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*
-        // (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`)
-        // which spawns the harness itself, so there is no argv to add to. Claude
-        // Code's env-based settings paths were checked as an alternative and do
-        // not deliver hooks either. Say so rather than let the operator believe a
-        // configured hook is running.
-        let configured = options.hooks.for_provider(options.provider).len();
-        if configured > 0 {
-            tracing::warn!(
-                provider = options.provider.as_str(),
-                hooks = configured,
-                "medulla hooks are not installed for ACP dispatch: the harness CLI is \
-                 launched by the ACP server, not by Medulla",
-            );
-        }
+        // Hooks are installed inside `run_acp_task` rather than here. This path
+        // has no harness argv to add them to — Medulla spawns an ACP *server*
+        // which spawns the harness — so delivery is per-transport and belongs
+        // where the session request and the server's environment are built. See
+        // `crate::harness_hooks::acp`.
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;
@@ -251,12 +248,18 @@ async fn run_provider_attempt(
     // than only by `medulla skills install`, so a workflow authored, disabled,
     // or deleted since the last install is described correctly here. Empty for
     // a provider with no directory flag, so those argvs are unchanged.
+    //
+    // Skipped entirely when this launch is getting no Medulla tools: every one
+    // of these skills instructs the model to call `workflow_run`, and a session
+    // told to call a tool it was not served spends a turn discovering that.
     #[cfg(feature = "workflows")]
-    extra_args.extend(crate::workflows::skills::refresh_managed(
-        spec.provider,
-        &spec.env,
-        std::path::Path::new(&spec.cwd),
-    ));
+    if !crate::harness_tools::withheld(&spec.env) {
+        extra_args.extend(crate::workflows::skills::refresh_managed(
+            spec.provider,
+            &spec.env,
+            std::path::Path::new(&spec.cwd),
+        ));
+    }
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,

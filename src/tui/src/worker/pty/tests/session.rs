@@ -251,28 +251,6 @@ fn sessions_keep_open_order_so_the_cursor_does_not_jump() {
 }
 
 #[test]
-fn a_session_records_its_worktrees_branch() {
-    let dir = tempfile::tempdir().unwrap();
-    let status = std::process::Command::new("git")
-        .args(["init", "--quiet", "--initial-branch", "visible-branch"])
-        .arg(dir.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-
-    let manager = PtyManager::new();
-    let mut spec = sh("sleep 30");
-    spec.cwd = dir.path().to_string_lossy().into_owned();
-    let id = manager.open(spec).unwrap();
-
-    assert_eq!(
-        manager.row(&id).unwrap().branch.as_deref(),
-        Some("visible-branch")
-    );
-    manager.close(&id);
-}
-
-#[test]
 fn a_launch_root_preserves_trailing_whitespace() {
     let parent = tempfile::tempdir().unwrap();
     let directory = parent.path().join("repository ");
@@ -367,19 +345,6 @@ fn an_unborn_repository_records_its_root_without_a_launch_commit() {
     );
     assert_eq!(row.launch_commit, None);
     assert!(row.launch_checkout_identity.is_some());
-    manager.close(&id);
-}
-
-#[test]
-fn a_session_outside_git_has_no_branch() {
-    let dir = tempfile::tempdir().unwrap();
-    let manager = PtyManager::new();
-    let mut spec = sh("sleep 30");
-    spec.cwd = dir.path().to_string_lossy().into_owned();
-    let id = manager.open(spec).unwrap();
-
-    assert!(manager.row(&id).unwrap().branch.is_none());
-    assert!(manager.row(&id).unwrap().launch_root.is_none());
     manager.close(&id);
 }
 

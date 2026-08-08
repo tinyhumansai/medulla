@@ -263,10 +263,33 @@ tokenEnv = "MEDULLA_TOKEN"
 # selectionFg = "white"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
 
-# Legacy harness-row toggles, kept so an older config keeps working. They are
-# read only when [statusLine] below is absent, in which case `false` means that
-# field is hidden. Settings › Status line writes [statusLine] and takes over.
+# ---------------------------------------------------------------------------
+# appearance — how the Agents sidebar arranges itself, plus the legacy
+# harness-row toggles. Settings › Appearance edits all of these live.
+#
+# sidebarGrouping picks what heads the sidebar's sections:
+#   "host"     one section per machine, drawn only once a second host exists
+#              (the default)
+#   "path"     one per workspace directory, so a checkout's agents read together
+#   "harness"  one per coding-agent CLI
+#   "none"     one flat list, no headers
+#
+# sidebarSort orders the agents in a section and the sessions under an agent:
+#   "created"  declaration order for agents, oldest-first for sessions (default)
+#   "recent"   most recently active first
+#   "name"     alphabetical
+#
+# Grouping only moves the headers: every agent keeps its own sessions, so no row
+# disappears whichever way these are set.
+#
+# showHarnessBranch/showHarnessPath are legacy, kept so an older config keeps
+# working. They are read only when [statusLine] below is absent, in which case
+# `false` means that field is hidden. Settings › Status line writes
+# [statusLine] and takes over.
+# ---------------------------------------------------------------------------
 # [appearance]
+# sidebarGrouping = "host"
+# sidebarSort = "created"
 # showHarnessBranch = true
 # showHarnessPath = true
 
@@ -275,27 +298,31 @@ tokenEnv = "MEDULLA_TOKEN"
 # out. Settings › Status line edits these live and previews the result, which
 # is by far the easier way to arrive at a layout you like.
 #
-# Every field answers three questions:
-#   where   "line1" | "line2" | "line3" | "hidden"  (at most three lines)
-#   when    "always" | "active" (only the selected row) | "alert" (only a
-#           harness that failed, exited non-zero, or recorded an error)
-#   spelled per-field, see below
+# Every field answers the same three questions, which are the rows the settings
+# page shows under each field's name:
+#   position "line1" | "line2" | "line3" | "hidden"  (at most three lines)
+#   shown    "always" | "active" (only the selected row) | "alert" (only a
+#            harness that failed, exited non-zero, or recorded an error)
+#   spelled  per-field, see below
 #
-# The defaults below reproduce the historical single-line row:
+# The defaults below are the identifying line plus the thread beneath it:
 #   ● codex · unmanaged · main · ~/work/medulla
+#     Ship the status line
 # ---------------------------------------------------------------------------
 # [statusLine]
-# state = "line1"                # the ● / ✓ / ✕ run-state glyph
+# state = "line1"                # State glyph: the ●/✓/✕ symbol, running, finished, or failed
 # stateWhen = "always"
-# harness = "line1"
+# harness = "line1"              # Harness name: which CLI is driving the session
 # harnessWhen = "always"
 # harnessStyle = "short"         # "long" (Claude Code) | "short" (claude) | "icon"
-# control = "line1"              # managed / unmanaged
+# control = "line1"              # Managed / unmanaged: Medulla's session or yours
 # controlWhen = "always"
 # controlStyle = "text"          # "text" (unmanaged) | "icon" (⊘ / ⊙)
-# branch = "line1"
+# thread = "line2"               # Thread name: the conversation being worked on
+# threadWhen = "always"
+# branch = "line1"               # Git branch: the branch the checkout is on
 # branchWhen = "always"
-# path = "line1"
+# path = "line1"                 # Working path: the checkout it is running in
 # pathWhen = "always"
 # pathStyle = "shortened"        # "full" | "shortened" (~/…/tail) | "last"
 

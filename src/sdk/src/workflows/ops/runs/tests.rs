@@ -34,6 +34,7 @@ fn recorded(store: &Arc<dyn WorkflowStore>, run_id: &str, output_bytes: usize) {
         input: Some(json!("a very long prompt")),
         output: Some(json!("o".repeat(output_bytes))),
         diagnostics: vec!["$.missing resolved to null".to_string()],
+        transcript: Vec::new(),
     }];
     store.record_run(&record).expect("records the run");
 }

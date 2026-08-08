@@ -1,4 +1,4 @@
-//! What the Agents rail assembles: declared agents with no traffic, sessions
+//! What the Sessions rail assembles: declared agents with no traffic, sessions
 //! grouped under the agent that owns them, and host rows only once there is a
 //! second machine to tell apart.
 
@@ -8,9 +8,9 @@ use std::sync::Arc;
 use medulla::config::LoadedConfig;
 use medulla::protocol::HarnessProvider;
 use medulla::runtime::mock::MockRuntime;
-use medulla::runtime::{AgentDeclaration, Runtime};
+use medulla::runtime::{AgentDeclaration, Runtime, WorkerInfo};
 
-use super::{RailRow, NEW_AGENT_LABEL};
+use super::{AgentGroup, AgentRailRow, GroupRailRow, RailRow, NEW_SESSION_LABEL};
 use crate::ui::app::App;
 use crate::worker::pty::PtyManager;
 
@@ -65,7 +65,7 @@ pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionR
         preset: None,
         state: crate::worker::pty::PtyState::Running,
         cwd: "/".to_string(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,
@@ -84,91 +84,69 @@ pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionR
     }
 }
 
-/// The agent rows, in rail order.
-fn agent_ids(app: &App) -> Vec<String> {
-    app.rail_rows()
-        .into_iter()
-        .filter_map(|row| match row {
-            RailRow::Agent(agent) => Some(agent.agent_id),
-            _ => None,
-        })
-        .collect()
-}
-
 #[test]
-fn a_declared_agent_with_no_sessions_still_has_a_row() {
-    // The point of sourcing the rail from declarations: an agent nothing has
-    // been dispatched to folds no lane, so under the old taxonomy it had no row
-    // at all — a targetable identity you could not see.
-    let mut app = app();
-    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
-        "idle-agent",
-        "",
-        "claude",
-        "/work/idle",
-    )];
-
-    let row = app
-        .rail_rows()
-        .into_iter()
-        .find_map(|row| match row {
-            RailRow::Agent(agent) if agent.agent_id == "idle-agent" => Some(agent),
-            _ => None,
-        })
-        .expect("the declared agent has a row");
-
-    assert!(row.lane_index.is_none(), "it has no traffic to fold");
-    assert_eq!(row.harness(), Some("claude"));
-    assert_eq!(row.workspace(), Some("/work/idle"));
-}
-
-#[test]
-fn a_declaration_and_its_lane_are_one_row_not_two() {
-    // Declaring an agent the fold already produced a lane for must not list it
-    // twice: the id is the join, and the lane keeps its own live row.
-    let mut app = app();
-    let Some(existing) = agent_ids(&app).into_iter().next() else {
-        return;
-    };
-    app.loaded.config.fleet.agent_declarations = vec![AgentDeclaration::new(
-        existing.clone(),
-        "",
-        "claude",
-        "/work",
-    )];
-
-    let ids = agent_ids(&app);
-    assert_eq!(
-        ids.iter().filter(|id| **id == existing).count(),
-        1,
-        "{ids:?} lists {existing} once"
+fn the_sessions_of_one_agent_stay_contiguous() {
+    // The agent tier has no row any more, but it still decides the *order*: the
+    // rail groups sessions by agent, so an agent's sessions come out as one run
+    // rather than interleaved with another's. That is what keeps the tree glyphs
+    // (`last`) and the host grouping meaningful without a header to anchor them.
+    let app = app();
+    let mut seen: Vec<String> = Vec::new();
+    let mut current: Option<String> = None;
+    for row in app.rail_rows() {
+        let RailRow::Session(session) = row else {
+            continue;
+        };
+        let Some(agent_id) = session.agent_id.clone() else {
+            continue;
+        };
+        if current.as_ref() == Some(&agent_id) {
+            continue;
+        }
+        assert!(
+            !seen.contains(&agent_id),
+            "{agent_id} was already listed and has come back around: {seen:?}"
+        );
+        seen.push(agent_id.clone());
+        current = Some(agent_id);
+    }
+    assert!(
+        !seen.is_empty(),
+        "the demo fixture dispatches at least one task"
     );
 }
 
 #[test]
-fn every_session_row_sits_under_the_agent_that_owns_it() {
-    // The rail's whole grouping rule, asserted structurally: walking the rows,
-    // a session's agent is always whichever agent row it last passed.
-    let app = app();
-    let mut current: Option<String> = None;
-    let mut checked = 0;
-    for row in app.rail_rows() {
-        match row {
-            RailRow::Agent(agent) => current = Some(agent.agent_id),
-            RailRow::Session(session) => {
-                if let Some(agent_id) = &session.agent_id {
-                    assert_eq!(
-                        Some(agent_id),
-                        current.as_ref(),
-                        "a session is filed under the agent above it"
-                    );
-                    checked += 1;
-                }
-            }
-            _ => {}
-        }
-    }
-    assert!(checked > 0, "the demo fixture dispatches at least one task");
+fn empty_grouped_sections_do_not_emit_a_header() {
+    let rows = app().flatten(
+        vec![super::organize::Section {
+            header: super::organize::SectionHeader::Group(GroupRailRow {
+                label: "/quiet".to_string(),
+            }),
+            agents: vec![AgentGroup {
+                row: AgentRailRow {
+                    agent_id: "quiet".to_string(),
+                    host_id: String::new(),
+                    agent: None,
+                    lane_index: None,
+                },
+                sessions: Vec::new(),
+                last_at: 0,
+                lane_label: None,
+                harness_label: None,
+                visible_tasks: 0,
+                hidden: 0,
+                overflow: false,
+            }],
+        }],
+        Vec::new(),
+        &[],
+    );
+
+    assert!(
+        !rows.iter().any(|row| matches!(row, RailRow::Group(_))),
+        "a group without a rendered session must not leave an empty heading"
+    );
 }
 
 // Unix-only: starts a real child on a real pseudo-terminal via `/bin/sh`,
@@ -288,8 +266,28 @@ fn a_session_in_an_undeclared_directory_is_still_listed() {
 }
 
 #[test]
-fn host_rows_appear_only_once_a_second_host_exists() {
-    let mut app = app();
+fn the_host_tree_keeps_a_second_declared_host() {
+    let runtime = MockRuntime::empty();
+    runtime.set_workers(vec![WorkerInfo {
+        id: "studio-claude".into(),
+        address: "studio".into(),
+        handle: None,
+        label: None,
+        harness: Some("claude".into()),
+        workspace: Some("/work".into()),
+        peer_id: None,
+        cpu_cores: None,
+        memory_total_bytes: None,
+        memory_available_bytes: None,
+        ip_address: None,
+        selected: false,
+        roles: Vec::new(),
+        budgets: Vec::new(),
+        readiness: Vec::new(),
+    }]);
+    let mut loaded = LoadedConfig::defaults("medulla.tui.json".into());
+    loaded.config.link = Some(medulla::config::LinkConfig::default());
+    let mut app = App::new(Arc::new(runtime), loaded);
     app.loaded.config.fleet.agent_declarations =
         vec![AgentDeclaration::new("local-claude", "", "claude", "/work")];
     assert!(
@@ -310,20 +308,21 @@ fn host_rows_appear_only_once_a_second_host_exists() {
             "/work",
         ));
     let hosts: Vec<(String, bool)> = app
-        .rail_rows()
+        .host_tree()
         .into_iter()
-        .filter_map(|row| match row {
-            RailRow::Host(host) => Some((host.host_id, host.local)),
-            _ => None,
-        })
+        .map(|host| (host.id, host.kind == medulla::ui::hosts::HostKind::Local))
         .collect();
     assert!(
         hosts.iter().any(|(host_id, _)| host_id == "studio"),
-        "the second machine gets a header: {hosts:?}"
+        "the second declared machine stays in the shared tree: {hosts:?}"
+    );
+    assert!(
+        hosts.iter().any(|(_, is_local)| *is_local),
+        "the local machine remains in the shared tree: {hosts:?}"
     );
     assert!(
         hosts.len() >= 2,
-        "so does this one, once there is a second: {hosts:?}"
+        "the local and second declared machines both remain: {hosts:?}"
     );
     let local = app.local_host_refs();
     assert_eq!(
@@ -334,140 +333,53 @@ fn host_rows_appear_only_once_a_second_host_exists() {
 }
 
 #[test]
-fn the_rail_and_the_hosts_tab_list_the_same_agents_under_the_same_hosts() {
-    // The unification, asserted directly: both tabs render `host_rows`, so the
-    // Agents rail cannot claim an agent the Hosts tab does not have, place it on
-    // another host, or order them differently. The rail may hold *more* — a lane
-    // for a backend-side agent this hub never advertised — and those are the
-    // rows the tree does not cover, so they are excluded rather than asserted
-    // away.
-    let mut app = hosting_app();
-    app.loaded.config.fleet.agent_declarations = vec![
-        AgentDeclaration::new("api-claude", "", "claude", "/work/api"),
-        AgentDeclaration::new("web-codex", "", "codex", "/work/web"),
-        AgentDeclaration::new("studio-claude", "studio", "claude", "/work"),
-    ];
-
-    let expected: Vec<(String, String)> = app
-        .host_tree()
-        .into_iter()
-        .flat_map(|host| {
-            host.agents
-                .into_iter()
-                .map(move |agent| (host.id.clone(), agent.agent_id))
-        })
-        .collect();
-    let known: Vec<String> = expected.iter().map(|(_, agent)| agent.clone()).collect();
-    let railed: Vec<(String, String)> = app
-        .rail_rows()
-        .into_iter()
-        .filter_map(|row| match row {
-            RailRow::Agent(agent) if known.contains(&agent.agent_id) => {
-                Some((agent.host_id, agent.agent_id))
-            }
-            _ => None,
-        })
-        .collect();
-
-    assert!(!expected.is_empty(), "the fixture declares agents");
-    assert_eq!(railed, expected, "one tree, two lenses");
-}
-
-#[test]
 fn the_create_action_is_absent_on_a_device_that_hosts_nothing() {
-    // A machine with no host cannot declare an agent on itself, so the action is
+    // A machine with no host has nowhere to start a session, so the action is
     // missing rather than present and refusing.
     assert!(
-        !app().rail_rows().iter().any(RailRow::is_new_agent),
+        !app().rail_rows().iter().any(RailRow::is_new_session),
         "no host, no create action"
     );
+    let rows = hosting_app().rail_rows();
     assert!(
-        hosting_app().rail_rows().iter().any(RailRow::is_new_agent),
-        "hosting, so {NEW_AGENT_LABEL} is offered"
+        rows.iter().any(RailRow::is_new_session),
+        "hosting, so {NEW_SESSION_LABEL} is offered"
+    );
+    // And exactly one of it: it used to be emitted per declared agent, which put
+    // a button under every group for a flow that no longer asks which agent.
+    assert_eq!(
+        rows.iter().filter(|row| row.is_new_session()).count(),
+        1,
+        "one door, not one per agent: {rows:?}"
     );
 }
 
 #[test]
-fn an_agent_is_labelled_by_its_name_and_falls_back_to_its_id() {
-    // The label, the harness and the workspace all come from the shared tree, so
-    // an agent reads the same on both tabs. A row the tree does not cover has
-    // only its id, and says nothing about the harness rather than guessing.
-    let mut app = app();
-    let mut declaration = AgentDeclaration::new("api-codex", "", "codex", "/work/api");
-    app.loaded.config.fleet.agent_declarations = vec![declaration.clone()];
-
-    let row = |app: &App| {
-        app.rail_rows()
-            .into_iter()
-            .find_map(|row| match row {
-                RailRow::Agent(agent) if agent.agent_id == "api-codex" => Some(agent),
-                _ => None,
-            })
-            .expect("the declared agent has a row")
-    };
-
-    let declared = row(&app);
-    assert_eq!(declared.label(), "api-codex", "no name means the id");
-    assert_eq!(declared.harness(), Some("codex"));
-    assert_eq!(declared.workspace(), Some("/work/api"));
-
-    declaration.name = Some("   ".into());
-    app.loaded.config.fleet.agent_declarations = vec![declaration.clone()];
-    assert_eq!(row(&app).label(), "api-codex", "a blank name is not a name");
-
-    declaration.name = Some("API".into());
-    app.loaded.config.fleet.agent_declarations = vec![declaration];
-    assert_eq!(row(&app).label(), "API");
-
-    let bare = super::AgentRailRow {
-        agent_id: "api-codex".into(),
-        host_id: String::new(),
-        agent: None,
-        lane_index: None,
-    };
-    assert_eq!(bare.label(), "api-codex");
-    assert_eq!(bare.harness(), None);
-    assert_eq!(bare.workspace(), None);
-}
-
-#[test]
-fn a_row_answers_for_the_agent_and_the_lane_behind_it() {
+fn a_row_answers_for_the_lane_behind_it() {
     let app = app();
     for row in app.rail_rows() {
         match &row {
-            RailRow::Agent(agent) => {
-                assert_eq!(row.agent_id(), Some(agent.agent_id.as_str()));
-                assert_eq!(row.lane_index(), agent.lane_index);
-                assert!(row.task().is_none(), "an agent is not a session");
-            }
             RailRow::Session(session) => {
-                assert_eq!(row.agent_id(), session.agent_id.as_deref());
                 assert_eq!(row.lane_index(), session.lane_index);
             }
-            // Hosts, the heading and the create action are about no agent and
-            // no lane.
-            RailRow::Host(_) | RailRow::NewAgent | RailRow::AgentsHeader => {
-                assert_eq!(row.agent_id(), None);
-                assert_eq!(row.lane_index(), None);
-                assert_eq!(row.session_id(), None);
-            }
-            // The per-agent action names its agent — that is what `^T` and
-            // Enter act on — but no lane and no session of its own.
-            RailRow::NewSession { agent_id } => {
-                assert_eq!(row.agent_id(), Some(agent_id.as_str()));
-                assert_eq!(row.new_session_agent(), Some(agent_id.as_str()));
+            // The host header and the action row are about no lane and no
+            // session.
+            RailRow::Host(_) | RailRow::Group(_) | RailRow::NewSession => {
                 assert_eq!(row.lane_index(), None);
                 assert_eq!(row.session_id(), None);
                 assert!(row.task().is_none());
             }
-            // A run row is about the session that started it, not about an
-            // agent or a lane of its own.
+            // A run row is about the session that started it, not a lane of its
+            // own.
             RailRow::WorkflowRun(run) => {
                 assert_eq!(row.session_id(), Some(run.session_id.as_str()));
-                assert_eq!(row.agent_id(), None);
                 assert_eq!(row.lane_index(), None);
             }
-            RailRow::Lane(lane) => assert_eq!(row.lane_index(), lane.lane_index()),
+            // The paging control names the lane it pages, and nothing else.
+            RailRow::Overflow { lane_index, .. } => {
+                assert_eq!(row.lane_index(), Some(*lane_index));
+                assert_eq!(row.session_id(), None);
+            }
         }
     }
 }
@@ -483,66 +395,15 @@ fn only_the_rows_that_name_something_take_the_cursor() {
     )];
     for row in app.rail_rows() {
         match row {
-            RailRow::Host(_) => assert!(!row.selectable(), "a host header is a label"),
-            RailRow::AgentsHeader => {
-                assert!(!row.selectable(), "the agents heading is a label")
+            RailRow::Host(_) | RailRow::Group(_) => {
+                assert!(!row.selectable(), "a section header is a label")
             }
-            RailRow::Agent(_)
-            | RailRow::Session(_)
-            | RailRow::NewAgent
-            | RailRow::NewSession { .. }
-            | RailRow::WorkflowRun(_) => {
+            RailRow::Session(_)
+            | RailRow::NewSession
+            | RailRow::WorkflowRun(_)
+            | RailRow::Overflow { .. } => {
                 assert!(row.selectable())
             }
-            RailRow::Lane(_) => {}
         }
     }
-}
-
-#[test]
-fn the_agents_heading_sits_under_the_create_action_and_only_over_a_tree() {
-    let mut app = hosting_app();
-    app.loaded.config.fleet.agent_declarations =
-        vec![AgentDeclaration::new("api-codex", "", "codex", "/w/api")];
-    let rows = app.rail_rows();
-    let new_agent = rows
-        .iter()
-        .position(|row| matches!(row, RailRow::NewAgent))
-        .expect("the create action is on the rail");
-    let heading = rows
-        .iter()
-        .position(|row| matches!(row, RailRow::AgentsHeader))
-        .expect("a rail with agents heads them");
-    let first_agent = rows
-        .iter()
-        .position(|row| matches!(row, RailRow::Agent(_)))
-        .expect("this fixture declares agents");
-    assert_eq!(
-        heading,
-        new_agent + 1,
-        "the heading follows the button it explains"
-    );
-    assert!(
-        heading < first_agent,
-        "and precedes the tree it heads: {rows:?}"
-    );
-
-    // The other half of "only over a tree": a hosting device with nothing
-    // declared and no traffic still offers the create action, and a heading
-    // there would announce a section that is not on the rail. Built on the empty
-    // runtime rather than `hosting_app`, whose demo lanes are themselves agents.
-    let mut bare = App::new(
-        Arc::new(MockRuntime::empty()) as Arc<dyn Runtime>,
-        LoadedConfig::defaults("medulla.tui.json".into()),
-    );
-    bare.set_local_sessions(shell_harnesses(PtyManager::new()));
-    let rows = bare.rail_rows();
-    assert!(
-        rows.iter().any(|row| matches!(row, RailRow::NewAgent)),
-        "the create action is still offered: {rows:?}"
-    );
-    assert!(
-        !rows.iter().any(|row| matches!(row, RailRow::AgentsHeader)),
-        "but nothing is headed: {rows:?}"
-    );
 }

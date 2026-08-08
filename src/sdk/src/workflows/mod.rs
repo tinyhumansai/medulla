@@ -37,6 +37,7 @@ pub mod run;
 pub mod skills;
 pub mod store;
 mod types;
+pub mod workspace;
 
 #[cfg(test)]
 mod tests;

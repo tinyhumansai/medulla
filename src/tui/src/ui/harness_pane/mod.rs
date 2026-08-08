@@ -1,4 +1,4 @@
-//! The embedded harness terminal in the orchestrator's Agents tab.
+//! The embedded harness terminal in the orchestrator's Sessions tab.
 //!
 //! An agent lane used to show a transcript we reconstructed from the harness's
 //! JSON stream. That reconstruction only ever existed because the harness was

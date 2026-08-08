@@ -169,7 +169,7 @@ fn turning_medullas_own_hooks_off_withdraws_them_here_and_on_disk() {
 /// The P2 Codex found on this branch: saving a hook updated
 /// `loaded.config.hooks`, but `LocalSessions.hooks` — the copy
 /// `harness_pane::spawn::open_unmanaged` actually reads when the operator
-/// starts a harness from the Agents pane — was a separate clone taken once at
+/// starts a harness from the Sessions pane — was a separate clone taken once at
 /// startup and never touched again. The status line claimed "applies to
 /// harnesses started from now on" while a session opened before a restart
 /// still launched with the stale hook set: a newly added hook would not run,
@@ -199,7 +199,7 @@ fn saving_a_hook_updates_the_live_operator_launch_state_too() {
 
 /// The same staleness class applies to turning Medulla's own hooks off: the
 /// operator flips `b`, the status line says the harnesses report nothing —
-/// that has to be true for a session opened from the Agents pane right after,
+/// that has to be true for a session opened from the Sessions pane right after,
 /// not only for one started following a restart.
 #[test]
 fn toggling_builtin_hooks_updates_the_live_operator_launch_state_too() {

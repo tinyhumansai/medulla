@@ -83,6 +83,7 @@ impl HarnessDispatch for StubHarness {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 

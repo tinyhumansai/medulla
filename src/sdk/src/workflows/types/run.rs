@@ -200,6 +200,20 @@ pub struct RunStep {
     /// rather than an intended value.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<String>,
+    /// What the harness said while it ran this step, in order.
+    ///
+    /// Recorded for `agent` nodes only, and only for steps run through a
+    /// dispatch that collects one. Absent on every other node kind and on
+    /// records written before transcripts existed — additive, like every other
+    /// field here, so an older build still reads these files.
+    ///
+    /// This is the answer to the question [`input`](Self::input) and
+    /// [`output`](Self::output) cannot reach: those say what the step was asked
+    /// and what it returned, while a step that returned something surprising is
+    /// explained by what happened in between. See
+    /// [`crate::harness_transcript`] for the bounds it is kept under.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transcript: Vec<crate::harness_transcript::TranscriptEntry>,
 }
 
 /// A durable record of one workflow run.

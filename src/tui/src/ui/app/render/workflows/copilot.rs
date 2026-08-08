@@ -1,6 +1,6 @@
 //! The copilot pane: the conversation that edits the graph beside it.
 //!
-//! A transcript above a composer, like the Agents tab — and now literally the
+//! A transcript above a composer, like the Sessions tab — and now literally the
 //! same widgets ([`crate::ui::chat`]) rather than a second implementation of the
 //! idea. The difference is scope: this thread is about one workflow, and the
 //! agent behind it holds the workflow tools rather than the whole machine.
@@ -11,7 +11,7 @@
 //!
 //! The composer is a sibling of the transcript panel rather than nested inside
 //! it, so it carries its own border. That border is the only thing that says
-//! whether typing goes here — the Agents composer has always worked this way,
+//! whether typing goes here — the Sessions composer has always worked this way,
 //! and the copilot reading differently made the two panes feel unrelated.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

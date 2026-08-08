@@ -163,6 +163,11 @@ pub fn parse_workflow_args(args: &[String]) -> WorkflowArgs {
                     out.set.push(v.clone());
                 }
             }
+            "--workspace" => {
+                if let Some(v) = it.next() {
+                    out.workspace = Some(v.clone());
+                }
+            }
             "--run-id" => {
                 if let Some(v) = it.next() {
                     out.run_id = Some(v.clone());
@@ -553,6 +558,7 @@ Workflow flags:\n  \
 --input <json>          Trigger payload for run / dry-run\n  \
 --inputs <json>         Declared workflow inputs, as an object keyed by name\n  \
 --set <name>=<value>    One declared input (repeatable; wins over --inputs)\n  \
+--workspace <dir>       Checkout the run works in: where its shell steps run and\n                          which repository its agent steps open (default: cwd)\n  \
 --run-id <id>           Id to give the run (default: a fresh one)\n  \
 --approve <node-id>     Gate to release on resume (repeatable)\n  \
 --reject <node-id>      Gate to refuse on resume (repeatable)\n\n\

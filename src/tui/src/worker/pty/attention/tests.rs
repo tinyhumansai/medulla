@@ -406,6 +406,23 @@ fn a_continuation_that_describes_the_failure_is_not_recovery() {
     );
 }
 
+/// When two different failures sit in the live tail, the row must describe the
+/// *latest* one — the line `error_index` chose — not whichever marker happens
+/// to appear first in the table. An older "usage limit reached" above a retry
+/// and a newer "Invalid API key" below it must not send the operator back to
+/// the quota page.
+#[test]
+fn the_latest_failure_is_the_one_described() {
+    let screen = "Usage limit reached\n> retry with the refreshed token\nInvalid API key\n> ";
+    let (kind, what) = detect(HarnessProvider::Codex, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Error, "{screen}");
+    assert!(
+        what.contains("sign-in") || what.contains("API key"),
+        "{what}"
+    );
+    assert!(!what.contains("usage limit"), "{what}");
+}
+
 /// The final line of a completed turn can itself name an error marker while
 /// describing its resolution. The matched line is no more a live error than a
 /// continuation row is: "The invalid API key has been replaced." says the

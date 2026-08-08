@@ -407,3 +407,103 @@ async fn abort_cancelled_resolves_when_signalled() {
     // Already-aborted: cancelled returns immediately.
     abort.cancelled().await;
 }
+
+/// Build a fake claude CLI at `path` from `body`, and the options that run it
+/// with `timeout_ms` as the idle budget. Shared by the watchdog tests below.
+#[cfg(unix)]
+fn idle_probe_options(
+    dir: &std::path::Path,
+    body: &str,
+    timeout_ms: u64,
+) -> (std::path::PathBuf, RunTaskOptions) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let harness = dir.join("fake-claude");
+    std::fs::write(&harness, body).unwrap();
+    std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let options = RunTaskOptions {
+        transport: Default::default(),
+        conversation: "peer".into(),
+        session_class: crate::sessions::SessionClass::Unbound,
+        resume_session_id: None,
+        workspace_context: Default::default(),
+        provider: HarnessProvider::Claude,
+        prompt: "go".into(),
+        cwd: dir.to_string_lossy().into_owned(),
+        env: HashMap::from([(
+            "MEDULLA_CLAUDE_BIN".into(),
+            harness.to_string_lossy().into_owned(),
+        )]),
+        timeout_ms,
+        model: None,
+        agent: None,
+        extra_args: Vec::new(),
+        skip_permissions: false,
+        abort: Abort::new(),
+        router: None,
+        attribution: false,
+        hooks: crate::harness_hooks::HooksConfig::default(),
+        on_event: None,
+        on_stdin: None,
+        on_session: None,
+        on_workspace_context: None,
+    };
+    (harness, options)
+}
+
+/// A harness deep inside one long tool call logs progress to stderr and emits no
+/// parsed event for far longer than the idle budget. That is a working child,
+/// not a hung one, and killing it discards everything it has not yet pushed.
+#[cfg(unix)]
+#[tokio::test]
+async fn stderr_chatter_keeps_a_working_child_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_bin, options) = idle_probe_options(
+        dir.path(),
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 12 ]; do echo \"compiling crate $i\" >&2; sleep 0.1; i=$((i+1)); done\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"built\"}'\n",
+        300,
+    );
+
+    let result = super::execute::run_provider_task(options).await;
+
+    assert_eq!(result.unwrap().reply, "built");
+}
+
+/// stdout records this build does not map still prove the child is running, so
+/// they must push the deadline out too — only a silent pipe means idle.
+#[cfg(unix)]
+#[tokio::test]
+async fn unmapped_stdout_records_keep_a_working_child_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_bin, options) = idle_probe_options(
+        dir.path(),
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 12 ]; do printf '%s\\n' '{\"type\":\"not_a_kind_we_map\"}'; sleep 0.1; i=$((i+1)); done\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"done\"}'\n",
+        300,
+    );
+
+    let result = super::execute::run_provider_task(options).await;
+
+    assert_eq!(result.unwrap().reply, "done");
+}
+
+/// The watchdog still exists: a child that says nothing at all on either pipe
+/// is killed on the idle budget rather than hanging the run.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wholly_silent_child_is_still_killed_as_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_bin, options) = idle_probe_options(
+        dir.path(),
+        "#!/bin/sh\nsleep 5\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"too late\"}'\n",
+        300,
+    );
+
+    let error = super::execute::run_provider_task(options)
+        .await
+        .expect_err("a silent child must trip the watchdog");
+
+    assert!(
+        error.contains("idle for 300ms"),
+        "unexpected error: {error}"
+    );
+}

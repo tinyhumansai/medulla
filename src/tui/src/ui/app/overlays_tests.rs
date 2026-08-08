@@ -19,7 +19,7 @@ use medulla::runtime::mock::MockRuntime;
 
 use super::types::{
     tab_pos, App, HandbackPrompt, Overlay, PromptKind, ResumePicker, SessionPicker,
-    SessionPickerStep, RP_TEMPLATES,
+    SessionPickerStep, WorkspaceChoice, RP_TEMPLATES,
 };
 use crate::ui::composer::{Draft, TextPrompt};
 

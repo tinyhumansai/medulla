@@ -179,12 +179,15 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             )));
         }
-        // Said here as well as in the status line, because it is the one fact
-        // that makes this different from every other way to start a session —
-        // and it is now a statement rather than a question, so it is said on
-        // both steps and never asked.
+        // The one fact that makes this picker different from every other way
+        // to start a session is that the session is unmanaged, so that is
+        // stated on both steps. The keyboard verbs beside it are step-specific:
+        // Tab complete and Shift+F save favorite need the workspace step's
+        // text field and chosen directory, and advertising them on the harness
+        // step — where neither key is bound — would send an operator pressing
+        // the hint into silence.
         lines.push(TLine::from(Span::styled(
-            "  ↑/↓ choose · Tab complete · Shift+F save favorite · unmanaged",
+            harness_picker_hint(picker.step),
             Style::default().add_modifier(Modifier::DIM),
         )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);

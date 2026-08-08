@@ -15,9 +15,9 @@ use medulla::daemon::{DaemonConfig, DaemonRuntime};
 use medulla::protocol::{HarnessProvider, TaskFrameKind};
 use medulla::ui::agents::{TaskState, TaskStatus};
 
-use super::super::super::super::super::rail::{RailRow, SessionRailRow};
-use super::super::super::super::color;
-use super::{app, lane, NOW};
+use super::super::super::super::rail::{RailRow, SessionRailRow};
+use super::super::super::color;
+use super::tests::{app, lane, NOW};
 use crate::ui::harness_pane::LocalSessions;
 use crate::worker::pty::{LaunchSpec, PtyManager, PtyState, SessionControl, SessionOrigin};
 

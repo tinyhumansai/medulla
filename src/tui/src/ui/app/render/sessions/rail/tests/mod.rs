@@ -1,6 +1,5 @@
 //! Unit-test fixtures and focused coverage for the Sessions rail.
 
-mod task_row_tests;
 mod workflow_run_tests;
 mod wrap_tests;
 
@@ -52,7 +51,7 @@ fn none_waiting() -> std::collections::HashSet<String> {
     std::collections::HashSet::new()
 }
 
-fn lane() -> AgentLane {
+pub(super) fn lane() -> AgentLane {
     AgentLane {
         key: "k".into(),
         label: "worker".into(),

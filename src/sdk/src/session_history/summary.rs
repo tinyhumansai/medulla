@@ -185,6 +185,40 @@ pub fn codex_thread_label(env: &HashMap<String, String>, session_id: &str) -> Op
     })
 }
 
+/// Load the Codex session-index into an id-to-label map.
+///
+/// Callers that need to resolve thread names for many sessions (e.g. the
+/// recent-session list) can load the index once and look up every session
+/// against the same map, rather than re-reading and re-parsing the file
+/// per session.
+pub fn codex_index_map(env: &HashMap<String, String>) -> HashMap<String, String> {
+    let Some(index_path) = (|| {
+        super::scan::codex_sessions_dir(env)
+            .parent()?
+            .join("session_index.jsonl")
+            .into()
+    })() else {
+        return HashMap::new();
+    };
+    let Ok(contents) = std::fs::read_to_string(index_path) else {
+        return HashMap::new();
+    };
+    contents
+        .lines()
+        .filter_map(|line| {
+            let record: Value = serde_json::from_str(line).ok()?;
+            let object = record.as_object()?;
+            let id = object.get("id").and_then(Value::as_str)?;
+            let label = object
+                .get("thread_name")
+                .and_then(Value::as_str)
+                .map(slug_label)
+                .filter(|l| !l.is_empty())?;
+            Some((id.to_string(), label))
+        })
+        .collect()
+}
+
 /// Read the first [`HEAD_BYTES`] of `path` as UTF-8 (lossy) and split into
 /// non-empty lines, dropping a final partial line when the read hit the cap.
 fn read_head_lines(path: &Path) -> Vec<String> {

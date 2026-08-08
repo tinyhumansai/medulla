@@ -202,6 +202,25 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
     {
         return None;
     }
+    // A bare marker phrase that is the last content in the tail, with only the
+    // restored composer beneath it, is ambiguous: it can be a terminal error,
+    // but it can equally be the final line of a completed turn whose reply
+    // merely quotes the phrase — asking the harness to "reply exactly
+    // `authentication failed`" puts that line exactly where an error would sit,
+    // with none of the recovery vocabulary that would name it as a turn's
+    // content. The screen cannot tell the two apart, and a missed blink is
+    // cheaper than a rail that blinks at nothing, so the message must carry
+    // context beyond the bare marker — extra words on the matched line, or a
+    // continuation row below — before it is reported as blocking.
+    let below = &tail[error_index + 1..];
+    if !below.is_empty()
+        && below.iter().all(|line| is_composer(line))
+        && ERRORS
+            .iter()
+            .any(|(marker, _)| squash(tail[error_index]) == *marker)
+    {
+        return None;
+    }
     // The prompt is part of the terminal viewport too, but it is operator
     // input rather than harness output; a draft such as `> fix invalid API
     // key` must not turn an otherwise idle session red. The matched line is a

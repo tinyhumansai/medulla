@@ -552,6 +552,14 @@ fn codex_still_announces_its_turn_the_old_way() {
     ));
 }
 
+/// A draft in the idle composer that echoes a footer phrase is operator input,
+/// not the harness working: it must not spin the row or veto real cues until
+/// the draft clears.
+#[test]
+fn a_draft_echoing_a_working_phrase_in_the_composer_is_not_working() {
+    assert!(!is_working("› document esc to interrupt behavior"));
+}
+
 /// Each part of the progress line appears in ordinary output on its own. Only
 /// the three together mean a turn is in flight.
 #[test]

@@ -382,9 +382,18 @@ async fn run_provider_attempt(
     let mut line_no: i64 = 0;
     let mut stdout_tail = String::new();
 
-    // Idle watchdog: killed only after `timeout_ms` with NO new event; each event
-    // pushes the deadline out. Armed at start to cover a child that emits nothing.
+    // Idle watchdog: killed only after `timeout_ms` with NO sign of life; each
+    // one pushes the deadline out. Armed at start to cover a child that emits
+    // nothing at all.
+    //
+    // "Sign of life" is deliberately wider than "parsed event". A harness that
+    // spends twenty minutes inside one tool call — a cold `cargo test`, a long
+    // lint — emits no semantic events for the whole of it, and treating that as
+    // a hang killed sessions mid-task and discarded everything they had not yet
+    // pushed. Any output on either pipe now counts, so the watchdog still fires
+    // on a genuinely wedged child while a working one is left alone.
     let mut deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+    let mut seen_stderr = stderr_beat.load(Ordering::Relaxed);
     let mut buf = Vec::new();
 
     let idle_error = format!(

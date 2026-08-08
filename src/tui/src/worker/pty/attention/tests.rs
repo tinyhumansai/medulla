@@ -394,6 +394,41 @@ fn a_wrapped_blocking_error_is_still_blocking() {
     }
 }
 
+/// A bullet-prefixed error is still blocking. Providers commonly lead a
+/// terminal error or its wrapped instruction with a bullet glyph
+/// (`•`, `*`, `·`), so the leading glyph is layout, not proof the harness
+/// recovered; the line must not clear the error on that alone.
+#[test]
+fn a_bullet_prefixed_error_is_still_blocking() {
+    for screen in [
+        "• Invalid API key · Please run /login\n> ",
+        "• You've hit your usage limit.\n> ",
+        "* Invalid API key · please re-authenticate\n> ",
+        "· Invalid API key.\n> ",
+    ] {
+        let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+        assert_eq!(kind, AttentionKind::Error, "{screen}");
+        assert!(
+            what.contains("usage limit") || what.contains("sign-in"),
+            "{what}"
+        );
+    }
+}
+
+/// A bullet-led line that really shows an in-flight activity shape — an
+/// ellipsis or a live elapsed counter — is still recovery evidence, so the
+/// glyph tightening above must not re-flag a harness that kept working.
+#[test]
+fn an_activity_shaped_bullet_line_is_still_recovery() {
+    for screen in [
+        // The mid-dot animated list item that Claude draws while working.
+        "✽ Reticulating splines… (12s · esc to interrupt)\nInvalid API key\n> ",
+        "• Working (8s · esc to interrupt)\n> ",
+    ] {
+        assert_eq!(detect(HarnessProvider::Claude, screen), None, "{screen}");
+    }
+}
+
 /// A continuation is only recovery evidence when it carries a live status
 /// signal. A sentence about the failure using words that happen to contain a
 /// recovery keyword must not clear the error: "unsuccessful" contains

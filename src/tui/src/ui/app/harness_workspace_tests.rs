@@ -233,3 +233,24 @@ fn saving_a_named_favorite_persists_it_and_makes_its_name_searchable() {
     assert_eq!(choice.label.as_deref(), Some("Daily Medulla"));
     assert_eq!(choice.path, workspace.to_string_lossy());
 }
+
+#[test]
+fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    // Point at a config file whose directory does not exist, so persistence
+    // fails — a favorite the disk never recorded must not be visible in memory
+    // either, or a later successful save could silently persist it.
+    let missing_dir = root.path().join("no-such-dir");
+    app.set_config_path(missing_dir.join("config.toml"));
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    assert!(
+        app.loaded.config.harness.favorite_workspaces.is_empty(),
+        "a favorite that could not be persisted must not appear to be saved"
+    );
+    assert!(app.status().contains("Could not save favorite"));
+}

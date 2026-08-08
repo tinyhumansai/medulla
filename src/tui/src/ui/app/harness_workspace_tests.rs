@@ -240,11 +240,12 @@ fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
     let workspace = root.path().join("medulla");
     std::fs::create_dir(&workspace).unwrap();
     let mut app = picker_on_workspace_step(&workspace);
-    // Point at a config file whose directory does not exist, so persistence
-    // fails — a favorite the disk never recorded must not be visible in memory
-    // either, or a later successful save could silently persist it.
-    let missing_dir = root.path().join("no-such-dir");
-    app.set_config_path(missing_dir.join("config.toml"));
+    // An unparsable config file makes persistence fail before any write — a
+    // favorite the disk never recorded must not be visible in memory either,
+    // or a later successful save could silently persist it.
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "not [valid toml {{{").unwrap();
+    app.set_config_path(config);
 
     app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
 

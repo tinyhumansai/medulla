@@ -47,6 +47,24 @@ fn favorite_names_are_searchable_as_well_as_their_paths() {
 }
 
 #[test]
+fn an_exact_path_match_outranks_a_loose_label_match_for_a_favorite() {
+    // A query that names the directory exactly must rank the favorite at the
+    // path score rather than the loose label score, or a plain filesystem
+    // completion for the same directory would outrank it and win the row after
+    // path de-duplication.
+    assert_eq!(
+        workspace_match_score("/work/medulla", Some("primary medulla"), "medulla"),
+        Some(0)
+    );
+    // The label's own exact match is still honoured when the path does not
+    // match at all.
+    assert_eq!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "primary"),
+        Some(1)
+    );
+}
+
+#[test]
 fn loose_known_matches_do_not_beat_concrete_folder_matches() {
     let random_parent = match_score("/tmp/.tmpbQM6Hg", "pb").unwrap();
     let project_beta = fuzzy_subsequence_score("project-beta", "pb").unwrap() + 5;

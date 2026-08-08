@@ -249,6 +249,16 @@ fn an_answered_permission_menu_above_an_idle_composer_is_not_an_approval() {
     assert_eq!(detect(HarnessProvider::Claude, screen), None);
 }
 
+/// OpenCode's permission labels are too generic for the marker table, so they
+/// are matched structurally instead. The same scrollback rule applies: an
+/// answered menu's retained labels above the restored composer must not
+/// recreate the approval cue on every poll.
+#[test]
+fn an_answered_opencode_permission_menu_above_an_idle_composer_is_not_an_approval() {
+    let screen = "  Allow once   Always allow   Reject\n  ✓ Ran the command\n  > Try \"fix the failing test\"";
+    assert_eq!(detect(HarnessProvider::Opencode, screen), None);
+}
+
 #[test]
 fn a_composer_caret_is_not_an_option() {
     // A caret with prose after it is a composer, which is what a harness shows

@@ -21,6 +21,9 @@ use super::types::HooksConfig;
 
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use types::AcpDelivery;
 
 /// Build the ACP-transport delivery installing `hooks` into `provider`.

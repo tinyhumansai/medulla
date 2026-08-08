@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 
 use crate::protocol::HarnessProvider;
 
-use super::acp::delivery;
-use super::types::{HookEvent, HookHandler, HookSpec, HooksConfig};
+use super::super::types::{HookEvent, HookHandler, HookSpec, HooksConfig};
+use super::delivery;
 
 /// One `PostToolUse` hook running `command`, applying to every harness.
 fn hook(command: &str) -> HookSpec {
@@ -88,7 +88,7 @@ fn claude_settings_carry_hooks_only() {
 
 /// Several hooks on one event arrive as one document, in config order — the
 /// same folding the CLI path does, since both build it from
-/// [`super::native::hook_document`].
+/// [`super::super::native::hook_document`].
 #[test]
 fn claude_settings_carry_every_applicable_hook() {
     let hooks = HooksConfig {

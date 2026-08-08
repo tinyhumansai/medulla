@@ -340,10 +340,17 @@ async fn run_provider_attempt(
     // is logging to stderr is demonstrably alive even while it emits no parsed
     // events, and killing it as "idle" throws away real work.
     let stderr_tail = Arc::new(Mutex::new(String::new()));
+    // Monotonic origin for encoding stderr beats (see `stderr_beat`); sharing
+    // one base with the watchdog below lets it tell how old a beat is.
+    let beat_base = Instant::now();
+    // Holds the timestamp (micros since `beat_base`) of the most recent stderr
+    // line rather than a bare counter, so the idle watchdog can re-arm from the
+    // beat's *own* time instead of from whenever it next happens to check.
     let stderr_beat = Arc::new(AtomicU64::new(0));
     let stderr_task = {
         let stderr_tail = stderr_tail.clone();
         let stderr_beat = stderr_beat.clone();
+        let beat_base = beat_base;
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut buf = Vec::new();
@@ -353,7 +360,10 @@ async fn run_provider_attempt(
                     Ok(0) => break,
                     Ok(_) => {
                         let chunk = String::from_utf8_lossy(&buf);
-                        stderr_beat.fetch_add(1, Ordering::Relaxed);
+                        stderr_beat.store(
+                            beat_base.elapsed().as_micros() as u64,
+                            Ordering::Relaxed,
+                        );
                         let mut tail = stderr_tail.lock().unwrap();
                         tail.push_str(&chunk);
                         *tail = tail_bytes(&tail);

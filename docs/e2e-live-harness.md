@@ -1,7 +1,7 @@
-# E2E live harnesses: docker + tmux + opencode
+# E2E live harnesses: docker + tmux + a real coding CLI
 
-How the coordination e2e suite drives **real processes** (the `medulla` daemon, the
-real `opencode` CLI, and an interactive TUI) deterministically and offline, and how
+How the coordination e2e suite drives **real processes** (the `medulla` daemon, a
+real coding CLI, and an interactive TUI) deterministically and offline, and how
 to build more suites like it. Every pattern here was needed to make the suite pass,
 and each one transfers to other process combinations.
 
@@ -13,9 +13,9 @@ with no real keys and no network egress:
 ```
 owner driver (examples/coordination_owner.rs; a real medulla-link endpoint)
   → mock link forwarder (examples/mock_link_forwarder.rs; blind UDP, §5)
-    → medulla daemon (real binary, `--providers opencode`, the host end)
-      → real opencode CLI (spawned by the daemon as its provider)
-        → mock OpenAI-compatible LLM (e2e/coordination/mock_llm.py)
+    → medulla daemon (real binary, `--providers <harness>`, the host end)
+      → the real coding CLI (spawned by the daemon as its provider)
+        → mock LLM (e2e/coordination/mock_llm.py)
           → deterministic reply "COORDINATION_OK <echo of task>"
   ← Reply frame back over the link, asserted on content + usage + delivery
 ```
@@ -26,23 +26,36 @@ key and copies the ChaCha20-Poly1305 payload verbatim. Both endpoints run the
 real `medulla-link` crate, so every byte of payload encryption, every state
 diff and every retransmission is production code.
 
-A second tmux window drives an **interactive opencode TUI** with `send-keys` /
-`capture-pane` against the same mock LLM, proving tmux controls opencode as well as
-medulla.
+A second tmux window drives the CLI's **interactive TUI** with `send-keys` /
+`capture-pane` against the same mock LLM, proving tmux controls the harness as
+well as medulla.
+
+`E2E_HARNESS` selects the CLI — `opencode` (the default), `claude` or `codex` —
+and every suite runs unchanged against all three. `harness.sh` holds everything
+specific to one of them; see `gitbooks/developers/testing.md` for how each is
+routed at the mock and which wire dialect it lands on.
 
 ## Layout
 
 | File | Role |
 | --- | --- |
-| `e2e/coordination/lib.sh` | shared boot/teardown/assert helpers (the harness kernel) |
+| `e2e/coordination/lib.sh` | shared boot/teardown/assert helpers (the harness kernel), harness-agnostic |
+| `e2e/coordination/harness.sh` | everything specific to one coding CLI: binary, config, spawn env, TUI shape |
 | `e2e/coordination/run.sh` | happy-path round trip + TUI smoke leg; exit 0 on PASS |
 | `e2e/coordination/tests.sh` | 5 functional scenarios on top of `lib.sh` |
 | `e2e/coordination/tests_multi.sh` | 5 multi-agent scenarios: two daemons, two workspaces |
-| `e2e/coordination/run-live.sh` | the same fleet against real staging + OpenRouter |
-| `e2e/coordination/mock_llm.py` | stdlib-only OpenAI-compatible mock (SSE + unary) |
+| `e2e/coordination/tests_acp.sh` | 4 ACP-transport scenarios: an ACP server spawns the harness, not the CLI |
+| `e2e/coordination/tests_tui.sh` | 3 terminal scenarios: the `medulla <harness>` wrapper and the operator screen |
+| `e2e/coordination/run-live.sh` | the same fleet against real staging + OpenRouter (opencode only) |
+| `e2e/coordination/mock_llm.py` | entrypoint for the mock LLM |
+| `e2e/coordination/mockllm/` | the mock itself: one module per wire dialect (chat, messages, responses) |
 | `e2e/coordination/opencode.json` | opencode config template → mock LLM; `autoupdate: false` |
 | `e2e/coordination/opencode.live.json` | opencode config template → OpenRouter (live suite) |
-| `e2e/coordination/Dockerfile` | multi-stage image: rust build stage → slim runtime |
+| `e2e/coordination/medulla.claude.json`, `medulla.codex.json` | daemon configs carrying the custom harness preset for each CLI |
+| `e2e/coordination/codex_models_cache.json` | fixture stand-in for Codex's normally-fetched model catalog |
+| `e2e/coordination/Dockerfile.base` | the tools image: tmux, python3, node, all three coding CLIs — published to GHCR |
+| `e2e/coordination/Dockerfile` | the harness image: a rust build stage layered onto that base |
+| `e2e/coordination/build-image.sh` | build (and optionally push) either image |
 | `e2e/coordination/run-docker.sh` | build + run the whole harness in a container |
 | `examples/mock_link_forwarder.rs` | blind UDP forwarder implementing protocol §5 rules 1-8 |
 | `examples/coordination_owner.rs` | owner-side driver: enrolls pairs, serves legs, prints terminal frame JSON |
@@ -53,16 +66,28 @@ medulla.
 bash e2e/coordination/run.sh          # happy path + TUI smoke leg (~1-2 min)
 bash e2e/coordination/tests.sh        # 5 functional scenarios (~40s + boots)
 bash e2e/coordination/tests_multi.sh  # 5 multi-agent scenarios (~30s + boots)
+bash e2e/coordination/tests_acp.sh    # 4 ACP-transport scenarios
+bash e2e/coordination/tests_tui.sh    # 3 terminal scenarios (wrapper + operator screen)
 bash e2e/coordination/run-docker.sh   # the same, inside Linux/arm64 docker
 make e2e-docker                       # build the image, then run all three offline suites
+make e2e-docker-all                   # every suite against every coding CLI
+
+E2E_HARNESS=claude bash e2e/coordination/run.sh      # a single leg on the host
+make e2e-docker E2E_HARNESS=codex                    # a single leg in docker
 ```
 
 Knobs (all optional):
 
+- `E2E_HARNESS`: which coding CLI to drive — `opencode` (default), `claude`, `codex`.
+- `E2E_TRANSPORT`: how the daemon reaches it — `cli` (default) or `acp`.
+- `ACP_NPM_CACHE`: npm cache holding the ACP servers, so they resolve with no
+  network. The docker image primes it; unset on a developer's box.
 - `E2E_KEEP=1`: keep the run dir + tmux session (and container) for debugging.
 - `E2E_SMOKE=0`: skip the interactive TUI leg.
-- `MEDULLA_BIN` / `FORWARDER_BIN` / `OWNER_BIN` / `OPENCODE_BIN`: prebuilt binary
-  overrides; unset means `cargo build --release` (the docker image bakes all four).
+- `MEDULLA_BIN` / `FORWARDER_BIN` / `OWNER_BIN`: prebuilt binary overrides; unset
+  means `cargo build --release` (the docker image bakes all three).
+- `OPENCODE_BIN` / `CLAUDE_BIN` / `CODEX_BIN`: coding-CLI overrides; unset means
+  `$PATH` (the docker image bakes all three).
 - Docker: `IMAGE=`, `NO_CACHE=1`, `NET=host` (default is `--network none`).
 - Mock LLM: `MOCK_LLM_MARKER`, `MOCK_LLM_MODEL`, `MOCK_LLM_PORT`, `MOCK_LLM_LOG`.
 
@@ -75,8 +100,8 @@ N daemon processes, not one daemon with N directories. `tests_multi.sh` boots tw
 enrolled link identity, against **one shared** forwarder and mock LLM:
 
 ```
-mock forwarder ──┬── daemon alpha (work-alpha) ── opencode ──┐
-                 └── daemon beta  (work-beta)  ── opencode ──┴─→ mock LLM
+mock forwarder ──┬── daemon alpha (work-alpha) ── CLI ──┐
+                 └── daemon beta  (work-beta)  ── CLI ──┴─→ mock LLM
 ```
 
 | Scenario | Asserts |

@@ -4,10 +4,34 @@
 #   docker build -f e2e/coordination/Dockerfile -t medulla-e2e .
 # (run-docker.sh does this for you.)
 #
-# Stage 1 bakes the release `medulla` binary plus the two examples the harness
-# drives. Stage 2 is a slim Debian runtime with tmux + python3 + the real
-# opencode CLI, and it hands run.sh prebuilt binaries via the *_BIN env vars so
-# nothing is recompiled inside the container.
+# Two stages and a prebuilt base. Stage 1 compiles the release `medulla` binary
+# plus the two examples the harness drives. Stage 2 layers those and the harness
+# scripts onto `Dockerfile.base` — the published tools image carrying tmux,
+# python3, node and all three real coding CLIs — so nothing is recompiled or
+# re-downloaded inside the container.
+#
+# The CLIs live in the base rather than here because they are ~600 MB that does
+# not change when the source does: a CI run with a cold layer cache used to
+# re-fetch every one of them before it could compile a line of Rust. Now it pulls
+# a pinned image instead. See `Dockerfile.base`.
+#
+# One image serves all three harness legs; pick one at run time:
+#   docker run --rm --network none -e E2E_HARNESS=claude medulla-e2e
+
+# The published tools image stage 2 builds on. Declared here, before the first
+# `FROM`, because that is the only scope a `FROM` line can read an ARG from.
+#
+# Pinned to a version tag rather than `latest`, for the same reason every CLI
+# inside it is pinned: a base that moves under a green branch is a harness that
+# tests something other than what it last reported. Point this at a new tag when
+# a CLI version is bumped.
+#
+# Building against a locally-built base instead (no GHCR access, or trying a CLI
+# bump before publishing):
+#   bash e2e/coordination/build-image.sh --base
+#   BASE_IMAGE=ghcr.io/tinyhumansai/medulla_e2e_base:latest \
+#     bash e2e/coordination/build-image.sh
+ARG BASE_IMAGE=ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22
 
 # ---------------------------------------------------------------------------
 # Stage 1: compile medulla + examples (release)
@@ -52,51 +76,30 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --example coordination_owner
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime — tmux + python3 + opencode + baked binaries
+# Stage 2: runtime — the published tools base + this build's binaries
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim
-
-# Pinned opencode CLI version (sst/opencode, published under anomalyco/opencode).
-# glibc tarball to match the debian runtime. BuildKit sets TARGETARCH only when
-# --platform is passed; otherwise fall back to the native dpkg architecture
-# (never default it — a wrong-arch opencode binary is an Exec format error).
-ARG OPENCODE_VERSION=1.17.18
-ARG TARGETARCH
-
-RUN set -eux; \
-    apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        tmux python3 curl bash ca-certificates git; \
-    rm -rf /var/lib/apt/lists/*; \
-    ARCH="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    case "$ARCH" in \
-        arm64) OC_ARCH=arm64 ;; \
-        amd64) OC_ARCH=x64 ;; \
-        *) echo "unsupported arch=$ARCH" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL --http1.1 --retry 5 --retry-delay 3 --retry-all-errors \
-        -C - -o /tmp/opencode.tar.gz \
-        "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz"; \
-    tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin; \
-    rm /tmp/opencode.tar.gz; \
-    chmod +x /usr/local/bin/opencode; \
-    /usr/local/bin/opencode --version
+FROM ${BASE_IMAGE}
 
 # Prebuilt binaries from the build stage, onto PATH.
 COPY --from=build /build/target/release/medulla                      /usr/local/bin/medulla
 COPY --from=build /build/target/release/examples/mock_link_forwarder /usr/local/bin/mock_link_forwarder
 COPY --from=build /build/target/release/examples/coordination_owner  /usr/local/bin/coordination_owner
 
-# The harness scripts (run.sh, mock_llm.py, opencode.json).
+# The harness scripts (run.sh, mock_llm.py, the per-harness configs, fixtures).
 WORKDIR /app
 COPY e2e/coordination /app/e2e/coordination
 
-# Hand run.sh its prebuilt binaries so it never shells out to cargo.
+# Hand run.sh its prebuilt binaries so it never shells out to cargo. The coding
+# CLIs' own `*_BIN` variables come from the base image. `E2E_HARNESS` chooses
+# which of them a run actually drives.
 ENV MEDULLA_BIN=/usr/local/bin/medulla \
     FORWARDER_BIN=/usr/local/bin/mock_link_forwarder \
     OWNER_BIN=/usr/local/bin/coordination_owner \
-    OPENCODE_BIN=/usr/local/bin/opencode \
-    OPENCODE_DISABLE_AUTOUPDATE=1 \
-    TERM=xterm-256color
+    E2E_HARNESS=opencode
+
+# Last, so every COPY above still ran as root. See `Dockerfile.base` for why the
+# harness must not run as root.
+USER e2e
+ENV HOME=/home/e2e
 
 CMD ["bash", "/app/e2e/coordination/run.sh"]

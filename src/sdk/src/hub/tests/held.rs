@@ -104,6 +104,7 @@ fn a_successful_task_reports_its_reply_and_usage() {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         }),
     );
 
@@ -130,6 +131,7 @@ fn a_result_reports_the_session_that_served_the_task() {
             },
             harness: None,
             session_id: Some("sess-42".to_string()),
+            transcript: Vec::new(),
         }),
     );
 
@@ -151,6 +153,7 @@ fn a_result_claims_no_session_the_worker_did_not_report() {
             },
             harness: None,
             session_id: session_id.map(str::to_string),
+            transcript: Vec::new(),
         })
     };
 

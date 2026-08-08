@@ -216,6 +216,14 @@ fn local_context(
     }
     let loaded = medulla::config::load_config(parsed.config.as_deref(), env, cwd)?;
     let home = medulla::home::medulla_home(env);
+    // The embedded core this command may boot — an `agent` node that names
+    // `openhuman`, or the review spawned for a failed run — reads its
+    // environment during construction. The TUI binds the core at startup; this
+    // command is its own process, so it binds the same four variables from the
+    // same config here. Without it a lazily booted core would fall back to
+    // ambient `~/.openhuman` and the production backend instead of this
+    // account's state and configured deployment.
+    medulla::core_host::bind_from_config(env, &loaded.config, &home);
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
     // A `medulla:shell` step runs where the command was invoked, matching what
     // an operator running it by hand would expect — unless `--workspace` named

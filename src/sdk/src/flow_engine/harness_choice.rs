@@ -93,7 +93,8 @@ impl HarnessSelector {
                 });
             }
             return Err(format!(
-                "`harness` is `{value}`, but OpenHuman is an operator-facing TUI and cannot run a workflow agent node — use {}, or a custom harness preset id.",
+                "`harness` is `{value}`, which is a built-in harness but cannot run a workflow \
+                 agent node — use {}, or a custom harness preset id.",
                 Self::builtin_names().join(", ")
             ));
         }

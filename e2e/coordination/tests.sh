@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Functional scenario suite for the medulla coordination harness.
 #
-# Reuses the real-process stack helpers in `lib.sh` (mock link forwarder →
-# owner driver → `medulla daemon` → real `opencode` → mock LLM). The happy-path round trip lives
-# in `run.sh`; this file adds the functional edges around it:
+# Reuses the real-process stack helpers in `lib.sh` (mock link forwarder → owner
+# driver → `medulla daemon` → the real coding CLI → mock LLM). `$E2E_HARNESS`
+# selects that CLI, so every scenario below runs against opencode, claude or
+# codex unchanged. The happy-path round trip lives in `run.sh`; this file adds
+# the functional edges around it:
 #
 #   1. capabilities  — a `capabilities` probe returns a capabilities_result frame
-#                      advertising the opencode provider (a distinct round trip,
+#                      advertising the selected provider (a distinct round trip,
 #                      different frame kind, on the running daemon).
 #   2. token-usage   — a task reply carries propagated child token usage
-#                      (regression guard for the opencode `tokens:{input,output}`
-#                      shape the daemon must surface to the orchestrator).
+#                      (regression guard for the `tokens:{input,output}` shape
+#                      the daemon must surface to the orchestrator).
 #   3. second-round  — a second delegation succeeds on the same running daemon
 #                      (daemon is not single-shot, and the link keeps its state
 #                      across legs rather than needing a fresh session per task).
@@ -56,17 +58,18 @@ group_shared_stack() {
   boot_daemon
 
   # ── 1. capabilities probe ────────────────────────────────────────────────
-  scenario "capabilities probe returns opencode in a capabilities_result"
+  scenario "capabilities probe returns $HARNESS in a capabilities_result"
   run_owner caps --to "$WORKER_ID" \
     --kind capabilities --task "report" --task-id "caps-$$" --timeout-ms 120000
   [ "$OWNER_RC" = "0" ] || fail "capabilities owner exited $OWNER_RC (expected 0)"
-  "$PYTHON_BIN" - "$RUN_DIR/caps.json" <<'PY' || fail "capabilities assertion failed"
+  "$PYTHON_BIN" - "$RUN_DIR/caps.json" "$HARNESS" <<'PY' || fail "capabilities assertion failed"
 import json, sys
 frame = json.load(open(sys.argv[1]))
 assert frame.get("kind") == "CapabilitiesResult", f"kind={frame.get('kind')!r}"
 caps = json.loads(frame.get("text") or "{}")
 providers = caps.get("providers") or []
-assert "opencode" in providers, f"providers missing opencode: {providers!r}"
+harness = sys.argv[2]
+assert harness in providers, f"providers missing {harness}: {providers!r}"
 assert caps.get("cwd"), f"capabilities missing cwd: {caps!r}"
 print(f"[e2e]   caps: providers={providers} cwd={caps.get('cwd')!r}", file=sys.stderr)
 PY
@@ -111,7 +114,7 @@ PY
   # ── 4. unavailable-provider error path ───────────────────────────────────
   scenario "a task requesting an unavailable provider returns an Error frame"
   run_owner badprov --to "$WORKER_ID" \
-    --provider claude --task "run this" --task-id "badprov-$$" --timeout-ms 120000
+    --provider "$(harness_absent_provider)" --task "run this" --task-id "badprov-$$" --timeout-ms 120000
   # The owner exits non-zero on an Error terminal frame — expected here.
   [ "$OWNER_RC" != "0" ] || fail "bad-provider owner exited 0 (expected non-zero on Error)"
   "$PYTHON_BIN" - "$RUN_DIR/badprov.json" <<'PY' || fail "bad-provider assertion failed"

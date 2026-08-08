@@ -8,6 +8,7 @@ use medulla::ui::workflows::PlacedEdge;
 use medulla::workflows::{RunRecord, RunStatus};
 
 use super::kinds::labelled_value;
+use super::transcript::transcript_lines;
 
 /// A compact header saying what this run is, above the node evidence.
 ///
@@ -134,6 +135,12 @@ pub(super) fn run_lines(run: &RunRecord, node_id: &str, is_agent: bool) -> Vec<L
                     ))),
                 }
             }
+            // Between the prompt and the output on purpose: it is what happened
+            // between them. A node runs headless, so this is the only account
+            // of a step that did something surprising — the prompt says what it
+            // was asked and the output says what it returned, and neither shows
+            // the tool that kept failing in the middle.
+            lines.extend(transcript_lines(&step.transcript));
             if let Some(output) = &step.output {
                 let label = if is_agent { "output" } else { "result" };
                 let value = if is_agent {

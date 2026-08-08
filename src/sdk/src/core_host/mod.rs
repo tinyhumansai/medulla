@@ -39,6 +39,7 @@ use openhuman_core::embed::{Core, CoreError};
 use openhuman_core::{CoreBuilder, DomainSet, HostKind, ServiceSet, TokenSource};
 
 pub mod auth;
+pub mod shared;
 
 #[cfg(test)]
 mod auth_tests;
@@ -207,6 +208,41 @@ pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> St
     std::env::set_var(OPENHUMAN_BACKEND_URL_ENV, base_url);
     tracing::debug!("[core_host] backend api url bound from the Medulla config");
     base_url.to_string()
+}
+
+/// Point the embedded core at everything a loaded config names, before it can
+/// boot.
+///
+/// [`boot`] reads the core's environment during construction, and the lazy boot
+/// path ([`shared`]) has no caller of its own to bind for it. A host that has
+/// its layered config in hand — `medulla workflow run`, an MCP server — calls
+/// this once to reproduce the startup bindings the TUI and `medulla run`
+/// perform: the workspace derived from `MEDULLA_HOME`, the agent's action
+/// directory from the configured workspace roots, and both backend URLs from
+/// `backend.base_url`. A workflow `agent` node or MCP turn that reaches the
+/// core first then reads this account's state and the configured deployment
+/// rather than ambient `~/.openhuman`.
+///
+/// Non-overriding, like every individual binding: an operator who exported any
+/// of the variables wins.
+pub fn bind_from_config(
+    env: &HashMap<String, String>,
+    config: &crate::config::TuiConfig,
+    home: &Path,
+) {
+    // The first configured workspace root is the agent's read/write root, the
+    // same precedence `app_loop.rs` gives it when the TUI binds its primary
+    // host. A blank or absent root leaves the variable alone.
+    let root = config
+        .workflow
+        .workspaces
+        .first()
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty());
+    bind_workspace(env, home);
+    bind_action_dir(env, root.as_deref());
+    bind_medulla_base_url(env, &config.backend.base_url);
+    bind_backend_api_url(env, &config.backend.base_url);
 }
 
 /// Build the embedded core and wrap it in the typed facade.

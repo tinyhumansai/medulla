@@ -49,6 +49,12 @@ pub(super) async fn medulla_mcp_servers(
         use crate::mcp::attach;
         use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
 
+        // A launch serving a workflow `agent` node gets no Medulla tools on
+        // either transport — see [`crate::harness_tools`]. Ahead of the grant
+        // below so nothing is minted for a session that will not carry it.
+        if crate::harness_tools::withheld(task_env) {
+            return Vec::new();
+        }
         // An operator who turned workflows off should not have harnesses handed
         // tools that would be refused. Resolved through the shared policy so
         // this transport and the CLI one cannot come to disagree about which
@@ -338,8 +344,14 @@ pub(super) fn agent_for(options: &RunTaskOptions) -> Result<AcpAgent, String> {
 /// [`agent_for`] as the pure configuration entry point used by focused tests.
 fn agent_for_with_env(
     options: &RunTaskOptions,
-    env: HashMap<String, String>,
+    mut env: HashMap<String, String>,
 ) -> Result<AcpAgent, String> {
+    // Codex's routed provider block reaches its ACP server through the
+    // environment, not argv — see `codex_acp_overrides_env`. Applied before the
+    // config is built so the overlay below carries it.
+    for (key, value) in codex_acp_overrides_env(options, &env)? {
+        env.insert(key, value);
+    }
     let config = match options.provider {
         HarnessProvider::Claude => {
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
@@ -388,23 +400,41 @@ fn codex_acp_args(
         "-y".to_string(),
         "@agentclientprotocol/codex-acp@latest".to_string(),
     ];
-    let model = options
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|model| !model.is_empty());
-    if let Some(model) = model {
+    if let Some(model) = codex_acp_model(options) {
         args.push("-m".to_string());
         args.push(model.to_string());
     }
-    // A routed run cannot safely fall back to the operator's default account
-    // or endpoint: its catalog governs the provider's supported tool shapes.
-    // Match the direct spawn seam and return a usable error before ACP starts.
-    args.extend(
-        crate::codex_overrides::launch_args(options.provider, model, env)
-            .map_err(|error| error.to_string())?,
-    );
+    // The routed provider block does NOT ride here. `codex-acp` parses argv only
+    // for its `login` and `cli` subcommands; in server mode it ignores it and
+    // reads `CODEX_CONFIG`/`MODEL_PROVIDER` from the environment instead, which
+    // is what `codex_acp_overrides_env` puts there. `-m` is kept because it is
+    // harmless either way and documents the intent at the spawn.
+    let _ = env;
     Ok(args)
+}
+
+/// The routed model for a Codex ACP spawn, trimmed and non-empty.
+fn codex_acp_model(options: &RunTaskOptions) -> Option<&str> {
+    options
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+}
+
+/// The routed-provider configuration a Codex ACP spawn needs, in the form its
+/// server actually reads.
+///
+/// A routed run cannot safely fall back to the operator's default account or
+/// endpoint — its catalog governs the provider's supported tool shapes — so a
+/// catalog that cannot be derived is an error before ACP starts, matching the
+/// direct spawn seam.
+fn codex_acp_overrides_env(
+    options: &RunTaskOptions,
+    env: &HashMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    crate::codex_overrides::acp_env(options.provider, codex_acp_model(options), env)
+        .map_err(|error| error.to_string())
 }
 
 /// The environment handed to the ACP agent process.

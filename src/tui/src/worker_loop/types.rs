@@ -10,6 +10,15 @@ pub struct WorkerTuiConfig {
     pub config_path: std::path::PathBuf,
     pub credential_dir: std::path::PathBuf,
     pub agent_id: Option<String>,
+    /// The operator's `--providers` restriction, or `None` for "everything on
+    /// PATH".
+    ///
+    /// The headless daemon has always honoured this flag; the screen did not,
+    /// and detected every CLI it could find instead. On a box with more than one
+    /// installed that is not a cosmetic difference — the setup step offers
+    /// agents the operator excluded, the worker can settle on one of them, and
+    /// peer tasks then run on a harness the launch command ruled out.
+    pub only_providers: Option<Vec<HarnessProvider>>,
     pub startup_status: Option<String>,
     pub transport: Option<LinkBridge>,
     pub endpoint: Option<String>,

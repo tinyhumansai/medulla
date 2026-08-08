@@ -180,9 +180,20 @@ async fn an_unusable_harness_fails_the_node_rather_than_running_elsewhere() {
     assert!(message.contains("custom harness id"), "{message}");
 }
 
+/// OpenHuman is a harness a node may name, and it resolves to the built-in
+/// provider rather than being taken for a custom preset id — which is what a
+/// bare "unknown name" fallback would have made of it, silently, leaving the
+/// node to fail later on a worker that has no such preset.
 #[test]
-fn openhuman_is_not_a_dispatchable_builtin_harness() {
-    let error = super::harness_choice::HarnessSelector::parse("openhuman").unwrap_err();
+fn openhuman_is_a_dispatchable_builtin_harness() {
+    let selector = super::harness_choice::HarnessSelector::parse("openhuman")
+        .expect("openhuman is dispatchable");
 
-    assert!(error.contains("operator-facing TUI"));
+    assert_eq!(
+        selector,
+        super::harness_choice::HarnessSelector::Builtin {
+            provider: crate::protocol::HarnessProvider::Openhuman,
+            transport: crate::protocol::HarnessTransport::Cli,
+        }
+    );
 }

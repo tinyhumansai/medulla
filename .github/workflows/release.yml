@@ -34,7 +34,7 @@ permissions:
   contents: write
 
 jobs:
-  # The docker/tmux/opencode end-to-end suite. It used to run on every push
+  # The docker/tmux end-to-end suite, once per coding CLI. It used to run on every push
   # and pull request, where it was by far the slowest check — it builds a
   # harness image and drives three container scenarios, so it dominated the
   # wait on changes that could not affect it. It gates releases instead:
@@ -42,9 +42,25 @@ jobs:
   # runs before `tag` so a failure costs nothing — no version bump is
   # committed and no tag is pushed.
   e2e-docker:
-    name: E2E (docker + tmux + opencode)
+    name: E2E (docker + tmux + ${{ matrix.harness }})
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      # One leg per coding CLI. The image is the same for all three — only
+      # `E2E_HARNESS` differs — so a claude or codex regression cannot hide
+      # behind a green opencode run. `fail-fast: false` so a release blocked by
+      # one harness still reports whether the others are healthy.
+      fail-fast: false
+      matrix:
+        harness: [opencode, claude, codex]
+    env:
+      E2E_HARNESS: ${{ matrix.harness }}
+    # Read-only, and `packages` so the harness image can pull its tools base
+    # (ghcr.io/tinyhumansai/medulla_e2e_base) rather than re-downloading every
+    # coding CLI on a cold layer cache.
+    permissions:
+      contents: read
+      packages: read
     steps:
       # `ref: main` for the same reason the `tag` job pins it: this workflow
       # always releases from main whatever ref it was dispatched from, so
@@ -60,9 +76,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Build the harness image once with a GHA layer cache (the Rust build
-      # stage is the expensive layer; warm runs skip it entirely), then run the
-      # suites in fully network-isolated containers via run-docker.sh.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the harness image once with a GHA layer cache. Only the Rust stage
+      # is built here — tmux, node and all three coding CLIs are pulled with the
+      # pinned tools base (see e2e/coordination/Dockerfile.base) instead of being
+      # re-fetched whenever the layer cache is cold. Then run the suites in fully
+      # network-isolated containers via run-docker.sh.
       - name: Build harness image
         uses: docker/build-push-action@v6
         with:
@@ -80,10 +105,29 @@ jobs:
         run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
 
       - name: Functional scenarios (tests.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests.sh
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests.sh
 
       - name: Multi-agent scenarios (tests_multi.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
+
+      # The other transport: the daemon spawns an ACP server, which spawns the
+      # harness. Everything the CLI seam does at spawn time has to be redone by
+      # other means there, and twice it silently was not.
+      - name: ACP transport scenarios (tests_acp.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_acp.sh
+
+      # The surfaces an operator looks at: the `medulla <harness>` wrapper and
+      # the `medulla daemon --tui` screen, both full-screen TUIs on a real pty.
+      - name: Terminal scenarios (tests_tui.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_tui.sh
 
   tag:
     needs: e2e-docker

@@ -412,6 +412,16 @@ async fn run_provider_attempt(
                 return Err(format!("{} task aborted", provider_name(spec.provider)));
             }
             _ = tokio::time::sleep_until(deadline) => {
+                // stderr arrives on its own task, so it cannot push the deadline
+                // out directly; the deadline firing is where it is claimed. A
+                // beat since the deadline was armed means the child spoke during
+                // the window and is not idle — re-arm rather than kill.
+                let beat = stderr_beat.load(Ordering::Relaxed);
+                if beat != seen_stderr {
+                    seen_stderr = beat;
+                    deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+                    continue;
+                }
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 report_workspace_context(&mapper, spec);

@@ -409,6 +409,12 @@ impl App {
                 row.origin.is_user()
                     || row.control == crate::worker::pty::SessionControl::User
                     || row.retained
+                    // A lifecycle failure is deliberately retained by the
+                    // frame sweep. It must also enter this projection or the
+                    // manager keeps an unreachable record whose failure cue
+                    // and waiting badge can never be acted on.
+                    || crate::worker::pty::lifecycle_cue(row, medulla::clock::now_millis())
+                        .is_some_and(|cue| cue.kind.is_failure())
                     // Only while a run is *still going*: the rows a settled one
                     // would contribute are dropped by `run_rows_under`, so a
                     // session held open by finished runs would be a row with

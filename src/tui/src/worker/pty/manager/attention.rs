@@ -49,19 +49,29 @@ impl PtyManager {
             .and_then(|session| lock(&session.attention).cue.clone())
     }
 
-    /// How many live sessions are waiting on the operator.
+    /// How many sessions are waiting on the operator.
     pub fn waiting_count(&self) -> usize {
-        self.handles()
-            .into_iter()
-            .filter(|session| session.is_running() && lock(&session.attention).cue.is_some())
-            .count()
+        self.waiting_sessions().len()
     }
 
-    /// All live session IDs that are waiting on the operator.
+    /// All session IDs that are waiting on the operator.
+    ///
+    /// Answers from [`row_cue`](super::super::attention::row_cue) rather than
+    /// from the screen classification alone, which is what keeps the tab badge
+    /// and the rail rows in agreement. They used to disagree by construction:
+    /// the rail flags a harness that died or finished, and this counted only the
+    /// ones with something on screen, so a badge could read zero above a rail
+    /// with two rows blinking on it.
+    ///
+    /// Only *blocking* cues count — see [`AttentionKind::blocks`]. A finished
+    /// session is drawn on its row and left out of the number.
     pub fn waiting_sessions(&self) -> std::collections::HashSet<String> {
+        let now = (self.inner.now)();
         self.handles()
             .into_iter()
-            .filter(|session| session.is_running() && lock(&session.attention).cue.is_some())
+            .filter(|session| {
+                attention::row_cue(&session.row(), now).is_some_and(|cue| cue.kind.blocks())
+            })
             .map(|session| session.id().to_string())
             .collect()
     }
@@ -115,6 +125,7 @@ fn refresh(session: &SessionHandle, now: i64) {
         state.completion_deadline = None;
     }
     state.seen_bells = consumed_bell_count(state.seen_bells, bells);
+    state.working = working;
     state.cue = match (cue, state.cue.take()) {
         (None, held) => held.filter(|held| held.kind == AttentionKind::Bell),
         (Some((kind, what)), None) => Some(HarnessAttention::new(kind, what, now)),

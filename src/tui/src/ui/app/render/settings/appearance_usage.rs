@@ -8,7 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::stream;
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_seconds, color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
 use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS, SIDEBAR_GROUPING_OPTION};
@@ -99,6 +99,30 @@ impl App {
                 }
             ),
             blink_style,
+        )));
+        let rate_index = THEME_ROLES.len() + 1;
+        if rate_index == sel {
+            selected_line_index = lines.len();
+        }
+        let rate_style = if rate_index == sel {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        // Shown in seconds because that is the unit the setting is configured
+        // and reasoned about in, and dimmed to "—" while blinking is off: a rate
+        // for an effect that is not running is a number that means nothing.
+        lines.push(TLine::from(Span::styled(
+            format!(
+                "{}    Blink rate        {}",
+                if rate_index == sel { "  ▸ " } else { "    " },
+                if self.theme.attention_blink {
+                    format!("{:.1}s", blink_seconds(self.theme.attention_blink_ms))
+                } else {
+                    "—".to_string()
+                }
+            ),
+            rate_style,
         )));
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled("Resource indicators", heading)));

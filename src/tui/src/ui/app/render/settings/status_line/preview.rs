@@ -98,8 +98,10 @@ fn sample_selected() -> SessionRow {
         control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
         retained: false,
+        closed_by_request: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

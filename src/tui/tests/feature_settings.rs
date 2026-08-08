@@ -224,6 +224,56 @@ fn appearance_blink_status_reports_the_boolean_value() {
     assert!(saved.contains("attentionBlink = false"), "{saved}");
 }
 
+/// The pulse rate is configured, reported, and persisted in seconds — the unit
+/// the effect is actually judged in.
+#[test]
+fn appearance_cycles_the_attention_blink_rate_in_seconds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    let _ = key(&mut app, KeyCode::Char('2'));
+    // Five colour rows and the blink toggle land on the rate.
+    for _ in 0..6 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Right);
+
+    assert!(
+        app.status().contains("Attention blink rate → 1.5s (saved)"),
+        "status note: {}",
+        app.status()
+    );
+    let out = text_of(&draw(&mut app, 180, 45));
+    assert!(out.contains("Blink rate        1.5s"), "{out}");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("attentionBlinkSeconds = 1.5"), "{saved}");
+}
+
+/// Custom rates enter the offered cycle from the direction the operator chose.
+#[test]
+fn appearance_cycles_custom_attention_blink_rates_from_each_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path);
+    app.set_attention_blink_ms(1_100);
+    let _ = key(&mut app, KeyCode::Char('2'));
+    for _ in 0..6 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+
+    let _ = key(&mut app, KeyCode::Right);
+    assert!(app.status().contains("Attention blink rate → 0.3s (saved)"));
+
+    app.set_attention_blink_ms(1_100);
+    let _ = key(&mut app, KeyCode::Left);
+    assert!(app.status().contains("Attention blink rate → 3.0s (saved)"));
+
+    let _ = key(&mut app, KeyCode::Left);
+    assert!(app.status().contains("Attention blink rate → 2.0s (saved)"));
+}
+
 #[test]
 fn appearance_cycles_and_persists_process_indicators() {
     let dir = tempfile::tempdir().unwrap();
@@ -231,8 +281,8 @@ fn appearance_cycles_and_persists_process_indicators() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows and the attention blink toggle precede resources.
-    for _ in 0..6 {
+    // Five color rows and the two attention controls precede resources.
+    for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -252,8 +302,9 @@ fn appearance_cycles_and_persists_the_sidebar_layout() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows, the blink toggle, and the seven option rows before it.
-    for _ in 0..13 {
+    // Five color rows, the two attention controls, and the seven option rows
+    // before it.
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -288,7 +339,7 @@ fn appearance_sidebar_grouping_wraps_backwards() {
     // how every other control on this page behaves.
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('2'));
-    for _ in 0..13 {
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Left);
@@ -305,8 +356,8 @@ fn appearance_persists_process_indicators_to_json() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows and the attention blink toggle precede resources.
-    for _ in 0..6 {
+    // Five color rows and the two attention controls precede resources.
+    for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -386,9 +437,9 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows, attention blink, three process indicators, and Session titles
-    // lands on Device CPU.
-    for _ in 0..10 {
+    // Five color rows, the two attention controls, three process indicators,
+    // and Session titles lands on Device CPU.
+    for _ in 0..11 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);

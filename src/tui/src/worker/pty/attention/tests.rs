@@ -415,6 +415,38 @@ fn a_bullet_prefixed_error_is_still_blocking() {
     }
 }
 
+/// A terminal error that *names* the failure in recovering vocabulary — "the
+/// API key is not working", "the request could not be completed" — is still
+/// blocking: the recovery word is negated, so the line describes the failure,
+/// not a recovered turn.
+#[test]
+fn a_negated_recovery_word_is_not_recovery() {
+    for screen in [
+        "Authentication failed: the API key is not working\n> ",
+        "Invalid API key.\nThe request could not be completed.\n> ",
+        "Usage limit reached: the task could not be completed.\n> ",
+    ] {
+        let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+        assert_eq!(kind, AttentionKind::Error, "{screen}");
+        assert!(
+            what.contains("usage limit")
+                || what.contains("sign-in")
+                || what.contains("authentication failed")
+                || what.contains("API key"),
+            "{what}"
+        );
+    }
+}
+
+/// A genuine recovery line that merely *mentions* a negator further back —
+/// "no errors, all resolved" — still counts as recovery: only near-negation
+/// inverts a recovery word.
+#[test]
+fn a_recovery_line_that_mentions_negation_is_still_recovery() {
+    let screen = "Invalid API key\nNo errors remained, all resolved.\n> ";
+    assert_eq!(detect(HarnessProvider::Claude, screen), None, "{screen}");
+}
+
 /// A glyph-led line that carries the full in-flight activity shape — an
 /// animated ellipsis or a live elapsed counter — is still recovery evidence.
 /// A spinner gerund names no recovery word ("Cogitating" is in no marker list)

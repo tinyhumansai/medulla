@@ -143,19 +143,24 @@ impl App {
                             } else {
                                 Style::default()
                             };
-                            let display = choice
-                                .label
-                                .as_deref()
-                                .map(|label| format!("★ {label} · {}", choice.path))
-                                .unwrap_or_else(|| choice.path.clone());
-                            TLine::from(vec![
-                                Span::styled(
-                                    format!(
-                                        "{marker}{}",
-                                        medulla::ui::util::clip_left(&display, 43)
-                                    ),
-                                    style,
+                            // A bare path is clipped from the left, so the tail
+                            // that identifies the directory survives. A named
+                            // favorite instead clips from both ends: `★ name ·`
+                            // is the distinguishing part the operator added, and
+                            // clipping from the left would delete it whenever
+                            // the path below runs long.
+                            let display = match &choice.label {
+                                Some(label) => medulla::ui::util::clip_middle(
+                                    &format!("★ {label} · {}", choice.path),
+                                    WORKSPACE_ROW_WIDTH,
                                 ),
+                                None => medulla::ui::util::clip_left(
+                                    &choice.path,
+                                    WORKSPACE_ROW_WIDTH,
+                                ),
+                            };
+                            TLine::from(vec![
+                                Span::styled(format!("{marker}{display}"), style),
                                 Span::styled(
                                     format!("  {}", choice.source),
                                     Style::default().add_modifier(Modifier::DIM),

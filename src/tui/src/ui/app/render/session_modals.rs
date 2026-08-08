@@ -139,11 +139,16 @@ impl App {
                             } else {
                                 Style::default()
                             };
+                            let display = choice
+                                .label
+                                .as_deref()
+                                .map(|label| format!("★ {label} · {}", choice.path))
+                                .unwrap_or_else(|| choice.path.clone());
                             TLine::from(vec![
                                 Span::styled(
                                     format!(
                                         "{marker}{}",
-                                        medulla::ui::util::clip_left(&choice.path, 43)
+                                        medulla::ui::util::clip_left(&display, 43)
                                     ),
                                     style,
                                 ),
@@ -171,7 +176,7 @@ impl App {
         // and it is now a statement rather than a question, so it is said on
         // both steps and never asked.
         lines.push(TLine::from(Span::styled(
-            "  unmanaged · the orchestrator will not dispatch into it",
+            "  ↑/↓ choose · Tab complete · Shift+F save favorite · unmanaged",
             Style::default().add_modifier(Modifier::DIM),
         )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);

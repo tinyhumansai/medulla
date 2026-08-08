@@ -153,7 +153,8 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     if let Some(picker) = &mut a.session_picker {
         picker.workspace_choices = vec![WorkspaceChoice {
             path: ".".into(),
-            source: "recent",
+            source: "recent".into(),
+            label: None,
         }];
         picker.workspace_index = 0;
     }

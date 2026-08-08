@@ -145,6 +145,57 @@ impl App {
         .map_err(|error| format!("workspace history was not saved ({error})"))
     }
 
+    /// Persist `workspace` as a named shortcut for the manual launcher.
+    ///
+    /// A name replaces any older favorite with the same spelling, while the
+    /// path is de-duplicated so one directory cannot occupy several top-ranked
+    /// rows under different aliases.
+    pub(in crate::ui::app) fn save_favorite_workspace(&mut self, name: &str, workspace: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.set_status("Favorite name cannot be empty");
+            return;
+        }
+        let Some(harnesses) = &self.local_sessions else {
+            self.set_status("This device is not hosting, so it has no workspace favorites");
+            return;
+        };
+        let path = harnesses.resolve_workspace(workspace);
+        if !Path::new(&path).is_dir() {
+            self.set_status("Favorites must point to an existing directory");
+            return;
+        }
+        let favorites = &mut self.loaded.config.harness.favorite_workspaces;
+        favorites
+            .retain(|favorite| !favorite.name.eq_ignore_ascii_case(name) && favorite.path != path);
+        favorites.insert(
+            0,
+            medulla::config::FavoriteWorkspace {
+                name: name.to_string(),
+                path: path.clone(),
+            },
+        );
+        let Some(config_path) = &self.config_path else {
+            self.set_status(format!(
+                "Saved favorite {name} · this run only — no config file"
+            ));
+            self.refresh_harness_workspace_choices();
+            return;
+        };
+        match medulla::config::persist_setting(
+            config_path,
+            "harness",
+            "favoriteWorkspaces",
+            toml::Value::try_from(favorites.clone()).expect("favorite workspaces serialize"),
+        ) {
+            Ok(()) => {
+                self.set_status(format!("Saved favorite {name} · {path}"));
+                self.refresh_harness_workspace_choices();
+            }
+            Err(error) => self.set_status(format!("Could not save favorite ({error})")),
+        }
+    }
+
     /// Rank recent, configured, and filesystem-derived workspace suggestions.
     fn workspace_choices(&self, query: &str) -> Vec<WorkspaceChoice> {
         let Some(harnesses) = &self.local_sessions else {
@@ -154,25 +205,37 @@ impl App {
         let process_dir = std::env::current_dir().unwrap_or_else(|_| base.to_path_buf());
         let resolved_query = harnesses.resolve_workspace(query);
         let mut known = Vec::new();
-        for path in &self.loaded.config.harness.recent_workspaces {
-            known.push((absolute(path, base), "recent"));
+        for favorite in &self.loaded.config.harness.favorite_workspaces {
+            known.push((
+                absolute(&favorite.path, base),
+                "favorite".to_string(),
+                Some(favorite.name.clone()),
+            ));
         }
-        known.push((harnesses.workspace.clone(), "default"));
+        for path in &self.loaded.config.harness.recent_workspaces {
+            known.push((absolute(path, base), "recent".to_string(), None));
+        }
+        known.push((harnesses.workspace.clone(), "default".to_string(), None));
         if !self.loaded.config.host.workspace.trim().is_empty() {
             known.push((
                 absolute(&self.loaded.config.host.workspace, &process_dir),
-                "registered",
+                "registered".to_string(),
+                None,
             ));
         }
         for path in &self.loaded.config.host.workspaces {
-            known.push((absolute(path, &process_dir), "registered"));
+            known.push((absolute(path, &process_dir), "registered".to_string(), None));
         }
         for host in &self.loaded.config.hosts {
             if !host.workspace.trim().is_empty() {
-                known.push((absolute(&host.workspace, &process_dir), "registered"));
+                known.push((
+                    absolute(&host.workspace, &process_dir),
+                    "registered".to_string(),
+                    None,
+                ));
             }
             for path in &host.workspaces {
-                known.push((absolute(path, &process_dir), "registered"));
+                known.push((absolute(path, &process_dir), "registered".to_string(), None));
             }
         }
 
@@ -180,10 +243,19 @@ impl App {
         let mut ranked = known
             .into_iter()
             .enumerate()
-            .filter(|(_, (path, _))| Path::new(path).is_dir())
-            .filter_map(|(order, (path, source))| {
-                match_score(&path, query)
-                    .map(|score| (score, order, WorkspaceChoice { path, source }))
+            .filter(|(_, (path, _, _))| Path::new(path).is_dir())
+            .filter_map(|(order, (path, source, label))| {
+                workspace_match_score(&path, label.as_deref(), query).map(|score| {
+                    (
+                        score,
+                        order,
+                        WorkspaceChoice {
+                            path,
+                            source,
+                            label,
+                        },
+                    )
+                })
             })
             .collect::<Vec<_>>();
 
@@ -198,7 +270,8 @@ impl App {
                             folder_order + index,
                             WorkspaceChoice {
                                 path,
-                                source: "folder",
+                                source: "folder".to_string(),
+                                label: None,
                             },
                         )
                     }),
@@ -220,6 +293,13 @@ impl App {
             .take(MAX_WORKSPACE_CHOICES)
             .collect()
     }
+}
+
+/// Match a saved name first, falling back to the directory path's normal score.
+fn workspace_match_score(path: &str, label: Option<&str>, query: &str) -> Option<usize> {
+    label
+        .and_then(|label| match_score(label, query))
+        .or_else(|| match_score(path, query))
 }
 
 /// Make a configured path absolute against its owning resolution directory.

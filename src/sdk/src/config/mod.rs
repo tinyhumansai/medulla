@@ -57,11 +57,12 @@ pub use persist::{
 };
 pub use types::{
     wire_value, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle, CoreConfig,
-    EvolveSettings, FieldPlacement, FieldVisibility, FleetConfig, HarnessNameStyle, HarnessSection,
-    HookDefaultsConfig, HostSection, HubSection, HubWorkerConfig, LinkConfig, LoadedConfig,
-    McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig, PathStyle, Peer,
-    ProviderBudgetConfig, RouterConfig, RouterProviderConfig, StatusLineConfig, ThemeConfig,
-    TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    EvolveSettings, FavoriteWorkspace, FieldPlacement, FieldVisibility, FleetConfig,
+    HarnessNameStyle, HarnessSection, HookDefaultsConfig, HostSection, HubSection, HubWorkerConfig,
+    LinkConfig, LoadedConfig, McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig,
+    PathStyle, Peer, ProviderBudgetConfig, RouterConfig, RouterProviderConfig, StatusLineConfig,
+    ThemeConfig, TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig,
+    DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, display_host, is_staging, resolve_backend_base_url,

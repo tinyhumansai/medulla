@@ -1,7 +1,7 @@
 //! Focused tests for bounded folder completion and fuzzy ranking.
 
 use super::harness_workspace::{
-    absolute, folder_completions, fuzzy_subsequence_score, match_score,
+    absolute, folder_completions, fuzzy_subsequence_score, match_score, workspace_match_score,
 };
 
 #[test]
@@ -33,6 +33,17 @@ fn folder_completion_lists_matching_children_but_never_files() {
 #[test]
 fn known_workspace_basename_prefixes_beat_filesystem_duplicates() {
     assert_eq!(match_score("/work/project-beta", "project-b"), Some(1));
+}
+
+#[test]
+fn favorite_names_are_searchable_as_well_as_their_paths() {
+    assert_eq!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "primary"),
+        Some(1)
+    );
+    assert!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "medulla").is_some()
+    );
 }
 
 #[test]

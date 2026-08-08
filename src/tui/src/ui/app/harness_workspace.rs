@@ -302,11 +302,21 @@ impl App {
     }
 }
 
-/// Match a saved name first, falling back to the directory path's normal score.
+/// Match a saved name and its path, keeping whichever scores better.
+///
+/// A favorite is searchable by both spellings an operator can use, and the two
+/// can disagree: a query that names the directory exactly is a strictly better
+/// match than one that only loosely resembles the label. `or_else` would skip
+/// the path score whenever the label scored at all, so a favorite could rank
+/// behind a plain filesystem completion for the same directory and lose the
+/// row to path de-duplication — the exact case the name was added to fix.
 pub(super) fn workspace_match_score(path: &str, label: Option<&str>, query: &str) -> Option<usize> {
-    label
-        .and_then(|label| match_score(label, query))
-        .or_else(|| match_score(path, query))
+    let label_score = label.and_then(|label| match_score(label, query));
+    let path_score = match_score(path, query);
+    match (label_score, path_score) {
+        (Some(label_score), Some(path_score)) => Some(label_score.min(path_score)),
+        (label_score, path_score) => label_score.or(path_score),
+    }
 }
 
 /// Make a configured path absolute against its owning resolution directory.

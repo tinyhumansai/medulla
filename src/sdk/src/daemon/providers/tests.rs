@@ -502,5 +502,8 @@ async fn a_wholly_silent_child_is_still_killed_as_idle() {
         .await
         .expect_err("a silent child must trip the watchdog");
 
-    assert!(error.contains("idle for 300ms"), "unexpected error: {error}");
+    assert!(
+        error.contains("idle for 300ms"),
+        "unexpected error: {error}"
+    );
 }

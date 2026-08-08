@@ -167,10 +167,13 @@ fn transcripts_from_one_multi_dispatch_activation_fold_onto_its_step() {
 }
 
 #[test]
-fn transcripts_of_an_early_fan_out_do_not_shift_onto_a_later_step() {
-    // The same fan-out, but with another activation of the node after it. The
-    // first step owns both of its transcripts; the later step keeps its own
-    // rather than inheriting the leftovers.
+fn excess_transcripts_fold_onto_the_last_step_in_completion_order() {
+    // More transcripts than steps for a node — a multi-dispatch activation
+    // followed by another — stays in completion order: one transcript per step
+    // as far as it goes, and the last step absorbs what is left. This is the
+    // same grouping the prompt pass uses, so a transcript is never dropped and
+    // never reordered, even when the node has only one step to receive a
+    // fan-out's worth.
     let evidence = AgentEvidence::default();
     evidence.record_transcript("work", vec![entry("agent_message", "fan one")]);
     evidence.record_transcript("work", vec![entry("agent_message", "fan two")]);
@@ -179,15 +182,12 @@ fn transcripts_of_an_early_fan_out_do_not_shift_onto_a_later_step() {
 
     evidence.attach(&mut steps);
 
-    assert_eq!(
-        steps[0].transcript,
-        vec![
-            entry("agent_message", "fan one"),
-            entry("agent_message", "fan two"),
-        ]
-    );
+    assert_eq!(steps[0].transcript, vec![entry("agent_message", "fan one")]);
     assert_eq!(
         steps[1].transcript,
-        vec![entry("agent_message", "next activation")]
+        vec![
+            entry("agent_message", "fan two"),
+            entry("agent_message", "next activation"),
+        ]
     );
 }

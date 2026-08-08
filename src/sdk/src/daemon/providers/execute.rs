@@ -4,6 +4,7 @@
 //! opencode SQLite-lock exits with jittered exponential backoff.
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

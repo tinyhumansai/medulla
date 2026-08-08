@@ -350,7 +350,8 @@ async fn run_provider_attempt(
     let stderr_task = {
         let stderr_tail = stderr_tail.clone();
         let stderr_beat = stderr_beat.clone();
-        let beat_base = beat_base;
+        // `beat_base` is `Copy`, so the `async move` block captures it by copy;
+        // it remains in scope for the watchdog's stale-beat arithmetic below.
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut buf = Vec::new();

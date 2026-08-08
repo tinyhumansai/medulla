@@ -123,18 +123,38 @@ impl AgentEvidence {
     /// Simpler than the prompt pass beside it, and deliberately so. A prompt
     /// queue may hold several entries for one step — a node that dispatched
     /// more than once inside a single activation — so that pass has to decide
-    /// how many to fold together. A transcript is one whole harness turn, and a
-    /// step is one activation, so the mapping is one to one and the Nth
-    /// transcript belongs to the Nth step.
+    /// how many to fold together. A transcript is one whole harness turn, and
+    /// the same can happen here: a node that dispatches more than once inside a
+    /// single activation queues one transcript per dispatch, so the Nth step
+    /// owns however many of its dispatches produced turns. Both passes use the
+    /// same `remaining` bookkeeping — the last step of a node absorbs every
+    /// entry still queued for it, and every step before it takes one — which is
+    /// what keeps a multi-dispatch activation's transcripts on its own step
+    /// instead of drifting onto a later activation of the same node.
     fn attach_transcripts(&self, steps: &mut [RunStep]) {
         let mut transcripts = self.transcripts.lock().expect("agent evidence lock");
+        let mut remaining = HashMap::<String, usize>::new();
+        for step in steps.iter() {
+            *remaining.entry(step.node_id.clone()).or_default() += 1;
+        }
         for step in steps {
             let Some(queue) = transcripts.get_mut(&step.node_id) else {
                 continue;
             };
-            if let Some(transcript) = queue.pop_front() {
-                step.transcript = transcript;
+            let steps_left = remaining.get_mut(&step.node_id).expect("step was counted");
+            let take = if *steps_left == 1 {
+                queue.len()
+            } else {
+                1.min(queue.len())
+            };
+            let mut folded = Vec::new();
+            for _ in 0..take {
+                if let Some(transcript) = queue.pop_front() {
+                    folded.extend(transcript);
+                }
             }
+            step.transcript = folded;
+            *steps_left -= 1;
         }
     }
 }

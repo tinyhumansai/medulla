@@ -402,9 +402,9 @@ fn a_wrapped_blocking_error_is_still_blocking() {
 fn a_bullet_prefixed_error_is_still_blocking() {
     for screen in [
         "• Invalid API key · Please run /login\n> ",
-        "• You've hit your usage limit.\n> ",
+        "• You've hit your usage limit. Try again later.\n> ",
         "* Invalid API key · please re-authenticate\n> ",
-        "· Invalid API key.\n> ",
+        "· Invalid API key. Re-authenticate your session.\n> ",
     ] {
         let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
         assert_eq!(kind, AttentionKind::Error, "{screen}");

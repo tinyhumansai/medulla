@@ -54,11 +54,14 @@ fn a_terminal_title_update_surfaces_as_the_thread_name() {
 }
 
 #[test]
-fn clearing_a_terminal_title_clears_the_thread_name() {
+fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
+    // The screen layer ignores empty OSC title samples so that a thread name
+    // discovered from the Codex session index (or from a prior non-empty title)
+    // is not erased by ordinary harness output that includes no title escape.
     let manager = PtyManager::new();
     let id = manager
         .open(sh(
-            "printf '\\033]2;Named thread\\007'; read line; printf '\\033]2;   \\007'; sleep 30",
+            "printf '\\033]2;Named thread\\007'; read line; printf '\\033]2;\\007'; sleep 30",
         ))
         .unwrap();
     wait_for("initial thread name", || {
@@ -66,13 +69,13 @@ fn clearing_a_terminal_title_clears_the_thread_name() {
     });
 
     manager.write(&id, b"clear\n").unwrap();
-    wait_for("cleared thread name", || {
-        manager
-            .row(&id)
-            .is_some_and(|row| row.thread_name.is_none())
-    });
-
-    assert_eq!(manager.row(&id).unwrap().thread_name, None);
+    // The empty title must NOT overwrite: the name stays.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert_eq!(
+        manager.row(&id).and_then(|row| row.thread_name),
+        Some("Named thread".to_string()),
+        "empty OSC title must not clear a previously set thread name"
+    );
     manager.close(&id);
 }
 

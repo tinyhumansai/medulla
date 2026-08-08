@@ -29,13 +29,18 @@ use super::super::LocalSessions;
 /// `--session-id`, which `/bin/sh` would reject as an unknown option. Codex
 /// takes no preset id, so its argv is empty and the script is the whole command.
 pub(super) fn sh(script: &str) -> LaunchSpec {
+    sh_for(HarnessProvider::Codex, script)
+}
+
+/// A shell PTY carrying `provider` metadata for provider-specific input tests.
+fn sh_for(provider: HarnessProvider, script: &str) -> LaunchSpec {
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {
         env.insert("PATH".to_string(), path);
     }
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     LaunchSpec {
-        provider: HarnessProvider::Codex,
+        provider,
         preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
@@ -292,6 +297,36 @@ fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
 }
 
 #[test]
+fn codex_without_mouse_or_alternate_scroll_gets_arrow_scroll_events() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Current Codex releases enable bracketed paste and enhanced keyboard input,
+    // but no longer advertise DECSET 1007. The provider still expects wheel
+    // scrolling to reach its transcript as cursor keys.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?2004hready'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the Codex stand-in to become ready", || {
+        text(&harnesses, &id).contains("ready")
+    });
+    assert_eq!(sessions.alternate_scroll(&id), Some(false));
+    assert!(matches!(
+        sessions.mouse_protocol(&id),
+        Some((vt100::MouseProtocolMode::None, _))
+    ));
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    wait_for("Codex to receive translated wheel input", || {
+        text(&harnesses, &id).contains("^[[A^[[A^[[A")
+    });
+    sessions.close(&id);
+}
+
+#[test]
 fn alternate_screen_without_alternate_scroll_does_not_receive_arrows() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());
@@ -321,7 +356,8 @@ fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     let harnesses = harnesses(sessions.clone());
     // Enough lines to push history off a 30-row screen, and no mouse reporting.
     let id = sessions
-        .open(sh(
+        .open(sh_for(
+            HarnessProvider::Claude,
             "i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done; sleep 30",
         ))
         .unwrap();

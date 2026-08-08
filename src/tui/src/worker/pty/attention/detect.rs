@@ -538,18 +538,26 @@ fn has_yes_no(screen: &str) -> bool {
 /// indefinitely. Binding the match to the live region below the last composer
 /// rejects those retained labels while keeping the wrap-tolerant whole-screen
 /// match for a menu with no composer beneath it (the active case).
-fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+/// The squashed text of the live region: everything below the last composer, or
+/// the whole screen when there is none.
+///
+/// A composer is the current idle prompt; anything below it is its own chrome,
+/// and everything above it is history that must not re-raise a cue the operator
+/// already answered. A harness mid-menu draws no composer, so the whole screen
+/// is live then. Both the marker cue and the OpenCode permission menu search
+/// this region so a menu answered and left in scrollback stops recreating its
+/// approval cue on every poll.
+fn live_region_squash(screen: &str) -> String {
     let lines: Vec<&str> = screen.lines().collect();
     let live = match lines.iter().rposition(|line| is_composer(line)) {
-        // No composer anywhere means the harness is mid-menu: the whole screen
-        // is the live region.
         None => &lines[..],
-        // A composer is the current idle prompt; anything below it is its own
-        // chrome, and everything above it is history that must not re-raise a
-        // cue the operator already answered.
         Some(index) => &lines[index + 1..],
     };
-    let squashed = squash(&live.join("\n"));
+    squash(&live.join("\n"))
+}
+
+fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    let squashed = live_region_squash(screen);
     MARKERS
         .iter()
         .filter(|(candidate, ..)| *candidate == provider)

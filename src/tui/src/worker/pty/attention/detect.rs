@@ -277,22 +277,67 @@ fn is_recovery_evidence(line: &str) -> bool {
     }
     let squashed = squash(trimmed);
     let lower = trimmed.to_lowercase();
-    WORKING.iter().any(|marker| squashed.contains(marker))
-        || [
-            "working",
-            "done",
-            "finished",
-            "completed",
-            "succeeded",
-            "replaced",
-            "resolved",
-            "fixed",
-            "recovered",
-            "retried",
-            "retrying",
-        ]
-        .iter()
-        .any(|word| lower.contains(word))
+    if WORKING.iter().any(|marker| squashed.contains(marker)) {
+        return true;
+    }
+    // A recovery word is evidence only when it is positive. Matching it by
+    // substring anywhere in the line would clear a genuine terminal error that
+    // *names* the failure in recovering vocabulary: "the API key is not
+    // working" and "the request could not be completed" both contain a
+    // recovery word yet mean the opposite. Guard the match against a negator
+    // so a negated phrase never reads as a recovered turn.
+    has_positive_recovery_word(&lower)
+}
+
+/// Whether `line` (lowercased) contains a recovery word that is not negated.
+///
+/// A recovery word counts as proof the harness went on only when it is not
+/// the object of a negation — the failure "is not working", "could not be
+/// completed", "remains unresolved". Both a separate negator ("not", "never",
+/// "cannot") immediately before the word and a `un`/`non` prefix folded into
+/// it ("unresolved", "undone") disqualify it, because either describes the
+/// failure rather than a recovered turn.
+fn has_positive_recovery_word(lower: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "working",
+        "done",
+        "finished",
+        "completed",
+        "succeeded",
+        "replaced",
+        "resolved",
+        "fixed",
+        "recovered",
+        "retried",
+        "retrying",
+    ];
+    const NEGATORS: &[&str] = &[
+        "not",
+        "never",
+        "cannot",
+        "can't",
+        "couldn't",
+        "won't",
+        "n't",
+        "no",
+        "non",
+        "un",
+    ];
+    WORDS.iter().any(|word| {
+        lower.match_indices(word).any(|(at, _)| {
+            // Near-negation: the word is negated only when the negator is the
+            // immediately preceding token ("is not working") or the `un`/`non`
+            // prefix just before it ("unresolved"). `un`/`non` are checked as
+            // bare tokens so ordinary words that merely start with them
+            // ("understanding", "none") do not disqualify a recovery line.
+            let before = &lower[..at];
+            before
+                .split_whitespace()
+                .rev()
+                .take(2)
+                .any(|w| NEGATORS.contains(&w.trim_matches(|c: char| !c.is_alphanumeric())))
+        })
+    })
 }
 
 /// Whether OpenCode drew its permission action menu.

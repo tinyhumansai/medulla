@@ -416,7 +416,7 @@ fn a_continuation_that_describes_the_failure_is_not_recovery() {
 /// the quota page.
 #[test]
 fn the_latest_failure_is_the_one_described() {
-    let screen = "Usage limit reached\n> retry with the refreshed token\nInvalid API key\n> ";
+    let screen = "Usage limit reached\n> retry with the refreshed token\nInvalid API key · Please run /login\n> ";
     let (kind, what) = detect(HarnessProvider::Codex, screen).expect("a cue");
     assert_eq!(kind, AttentionKind::Error, "{screen}");
     assert!(

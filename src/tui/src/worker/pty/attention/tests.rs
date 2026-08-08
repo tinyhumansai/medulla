@@ -440,6 +440,22 @@ fn a_completed_turn_that_names_the_marker_is_not_a_live_error() {
     }
 }
 
+/// A completed turn whose reply quotes a bare error phrase must not read as a
+/// blocking error. Asking the harness to "reply exactly `authentication
+/// failed`" puts the marker line exactly where a live error would sit, with no
+/// recovery vocabulary and only the restored composer beneath it — the screen
+/// cannot tell the two apart, and a missed blink is cheaper than a rail that
+/// blinks at nothing.
+#[test]
+fn a_reply_quoting_a_bare_error_phrase_is_not_blocking() {
+    for screen in [
+        "> reply exactly \"authentication failed\"\nauthentication failed\n> ",
+        "> what did the error say?\nauthentication failed\n> ",
+    ] {
+        assert_eq!(detect(HarnessProvider::Codex, screen), None, "{screen}");
+    }
+}
+
 /// A question outranks the error that prompted it: the harness recovered far
 /// enough to ask, and the question is the thing the operator can act on.
 #[test]

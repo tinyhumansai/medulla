@@ -454,6 +454,12 @@ async fn run_provider_attempt(
                 match read {
                     Ok(0) => break, // EOF
                     Ok(_) => {
+                        // Any output on stdout is proof of life, even a record
+                        // too large to parse, so refresh the idle deadline before
+                        // the oversized guard: a harness emitting only huge JSON
+                        // records must not be killed as idle on the original
+                        // deadline.
+                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
                         if buf.len() > MAX_RECORD_BYTES {
                             continue; // unparseable oversized record — drop it.
                         }

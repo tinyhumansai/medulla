@@ -24,7 +24,7 @@ mod tests;
 pub use decode::{decode_task_frame, parse_agent_capabilities};
 pub use encode::{
     encode_task_frame, encode_task_frame_with_attachments, encode_task_frame_with_usage,
-    encode_task_frame_with_work,
+    encode_task_frame_with_work, encode_workflow_node_task_frame,
 };
 pub use types::{
     dispatchable_flavors, AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert,

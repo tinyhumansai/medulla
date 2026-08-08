@@ -92,6 +92,7 @@ fn live_options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: peer.to_string(),

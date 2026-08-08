@@ -100,6 +100,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         custom_harness: None,
         model: None,
         tool_mode: None,
+        workflow_node: false,
         workflow: None,
         workflow_fingerprint: None,
         workflow_inputs: Default::default(),

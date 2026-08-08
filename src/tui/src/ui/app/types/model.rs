@@ -19,6 +19,7 @@ use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType
 use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 
+use super::picker::*;
 use super::rail_hit::RailHit;
 
 /// The ordered top-level tab names. The tab index selects into this array.

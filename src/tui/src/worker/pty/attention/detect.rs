@@ -183,6 +183,22 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
     {
         return None;
     }
+    // An error is terminal only when the harness printed it and then went
+    // idle. Substantive output below the error line — a tool that echoed
+    // "authentication failed" and kept going, the tail of a turn that
+    // completed anyway — proves the phrase was part of a turn's output, not
+    // the reason the harness stopped. Continuation lines that themselves name
+    // an error stay part of the error screen.
+    if tail[error_index + 1..]
+        .iter()
+        .filter(|line| !is_composer(line))
+        .any(|line| {
+            let squashed = squash(line);
+            !ERRORS.iter().any(|(marker, _)| squashed.contains(marker))
+        })
+    {
+        return None;
+    }
     // The prompt is part of the terminal viewport too, but it is operator
     // input rather than harness output. In particular, a draft such as
     // `> fix invalid API key` must not turn an otherwise idle session red.

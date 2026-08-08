@@ -302,8 +302,9 @@ fn appearance_cycles_and_persists_the_sidebar_layout() {
     let mut app = settings_app();
     app.set_config_path(path.clone());
     let _ = key(&mut app, KeyCode::Char('2'));
-    // Five color rows, the blink toggle, and the seven option rows before it.
-    for _ in 0..13 {
+    // Five color rows, the two attention controls, and the seven option rows
+    // before it.
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Right);
@@ -338,7 +339,7 @@ fn appearance_sidebar_grouping_wraps_backwards() {
     // how every other control on this page behaves.
     let mut app = settings_app();
     let _ = key(&mut app, KeyCode::Char('2'));
-    for _ in 0..13 {
+    for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
     let _ = key(&mut app, KeyCode::Left);

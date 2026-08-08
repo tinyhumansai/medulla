@@ -203,19 +203,16 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         return None;
     }
     // The prompt is part of the terminal viewport too, but it is operator
-    // input rather than harness output. In particular, a draft such as
-    // `> fix invalid API key` must not turn an otherwise idle session red.
-    let tail = squash(
-        &tail
-            .iter()
-            .copied()
-            .filter(|line| !is_composer(line))
-            .collect::<Vec<_>>()
-            .join("\n"),
-    );
+    // input rather than harness output; a draft such as `> fix invalid API
+    // key` must not turn an otherwise idle session red. The matched line is a
+    // non-composer by construction, so resolving the description from it skips
+    // any draft while staying pinned to the *latest* failure — rescanning the
+    // whole tail in `ERRORS` table order could report an older error still on
+    // screen instead of the one `error_index` deliberately chose.
+    let matched = squash(tail[error_index]);
     ERRORS
         .iter()
-        .find(|(marker, _)| tail.contains(marker))
+        .find(|(marker, _)| matched.contains(marker))
         .map(|(_, what)| *what)
 }
 

@@ -490,11 +490,9 @@ async fn run_provider_attempt(
                             on_event.as_mut(),
                         );
                         line_no += 1;
-                        // Any line at all is proof of life, mapped or not: a
-                        // record this build does not understand still came from
-                        // a running child, and only a silent pipe means idle.
+                        // Mapped or not, the record arrived from a living child,
+                        // so the idle window was already refreshed above.
                         let _ = produced;
-                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
                     }
                     Err(_) => break,
                 }

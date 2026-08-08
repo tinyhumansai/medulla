@@ -256,6 +256,14 @@ pub struct SessionRow {
     /// it hold the checkout against every task queued behind it. Cleared the
     /// moment the operator does take it.
     pub retained: bool,
+    /// Whether the child was deliberately asked to exit rather than dying on
+    /// its own.
+    ///
+    /// A harness that is killed on request — an operator closing it, a bounded
+    /// turn that never answered — reaps with a signal-derived nonzero status.
+    /// That is the child obeying the request, not a lifecycle failure, and the
+    /// lifecycle cue reads it accordingly.
+    pub closed_by_request: bool,
     /// The name the operator gave it when they started it, if they gave one.
     ///
     /// `None` for a dispatched session; the UI labels those from their task.

@@ -57,14 +57,17 @@ pub fn lifecycle_cue(row: &SessionRow, _now: i64) -> Option<HarnessAttention> {
 ///
 /// A recorded write error wins over the exit status because it says *what*
 /// happened; an exit code alone can only say that something did. A clean exit is
-/// not a failure and a running session has not had one yet.
+/// not a failure and a running session has not had one yet. Nor is a deliberate
+/// close: a child killed on request reaps with a signal-derived nonzero status,
+/// which is the harness obeying the close rather than a lifecycle failure, so a
+/// requested close reports nothing here and simply leaves the rail.
 fn failure_reason(row: &SessionRow) -> Option<String> {
     if let Some(error) = row.last_error.as_deref() {
         return Some(format!("{} failed: {error}", row.provider.as_str()));
     }
     match row.state {
         PtyState::Failed => Some(format!("{} could not run", row.provider.as_str())),
-        PtyState::Exited { code: Some(code) } if code != 0 => {
+        PtyState::Exited { code: Some(code) } if code != 0 && !row.closed_by_request => {
             Some(format!("{} exited with {code}", row.provider.as_str()))
         }
         _ => None,

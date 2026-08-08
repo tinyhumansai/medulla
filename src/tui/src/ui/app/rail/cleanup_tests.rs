@@ -48,6 +48,18 @@ fn a_failed_session_stays_visible_for_the_operator() {
 }
 
 #[test]
+fn a_requested_close_is_not_kept_as_a_failure() {
+    // The operator confirmed the close: the kill's signal-derived exit status is
+    // the harness obeying, not a lifecycle failure, so the row leaves rather than
+    // turning red forever under a "Closed the harness" status.
+    let app = hosting_app();
+    let mut row = exited("w_1", 1, None);
+    row.closed_by_request = true;
+
+    assert!(!app.keeps_finished_session(&row));
+}
+
+#[test]
 fn the_attached_session_stays_listed_after_it_exits() {
     // The operator is reading that screen — often *because* it exited. Sweeping
     // it would take the exit code away from the person looking at it.

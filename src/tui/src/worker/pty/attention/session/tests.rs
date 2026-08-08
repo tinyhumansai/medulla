@@ -36,6 +36,7 @@ fn lifecycle_row() -> SessionRow {
         control: SessionControl::User,
         origin: SessionOrigin::User,
         retained: false,
+        closed_by_request: false,
         name: None,
         attention: None,
         working: false,
@@ -63,6 +64,24 @@ fn a_non_zero_exit_reports_its_code() {
     let cue = lifecycle_cue(&row, LIFECYCLE_NOW).expect("a cue");
     assert_eq!(cue.kind, AttentionKind::Failed);
     assert!(cue.what.contains("137"), "{}", cue.what);
+}
+
+#[test]
+fn a_non_zero_exit_from_a_requested_close_is_not_a_failure() {
+    let mut row = lifecycle_row();
+    row.state = PtyState::Exited { code: Some(1) };
+    row.closed_by_request = true;
+    assert_eq!(lifecycle_cue(&row, LIFECYCLE_NOW), None);
+}
+
+#[test]
+fn a_requested_close_still_keeps_a_recorded_error() {
+    let mut row = lifecycle_row();
+    row.state = PtyState::Exited { code: Some(1) };
+    row.closed_by_request = true;
+    row.last_error = Some("write queue full".into());
+    let cue = lifecycle_cue(&row, LIFECYCLE_NOW).expect("a cue");
+    assert_eq!(cue.kind, AttentionKind::Failed);
 }
 
 #[test]

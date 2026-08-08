@@ -266,6 +266,16 @@ pub struct SessionHandle {
     /// are: [`try_claim`](super::SessionHandle::try_claim) tests it per session
     /// on every dispatch.
     pub(super) retained: AtomicBool,
+    /// Whether the child was deliberately asked to exit rather than dying on
+    /// its own.
+    ///
+    /// Set by [`mark_closed`](SessionHandle::mark_closed), which only the
+    /// deliberate-close paths call — an operator closing the harness, the
+    /// executor finishing a bounded turn that never answered, an orchestrator
+    /// interrupting a session it owns. The signal-derived exit status such a
+    /// kill leaves behind is the harness obeying the request, not a lifecycle
+    /// failure, so the lifecycle cue must not read it as one.
+    pub(super) closed_by_request: AtomicBool,
     /// How many bytes sit in [`SessionIo::writes`] still unwritten.
     ///
     /// The budget a caller is admitted against, so a child that never drains its

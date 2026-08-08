@@ -169,6 +169,7 @@ impl SessionHandle {
             control: self.control(),
             origin: self.meta.origin,
             retained: self.is_retained(),
+            closed_by_request: self.is_closed_by_request(),
             name: cold.name.clone(),
             attention: attention.cue.clone(),
             // Only meaningful while the child is alive: the last screen a dead

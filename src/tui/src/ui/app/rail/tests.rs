@@ -78,6 +78,7 @@ pub(in crate::ui::app) fn stub_session(id: &str) -> crate::worker::pty::SessionR
         control: crate::worker::pty::SessionControl::Orchestrator,
         origin: crate::worker::pty::SessionOrigin::Orchestrator,
         retained: false,
+        closed_by_request: false,
         name: None,
         attention: None,
         working: false,

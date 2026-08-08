@@ -98,7 +98,10 @@ impl LocalSessions {
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - the harness enables alternate scrolling without mouse reporting (Codex),
+    /// - Codex does not negotiate mouse reports in current releases. Its TUI
+    ///   consumes cursor keys to move through the transcript, so a notch becomes
+    ///   cursor-key input even when it does not advertise alternate scrolling;
+    /// - another harness enables alternate scrolling without mouse reporting,
     ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
     ///   specifies;
     /// - otherwise our emulator's own retained lines move instead. Not as good,
@@ -118,7 +121,11 @@ impl LocalSessions {
                 return;
             }
         }
-        if self.sessions.alternate_scroll(session_id) == Some(true) {
+        let codex = self
+            .sessions
+            .row(session_id)
+            .is_some_and(|row| row.provider == medulla::protocol::HarnessProvider::Codex);
+        if codex || self.sessions.alternate_scroll(session_id) == Some(true) {
             let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };
             let mut bytes = Vec::with_capacity(arrow.len() * rows);
             for _ in 0..rows {

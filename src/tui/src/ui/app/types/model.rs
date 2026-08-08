@@ -613,8 +613,10 @@ pub(in crate::ui::app) enum SessionPickerStep {
 pub(in crate::ui::app) struct WorkspaceChoice {
     /// Absolute directory path.
     pub(in crate::ui::app) path: String,
-    /// Short operator-facing provenance such as `recent` or `folder`.
-    pub(in crate::ui::app) source: &'static str,
+    /// Short operator-facing provenance such as `favorite`, `recent`, or `folder`.
+    pub(in crate::ui::app) source: String,
+    /// An operator-defined favorite name, when this is a saved shortcut.
+    pub(in crate::ui::app) label: Option<String>,
 }
 
 /// A pointer gesture a harness owns until the button comes back up.
@@ -741,6 +743,8 @@ pub(in crate::ui::app) enum PromptKind {
     HostEditLabel(String),
     /// Declare another directory this device may work in.
     WorkspaceAdd,
+    /// Save the selected manual-launcher directory under an operator-chosen name.
+    FavoriteWorkspaceAdd(String),
     /// Add a named OpenRouter-backed coding harness.
     CustomHarnessAdd,
     /// Edit the custom harness with the given stable id.

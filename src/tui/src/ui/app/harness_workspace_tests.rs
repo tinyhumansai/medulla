@@ -1,7 +1,7 @@
 //! Focused tests for bounded folder completion and fuzzy ranking.
 
 use super::harness_workspace::{
-    absolute, folder_completions, fuzzy_subsequence_score, match_score,
+    absolute, folder_completions, fuzzy_subsequence_score, match_score, workspace_match_score,
 };
 
 #[test]
@@ -33,6 +33,35 @@ fn folder_completion_lists_matching_children_but_never_files() {
 #[test]
 fn known_workspace_basename_prefixes_beat_filesystem_duplicates() {
     assert_eq!(match_score("/work/project-beta", "project-b"), Some(1));
+}
+
+#[test]
+fn favorite_names_are_searchable_as_well_as_their_paths() {
+    assert_eq!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "primary"),
+        Some(1)
+    );
+    assert!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "medulla").is_some()
+    );
+}
+
+#[test]
+fn an_exact_path_match_outranks_a_loose_label_match_for_a_favorite() {
+    // A query that names the directory exactly must rank the favorite at the
+    // path score rather than the loose label score, or a plain filesystem
+    // completion for the same directory would outrank it and win the row after
+    // path de-duplication.
+    assert_eq!(
+        workspace_match_score("/work/medulla", Some("primary medulla"), "medulla"),
+        Some(0)
+    );
+    // The label's own exact match is still honoured when the path does not
+    // match at all.
+    assert_eq!(
+        workspace_match_score("/work/medulla-public", Some("Primary Medulla"), "primary"),
+        Some(1)
+    );
 }
 
 #[test]
@@ -163,4 +192,104 @@ fn arrowing_onto_a_completion_still_wins_over_the_typed_query() {
         Some(root.path().join("alpha")),
         "a deliberately chosen completion is still what Enter uses"
     );
+}
+
+#[test]
+fn saving_a_named_favorite_persists_it_and_makes_its_name_searchable() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    app.set_config_path(config.clone());
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    assert_eq!(app.loaded.config.harness.favorite_workspaces.len(), 1);
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].name,
+        "Daily Medulla"
+    );
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].path,
+        workspace.to_string_lossy()
+    );
+    assert!(std::fs::read_to_string(config)
+        .unwrap()
+        .contains("favoriteWorkspaces"));
+
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_query = "daily".into();
+    picker.workspace_picked = false;
+    app.refresh_harness_workspace_choices();
+    let choice = app
+        .session_picker
+        .as_ref()
+        .unwrap()
+        .workspace_choices
+        .first()
+        .unwrap();
+    assert_eq!(choice.label.as_deref(), Some("Daily Medulla"));
+    assert_eq!(choice.path, workspace.to_string_lossy());
+}
+
+#[test]
+fn saving_a_favorite_reanchors_the_cursor_on_the_saved_workspace() {
+    // Saving promotes the new favorite to the head of the list, so the arrowed
+    // cursor must follow it (index 0) rather than keep pointing at the row it
+    // covered before — otherwise Enter starts the harness in whatever directory
+    // landed in that row instead of the workspace just favorited.
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    app.set_config_path(config.clone());
+
+    // The operator arrows onto a non-first completion before saving.
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_index = 3;
+    picker.workspace_picked = true;
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    let picker = app.session_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.workspace_index, 0,
+        "the cursor follows the promoted favorite to the head row"
+    );
+    assert!(
+        picker.workspace_picked,
+        "Enter must still honour the highlighted row after the refresh"
+    );
+    assert_eq!(
+        app.selected_picker_workspace()
+            .map(std::path::PathBuf::from),
+        Some(workspace.clone()),
+        "Enter starts in the workspace that was just favorited"
+    );
+}
+
+#[test]
+fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    // An unparsable config file makes persistence fail before any write — a
+    // favorite the disk never recorded must not be visible in memory either,
+    // or a later successful save could silently persist it.
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "not [valid toml {{{").unwrap();
+    app.set_config_path(config);
+
+    app.save_favorite_workspace("Daily Medulla", workspace.to_str().unwrap());
+
+    assert!(
+        app.loaded.config.harness.favorite_workspaces.is_empty(),
+        "a favorite that could not be persisted must not appear to be saved"
+    );
+    assert!(app.status().contains("Could not save favorite"));
 }

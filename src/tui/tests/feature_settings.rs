@@ -256,7 +256,7 @@ fn appearance_cycles_custom_attention_blink_rates_from_each_end() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path);
-    app.theme.attention_blink_ms = 1_100;
+    app.set_attention_blink_ms(1_100);
     let _ = key(&mut app, KeyCode::Char('2'));
     for _ in 0..6 {
         let _ = key(&mut app, KeyCode::Char('j'));
@@ -265,7 +265,7 @@ fn appearance_cycles_custom_attention_blink_rates_from_each_end() {
     let _ = key(&mut app, KeyCode::Right);
     assert!(app.status().contains("Attention blink rate → 0.3s (saved)"));
 
-    app.theme.attention_blink_ms = 1_100;
+    app.set_attention_blink_ms(1_100);
     let _ = key(&mut app, KeyCode::Left);
     assert!(app.status().contains("Attention blink rate → 3.0s (saved)"));
 

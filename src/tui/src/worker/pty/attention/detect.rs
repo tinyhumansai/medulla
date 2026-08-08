@@ -293,10 +293,12 @@ fn is_recovery_evidence(line: &str) -> bool {
 ///
 /// A recovery word counts as proof the harness went on only when it is not
 /// the object of a negation — the failure "is not working", "could not be
-/// completed", "remains unresolved". Both a separate negator ("not", "never",
-/// "cannot") immediately before the word and a `un`/`non` prefix folded into
-/// it ("unresolved", "undone") disqualify it, because either describes the
-/// failure rather than a recovered turn.
+/// completed", "couldn't be resolved". A separate negator ("not", "never",
+/// "cannot", any `n't` contraction) just before the word, or a `un`/`non`
+/// prefix folded into it ("unresolved", "undone"), disqualifies it: the line
+/// describes the failure rather than a recovered turn. Only near-negation is
+/// considered, so ordinary lines that merely *mention* a negator further back
+/// ("no errors, all fixed") still count as recovery.
 fn has_positive_recovery_word(lower: &str) -> bool {
     const WORDS: &[&str] = &[
         "working",
@@ -311,31 +313,23 @@ fn has_positive_recovery_word(lower: &str) -> bool {
         "retried",
         "retrying",
     ];
-    const NEGATORS: &[&str] = &[
-        "not",
-        "never",
-        "cannot",
-        "can't",
-        "couldn't",
-        "won't",
-        "n't",
-        "no",
-        "non",
-        "un",
-    ];
+    const NEGATORS: &[&str] = &["not", "never", "cannot", "can't", "couldn't", "won't"];
+    let negates = |w: &str| -> bool {
+        NEGATORS.contains(&w) || w == "un" || w == "non" || w.ends_with("n't")
+    };
     WORDS.iter().any(|word| {
         lower.match_indices(word).any(|(at, _)| {
-            // Near-negation: the word is negated only when the negator is the
-            // immediately preceding token ("is not working") or the `un`/`non`
-            // prefix just before it ("unresolved"). `un`/`non` are checked as
-            // bare tokens so ordinary words that merely start with them
-            // ("understanding", "none") do not disqualify a recovery line.
             let before = &lower[..at];
-            before
+            // `un`/`non` are matched as bare tokens so ordinary words that
+            // merely start with them ("understanding", "none") disqualify
+            // nothing; only when the prefix is the token right before the
+            // recovery word does it negate it.
+            !before
                 .split_whitespace()
                 .rev()
-                .take(2)
-                .any(|w| NEGATORS.contains(&w.trim_matches(|c: char| !c.is_alphanumeric())))
+                .take(3)
+                .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+                .any(negates)
         })
     })
 }

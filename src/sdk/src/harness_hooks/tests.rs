@@ -397,7 +397,7 @@ fn every_spawn_seam_uses_the_merged_launch_builder() {
     let seams = [
         "src/sdk/src/wrapper/run/mod.rs",
         "src/sdk/src/daemon/providers/execute.rs",
-        "src/tui/src/worker/executor/run.rs",
+        "src/tui/src/worker/executor/launch.rs",
         "src/tui/src/ui/harness_pane/spawn.rs",
     ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

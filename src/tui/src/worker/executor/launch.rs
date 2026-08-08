@@ -8,14 +8,13 @@
 use std::collections::HashMap;
 
 use medulla::daemon::providers::RunTaskOptions;
-use medulla::protocol::HarnessProvider;
 use medulla::sessions::SessionClass;
 
 use super::super::pty::{LaunchSpec, SessionControl, SessionOrigin};
 use super::types::{OpenedSession, PtySessionExecutor, SessionPlan};
 
 impl PtySessionExecutor {
-    fn session_for(
+    pub(super) fn session_for(
         &self,
         options: &RunTaskOptions,
         class: SessionClass,
@@ -123,7 +122,7 @@ impl PtySessionExecutor {
     /// the runtime, taking the inbox drain and every screen sampler down with
     /// it since they share one. So the launch goes to the blocking pool, which
     /// is what it is for.
-    async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
+    pub(super) async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
         let gh_repo_is_set = spec.env.contains_key("GH_REPO");
         let sessions = self.sessions.clone();
         let id = tokio::task::spawn_blocking(move || sessions.open(spec))

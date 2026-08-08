@@ -6,13 +6,13 @@
 //! runs until the harness states the turn is done, the turn times out, or an
 //! operator takes control.
 
-use medulla::daemon::providers::{Abort, OnEvent, RunTaskResult};
+use medulla::daemon::providers::RunTaskResult;
 use medulla::protocol::HarnessProvider;
 use medulla::sessions::TurnStream;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::run::{LOCATE_BUDGET, POLL, SETTLE_GRACE_MS, STALL_BUDGET_MS};
 use super::super::pty::SessionControl;
+use super::run::{LOCATE_BUDGET, POLL, SETTLE_GRACE_MS, STALL_BUDGET_MS};
 use super::types::{PtySessionExecutor, TurnSpec};
 
 impl PtySessionExecutor {
@@ -79,7 +79,7 @@ impl PtySessionExecutor {
     /// signal for a transcript that stops without a stated reason. A caller
     /// configuring a shorter ceiling than either means it, and is honored
     /// ahead of them.
-    async fn await_turn(
+    pub(super) async fn await_turn(
         &self,
         id: &str,
         spec: TurnSpec,
@@ -212,10 +212,8 @@ impl PtySessionExecutor {
             // (when `TailPoll.located` is emitted); a later /rename would
             // otherwise not be observable until a subsequent turn recreates
             // the tailer.
-            if provider == HarnessProvider::Codex && poll_ticks % 30 == 0 {
-                if let Some(sid) =
-                    self.sessions.row(id).and_then(|row| row.session_id.clone())
-                {
+            if provider == HarnessProvider::Codex && poll_ticks.is_multiple_of(30) {
+                if let Some(sid) = self.sessions.row(id).and_then(|row| row.session_id.clone()) {
                     if let Some(name) =
                         medulla::session_history::codex_thread_label(&self.env, &sid)
                     {

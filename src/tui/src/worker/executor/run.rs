@@ -31,11 +31,11 @@ use std::time::Duration;
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use medulla::protocol::HarnessProvider;
 use medulla::session_history::SessionAgentKind;
-use medulla::sessions::{SessionClass, TurnStream};
+use medulla::sessions::SessionClass;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin};
-use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, TurnSpec, WorkspaceContext};
+use super::super::pty::{PtyManager, SessionControl};
+use super::types::{PtySessionExecutor, SessionPlan, TurnSpec, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
 ///
@@ -361,7 +361,7 @@ impl PtySessionExecutor {
     /// harness still finishing the last one interleaves two prompts into one
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
-    fn stop_turn(&self, id: &str) {
+    pub(super) fn stop_turn(&self, id: &str) {
         let stopped = self.sessions.stop_if_orchestrator(id);
         retire_stopped_workspace_context(
             &mut self

@@ -87,6 +87,23 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
 
     let core = crate::core_host::shared::shared().await?;
 
+    // A workflow node names a resolved checkout in `cwd`; the shared core can
+    // edit only the workspace it resolved at boot. Refuse a task pointed at any
+    // other one rather than let the node write to the wrong directory while the
+    // run record reports the selection. `OPENHUMAN_ACTION_DIR` is set by every
+    // host that boots the core and not scrubbed on this path, so it is the
+    // canonical record of where the core will edit.
+    if !cwd.trim().is_empty() {
+        let action_dir = std::env::var(crate::core_host::OPENHUMAN_ACTION_DIR_ENV)
+            .ok()
+            .filter(|dir| !dir.trim().is_empty());
+        if let Some(action_dir) = action_dir {
+            if let Some(message) = workspace_mismatch(&cwd, &action_dir) {
+                return Err(message);
+            }
+        }
+    }
+
     // The core's own continuity key. A bounded workflow node arrives with no
     // resume id and gets a fresh thread — which is the isolation a node needs,
     // and the same thing `--session-id` buys on the CLI providers.

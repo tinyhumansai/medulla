@@ -250,10 +250,28 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
 /// problem is over, the opposite of a terminal message.
 fn is_recovery_evidence(line: &str) -> bool {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    // A checkmark or the record glyph is unambiguously completion/activity —
+    // a harness draws `✓ done`, `⏺ Working on it…` to mark progress and never
+    // opens a terminal error with one — so either stands on its own as proof
+    // the harness went on.
     if trimmed
         .chars()
         .next()
-        .is_some_and(|first| PROGRESS_GLYPHS.contains(&first) || "✓⏺•".contains(first))
+        .is_some_and(|first| "✓⏺".contains(first))
+    {
+        return true;
+    }
+    // The spinner/bullet family is different: `•`, `*`, `·`, `✽` are also how a
+    // terminal error or its wrapped instruction is commonly prefixed —
+    // `• Invalid API key · Please run /login` opens with `•`. A bare leading
+    // glyph is layout, not evidence the harness recovered, so one of these
+    // lines clears a blocking error only when it carries the full activity
+    // shape: an animated ellipsis or a live elapsed counter (`• Working (8s …)`).
+    if trimmed
+        .chars()
+        .next()
+        .is_some_and(|first| PROGRESS_GLYPHS.contains(&first) || first == '•')
+        && (trimmed.contains('…') || has_elapsed_timer(trimmed))
     {
         return true;
     }

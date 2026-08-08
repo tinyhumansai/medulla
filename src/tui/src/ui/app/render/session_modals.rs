@@ -355,6 +355,22 @@ impl App {
     }
 }
 
+/// The footer hint under the picker, stated per step.
+///
+/// `↑/↓ choose` applies to both steps, and the "unmanaged" statement is true
+/// of any hand-started session, so both are said everywhere. `Tab complete`
+/// and `Shift+F save favorite` are only meaningful on the workspace step — the
+/// one with a text field to complete and a chosen directory to remember — and
+/// the keys are not bound on the harness step, so the hint is not shown there.
+pub(super) fn harness_picker_hint(step: SessionPickerStep) -> &'static str {
+    match step {
+        SessionPickerStep::Harness => "  ↑/↓ choose · unmanaged",
+        SessionPickerStep::Workspace => {
+            "  ↑/↓ choose · Tab complete · Shift+F save favorite · unmanaged"
+        }
+    }
+}
+
 /// Window a long harness list so the selected row always remains visible.
 pub(super) fn harness_choice_window(
     total: usize,

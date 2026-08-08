@@ -71,7 +71,15 @@ fn overrides(args: &[String]) -> HashMap<String, String> {
         assert_eq!(flag, "-c", "every override is introduced by -c");
         let assignment = rest.next().expect("-c is followed by an assignment");
         let (key, value) = assignment.split_once('=').expect("assignment has a value");
-        pairs.insert(key.to_string(), value.trim_matches('"').to_string());
+        // `value` is the output of `toml_string`, which escapes backslashes and
+        // quotes. Decode those escapes so the comparison is against the real
+        // value both transports deliver (e.g. a `C:\...` catalog path on
+        // Windows), not against the argv-encoded form.
+        let decoded = value
+            .trim_matches('"')
+            .replace("\\\\", "\\")
+            .replace("\\\"", "\"");
+        pairs.insert(key.to_string(), decoded);
     }
     pairs
 }

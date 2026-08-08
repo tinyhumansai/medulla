@@ -62,6 +62,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         timeout_ms,
         abort,
         resume_session_id,
+        cwd,
         hooks,
         mut on_event,
         on_session,

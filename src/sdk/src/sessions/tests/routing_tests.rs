@@ -107,3 +107,12 @@ fn opencode_is_the_only_provider_with_no_continuity_at_all() {
     assert!(has_continuity(HarnessProvider::Codex));
     assert!(!has_continuity(HarnessProvider::Opencode));
 }
+
+#[test]
+fn openhuman_resumes_through_the_embedded_thread_id() {
+    // OpenHuman carries an unbound conversation's context across turns by
+    // resuming a thread id on the embedded core, so the registry must treat it
+    // like a resumable provider rather than a stateless one.
+    assert!(can_resume(HarnessProvider::Openhuman));
+    assert!(has_continuity(HarnessProvider::Openhuman));
+}

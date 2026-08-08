@@ -17,6 +17,10 @@ use super::super::types::{App, SessionPickerStep};
 
 const HARNESS_TRAILER_LINES: usize = 3;
 
+/// Width allotted to a workspace row's path (or favorite label and path)
+/// before the dim provenance suffix is appended.
+const WORKSPACE_ROW_WIDTH: usize = 43;
+
 impl App {
     /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {

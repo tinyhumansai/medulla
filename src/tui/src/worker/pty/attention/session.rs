@@ -25,11 +25,17 @@ use super::{AttentionKind, HarnessAttention};
 /// nothing left to read — so a caller can chain it with the screen-derived cue
 /// and let precedence decide.
 ///
-/// `now` stamps the cue rather than being read from the clock here, so a rail
-/// drawing a whole frame reports one elapsed time across every row it draws.
-pub fn lifecycle_cue(row: &SessionRow, now: i64) -> Option<HarnessAttention> {
+/// The row's stable last-output timestamp stamps the cue. Reaping writes that
+/// timestamp when a child exits, so it is the lifecycle transition time for
+/// failures; a retained session has likewise just completed a turn. Reusing it
+/// prevents every render frame from resetting the displayed elapsed time.
+pub fn lifecycle_cue(row: &SessionRow, _now: i64) -> Option<HarnessAttention> {
     if let Some(what) = failure_reason(row) {
-        return Some(HarnessAttention::new(AttentionKind::Failed, what, now));
+        return Some(HarnessAttention::new(
+            AttentionKind::Failed,
+            what,
+            row.last_output_at,
+        ));
     }
     // Retained means a task finished here and the session was deliberately kept
     // standing. Nobody has taken it and nothing more will happen in it, which is
@@ -38,7 +44,7 @@ pub fn lifecycle_cue(row: &SessionRow, now: i64) -> Option<HarnessAttention> {
         return Some(HarnessAttention::new(
             AttentionKind::Completed,
             format!("{} finished — read and release", row.provider.as_str()),
-            now,
+            row.last_output_at,
         ));
     }
     None

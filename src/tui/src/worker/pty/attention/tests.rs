@@ -330,6 +330,13 @@ fn an_error_scrolled_out_of_the_live_tail_is_not_current() {
     assert_eq!(detect(HarnessProvider::Claude, &screen), None, "{screen}");
 }
 
+#[test]
+fn an_error_does_not_resurface_after_a_successful_retry() {
+    let screen = "Invalid API key\n› retry with the refreshed token\n✓ Retried successfully\n› ";
+
+    assert_eq!(detect(HarnessProvider::Codex, screen), None);
+}
+
 /// A question outranks the error that prompted it: the harness recovered far
 /// enough to ask, and the question is the thing the operator can act on.
 #[test]
@@ -539,6 +546,16 @@ fn a_non_zero_exit_reports_its_code() {
     let cue = lifecycle_cue(&row, LIFECYCLE_NOW).expect("a cue");
     assert_eq!(cue.kind, AttentionKind::Failed);
     assert!(cue.what.contains("137"), "{}", cue.what);
+}
+
+#[test]
+fn lifecycle_cues_keep_their_original_timestamp() {
+    let mut row = lifecycle_row();
+    row.state = PtyState::Exited { code: Some(137) };
+    row.last_output_at = LIFECYCLE_NOW + 5_000;
+
+    let cue = lifecycle_cue(&row, LIFECYCLE_NOW + 60_000).expect("a cue");
+    assert_eq!(cue.since, row.last_output_at);
 }
 
 #[test]

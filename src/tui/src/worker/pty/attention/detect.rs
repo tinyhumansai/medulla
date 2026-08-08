@@ -163,11 +163,28 @@ fn blocking_error(screen: &str) -> Option<&'static str> {
         .filter(|line| !line.trim().is_empty())
         .collect();
     let tail_start = lines.len().saturating_sub(ERROR_TAIL_LINES);
+    let tail = &lines[tail_start..];
+    let error_index = tail.iter().rposition(|line| {
+        let squashed = squash(line);
+        ERRORS.iter().any(|(marker, _)| squashed.contains(marker))
+    })?;
+    // A submitted retry leaves its old composer in the transcript and restores
+    // the persistent composer once the turn settles. Two composers after an
+    // error therefore prove that a later turn completed; the old error no
+    // longer describes the session's live state.
+    if tail[error_index + 1..]
+        .iter()
+        .filter(|line| is_composer(line))
+        .nth(1)
+        .is_some()
+    {
+        return None;
+    }
     // The prompt is part of the terminal viewport too, but it is operator
     // input rather than harness output. In particular, a draft such as
     // `> fix invalid API key` must not turn an otherwise idle session red.
     let tail = squash(
-        &lines[tail_start..]
+        &tail
             .iter()
             .copied()
             .filter(|line| !is_composer(line))
@@ -295,13 +312,17 @@ fn has_live_working_marker(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .collect();
     let tail_start = lines.len().saturating_sub(PROGRESS_TAIL_LINES);
+    let mut composer_below = false;
     for line in lines[tail_start..].iter().rev() {
         let squashed = squash(line);
         if WORKING.iter().any(|marker| squashed.contains(marker)) {
-            return true;
+            // Codex keeps its composer on screen while it works. Its active
+            // footer includes a live elapsed counter, unlike a stale bare
+            // interrupt hint in scrollback above an idle composer.
+            return !composer_below || (squashed.contains("working") && has_elapsed_timer(line));
         }
         if is_composer(line) {
-            return false;
+            composer_below = true;
         }
     }
     false

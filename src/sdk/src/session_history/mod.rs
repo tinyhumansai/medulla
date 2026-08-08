@@ -23,6 +23,7 @@ mod tests;
 
 pub use list::list_recent_sessions;
 pub use scan::{claude_sessions_dir, codex_sessions_dir};
+pub use summary::codex_thread_label;
 pub use types::{RecentSession, SessionAgentKind};
 
 pub(crate) use scan::{collect_session_files, discover_session_file, preexisting_session_files};

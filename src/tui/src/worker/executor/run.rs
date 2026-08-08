@@ -632,6 +632,14 @@ impl PtySessionExecutor {
         if let Some(located) = &poll.located {
             self.sessions
                 .record_session_id(id, located.harness_session_id.clone());
+            if provider == HarnessProvider::Codex {
+                if let Some(thread_name) = medulla::session_history::codex_thread_label(
+                    &self.env,
+                    &located.harness_session_id,
+                ) {
+                    self.sessions.record_thread_name(id, thread_name);
+                }
+            }
         }
         for line in poll.lines {
             *last_line_at = medulla::clock::now_millis();

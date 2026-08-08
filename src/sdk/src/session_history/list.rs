@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use super::scan::{
     claude_sessions_dir, codex_sessions_dir, collect_session_files, is_here, safe_resolve,
 };
-use super::summary::read_session_summary;
+use super::summary::{codex_thread_label, read_session_summary};
 use super::types::{RawSessionFile, RecentSession, SessionAgentKind};
 
 /// Default number of ranked sessions returned when no limit is given.
@@ -56,12 +56,17 @@ pub fn list_recent_sessions(
                 continue;
             }
         }
+        let label = if file.agent == SessionAgentKind::Codex {
+            codex_thread_label(env, &summary.id).unwrap_or(summary.label)
+        } else {
+            summary.label
+        };
         by_id.insert(
             key,
             RecentSession {
                 agent: file.agent,
                 id: summary.id,
-                label: summary.label,
+                label,
                 last_active: file.mtime_ms,
                 path: file.path.to_string_lossy().into_owned(),
                 cwd: summary.cwd,

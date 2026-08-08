@@ -6,6 +6,7 @@
 //! the cost of scanning many transcripts. Claude and Codex use different record
 //! shapes, so each has its own head reader.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::Value;
@@ -160,6 +161,28 @@ pub(super) fn as_message_content(message: Option<&Value>) -> Option<Value> {
 /// their own placeholder.
 pub(super) fn slug_label(text: &str) -> String {
     slug(text)
+}
+
+/// Read Codex's persisted name for `session_id`, when it has one.
+///
+/// Codex records `/rename` names in `session_index.jsonl` beside its `sessions`
+/// directory rather than updating the terminal title.  Claude has no equivalent
+/// index, so callers use this only for Codex and retain the transcript-prompt
+/// fallback when the index has not caught up yet.
+pub fn codex_thread_label(env: &HashMap<String, String>, session_id: &str) -> Option<String> {
+    let index = super::scan::codex_sessions_dir(env)
+        .parent()?
+        .join("session_index.jsonl");
+    let contents = std::fs::read_to_string(index).ok()?;
+    contents.lines().find_map(|line| {
+        let record: Value = serde_json::from_str(line).ok()?;
+        let object = record.as_object()?;
+        (object.get("id").and_then(Value::as_str) == Some(session_id))
+            .then(|| object.get("thread_name").and_then(Value::as_str))
+            .flatten()
+            .map(slug_label)
+            .filter(|label| !label.is_empty())
+    })
 }
 
 /// Read the first [`HEAD_BYTES`] of `path` as UTF-8 (lossy) and split into

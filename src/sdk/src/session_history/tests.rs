@@ -3,8 +3,8 @@
 
 use super::scan::{collect_session_files, is_here, is_session_file, sessions_dir_for};
 use super::summary::{
-    as_message_content, extract_text, first_prompt_text, read_claude_summary, read_codex_summary,
-    slug_label,
+    as_message_content, codex_thread_label, extract_text, first_prompt_text, read_claude_summary,
+    read_codex_summary, slug_label,
 };
 use super::*;
 use crate::ui::util::SLUG_MAX_CHARS;
@@ -26,7 +26,7 @@ fn write_session(dir: &Path, name: &str, contents: &str) -> PathBuf {
 fn ranks_current_cwd_first_then_recency() {
     let tmp = std::env::temp_dir().join(format!("medulla-sh-{}", std::process::id()));
     let claude_dir = tmp.join("claude");
-    let codex_dir = tmp.join("codex");
+    let codex_dir = tmp.join("codex").join("sessions");
     fs::create_dir_all(&claude_dir).unwrap();
     fs::create_dir_all(&codex_dir).unwrap();
 
@@ -53,6 +53,11 @@ fn ranks_current_cwd_first_then_recency() {
             serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"do B here"}]}})
         ),
     );
+    fs::write(
+        tmp.join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-b","thread_name":"Named Codex thread"}).to_string(),
+    )
+    .unwrap();
 
     let mut env = HashMap::new();
     env.insert(
@@ -69,8 +74,8 @@ fn ranks_current_cwd_first_then_recency() {
     assert_eq!(sessions[0].id, "codex-b", "current-cwd session ranks first");
     assert_eq!(sessions[0].agent, SessionAgentKind::Codex);
     assert_eq!(
-        sessions[0].label, "b-here",
-        "the prompt is slugged, filler dropped"
+        sessions[0].label, "named-codex-thread",
+        "Codex's persisted thread name takes precedence over its prompt"
     );
     assert_eq!(sessions[1].id, "claude-a");
     assert_eq!(sessions[1].label, "do-a");
@@ -252,6 +257,29 @@ fn codex_summary_uses_id_fallback_and_no_prompt_label() {
     assert_eq!(summary.id, "codex-x");
     assert_eq!(summary.cwd.as_deref(), Some("/here"));
     assert_eq!(summary.label, "(no prompt)");
+}
+
+#[test]
+fn codex_thread_label_reads_the_persisted_rename() {
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("ship-sidebar")
+    );
+    assert_eq!(codex_thread_label(&env, "missing"), None);
 }
 
 #[test]

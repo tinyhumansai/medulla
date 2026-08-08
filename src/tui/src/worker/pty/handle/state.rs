@@ -145,6 +145,15 @@ impl SessionHandle {
         lock(&self.cold).last_error = Some(error);
     }
 
+    /// Record the thread name discovered outside the terminal stream.
+    ///
+    /// Codex persists renamed threads in its session index instead of emitting
+    /// an OSC window title, so the transcript executor supplies that value once
+    /// it has identified the session.
+    pub(in super::super) fn record_thread_name(&self, thread_name: String) {
+        lock(&self.cold).thread_name = Some(thread_name);
+    }
+
     /// The operator-facing projection of this session, for the list pane.
     pub fn row(&self) -> SessionRow {
         let cold = lock(&self.cold);

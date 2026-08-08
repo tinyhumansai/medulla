@@ -13,7 +13,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use grid::RowGrid;
+pub use grid::{RowGrid, MAX_GRID_ROWS};
 pub use queue::{MessageQueue, QueueLimits};
 pub use types::{SspState, StateError};
 

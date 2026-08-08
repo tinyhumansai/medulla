@@ -6,6 +6,7 @@
 //! (`medulla-tui`'s `feature_harness_pty`) covers it against a live `/bin/sh`.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -179,6 +180,66 @@ fn signal_exit_maps_to_shell_convention() {
     // Raw wait status 9 == killed by SIGKILL, with no exit code of its own.
     assert_eq!(exit_code(std::process::ExitStatus::from_raw(9)), 128 + 9);
     assert_eq!(exit_code(std::process::ExitStatus::from_raw(0)), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Termination-signal source
+// ---------------------------------------------------------------------------
+
+/// Send `signal` to this process.
+#[cfg(unix)]
+fn raise(signal: libc::c_int) {
+    assert_eq!(unsafe { libc::raise(signal) }, 0, "raise({signal}) failed");
+}
+
+/// The run loop re-enters its `select!` after every branch, so the signal arm
+/// is polled again once a signal has already fired.
+///
+/// The regression this pins: the arm was a once-built `async` block, and
+/// polling a completed one panics with "`async fn` resumed after completion".
+/// That panic unwound past the terminal restore and the `session_end`
+/// lifecycle event, and left the harness child running with nobody waiting on
+/// it. [`Signals::recv`] must therefore stay drivable for the whole session.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_signal_arm_survives_being_polled_after_a_signal() {
+    let mut signals = super::Signals::install();
+    let mut ticks = tokio::time::interval(Duration::from_millis(5));
+    let mut fired = 0;
+
+    raise(libc::SIGINT);
+    let looped = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            tokio::select! {
+                _ = signals.recv() => {
+                    fired += 1;
+                    if fired == 2 {
+                        break;
+                    }
+                    // Back around the loop: the arm is polled a second time.
+                    raise(libc::SIGTERM);
+                }
+                _ = ticks.tick() => {}
+            }
+        }
+    })
+    .await;
+
+    assert!(looped.is_ok(), "the loop stalled waiting for a signal");
+    assert_eq!(fired, 2, "both signals were observed");
+}
+
+/// A host where no handler could be installed must simply never fire, rather
+/// than resolving instantly and spinning the run loop.
+#[tokio::test]
+async fn an_unavailable_signal_source_never_fires() {
+    let mut signals = super::Signals::Unavailable;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), signals.recv())
+            .await
+            .is_err(),
+        "Unavailable must never resolve"
+    );
 }
 
 // ---------------------------------------------------------------------------

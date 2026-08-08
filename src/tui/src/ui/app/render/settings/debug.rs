@@ -66,8 +66,14 @@ impl App {
             .context_index
             .min(self.contexts.len().saturating_sub(1));
         let vis = (inner.height as usize).max(1);
+        // Window the list on the selection rather than always drawing from the
+        // top. Both the keyboard and the wheel clamp `context_index` to the last
+        // chunk, so an unwindowed `take(vis)` left every selection past the first
+        // page outside the viewport: no row highlighted, and the chunks below the
+        // fold unreachable on a short terminal.
+        let start = crate::ui::selection::viewport_start(idx, self.contexts.len(), vis);
         let mut lines: Vec<TLine> = Vec::new();
-        for (i, item) in self.contexts.iter().take(vis).enumerate() {
+        for (i, item) in self.contexts.iter().enumerate().skip(start).take(vis) {
             let mut style = Style::default();
             if i == idx {
                 style = self.theme.selection();

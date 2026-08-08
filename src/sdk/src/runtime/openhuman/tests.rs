@@ -270,6 +270,27 @@ fn appended_events_accumulate_rather_than_replace() {
 }
 
 #[test]
+fn a_long_session_trims_the_log_to_its_retention_caps() {
+    // A growing log is also a growing deep clone on every `snapshot()`, so the
+    // live cell honours the same caps the other runtimes apply.
+    use crate::runtime::event_log::{CHAT_CAP, EVENT_CAP};
+    let cell = SnapshotCell::new();
+    let overflow = 100u64;
+    let batch: Vec<_> = (1..=EVENT_CAP as u64 + overflow)
+        .map(|seq| render_event(seq, "assistant"))
+        .collect();
+    cell.append_events(batch, Some(true));
+    let snap = cell.snapshot();
+    assert_eq!(snap.events.len(), EVENT_CAP);
+    assert_eq!(snap.chat_events.len(), CHAT_CAP);
+    assert_eq!(
+        snap.events[0].seq,
+        overflow + 1,
+        "the oldest rows are the ones dropped"
+    );
+}
+
+#[test]
 fn only_conversational_rows_reach_the_chat_view() {
     // Trace rows in the transcript would read as something that was said.
     let cell = SnapshotCell::new();

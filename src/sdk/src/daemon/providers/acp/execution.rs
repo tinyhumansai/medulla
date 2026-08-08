@@ -506,6 +506,11 @@ impl AcpAgentConfigExt for AcpAgentConfig {
             .iter()
             .flat_map(|name| ["-u".to_string(), (*name).to_string()])
             .collect::<Vec<_>>();
+        // The provider-binary override is untrusted configuration: without the
+        // `--` terminator, a command starting with `-` or containing `=` is
+        // eaten by `env` as an option or a variable assignment instead of being
+        // executed.
+        args.push("--".to_string());
         args.push(self.command().to_string_lossy().into_owned());
         args.extend(self.arguments().iter().cloned());
         AcpAgentConfig::new("env").args(args)

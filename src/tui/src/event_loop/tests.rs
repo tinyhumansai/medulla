@@ -6,8 +6,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::App;
 
-use super::should_refresh_context;
 use super::update_checker::spawn_update_checker;
+use super::{runtime_ping_needs_refresh, should_refresh_context};
 
 #[test]
 fn context_refresh_tracks_the_nested_settings_page() {
@@ -75,4 +75,18 @@ fn concurrent_claims_never_exceed_the_bound() {
     held.lock().expect("held frames").clear();
     assert_eq!(depth.load(Ordering::Relaxed), 0);
     assert!(super::types::PendingFrame::claim(&depth, LIMIT).is_some());
+}
+
+#[test]
+fn a_lagged_runtime_subscription_still_refreshes_the_snapshot() {
+    use tokio::sync::broadcast::error::RecvError;
+
+    // The arm used to test `recv.is_ok()`, so the one wakeup that means the most
+    // has changed — the subscription overflowed and dropped notifications — was
+    // the one that redrew nothing, leaving the UI stale until an unrelated event
+    // happened along.
+    assert!(runtime_ping_needs_refresh(&Ok(())));
+    assert!(runtime_ping_needs_refresh(&Err(RecvError::Lagged(7))));
+    // A closed channel has no newer snapshot behind it.
+    assert!(!runtime_ping_needs_refresh(&Err(RecvError::Closed)));
 }

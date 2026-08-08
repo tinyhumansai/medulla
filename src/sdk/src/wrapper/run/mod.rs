@@ -183,7 +183,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let mut recv_tick = tokio::time::interval(Duration::from_millis(timings.receive_poll_ms));
     let mut status_tick =
         tokio::time::interval(Duration::from_millis(timings.status_throttle_ms as u64));
-    let mut signal_fut = signal_future();
+    let mut signals = Signals::install();
 
     let code = loop {
         tokio::select! {
@@ -206,7 +206,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
                     bridge.tick_status().await;
                 }
             }
-            _ = &mut signal_fut => {
+            _ = signals.recv() => {
                 if let Some(kill_tx) = kill.take() {
                     let _ = kill_tx.send(());
                 }
@@ -245,32 +245,79 @@ fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
     config.env.extend(attribution_env);
 }
 
-/// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).
+/// The wrapper's own termination-signal source: SIGINT/SIGTERM on Unix, Ctrl-C
+/// elsewhere.
 ///
 /// On the PTY path the terminal is in raw mode, so Ctrl-C reaches the child's
 /// own line discipline instead of us — exactly as if the harness had been run
-/// directly. This future then only fires for signals sent to the wrapper itself.
-fn signal_future() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+/// directly. This only fires for signals sent to the wrapper itself.
+///
+/// It is a *source*, not a future, because the run loop re-enters its `select!`
+/// after a signal fires. A once-built `async` block would be polled again after
+/// completing and panic with "`async fn` resumed after completion" — taking the
+/// terminal restore, the `session_end` lifecycle event, and the child's kill
+/// down with it, and leaving the harness orphaned. [`Signals::recv`] builds a
+/// fresh, cancel-safe future on every poll instead.
+pub(super) enum Signals {
+    /// Unix signal streams, held for the life of the run loop so a signal
+    /// arriving between iterations is still delivered.
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        match (
-            signal(SignalKind::interrupt()),
-            signal(SignalKind::terminate()),
-        ) {
-            (Ok(mut sigint), Ok(mut sigterm)) => Box::pin(async move {
+    Unix {
+        /// SIGINT — an operator interrupt.
+        sigint: tokio::signal::unix::Signal,
+        /// SIGTERM — a supervisor or `kill` asking us to stop.
+        sigterm: tokio::signal::unix::Signal,
+    },
+    /// Non-Unix hosts, where Ctrl-C is the only portable termination signal.
+    #[cfg(not(unix))]
+    CtrlC,
+    /// No handler could be installed. Never fires, so the loop simply runs
+    /// until the child exits — the same outcome as before, without a panic.
+    Unavailable,
+}
+
+impl Signals {
+    /// Install handlers for the host's termination signals.
+    ///
+    /// Registration failure is not fatal: it degrades to [`Signals::Unavailable`],
+    /// which never fires.
+    pub(super) fn install() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            match (
+                signal(SignalKind::interrupt()),
+                signal(SignalKind::terminate()),
+            ) {
+                (Ok(sigint), Ok(sigterm)) => Signals::Unix { sigint, sigterm },
+                _ => Signals::Unavailable,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Signals::CtrlC
+        }
+    }
+
+    /// Resolve when a termination signal arrives.
+    ///
+    /// Cancel-safe, and safe to call repeatedly: each call awaits the live
+    /// signal stream rather than resuming a future that already completed, so
+    /// the run loop may drive it once per iteration for the whole session.
+    pub(super) async fn recv(&mut self) {
+        match self {
+            #[cfg(unix)]
+            Signals::Unix { sigint, sigterm } => {
                 tokio::select! {
                     _ = sigint.recv() => {}
                     _ = sigterm.recv() => {}
                 }
-            }),
-            _ => Box::pin(std::future::pending()),
+            }
+            #[cfg(not(unix))]
+            Signals::CtrlC => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            Signals::Unavailable => std::future::pending().await,
         }
-    }
-    #[cfg(not(unix))]
-    {
-        Box::pin(async move {
-            let _ = tokio::signal::ctrl_c().await;
-        })
     }
 }

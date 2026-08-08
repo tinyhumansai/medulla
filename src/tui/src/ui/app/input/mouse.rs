@@ -664,8 +664,19 @@ impl App {
             if let Some(rect) = self.hit_context {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    if rel < self.contexts.len() {
-                        self.context_index = rel;
+                    // The list is windowed on the selection (see `draw_context`),
+                    // so a clicked row names `start + rel`, not `rel`. Recomputed
+                    // from the same inputs the draw used — the rect it recorded
+                    // and the selection, neither of which can have moved since.
+                    let vis = (rect.height as usize).max(1);
+                    let start = crate::ui::selection::viewport_start(
+                        crate::ui::selection::clamp(self.context_index, self.contexts.len()),
+                        self.contexts.len(),
+                        vis,
+                    );
+                    let clicked = start + rel;
+                    if rel < vis && clicked < self.contexts.len() {
+                        self.context_index = clicked;
                     }
                 }
             }

@@ -18,16 +18,94 @@ use super::super::mappers::HarnessLineMapper;
 use super::detect::{
     build_resumed_run_args, extract_session_id, provider_bin, provider_name, supports_stdin,
 };
-use super::types::{OnEvent, OnStdin, RunSpec, RunTaskOptions, RunTaskResult};
+use super::types::{LineRead, OnEvent, OnStdin, RunSpec, RunTaskOptions, RunTaskResult};
 
 /// A record that never terminates in a newline is dropped past this size.
 const MAX_RECORD_BYTES: usize = 1_048_576;
+
 /// Cap on the retained stdout/stderr tail (bytes).
 pub(super) const TAIL_CAP: usize = 8192;
 /// Maximum transient-lock retry attempts.
 const LOCK_RETRY_ATTEMPTS: u32 = 5;
 /// Base backoff (ms) for the transient-lock retry.
 const LOCK_RETRY_BASE_MS: u64 = 250;
+
+/// Read one newline-terminated record into `buf`, never retaining more than
+/// `cap` bytes of any single record.
+///
+/// [`AsyncBufReadExt::read_until`] would buffer the whole line first and only
+/// then let the caller notice it was too big — so a child emitting one endless
+/// line grows the buffer without limit and the stated ceiling is not a ceiling
+/// at all. This consumes the stream in whatever chunks the reader already holds
+/// and, once the cap is passed, keeps only the trailing `retain_tail` bytes
+/// instead of the whole record.
+///
+/// With `retain_tail = Some(n)` an oversized record leaves the trailing `n`
+/// bytes of the record in `buf`, so a caller that only wants a diagnostic tail
+/// (stderr) still sees the end of an endless line. With `None` the oversized
+/// record is dropped entirely and the next read starts on the following record.
+///
+/// Like `read_until`, this is *not* cancellation safe: dropping it mid-line can
+/// lose the bytes already consumed. The run loop only cancels it on abort or
+/// idle timeout, both of which stop reading for good.
+pub(super) async fn read_line_bounded<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+    retain_tail: Option<usize>,
+) -> std::io::Result<LineRead> {
+    let mut oversized = false;
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            // EOF. A trailing record with no newline still counts as a line.
+            return Ok(if oversized {
+                LineRead::Oversized
+            } else if buf.is_empty() {
+                LineRead::Eof
+            } else {
+                LineRead::Line
+            });
+        }
+        let (take, complete) = match chunk.iter().position(|byte| *byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (chunk.len(), false),
+        };
+        // Past the ceiling: without a retained tail the record is dropped and
+        // the next read starts on the following one; with one, only the last
+        // `tail` bytes are kept as a rolling window so an endless stderr line
+        // still yields its trailing diagnostic.
+        let over = !oversized && buf.len() + take > cap;
+        oversized |= over;
+        if over && retain_tail.is_none() {
+            buf.clear();
+            buf.shrink_to_fit();
+        }
+        if retain_tail.is_some() || !oversized {
+            buf.extend_from_slice(&chunk[..take]);
+        }
+        if let Some(tail) = retain_tail {
+            trim_tail(buf, tail);
+        }
+        reader.consume(take);
+        if complete {
+            return Ok(if oversized {
+                LineRead::Oversized
+            } else {
+                LineRead::Line
+            });
+        }
+    }
+}
+
+/// Drop all but the trailing `tail` bytes of `buf`, in place. The kept slice is
+/// at most `tail` bytes, so the drain's memmove stays small even when a record
+/// blew past a much larger cap.
+fn trim_tail(buf: &mut Vec<u8>, tail: usize) {
+    if buf.len() > tail {
+        buf.drain(..buf.len() - tail);
+    }
+}
 
 /// opencode's SQLite session store throws this when runs start too close
 /// together; transient, clears on a short retry.
@@ -344,9 +422,19 @@ async fn run_provider_attempt(
             let mut buf = Vec::new();
             loop {
                 buf.clear();
-                match reader.read_until(b'\n', &mut buf).await {
-                    Ok(0) => break,
-                    Ok(_) => {
+                // Bounded for the same reason as stdout: only the last
+                // `TAIL_CAP` bytes are ever kept, so a child writing one endless
+                // stderr line must not be buffered whole to produce them.
+                // An oversized record keeps its trailing `TAIL_CAP` bytes in
+                // `buf`, so the tail still carries whatever diagnostic the child
+                // wrote — including the opencode `database is locked` marker the
+                // retry loop keys on — even when a single record blew past the
+                // ceiling.
+                match read_line_bounded(&mut reader, &mut buf, MAX_RECORD_BYTES, Some(TAIL_CAP))
+                    .await
+                {
+                    Ok(LineRead::Eof) => break,
+                    Ok(LineRead::Oversized) | Ok(LineRead::Line) => {
                         let chunk = String::from_utf8_lossy(&buf);
                         let mut tail = stderr_tail.lock().unwrap();
                         tail.push_str(&chunk);
@@ -406,13 +494,13 @@ async fn run_provider_attempt(
                 report_workspace_context(&mapper, spec);
                 return Err(idle_error);
             }
-            read = reader.read_until(b'\n', &mut buf) => {
+            read = read_line_bounded(&mut reader, &mut buf, MAX_RECORD_BYTES, None) => {
                 match read {
-                    Ok(0) => break, // EOF
-                    Ok(_) => {
-                        if buf.len() > MAX_RECORD_BYTES {
-                            continue; // unparseable oversized record — drop it.
-                        }
+                    Ok(LineRead::Eof) => break,
+                    // Unparseable oversized record — already discarded, and the
+                    // reader is positioned on the next one.
+                    Ok(LineRead::Oversized) => continue,
+                    Ok(LineRead::Line) => {
                         let raw = String::from_utf8_lossy(&buf);
                         let raw = raw.trim_end_matches(['\n', '\r']);
                         stdout_tail.push_str(raw);

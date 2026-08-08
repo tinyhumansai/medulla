@@ -164,3 +164,56 @@ fn arrowing_onto_a_completion_still_wins_over_the_typed_query() {
         "a deliberately chosen completion is still what Enter uses"
     );
 }
+
+#[test]
+fn a_long_workspace_list_windows_onto_the_selected_folder() {
+    // Regression: the workspace step extended its lines with *every* choice,
+    // where the harness step windows. On a short popup the rows past the fold
+    // were never painted and never recorded a hit box, so ↓ walked the selection
+    // onto an invisible, unclickable directory and Enter started a session there.
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    let root = tempfile::tempdir().unwrap();
+    let mut app = picker_on_workspace_step(root.path());
+    {
+        let picker = app.session_picker.as_mut().unwrap();
+        picker.workspace_choices = (0..30)
+            .map(|index| super::types::WorkspaceChoice {
+                path: format!("/w/folder-{index:02}"),
+                source: "recent",
+            })
+            .collect();
+        picker.workspace_index = 29;
+    }
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+    terminal.draw(|f| app.draw(f)).unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+
+    assert!(
+        screen.contains("folder-29"),
+        "the selected folder is on screen"
+    );
+    assert!(
+        !screen.contains("folder-00"),
+        "and the list has scrolled off the first page"
+    );
+
+    // Every drawn row is clickable, and the last one still names the selection.
+    let (_, hits) = app.hit_session_picker.clone().expect("picker hit map");
+    assert!(
+        hits.iter().any(|(_, index)| *index == 29),
+        "the selected row has a hit box: {hits:?}"
+    );
+    assert!(
+        hits.iter().all(|(_, index)| *index >= 18),
+        "and no hit box points at a row that was not drawn: {hits:?}"
+    );
+}

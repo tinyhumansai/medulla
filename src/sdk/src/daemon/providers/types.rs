@@ -1,8 +1,8 @@
 //! Data model for headless provider runs: the callback aliases, the cooperative
 //! [`Abort`] handle, and the input/output records ([`RunTaskOptions`],
-//! [`RunTaskResult`]) plus the injectable executor alias [`RunTaskFn`]. The
-//! detection and execution logic lives in the sibling `detect`/`execute`
-//! modules.
+//! [`RunTaskResult`]) plus the injectable executor alias [`RunTaskFn`] and the
+//! bounded-reader outcome enum [`LineRead`]. The detection and execution logic
+//! lives in the sibling `detect`/`execute` modules.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -233,4 +233,21 @@ pub(super) struct RunSpec {
     pub(super) attribution: bool,
     pub(super) hooks: crate::harness_hooks::HooksConfig,
     pub(super) on_workspace_context: Option<OnWorkspaceContext>,
+}
+
+/// What one bounded line read produced.
+///
+/// The `execute` module's bounded reader returns this to say whether a record
+/// was kept whole, dropped as oversized, or the stream ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LineRead {
+    /// A complete line at or under the cap, appended to the caller's buffer.
+    Line,
+    /// The line exceeded the cap. With a retained tail the trailing bytes of the
+    /// record are in the caller's buffer; otherwise nothing was buffered and the
+    /// rest of the line was discarded, so the next read starts on the following
+    /// record.
+    Oversized,
+    /// The stream ended with nothing buffered.
+    Eof,
 }

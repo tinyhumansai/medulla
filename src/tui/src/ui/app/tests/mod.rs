@@ -325,6 +325,66 @@ fn clicking_a_context_chunk_selects_it() {
     assert_eq!(a.context_index, 1);
 }
 
+/// Forty chunks, more than any Context viewport shows at once.
+fn many_contexts() -> Vec<medulla::runtime::ContextItem> {
+    (0..40)
+        .map(|index| medulla::runtime::ContextItem {
+            ref_: format!("chunk-{index:02}"),
+            kind: "file".into(),
+            bytes: index,
+            content: format!("body {index}"),
+        })
+        .collect()
+}
+
+#[test]
+fn the_context_list_scrolls_to_keep_the_selection_visible() {
+    // Regression: the list always drew from index 0, while the keyboard and the
+    // wheel clamp `context_index` to the last chunk. Past the first page the
+    // selection was off-screen — no row highlighted, and the chunks below the
+    // fold impossible to read.
+    let mut a = app();
+    let _ = a.focus_settings_subpage("Context");
+    a.contexts = many_contexts();
+    a.context_index = 39;
+
+    let screen = render(&mut a);
+
+    assert!(screen.contains("chunk-39"), "the selection is drawn");
+    assert!(
+        !screen.contains("chunk-00"),
+        "and the list has scrolled past the first page"
+    );
+}
+
+#[test]
+fn clicking_a_windowed_context_row_selects_the_chunk_that_is_drawn() {
+    // The click path maps a pane-relative row onto the list, so it has to apply
+    // the same viewport offset the draw did — otherwise clicking the top row of
+    // a scrolled list jumped back to the first chunk.
+    let mut a = app();
+    let _ = a.focus_settings_subpage("Context");
+    a.contexts = many_contexts();
+    a.context_index = 39;
+    // Ten visible rows, so the draw starts at 40 - 10 = 30.
+    a.hit_context = Some(ratatui::layout::Rect::new(0, 5, 40, 10));
+
+    let _ = a.handle_click(3, 5);
+    assert_eq!(a.context_index, 30, "the first drawn row is chunk 30");
+
+    // An unscrolled list still maps a row straight onto its index.
+    a.context_index = 0;
+    let _ = a.handle_click(3, 14);
+    assert_eq!(
+        a.context_index, 9,
+        "the tenth drawn row of an unscrolled list"
+    );
+
+    // A click outside the list rect changes nothing.
+    let _ = a.handle_click(3, 40);
+    assert_eq!(a.context_index, 9);
+}
+
 #[cfg(feature = "workflows")]
 #[test]
 fn the_wheel_scrolls_the_workflow_preview_only_when_the_pointer_is_over_it() {

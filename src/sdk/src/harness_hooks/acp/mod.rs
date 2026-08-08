@@ -48,8 +48,8 @@ pub fn delivery(provider: HarnessProvider, hooks: &HooksConfig) -> AcpDelivery {
         }
         HarnessProvider::Codex => {
             delivery.notes.push(format!(
-                "{} hook(s) are not installed for this Codex session: it is dispatched over ACP, \\
-                 and `codex app-server` runs no hooks however they are delivered. Launch this \\
+                "{} hook(s) are not installed for this Codex session: it is dispatched over ACP, \
+                 and `codex app-server` runs no hooks however they are delivered. Launch this \
                  harness without {}=acp for them to fire.",
                 applicable.len(),
                 crate::daemon::providers::HARNESS_PROTOCOL_ENV,

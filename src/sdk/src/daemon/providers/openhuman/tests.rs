@@ -102,3 +102,22 @@ async fn an_aborted_task_fails_without_booting_a_core() {
         .expect_err("an aborted task must not run");
     assert!(error.contains("aborted before start"), "{error}");
 }
+
+/// A task whose checkout is the very directory the shared core edits passes
+/// the guard — the common standalone and first-root cases.
+#[test]
+fn a_matching_task_workspace_is_accepted() {
+    assert_eq!(
+        workspace_mismatch("/some/checkout/medulla", "/some/checkout/medulla"),
+        None
+    );
+}
+
+/// A task pointed at any other checkout than the core's action directory is
+/// refused rather than silently edited the wrong place.
+#[test]
+fn a_differing_task_workspace_is_rejected() {
+    let message = workspace_mismatch("/some/checkout/a", "/some/checkout/b")
+        .expect("a differing workspace must be rejected");
+    assert!(message.contains("differs from the shared core's action directory"));
+}

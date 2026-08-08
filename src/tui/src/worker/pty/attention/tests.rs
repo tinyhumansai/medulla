@@ -321,7 +321,10 @@ fn a_blocking_error_is_reported_as_one() {
 #[test]
 fn a_blocking_error_is_recognised_whichever_harness_printed_it() {
     for (provider, screen) in [
-        (HarnessProvider::Codex, "You've hit your usage limit.\n> "),
+        (
+            HarnessProvider::Codex,
+            "You've hit your usage limit.\nPlease try again later.\n> ",
+        ),
         (
             HarnessProvider::Claude,
             "OAuth token has expired · Please run /login\n> ",

@@ -143,3 +143,51 @@ fn transcripts_are_queued_in_completion_order_when_none_are_empty() {
     assert_eq!(steps[1].transcript, vec![entry("tool_call", "two")]);
     assert_eq!(steps[2].transcript, vec![entry("error", "three")]);
 }
+
+#[test]
+fn transcripts_from_one_multi_dispatch_activation_fold_onto_its_step() {
+    // A per-item activation that dispatched twice queues two transcripts, but
+    // the engine records one step for the whole activation. Mirroring the
+    // prompt pass, the last step of the node absorbs every queued transcript,
+    // so neither is dropped and neither drifts onto a later step.
+    let evidence = AgentEvidence::default();
+    evidence.record_transcript("work", vec![entry("agent_message", "first file")]);
+    evidence.record_transcript("work", vec![entry("tool_call", "Bash(edit)")]);
+    let mut steps = [step("work")];
+
+    evidence.attach(&mut steps);
+
+    assert_eq!(
+        steps[0].transcript,
+        vec![
+            entry("agent_message", "first file"),
+            entry("tool_call", "Bash(edit)"),
+        ]
+    );
+}
+
+#[test]
+fn transcripts_of_an_early_fan_out_do_not_shift_onto_a_later_step() {
+    // The same fan-out, but with another activation of the node after it. The
+    // first step owns both of its transcripts; the later step keeps its own
+    // rather than inheriting the leftovers.
+    let evidence = AgentEvidence::default();
+    evidence.record_transcript("work", vec![entry("agent_message", "fan one")]);
+    evidence.record_transcript("work", vec![entry("agent_message", "fan two")]);
+    evidence.record_transcript("work", vec![entry("agent_message", "next activation")]);
+    let mut steps = [step("work"), step("work")];
+
+    evidence.attach(&mut steps);
+
+    assert_eq!(
+        steps[0].transcript,
+        vec![
+            entry("agent_message", "fan one"),
+            entry("agent_message", "fan two"),
+        ]
+    );
+    assert_eq!(
+        steps[1].transcript,
+        vec![entry("agent_message", "next activation")]
+    );
+}

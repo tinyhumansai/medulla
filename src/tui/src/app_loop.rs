@@ -283,16 +283,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         (session, account) =
                             session_of(&core, &loaded.config.backend.base_url).await;
                         let core = Arc::new(core);
-                        // Donated before anything else can want one. A workflow
-                        // `agent` node that names `harness: openhuman` runs
-                        // deep inside the engine with no way to be handed a
-                        // core down the call stack, so it takes the process's
-                        // shared one — and without this it would boot a second
-                        // core beside the one the operator is looking at, with
-                        // its own scheduler writing the same memory database.
-                        // Idempotent: the sign-in path below reaches here too,
-                        // and the first core installed is the one that stays.
-                        medulla::core_host::shared::install(Arc::clone(&core));
+                        donate_shared_core(&core);
                         core_arc = Some(Arc::clone(&core));
                         runtime = Some(
                             core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url)

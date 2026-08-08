@@ -243,7 +243,7 @@ fn is_recovery_evidence(line: &str) -> bool {
             "done",
             "finished",
             "completed",
-            "success",
+            "succeeded",
             "retried",
             "retrying",
         ]

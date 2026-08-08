@@ -381,6 +381,21 @@ fn a_wrapped_blocking_error_is_still_blocking() {
     }
 }
 
+/// A continuation is only recovery evidence when it carries a live status
+/// signal. A sentence about the failure using words that happen to contain a
+/// recovery keyword must not clear the error: "unsuccessful" contains
+/// "success", but it describes the failure, not a recovered turn.
+#[test]
+fn a_continuation_that_describes_the_failure_is_not_recovery() {
+    let screen = "Invalid API key.\nAuthentication unsuccessful.\n> ";
+    let (kind, what) = detect(HarnessProvider::Codex, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Error, "{screen}");
+    assert!(
+        what.contains("sign-in") || what.contains("API key"),
+        "{what}"
+    );
+}
+
 /// A question outranks the error that prompted it: the harness recovered far
 /// enough to ask, and the question is the thing the operator can act on.
 #[test]

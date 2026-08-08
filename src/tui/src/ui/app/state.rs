@@ -219,6 +219,16 @@ impl App {
         self.medulla_home = Some(home);
     }
 
+    /// Place the attention blink rate at an arbitrary interval. Test seam.
+    ///
+    /// The Appearance page only ever moves between the rates it offers, so a
+    /// test covering how a *custom* rate rejoins that cycle cannot reach this
+    /// state through the keyboard. `theme` stays private, as the rest of the
+    /// app's state does, and this is the one door opened for that case.
+    pub fn set_attention_blink_ms(&mut self, blink_ms: u64) {
+        self.theme.attention_blink_ms = blink_ms;
+    }
+
     /// The active Settings subpage name. Test/inspection seam.
     pub fn settings_subpage(&self) -> &'static str {
         SETTINGS_SUBPAGES[self.settings_index.min(SETTINGS_SUBPAGES.len() - 1)]

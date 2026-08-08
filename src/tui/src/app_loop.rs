@@ -79,6 +79,19 @@ async fn session_of(
     (session, account)
 }
 
+/// Donate the core this host just booted as the process's shared one.
+///
+/// Called before anything else can want a core. A workflow `agent` node that
+/// names `harness: openhuman` runs deep inside the engine with no way to be
+/// handed a core down the call stack, so it takes the process's shared one —
+/// and without this donation it would boot a second core beside the one the
+/// operator is looking at, with its own scheduler writing the same memory
+/// database. Idempotent: both the ready and sign-in paths call it, and the
+/// first core installed is the one that stays.
+fn donate_shared_core(core: &Arc<medulla::core_host::EmbeddedCore>) {
+    medulla::core_host::shared::install(Arc::clone(core));
+}
+
 /// Parse TUI args, select a runtime, set up the terminal, optionally run the
 /// login screen, start background services, and drive the event loop to exit.
 pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {

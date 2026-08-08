@@ -59,17 +59,25 @@ pub fn lifecycle_cue(row: &SessionRow, _now: i64) -> Option<HarnessAttention> {
 ///
 /// A recorded write error wins over the exit status because it says *what*
 /// happened; an exit code alone can only say that something did. A clean exit is
-/// not a failure and a running session has not had one yet. Nor is a deliberate
-/// close: a child killed on request reaps with a signal-derived nonzero status,
-/// which is the harness obeying the close rather than a lifecycle failure, so a
-/// requested close reports nothing here and simply leaves the rail.
+/// not a failure and a running session has not had one yet.
+///
+/// A deliberate close reports nothing at all, even when it left a recorded error
+/// or a signal-derived nonzero status behind. The child's death is the operator's
+/// request being carried out, and the close itself can manufacture the error:
+/// killing a child whose stdin the pty writer is blocked on unblocks that writer
+/// with an I/O error the moment the pty closes. So a requested close
+/// short-circuits everything here — the flag is set by every close path before
+/// the row is rebuilt — and the session simply leaves the rail.
 fn failure_reason(row: &SessionRow) -> Option<String> {
+    if row.closed_by_request {
+        return None;
+    }
     if let Some(error) = row.last_error.as_deref() {
         return Some(format!("{} failed: {error}", row.provider.as_str()));
     }
     match row.state {
         PtyState::Failed => Some(format!("{} could not run", row.provider.as_str())),
-        PtyState::Exited { code: Some(code) } if code != 0 && !row.closed_by_request => {
+        PtyState::Exited { code: Some(code) } if code != 0 => {
             Some(format!("{} exited with {code}", row.provider.as_str()))
         }
         _ => None,

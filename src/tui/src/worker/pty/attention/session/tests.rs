@@ -75,13 +75,16 @@ fn a_non_zero_exit_from_a_requested_close_is_not_a_failure() {
 }
 
 #[test]
-fn a_requested_close_still_keeps_a_recorded_error() {
+fn a_requested_close_suppresses_a_recorded_error() {
+    // A close can itself produce the recorded error: killing a child whose
+    // stdin the pty writer is blocked on unblocks that writer with an I/O
+    // error. Rebuilding the failure from it would repaint a row the operator
+    // just dismissed as a failure and pin it back to the rail.
     let mut row = lifecycle_row();
     row.state = PtyState::Exited { code: Some(1) };
     row.closed_by_request = true;
     row.last_error = Some("write queue full".into());
-    let cue = lifecycle_cue(&row, LIFECYCLE_NOW).expect("a cue");
-    assert_eq!(cue.kind, AttentionKind::Failed);
+    assert_eq!(lifecycle_cue(&row, LIFECYCLE_NOW), None);
 }
 
 #[test]

@@ -60,6 +60,19 @@ fn a_requested_close_is_not_kept_as_a_failure() {
 }
 
 #[test]
+fn a_write_error_unblocked_by_the_close_is_not_kept_as_a_failure() {
+    // Killing a child whose stdin the pty writer is blocked on unblocks that
+    // writer with an I/O error, which it records. That error is the close's own
+    // doing, so it must not pin the dismissed row to the rail as a failure.
+    let app = hosting_app();
+    let mut row = exited("w_1", 1, None);
+    row.closed_by_request = true;
+    row.last_error = Some("w_1: Input/output error".into());
+
+    assert!(!app.keeps_finished_session(&row));
+}
+
+#[test]
 fn the_attached_session_stays_listed_after_it_exits() {
     // The operator is reading that screen — often *because* it exited. Sweeping
     // it would take the exit code away from the person looking at it.

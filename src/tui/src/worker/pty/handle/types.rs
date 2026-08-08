@@ -229,6 +229,10 @@ pub struct SessionHandle {
     /// The exit status, or [`NO_EXIT_CODE`].
     pub(super) exit_code: AtomicI64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.
+    ///
+    /// Also stamped when a queued write fails, so the failure cue it produces
+    /// carries the moment the write failed rather than the last (possibly
+    /// minutes-old) output. See [`SessionHandle::record_error`].
     pub(super) last_output_at: AtomicI64,
     /// Bumped every time the emulator consumes input.
     ///

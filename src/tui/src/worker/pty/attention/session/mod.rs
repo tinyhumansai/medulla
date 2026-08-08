@@ -29,9 +29,11 @@ mod tests;
 /// and let precedence decide.
 ///
 /// The row's stable last-output timestamp stamps the cue. Reaping writes that
-/// timestamp when a child exits, so it is the lifecycle transition time for
-/// failures; a retained session has likewise just completed a turn. Reusing it
-/// prevents every render frame from resetting the displayed elapsed time.
+/// timestamp when a child exits, and a recorded write error stamps it with the
+/// moment the write failed, so either way it is the lifecycle transition time
+/// for a failure; a retained session has likewise just completed a turn.
+/// Reusing it prevents every render frame from resetting the displayed elapsed
+/// time.
 pub fn lifecycle_cue(row: &SessionRow, _now: i64) -> Option<HarnessAttention> {
     if let Some(what) = failure_reason(row) {
         return Some(HarnessAttention::new(

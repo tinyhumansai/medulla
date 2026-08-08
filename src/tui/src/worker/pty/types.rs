@@ -232,6 +232,10 @@ pub struct SessionRow {
     /// Epoch ms when the session started.
     pub started_at: i64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.
+    ///
+    /// Also the lifecycle-transition time a failure cue is stamped with: reaping
+    /// and a recorded write error both write it here, so a brand-new failure
+    /// does not claim the age of a session that had simply been quiet.
     pub last_output_at: i64,
     /// Why it failed, when it did.
     pub last_error: Option<String>,

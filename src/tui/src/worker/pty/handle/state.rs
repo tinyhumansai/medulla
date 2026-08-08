@@ -141,8 +141,15 @@ impl SessionHandle {
     /// is kept instead. Last-one-wins: the interesting failure is the current
     /// one, and a session whose pty has stopped accepting bytes will not recover
     /// to produce a different one.
-    pub(in super::super) fn record_error(&self, error: String) {
+    ///
+    /// `now` also becomes the row's last-activity time. The failure cue stamps
+    /// itself with [`last_output_at`](Self::last_output_at), and a quiet session
+    /// may have produced no output for minutes before its writer failed — without
+    /// the stamp the brand-new failure would claim it had been waiting that whole
+    /// idle period, forever, if the child stayed alive.
+    pub(in super::super) fn record_error(&self, error: String, now: i64) {
         lock(&self.cold).last_error = Some(error);
+        self.last_output_at.store(now, Ordering::Release);
     }
 
     /// The operator-facing projection of this session, for the list pane.

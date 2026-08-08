@@ -37,11 +37,16 @@ pub fn can_run_interactive(provider: HarnessProvider) -> bool {
 
 /// Whether a provider can resume a previously captured session id.
 ///
-/// `claude --resume <id>` and `codex exec resume <id>` both can. `opencode` has
-/// no resume flag, so an unbound `opencode` session runs each turn fresh —
-/// which degrades continuity but never correctness.
+/// `claude --resume <id>` and `codex exec resume <id>` both can. OpenHuman can
+/// too — it resumes in-process through the embedded core's `thread_id`, which
+/// is how an unbound OpenHuman conversation carries context across turns.
+/// `opencode` has no resume flag, so an unbound `opencode` session runs each
+/// turn fresh — which degrades continuity but never correctness.
 pub fn can_resume(provider: HarnessProvider) -> bool {
-    matches!(provider, HarnessProvider::Claude | HarnessProvider::Codex)
+    matches!(
+        provider,
+        HarnessProvider::Claude | HarnessProvider::Codex | HarnessProvider::Openhuman
+    )
 }
 
 /// Resolve the lifetime class for one stimulus.

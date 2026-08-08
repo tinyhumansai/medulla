@@ -138,6 +138,72 @@ fn handback_prompt_swallows_clicks_behind_it() {
 }
 
 #[test]
+fn inline_prompt_swallows_clicks_that_would_reach_the_picker_behind_it() {
+    // The favorite-add prompt opens *on top of* the workspace picker (Shift+F).
+    // Keyboard routing gives the prompt precedence over the picker, and the
+    // pointer must not come to disagree: a click on a picker row behind the
+    // prompt would replay Enter and start a harness while the favorite-name
+    // edit is still on screen.
+    let mut app = app();
+    app.session_picker = Some(SessionPicker {
+        choices: Vec::new(),
+        index: 0,
+        step: SessionPickerStep::Workspace,
+        cwd: "/".into(),
+        workspace_query: "x".into(),
+        workspace_choices: vec![WorkspaceChoice {
+            path: "/tmp".into(),
+            source: "folder".into(),
+            label: None,
+        }],
+        workspace_index: 0,
+        workspace_picked: false,
+    });
+    app.prompt = Some(TextPrompt::new(
+        PromptKind::FavoriteWorkspaceAdd("/tmp".into()),
+        "Save favorite for /tmp",
+    ));
+    app.hit_session_picker = Some((
+        ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 18,
+        },
+        vec![(
+            ratatui::layout::Rect {
+                x: 0,
+                y: 5,
+                width: 60,
+                height: 1,
+            },
+            0,
+        )],
+    ));
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 10,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(
+        app.prompt.is_some(),
+        "the click must not dismiss the favorite prompt"
+    );
+    let picker = app.session_picker.as_ref().unwrap();
+    assert!(
+        !picker.workspace_picked,
+        "the click must not be read as choosing a workspace row"
+    );
+    assert_eq!(
+        picker.workspace_index, 0,
+        "the picker selection must be left where it was"
+    );
+}
+
+#[test]
 fn pointer_input_cancels_an_armed_harness_close() {
     let mut app = app();
     app.arm_harness_close("session-a".into());

@@ -86,12 +86,15 @@ impl App {
             harness.api_key_env = previous.api_key_env.clone();
             harness.base_url = previous.base_url.clone();
             harness.context_window = previous.context_window;
-            // The compact editor line has no room for the Codex knobs (see
-            // `CustomHarnessConfig::from_editor_line`), so `harness` always
-            // comes back with them reset. Restore them here or an edit through
-            // the TUI silently turns codexOverrides back off.
+            // The compact editor line has no room for the Codex knobs nor the
+            // upstream-provider pin (see `CustomHarnessConfig::from_editor_line`),
+            // so `harness` always comes back with them reset. Restore them here
+            // or an edit through the TUI silently turns codexOverrides back off
+            // and drops the provider pin, letting the preset drift back to
+            // OpenRouter's own provider choice.
             harness.codex_overrides = previous.codex_overrides;
             harness.reasoning_effort = previous.reasoning_effort.clone();
+            harness.provider_only = previous.provider_only.clone();
             self.custom_harnesses[index] = harness;
             self.custom_harness_index = index;
         } else {

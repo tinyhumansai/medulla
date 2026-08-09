@@ -283,6 +283,44 @@ fn codex_thread_label_reads_the_persisted_rename() {
 }
 
 #[test]
+fn codex_thread_label_for_cwd_finds_the_newest_rollout_in_the_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label_for_cwd(&env, &project_str).as_deref(),
+        Some("ship-sidebar")
+    );
+    // A cwd with no session in it has no label to read.
+    let elsewhere = home.path().join("elsewhere").to_string_lossy().into_owned();
+    assert_eq!(codex_thread_label_for_cwd(&env, &elsewhere), None);
+}
+
+#[test]
 fn codex_summary_without_meta_is_none() {
     let lines = vec![serde_json::json!({"type":"response_item"}).to_string()];
     assert!(read_codex_summary(&lines).is_none());

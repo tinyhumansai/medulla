@@ -51,6 +51,41 @@ pub(super) enum SessionPlan {
     Queue(String),
 }
 
+/// A claimed idle session that releases its claim if dropped unconsumed.
+///
+/// The claim is a busy-flag compare-exchange made on the blocking pool. If the
+/// run future is cancelled while that call is pending, the blocking closure
+/// still runs to completion and its result is discarded; dropping the guard
+/// without taking it releases the claim, so a cancelled probe cannot leave a
+/// session marked busy forever.
+pub(in crate::worker) struct IdleClaim {
+    sessions: PtyManager,
+    row: Option<SessionRow>,
+}
+
+impl IdleClaim {
+    /// Wrap a freshly claimed idle session.
+    pub(super) fn new(sessions: PtyManager, row: SessionRow) -> Self {
+        Self {
+            sessions,
+            row: Some(row),
+        }
+    }
+
+    /// Take the claimed row, so the claim outlives the guard as a running turn.
+    pub(super) fn into_row(mut self) -> SessionRow {
+        self.row.take().expect("an idle claim is taken once")
+    }
+}
+
+impl Drop for IdleClaim {
+    fn drop(&mut self) {
+        if let Some(row) = self.row.take() {
+            self.sessions.release(&row.id);
+        }
+    }
+}
+
 /// What the blocking half of the session decision found.
 ///
 /// Split out of [`SessionPlan`] because the two halves must run on different

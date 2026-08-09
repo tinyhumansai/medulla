@@ -49,8 +49,8 @@ mod tests;
 
 pub use headers::{rewrite, MEDULLA_REFERER, MEDULLA_TITLE};
 pub use lifecycle::shared;
-pub use routing::{route_openrouter, route_run, route_spawn};
+pub use routing::{route_embedded, route_openrouter, route_run, route_spawn};
 pub use types::{
-    ProxyEndpoint, ProxyHandle, ProxyRouting, UpstreamShape, OPENROUTER_ROOT, PROXY_TOKEN_ENV,
-    UPSTREAM_URL_ENV,
+    EmbeddedRouting, ProxyEndpoint, ProxyHandle, ProxyRouting, UpstreamShape, OPENROUTER_ROOT,
+    PROXY_TOKEN_ENV, UPSTREAM_URL_ENV,
 };

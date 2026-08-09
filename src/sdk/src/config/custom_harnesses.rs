@@ -24,13 +24,18 @@
 //! [`crate::daemon::providers::openhuman::effective_model`] for where it sits
 //! among the other routes).
 //!
-//! Two fields mean less here than they do for a spawned CLI, and the difference
-//! is worth stating rather than discovering. `baseUrl` and `apiKeyEnv` describe
-//! an endpoint Medulla points a *child process* at; an OpenHuman turn has no
-//! child, and the embedded core resolves its own provider bindings and
-//! credentials from the account's own configuration. So the endpoint and the
-//! key name are inert for such a preset, and it is the core that must already
-//! be configured with a provider able to serve the named model.
+//! `baseUrl` and `apiKeyEnv` are live here too, though they arrive by a
+//! different road. For a spawned CLI they are layered into the child's
+//! environment; an OpenHuman turn has no child, so Medulla resolves the key,
+//! exchanges it for a loopback token at the attribution proxy, and passes the
+//! mount and the token to the core as a **per-call** route that the core applies
+//! to that turn alone and never persists. See
+//! [`crate::daemon::providers::openhuman::openrouter_route`].
+//!
+//! A preset that leaves them at their defaults still works and still needs no
+//! OpenRouter key: with no key exported under `apiKeyEnv` the turn runs on the
+//! account's own OpenHuman configuration, which is what an operator who
+//! configured only a model is asking for.
 
 use std::collections::HashMap;
 use std::path::Path;

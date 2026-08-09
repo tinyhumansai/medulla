@@ -54,13 +54,17 @@
 //! through the process it is already inside.
 
 //! *A model of its own.* The turn runs on whatever the operator chose — see
-//! [`model`] for every route to that choice and the order they resolve in.
+//! [`model`] for every route to that choice and the order they resolve in, and
+//! [`router`] for the endpoint and credential that make a chosen model
+//! reachable.
 
 mod model;
+mod router;
 mod run;
 
 #[cfg(test)]
 mod tests;
 
 pub use model::effective_model;
+pub use router::openrouter_route;
 pub use run::{run_openhuman_task, uses_embedded_core};

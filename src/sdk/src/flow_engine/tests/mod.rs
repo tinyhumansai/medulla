@@ -43,6 +43,7 @@ pub(super) struct RecordingDispatch {
 }
 
 impl RecordingDispatch {
+    /// A dispatch that answers every `TaskRequest` with `reply`.
     pub(super) fn replying(reply: &str) -> Arc<Self> {
         Arc::new(Self {
             seen: Mutex::new(Vec::new()),

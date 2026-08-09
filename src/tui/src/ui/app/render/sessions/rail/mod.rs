@@ -23,6 +23,8 @@ use super::types::{Selection, SessionsPanes};
 mod device_footer;
 mod harness_line;
 mod rows;
+#[cfg(test)]
+mod rows_tests;
 mod state;
 #[cfg(test)]
 mod status_line_tests;

@@ -262,6 +262,16 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "white"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+#
+# A harness that needs you is drawn in `attention` and pulses: bright for half a
+# cycle, dim for the other half, at `attentionBlinkSeconds`. The pulse is driven
+# by Medulla's own frame clock rather than the terminal's blink attribute, which
+# most terminals and every multiplexer ignore — so it looks the same everywhere.
+# A harness that *failed* pulses red instead, whatever `attention` is set to, so
+# a question and a breakage are never the same colour.
+# attention = "yellow"          # ⚠ rows, the tab badge, "N waiting on you"
+# attentionBlink = true         # false holds those cues steady and bright
+# attentionBlinkSeconds = 1.0   # one full pulse; clamped to 0.2–10.0
 
 # ---------------------------------------------------------------------------
 # appearance — how the Agents sidebar arranges itself, plus the legacy
@@ -310,7 +320,12 @@ tokenEnv = "MEDULLA_TOKEN"
 #     Ship the status line
 # ---------------------------------------------------------------------------
 # [statusLine]
-# state = "line1"                # State glyph: the ●/✓/✕ symbol, running, finished, or failed
+# state = "line1"                # State glyph: what the session is doing, one of
+#                                #   ⠋ spinning — a turn is in flight
+#                                #   ●          — alive, idle at its composer
+#                                #   ⚠          — waiting on you (pulses)
+#                                #   ✕          — failed or exited non-zero (pulses red)
+#                                #   ✓          — exited cleanly, or finished and held
 # stateWhen = "always"
 # harness = "line1"              # Harness name: which CLI is driving the session
 # harnessWhen = "always"

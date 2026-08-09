@@ -144,6 +144,49 @@ async fn a_post_tool_command_is_handed_the_turns_directory_on_stdin() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_hook_command_starts_in_the_turns_directory() {
+    // A hook script that shells out to `git` without an explicit `-C` resolves
+    // its repository from where it was started, so the command's own working
+    // directory has to agree with the payload's `cwd`. It used to inherit
+    // Medulla's process directory instead.
+    let turn = tempfile::tempdir().expect("temp dir");
+    let recorded = turn.path().join("pwd.txt");
+    let hook = MedullaToolHook::new(
+        Vec::new(),
+        vec![spec_with(
+            &format!("pwd > {}", recorded.display()),
+            "*",
+            Some(5),
+        )],
+    );
+    with_turn_cwd(Some(turn.path()), async {
+        hook.after_tool(&tool_context("Write"))
+            .await
+            .expect("the post-tool command runs")
+    })
+    .await;
+    let observed = std::fs::read_to_string(&recorded).expect("the hook recorded its directory");
+    assert_eq!(
+        std::fs::canonicalize(observed.trim()).expect("the recorded directory exists"),
+        std::fs::canonicalize(turn.path()).expect("the turn directory exists"),
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_turn_directory_that_no_longer_exists_falls_back_to_the_process_one() {
+    // A worktree named by an earlier turn can be gone by the time a hook runs.
+    // Spawning into it would fail the hook outright; the process directory at
+    // least runs it, which is what happened before a turn directory existed.
+    let removed = tempfile::tempdir().expect("temp dir");
+    let path = removed.path().to_path_buf();
+    drop(removed);
+    let observed = with_turn_cwd(Some(&path), async { hook_working_dir() }).await;
+    assert_eq!(observed, None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn an_openhuman_post_tool_callback_passes_native_input_to_the_command() {
     let hook = MedullaToolHook::new(
         Vec::new(),
@@ -243,23 +286,21 @@ const STDIN_RACE_PAYLOAD: &[u8] = &[b'x'; 1 << 20];
 
 #[cfg(unix)]
 #[tokio::test]
-async fn an_enforced_hook_whose_stdin_write_fails_vetoes() {
+async fn an_enforced_hook_whose_stdin_write_fails_is_still_observational() {
     // The command closes its stdin immediately and stays alive briefly, so the
-    // payload cannot fully arrive. An enforced (pre-hook) run must surface the
-    // write failure: the hook never received its input, so approving the tool
-    // call as if it had would run it unvetted.
-    let err = run_command(
+    // payload cannot fully arrive — the same race a hook that simply never
+    // drains its stdin (`git add -A && git commit`) hits. Surfacing that write
+    // failure as a veto made a `PreToolUse` hook veto the tool call it had just
+    // approved with `exit 0`, so only the exit status decides now, for enforced
+    // hooks exactly as for observational ones.
+    run_command(
         &spec("exec 0<&-; sleep 0.2"),
         STDIN_RACE_PAYLOAD,
         true,
         &Default::default(),
     )
     .await
-    .expect_err("an enforced hook whose stdin write fails must veto");
-    assert!(
-        err.to_string().contains("pipe"),
-        "expected a pipe error, got: {err}"
-    );
+    .expect("a stdin write failure alone must not veto an enforced hook");
 }
 
 #[cfg(unix)]

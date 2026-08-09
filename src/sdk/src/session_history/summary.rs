@@ -163,22 +163,30 @@ pub(super) fn slug_label(text: &str) -> String {
     slug(text)
 }
 
-/// Read Codex's persisted name for the newest session rooted at `cwd`.
+/// Read Codex's persisted name for the session rooted at `cwd` — but only when
+/// the folder is unambiguous about which session it belongs to.
 ///
 /// The id-keyed [`codex_thread_label`] is the right read once a transcript has
 /// been located, because identity beats recency. This is the fallback for a
 /// session nothing has located yet — one an operator created and typed into
 /// directly, which never enters the transcript executor — where the best
-/// identity on offer is "the newest Codex rollout in this working directory".
+/// identity on offer is "the Codex rollout in this working directory".
+///
+/// The name is attributed only when exactly one rollout is rooted here. With
+/// several — two sessions sharing a directory, or a stale rollout from a
+/// finished one still newer — the cwd cannot prove which is this session's, and
+/// answering with the newest would put another session's name on this row. The
+/// fallback then declines and the row keeps its terminal-derived name until
+/// identity is found.
 pub fn codex_thread_label_for_cwd(env: &HashMap<String, String>, cwd: &str) -> Option<String> {
-    let discovered = super::scan::discover_session_file(
-        env,
-        SessionAgentKind::Codex,
-        cwd,
-        0,
-        &std::collections::HashSet::new(),
-        None,
-    )?;
+    // `session_files_for_cwd` is cwd-strict (a transcript with no recorded cwd
+    // is not a candidate), so a single hit is a positive attribution, not a
+    // guess.
+    let mut candidates = super::scan::session_files_for_cwd(env, SessionAgentKind::Codex, cwd);
+    if candidates.len() != 1 {
+        return None;
+    }
+    let discovered = candidates.pop().expect("exactly one candidate");
     codex_thread_label(env, &discovered.id)
 }
 

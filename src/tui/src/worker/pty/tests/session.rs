@@ -61,7 +61,8 @@ fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
     let manager = PtyManager::new();
     let id = manager
         .open(sh(
-            "printf '\\033]2;Named thread\\007'; read line; printf '\\033]2;\\007'; sleep 30",
+            "printf '\\033]2;Named thread\\007'; read line; \
+             printf '\\033]2;\\007'; echo empty-title-done; sleep 30",
         ))
         .unwrap();
     wait_for("initial thread name", || {
@@ -69,8 +70,14 @@ fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
     });
 
     manager.write(&id, b"clear\n").unwrap();
-    // The empty title must NOT overwrite: the name stays.
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // The empty title must NOT overwrite: the name stays. The child writes its
+    // empty OSC sequence *then* the marker, and the reader thread feeds bytes to
+    // the emulator in order — so a marker on screen proves the empty sample has
+    // already passed through `process` before the name is checked. (A fixed
+    // sleep raced the reader and made this test flaky.)
+    wait_for("the empty title to have been emitted", || {
+        screen_text(&manager, &id).contains("empty-title-done")
+    });
     assert_eq!(
         manager.row(&id).and_then(|row| row.thread_name),
         Some("Named thread".to_string()),

@@ -138,13 +138,17 @@ impl CustomHarnessConfig {
         // Slugs are lowercased because OpenRouter matches them case-sensitively
         // while its own documentation and dashboard present them capitalized
         // ("StreamLake"). A pin that silently matched nothing would read as
-        // OpenRouter ignoring the setting rather than as a typo here.
+        // OpenRouter ignoring the setting rather than as a typo here. The first
+        // occurrence of each slug is kept, across the whole list rather than
+        // just adjacent entries: `dedup()` alone would leave a repeat that
+        // appears after a different slug.
+        let mut seen = std::collections::HashSet::new();
         self.provider_only = std::mem::take(&mut self.provider_only)
             .into_iter()
             .map(|slug| slug.trim().to_ascii_lowercase())
             .filter(|slug| !slug.is_empty())
+            .filter(|slug| seen.insert(slug.clone()))
             .collect();
-        self.provider_only.dedup();
 
         if self.id.is_empty()
             || !self

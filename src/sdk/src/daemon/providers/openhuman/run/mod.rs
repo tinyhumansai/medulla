@@ -21,6 +21,10 @@ mod watchdog;
 #[cfg(test)]
 mod tests;
 
+// `reply_text` is only consumed by the provider's test module (`super`'s
+// sibling under `#[cfg(test)]`), so it stays visible under tests only — in a
+// lib build the re-export would otherwise be dead imports under `-D warnings`.
+#[cfg(test)]
 pub(super) use execution::reply_text;
 pub use execution::run_openhuman_task;
 

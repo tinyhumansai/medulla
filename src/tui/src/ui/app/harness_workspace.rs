@@ -266,36 +266,52 @@ impl App {
         let resolved_query = harnesses.resolve_workspace(query);
         let mut known = Vec::new();
         for favorite in &self.loaded.config.harness.favorite_workspaces {
-            known.push((
-                absolute(&favorite.path, base),
-                "favorite".to_string(),
-                Some(favorite.name.clone()),
-            ));
+            known.push(WorkspaceCandidate {
+                path: absolute(&favorite.path, base),
+                source: "favorite",
+                label: Some(favorite.name.clone()),
+            });
         }
         for path in &self.loaded.config.harness.recent_workspaces {
-            known.push((absolute(path, base), "recent".to_string(), None));
+            known.push(WorkspaceCandidate {
+                path: absolute(path, base),
+                source: "recent",
+                label: None,
+            });
         }
-        known.push((harnesses.workspace.clone(), "default".to_string(), None));
+        known.push(WorkspaceCandidate {
+            path: harnesses.workspace.clone(),
+            source: "default",
+            label: None,
+        });
         if !self.loaded.config.host.workspace.trim().is_empty() {
-            known.push((
-                absolute(&self.loaded.config.host.workspace, &process_dir),
-                "registered".to_string(),
-                None,
-            ));
+            known.push(WorkspaceCandidate {
+                path: absolute(&self.loaded.config.host.workspace, &process_dir),
+                source: "registered",
+                label: None,
+            });
         }
         for path in &self.loaded.config.host.workspaces {
-            known.push((absolute(path, &process_dir), "registered".to_string(), None));
+            known.push(WorkspaceCandidate {
+                path: absolute(path, &process_dir),
+                source: "registered",
+                label: None,
+            });
         }
         for host in &self.loaded.config.hosts {
             if !host.workspace.trim().is_empty() {
-                known.push((
-                    absolute(&host.workspace, &process_dir),
-                    "registered".to_string(),
-                    None,
-                ));
+                known.push(WorkspaceCandidate {
+                    path: absolute(&host.workspace, &process_dir),
+                    source: "registered",
+                    label: None,
+                });
             }
             for path in &host.workspaces {
-                known.push((absolute(path, &process_dir), "registered".to_string(), None));
+                known.push(WorkspaceCandidate {
+                    path: absolute(path, &process_dir),
+                    source: "registered",
+                    label: None,
+                });
             }
         }
 
@@ -303,19 +319,21 @@ impl App {
         let mut ranked = known
             .into_iter()
             .enumerate()
-            .filter(|(_, (path, _, _))| Path::new(path).is_dir())
-            .filter_map(|(order, (path, source, label))| {
-                workspace_match_score(&path, label.as_deref(), query).map(|score| {
-                    (
-                        score,
-                        order,
-                        WorkspaceChoice {
-                            path,
-                            source,
-                            label,
-                        },
-                    )
-                })
+            .filter(|(_, candidate)| Path::new(&candidate.path).is_dir())
+            .filter_map(|(order, candidate)| {
+                workspace_match_score(&candidate.path, candidate.label.as_deref(), query).map(
+                    |score| {
+                        (
+                            score,
+                            order,
+                            WorkspaceChoice {
+                                path: candidate.path,
+                                source: candidate.source.to_string(),
+                                label: candidate.label,
+                            },
+                        )
+                    },
+                )
             })
             .collect::<Vec<_>>();
 

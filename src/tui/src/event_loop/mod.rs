@@ -81,6 +81,11 @@ pub(crate) async fn run(
     let mut tick = tokio::time::interval(Duration::from_millis(90));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
+    // Once the runtime's broadcast sender is gone, `sub.recv()` returns
+    // `Closed` immediately forever. Guarding the arm off keeps that from
+    // becoming a busy-loop: the select would otherwise always pick a ready
+    // arm and spin at 100% CPU, redrawing nothing new.
+    let mut runtime_sub_closed = false;
 
     // Background release-update checker ("automated cron"): first probe ~10s
     // after startup, then every 6h. A newer version surfaces as a persistent

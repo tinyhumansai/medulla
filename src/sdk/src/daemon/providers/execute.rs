@@ -344,8 +344,8 @@ async fn run_provider_attempt(
     // one base with the watchdog below lets it tell how old a beat is.
     let beat_base = Instant::now();
     // Holds the timestamp (micros since `beat_base`) of the most recent stderr
-    // line rather than a bare counter, so the idle watchdog can re-arm from the
-    // beat's *own* time instead of from whenever it next happens to check.
+    // output rather than a bare counter, so the idle watchdog can re-arm from
+    // the beat's *own* time instead of from whenever it next happens to check.
     let stderr_beat = Arc::new(AtomicU64::new(0));
     let stderr_task = {
         let stderr_tail = stderr_tail.clone();
@@ -353,18 +353,24 @@ async fn run_provider_attempt(
         // `beat_base` is `Copy`, so the `async move` block captures it by copy;
         // it remains in scope for the watchdog's stale-beat arithmetic below.
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut buf = Vec::new();
+            // Stderr is read as raw chunks rather than `read_until(b'\n')` lines:
+            // a spinner rewrites its progress in place with `\r` and never emits a
+            // newline, so a newline-framed read would not return until the pipe
+            // closed and the heartbeat would go stale even though bytes keep
+            // arriving — killing a visibly working child as idle. Reading a chunk
+            // at a time refreshes the beat on every byte arrival, which is exactly
+            // the "any output is proof of life" the idle watchdog promises. The
+            // diagnostic tail is a byte window for error messages, not a
+            // line-parsed log, so losing the framing costs nothing there.
+            let mut chunk = [0u8; 4096];
             loop {
-                buf.clear();
-                match reader.read_until(b'\n', &mut buf).await {
+                match stderr.read(&mut chunk).await {
                     Ok(0) => break,
-                    Ok(_) => {
-                        let chunk = String::from_utf8_lossy(&buf);
+                    Ok(n) => {
                         stderr_beat
                             .store(beat_base.elapsed().as_micros() as u64, Ordering::Relaxed);
                         let mut tail = stderr_tail.lock().unwrap();
-                        tail.push_str(&chunk);
+                        tail.push_str(&String::from_utf8_lossy(&chunk[..n]));
                         *tail = tail_bytes(&tail);
                     }
                     Err(_) => break,

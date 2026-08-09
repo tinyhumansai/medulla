@@ -81,6 +81,15 @@ impl App {
             }
             // Everything else the question is over is still swallowed, below.
         }
+        // The inline prompt owns the pointer over the picker exactly as it owns
+        // the keyboard (see `on_key`, which routes the prompt before the picker):
+        // it is an edit on top of a modal, and a click that replayed Enter on a
+        // picker row behind it would start a harness while the favorite-name
+        // prompt was still on screen. The prompt itself is a text entry with no
+        // click targets, so every pointer event is swallowed while it is open.
+        if self.prompt.is_some() {
+            return None;
+        }
         // The picker's rows are click targets too, and its list takes the wheel.
         // Same reasoning as the question above: it is opened from a rail row the
         // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive

@@ -108,6 +108,10 @@ impl App {
                 self.add_workspace(&text);
                 None
             }
+            PromptKind::FavoriteWorkspaceAdd(workspace) => {
+                self.save_favorite_workspace(&text, &workspace);
+                None
+            }
             PromptKind::CustomHarnessAdd => {
                 self.save_custom_harness(None, &text);
                 None

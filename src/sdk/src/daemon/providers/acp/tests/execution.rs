@@ -284,6 +284,24 @@ fn agent_command_terminates_env_options_before_the_binary() {
     );
 }
 
+/// `--` stops `env`'s *option* parsing but not its `NAME=VALUE` assignment
+/// scanning: an `=`-containing override could never be executed and would
+/// silently shift the command onto the next argument. The boundary refuses it.
+#[test]
+fn agent_rejects_assignment_like_provider_bin() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options
+        .env
+        .insert("MEDULLA_OPENCODE_BIN".to_string(), "A=B".to_string());
+
+    let error = super::super::execution::agent_for(&options).unwrap_err();
+    assert!(
+        error.contains('='),
+        "the rejection must name the assignment hazard: {error}"
+    );
+}
+
 /// A routed Codex preset reaching ACP dispatch must carry its model and its
 /// provider overrides **in the environment**.
 ///

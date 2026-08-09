@@ -169,6 +169,13 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let hook_grant_session = format!("wrapper-{}", uuid::Uuid::new_v4());
     let _hook_grant = crate::harness_hooks::seed_hook_grant(hook_grant_session, &mut config.env);
 
+    // Install handlers *before* the child starts: a termination signal that
+    // arrived between `spawn_child` and registration would kill this wrapper
+    // with default disposition, leaving the child running, the PTY unconsumed,
+    // and the terminal unrestored. The stream retains an early signal until the
+    // run loop below first polls it.
+    let mut signals = Signals::install();
+
     let ChildSession {
         input,
         mut done,
@@ -185,7 +192,6 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let mut recv_tick = tokio::time::interval(Duration::from_millis(timings.receive_poll_ms));
     let mut status_tick =
         tokio::time::interval(Duration::from_millis(timings.status_throttle_ms as u64));
-    let mut signals = Signals::install();
 
     let code = loop {
         tokio::select! {

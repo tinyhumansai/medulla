@@ -193,11 +193,13 @@ pub(crate) fn session_files_for_cwd(
             let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
             let summary = read_session_summary(agent, &file.path)?;
             let session_cwd = summary.cwd?;
-            (safe_resolve(&session_cwd).as_deref() == Some(here.as_str())).then_some(DiscoveredSession {
-                path: canonical,
-                id: summary.id,
-                cwd: Some(session_cwd),
-            })
+            (safe_resolve(&session_cwd).as_deref() == Some(here.as_str())).then_some(
+                DiscoveredSession {
+                    path: canonical,
+                    id: summary.id,
+                    cwd: Some(session_cwd),
+                },
+            )
         })
         .collect()
 }

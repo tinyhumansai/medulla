@@ -20,11 +20,13 @@ use super::bridge::{
 use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
 
 mod child;
+mod types;
 
 #[cfg(test)]
 mod tests;
 
 use child::{spawn_child, ChildSession};
+use types::Signals;
 
 /// How long to wait for the PTY reader to copy the child's final output before
 /// restoring the terminal. Bounded so a wedged reader cannot hang the exit.
@@ -167,6 +169,13 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let hook_grant_session = format!("wrapper-{}", uuid::Uuid::new_v4());
     let _hook_grant = crate::harness_hooks::seed_hook_grant(hook_grant_session, &mut config.env);
 
+    // Install handlers *before* the child starts: a termination signal that
+    // arrived between `spawn_child` and registration would kill this wrapper
+    // with default disposition, leaving the child running, the PTY unconsumed,
+    // and the terminal unrestored. The stream retains an early signal until the
+    // run loop below first polls it.
+    let mut signals = Signals::install();
+
     let ChildSession {
         input,
         mut done,
@@ -183,7 +192,6 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let mut recv_tick = tokio::time::interval(Duration::from_millis(timings.receive_poll_ms));
     let mut status_tick =
         tokio::time::interval(Duration::from_millis(timings.status_throttle_ms as u64));
-    let mut signal_fut = signal_future();
 
     let code = loop {
         tokio::select! {
@@ -206,7 +214,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
                     bridge.tick_status().await;
                 }
             }
-            _ = &mut signal_fut => {
+            _ = signals.recv() => {
                 if let Some(kill_tx) = kill.take() {
                     let _ = kill_tx.send(());
                 }
@@ -245,32 +253,75 @@ fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
     config.env.extend(attribution_env);
 }
 
-/// A future that resolves on SIGINT/SIGTERM (Unix) or Ctrl-C (elsewhere).
-///
-/// On the PTY path the terminal is in raw mode, so Ctrl-C reaches the child's
-/// own line discipline instead of us — exactly as if the harness had been run
-/// directly. This future then only fires for signals sent to the wrapper itself.
-fn signal_future() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        match (
-            signal(SignalKind::interrupt()),
-            signal(SignalKind::terminate()),
-        ) {
-            (Ok(mut sigint), Ok(mut sigterm)) => Box::pin(async move {
-                tokio::select! {
-                    _ = sigint.recv() => {}
-                    _ = sigterm.recv() => {}
-                }
-            }),
-            _ => Box::pin(std::future::pending()),
+impl Signals {
+    /// Install handlers for the host's termination signals.
+    ///
+    /// Each Unix stream registers independently, so a failure to install one
+    /// signal does not cost the others: whichever succeeded is kept. Only when
+    /// nothing could be installed does the source become [`Signals::Unavailable`],
+    /// which never fires.
+    pub(super) fn install() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let sigint = signal(SignalKind::interrupt()).ok();
+            let sigterm = signal(SignalKind::terminate()).ok();
+            if sigint.is_none() && sigterm.is_none() {
+                Signals::Unavailable
+            } else {
+                Signals::Unix { sigint, sigterm }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Signals::CtrlC
         }
     }
-    #[cfg(not(unix))]
-    {
-        Box::pin(async move {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+
+    /// Resolve when a termination signal arrives.
+    ///
+    /// Cancel-safe, and safe to call repeatedly: each call awaits the live
+    /// signal stream rather than resuming a future that already completed, so
+    /// the run loop may drive it once per iteration for the whole session.
+    pub(super) async fn recv(&mut self) {
+        match self {
+            #[cfg(unix)]
+            Signals::Unix { sigint, sigterm } => {
+                // Each branch polls only the streams that were installed by
+                // [`Signals::install`]; a registration that failed (`None`)
+                // awaits forever, so the branch never fires for a signal that
+                // was not actually registered.
+                tokio::select! {
+                    _ = recv_signal(sigint.as_mut()) => {}
+                    _ = recv_signal(sigterm.as_mut()) => {}
+                }
+            }
+            #[cfg(not(unix))]
+            Signals::CtrlC => {
+                // A registration error is a disabled source, not an immediate
+                // signal: awaiting it must not complete the branch, or the run
+                // loop would treat the failed install as a Ctrl-C and kill the
+                // child. Degrade to never resolving instead.
+                if tokio::signal::ctrl_c().await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            Signals::Unavailable => std::future::pending().await,
+        }
+    }
+}
+
+/// Await the next arrival on `sig`, or forever if that stream was never
+/// installed.
+///
+/// On Unix the two signals register independently, so a stream may be `None`
+/// while its counterpart is live. A `None` stream must still be a valid
+/// `select!` branch that simply never wins — it is not an immediate signal.
+#[cfg(unix)]
+async fn recv_signal(sig: Option<&mut tokio::signal::unix::Signal>) {
+    if let Some(signal) = sig {
+        let _ = signal.recv().await;
+    } else {
+        std::future::pending::<()>().await;
     }
 }

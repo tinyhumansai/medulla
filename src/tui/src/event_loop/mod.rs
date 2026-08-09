@@ -84,6 +84,11 @@ pub(crate) async fn run(
     let mut tick = tokio::time::interval(Duration::from_millis(medulla_tui::ui::theme::FRAME_MS));
     let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
     let mut mouse_on = true;
+    // Once the runtime's broadcast sender is gone, `sub.recv()` returns
+    // `Closed` immediately forever. Guarding the arm off keeps that from
+    // becoming a busy-loop: the select would otherwise always pick a ready
+    // arm and spin at 100% CPU, redrawing nothing new.
+    let mut runtime_sub_closed = false;
 
     // Background release-update checker ("automated cron"): first probe ~10s
     // after startup, then every 6h. A newer version surfaces as a persistent
@@ -128,8 +133,8 @@ pub(crate) async fn run(
                     }
                 }
             }
-            recv = sub.recv() => {
-                if recv.is_ok() {
+            recv = sub.recv(), if !runtime_sub_closed => {
+                if runtime_ping_needs_refresh(&mut runtime_sub_closed, &recv) {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
                         run_cmd(
@@ -314,6 +319,40 @@ pub(crate) async fn run(
     } else {
         SessionExit::Quit
     })
+}
+
+/// Whether a runtime broadcast wakeup means the snapshot on screen is stale.
+///
+/// `Lagged` is the case with the *most* to redraw, not the least: the runtime
+/// published faster than this loop consumed, so the subscription dropped
+/// notifications and what is drawn is further behind than a plain `Ok` would
+/// leave it. Treating it as nothing-to-do — which an `is_ok()` test does — left
+/// the UI stale until some unrelated event happened to wake it, exactly when
+/// the most had changed.
+///
+/// `Closed` is the one wakeup that refreshes nothing — and it is *terminal*:
+/// the runtime is gone, so no newer snapshot will ever arrive, and the caller
+/// sets `shut` from it so the loop disarms the arm instead of spinning on an
+/// ever-ready error. That is what keeps the select from busy-looping after the
+/// last sender drops.
+fn runtime_ping_needs_refresh(
+    shut: &mut bool,
+    recv: &Result<(), tokio::sync::broadcast::error::RecvError>,
+) -> bool {
+    // Once shut, nothing refreshes: the closure is terminal, so any wakeup
+    // that still arrives (the drained tail of the channel) was detached from
+    // a snapshot we can no longer read.
+    if *shut {
+        return false;
+    }
+    if matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
+        *shut = true;
+        return false;
+    }
+    matches!(
+        recv,
+        Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
+    )
 }
 
 /// Detect a changed event stream while the nested Context surface is visible.

@@ -51,6 +51,31 @@ use tinyhumans_sdk::{enc, QueryParam, TinyHumansClient};
 /// Default backend base URL.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:5000";
 
+/// How long the default HTTP client waits for a TCP/TLS connection.
+const DEFAULT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long the default HTTP client tolerates a silent socket mid-response.
+///
+/// An idle timeout rather than a whole-request one: [`MedullaClient::stream_events`]
+/// shares this client, and a total timeout would sever a healthy SSE stream on
+/// schedule. Comfortably longer than the backend's `: ping` heartbeat, and long
+/// enough for a slow model turn that has not yet emitted a byte.
+const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The HTTP client used when the caller supplies none.
+///
+/// `reqwest::Client::default()` has no timeouts at all, so a black-holed
+/// connection hangs sign-in — or any other call — forever. Falls back to the
+/// untimed default only if the builder fails, which it does not for this
+/// configuration.
+fn default_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .read_timeout(DEFAULT_READ_TIMEOUT)
+        .build()
+        .unwrap_or_default()
+}
+
 impl MedullaClientBuilder {
     /// Set the backend base URL (default [`DEFAULT_BASE_URL`]).
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
@@ -81,7 +106,7 @@ impl MedullaClientBuilder {
             .trim_end_matches('/')
             .to_string();
         let jwt = self.jwt.unwrap_or_default();
-        let http = self.http.unwrap_or_default();
+        let http = self.http.unwrap_or_else(default_http_client);
         MedullaClient {
             sdk: build_sdk(&base_url, &jwt, http.clone()),
             base_url,

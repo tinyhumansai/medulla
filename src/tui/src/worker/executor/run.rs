@@ -157,7 +157,17 @@ impl PtySessionExecutor {
         let queue_deadline = tokio::time::Instant::now() + self.queue_budget(options.timeout_ms);
         let queue_abort = options.abort.clone();
         let opened = loop {
-            let plan = self.session_for(&options, class)?;
+            // The half of the decision that blocks runs on the blocking pool,
+            // exactly as the launch below does. Reuse waits out the previous
+            // turn's completion-chime grace with a `std::thread::sleep` of up
+            // to 300ms, and the checkout check canonicalizes both paths; inline,
+            // that parked a tokio worker per dispatch, and a burst of task
+            // frames could park most of the runtime — taking the inbox drain
+            // and every screen sampler down with it, since they share one.
+            let probe = self
+                .probe_session(class, options.conversation.clone(), provider, &options.cwd)
+                .await?;
+            let plan = self.session_for(&options, probe)?;
             match plan {
                 SessionPlan::Reuse(opened) => break opened,
                 SessionPlan::Launch(spec) => break self.launch(*spec).await?,

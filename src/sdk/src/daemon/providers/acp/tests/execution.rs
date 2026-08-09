@@ -250,10 +250,55 @@ fn agent_command_removes_the_embedded_core_workspace() {
         [
             "-u",
             "OPENHUMAN_WORKSPACE",
+            "--",
             "npx",
             "-y",
             "@agentclientprotocol/claude-agent-acp@latest"
         ]
+    );
+}
+
+/// The provider-binary override is untrusted configuration, so `env` must be
+/// told where its own options stop: a binary named `-x` or `A=B` would
+/// otherwise be swallowed as an option or an assignment and never executed.
+#[cfg(unix)]
+#[test]
+fn agent_command_terminates_env_options_before_the_binary() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options
+        .env
+        .insert("MEDULLA_OPENCODE_BIN".to_string(), "-x".to_string());
+
+    let agent = super::super::execution::agent_for(&options).unwrap();
+    let config = agent.config();
+
+    let arguments = config.arguments();
+    let terminator = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .expect("env argv carries a `--` terminator");
+    assert!(
+        arguments[terminator + 1..].iter().any(|a| a == "-x"),
+        "the overridden binary must sit after the terminator: {arguments:?}"
+    );
+}
+
+/// `--` stops `env`'s *option* parsing but not its `NAME=VALUE` assignment
+/// scanning: an `=`-containing override could never be executed and would
+/// silently shift the command onto the next argument. The boundary refuses it.
+#[test]
+fn agent_rejects_assignment_like_provider_bin() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options
+        .env
+        .insert("MEDULLA_OPENCODE_BIN".to_string(), "A=B".to_string());
+
+    let error = super::super::execution::agent_for(&options).unwrap_err();
+    assert!(
+        error.contains('='),
+        "the rejection must name the assignment hazard: {error}"
     );
 }
 

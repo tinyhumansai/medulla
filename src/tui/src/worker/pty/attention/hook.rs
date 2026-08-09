@@ -24,9 +24,10 @@
 use medulla::harness_hooks::{HookEvent, HookEventLog};
 use medulla::protocol::HarnessProvider;
 
-use super::types::{AttentionKind, HarnessAttention};
+use super::types::AttentionKind;
 
-/// The cue a harness's last lifecycle report warrants, if any.
+/// The kind and label of the cue a harness's last lifecycle report warrants, if
+/// any.
 ///
 /// Returns `Some` only when the session's most recent hook report was
 /// [`HookEvent::Notification`] — i.e. the harness itself said it is waiting on
@@ -36,16 +37,16 @@ use super::types::{AttentionKind, HarnessAttention};
 /// otherwise keep showing "waiting for you" until the next `PostToolUse`
 /// arrived. The screen's own working footer is the earlier truth, so it vetoes.
 ///
-/// `now` stamps the cue the same way the screen-derived cues are stamped; the
-/// poller's held-cue preservation keeps that `since` stable across repaints for
-/// as long as the same cue holds.
+/// Mirrors [`super::detect`] and [`super::bell_cue`] in returning the
+/// `(AttentionKind, String)` pair and leaving the `since` stamp to the poller,
+/// so the same held-cue preservation keeps a cue that holds stable across
+/// repaints.
 pub fn hook_attention(
     provider: HarnessProvider,
     grant: Option<&str>,
     working: bool,
     log: &HookEventLog,
-    now: i64,
-) -> Option<HarnessAttention> {
+) -> Option<(AttentionKind, String)> {
     if working {
         return None;
     }
@@ -53,9 +54,8 @@ pub fn hook_attention(
     if log.last_event(grant) != Some(HookEvent::Notification) {
         return None;
     }
-    Some(HarnessAttention::new(
+    Some((
         AttentionKind::Approval,
         format!("{} is waiting for you", provider.as_str()),
-        now,
     ))
 }

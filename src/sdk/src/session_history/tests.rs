@@ -355,6 +355,68 @@ fn codex_thread_label_for_cwd_finds_the_newest_rollout_in_the_folder() {
 }
 
 #[test]
+fn codex_thread_label_for_cwd_needs_an_unambiguous_folder() {
+    // Two sessions sharing a directory: the cwd cannot prove which rollout
+    // produced this label, so the fallback must decline rather than put one
+    // session's name on the other's row.
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_session(
+        &sessions,
+        "rollout-b.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-b","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-b","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(codex_thread_label_for_cwd(&env, &project_str), None);
+    // A transcript with no recorded cwd is not a candidate either.
+    write_session(
+        &sessions,
+        "rollout-cwdless.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-c"}
+        })
+        .to_string(),
+    );
+    let alone = home.path().join("solo").to_string_lossy().into_owned();
+    fs::create_dir_all(&alone).unwrap();
+    assert_eq!(codex_thread_label_for_cwd(&env, &alone), None);
+}
+
+#[test]
 fn codex_summary_without_meta_is_none() {
     let lines = vec![serde_json::json!({"type":"response_item"}).to_string()];
     assert!(read_codex_summary(&lines).is_none());

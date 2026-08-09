@@ -37,6 +37,13 @@ pub(super) struct Inner {
     /// Feeds the single clipboard worker thread. See
     /// [`PtyManager::forward_clipboard`](super::PtyManager::forward_clipboard).
     pub(super) clipboard: Arc<ClipboardQueue>,
+    /// The lifecycle-report log the attention poller reads a `Notification`
+    /// from. Set once, before any session opens, by
+    /// [`PtyManager::set_hook_log`](super::PtyManager::set_hook_log); a
+    /// [`OnceLock`] because the poller reads it on every tick and the value
+    /// never changes after startup. `None` until then, in which case the
+    /// hook-derived cue is simply absent.
+    pub(super) hook_log: OnceLock<HookEventLog>,
 }
 
 /// A single-slot, coalescing handoff to the clipboard worker thread.

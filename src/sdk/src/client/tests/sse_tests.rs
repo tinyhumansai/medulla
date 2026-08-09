@@ -6,6 +6,8 @@ use super::{http_json, spawn_stub};
 use crate::client::sse::{SeqDedup, SseFrame, SseParser, MAX_FRAME_BYTES};
 use crate::client::*;
 use futures::StreamExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 // ---------------------------------------------------------------------------
 // SSE parser
@@ -292,6 +294,35 @@ async fn integration_sse_stream_yields_frames() {
     assert_eq!(second.seq, Some(2));
     assert_eq!(second.kind(), EventKind::Assistant { body: "two".into() });
     // Stop by dropping the stream.
+}
+
+#[tokio::test]
+async fn sse_requests_identify_medulla() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let read = socket.read(&mut buf).await.unwrap();
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {\"at\":1,\"sessionId\":\"s1\",\"event\":{\"kind\":\"assistant\",\"body\":\"ok\"}}\n\n",
+            )
+            .await
+            .unwrap();
+        socket.flush().await.unwrap();
+        let _ = tx.send(String::from_utf8_lossy(&buf[..read]).to_string());
+    });
+
+    let client = MedullaClient::new(format!("http://{addr}"), "jwt-abc");
+    let stream = client.stream_events("s1", None);
+    futures::pin_mut!(stream);
+    stream.next().await.unwrap().unwrap();
+
+    let sent = rx.await.unwrap();
+    assert!(sent.contains("x-sdk-name: medulla"), "{sent}");
+    assert!(!sent.contains("x-sdk-name: openhuman"), "{sent}");
 }
 
 // ---------------------------------------------------------------------------

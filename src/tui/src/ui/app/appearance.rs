@@ -13,7 +13,7 @@
 //! that move: see
 //! [`StatusLineConfig::from_appearance`](medulla::config::StatusLineConfig::from_appearance).
 
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_ms_from_seconds, blink_seconds, color_to_string, THEME_ROLES};
 
 use super::types::App;
 
@@ -27,8 +27,18 @@ pub(super) const SIDEBAR_GROUPING_OPTION: usize = 7;
 /// The option offset of the sidebar sort row.
 pub(super) const SIDEBAR_SORT_OPTION: usize = 8;
 
-/// Number of behavior controls shown after the editable theme colors.
-pub(super) const ATTENTION_ROWS: usize = 1;
+/// Number of behavior controls shown after the editable theme colors: the blink
+/// toggle and the rate it blinks at.
+pub(super) const ATTENTION_ROWS: usize = 2;
+
+/// The pulse lengths the Appearance editor offers, in seconds.
+///
+/// A short list rather than a free-text field, because the useful range is
+/// narrow and every value in it is a judgement about how insistent a stuck
+/// harness should be. Anything else remains configurable by hand — the config
+/// key takes any number and clamps it — and a hand-set value that is not on this
+/// list steps into it from the nearest end rather than being lost.
+const BLINK_SECONDS: [f64; 6] = [0.3, 0.5, 1.0, 1.5, 2.0, 3.0];
 
 /// Number of selectable rows: theme colors, attention behavior, and options.
 pub(super) const APPEARANCE_ROWS: usize =
@@ -63,6 +73,8 @@ impl App {
                 "off"
             };
             self.persist_theme_value_now("Attention blink", value.into());
+        } else if index == THEME_ROLES.len() + 1 {
+            self.cycle_blink_rate(forward);
         } else {
             let option = index - THEME_ROLES.len() - ATTENTION_ROWS;
             match option {
@@ -75,6 +87,27 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Step the attention pulse to the next offered length and persist it.
+    ///
+    /// A hand-configured value that is not one of the offered steps enters the
+    /// list from whichever end the operator moved towards, so a first press
+    /// changes the rate by a predictable amount instead of jumping to whatever
+    /// happens to be nearest.
+    fn cycle_blink_rate(&mut self, forward: bool) {
+        let current = blink_seconds(self.theme.attention_blink_ms);
+        let position = BLINK_SECONDS
+            .iter()
+            .position(|choice| (choice - current).abs() < f64::EPSILON);
+        let next = match position {
+            Some(index) if forward => BLINK_SECONDS[(index + 1) % BLINK_SECONDS.len()],
+            Some(index) => BLINK_SECONDS[(index + BLINK_SECONDS.len() - 1) % BLINK_SECONDS.len()],
+            None if forward => BLINK_SECONDS[0],
+            None => BLINK_SECONDS[BLINK_SECONDS.len() - 1],
+        };
+        self.theme.attention_blink_ms = blink_ms_from_seconds(next);
+        self.persist_theme_value_now("Attention blink rate", format!("{next:.1}s"));
     }
 
     /// Toggle extracted harness titles on orchestrator-managed agent rows.

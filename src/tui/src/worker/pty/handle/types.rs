@@ -143,6 +143,15 @@ pub(crate) struct AttentionState {
     pub(crate) completion_deadline: Option<std::time::Instant>,
     /// Epoch ms of the last classification attempt.
     pub(crate) checked_at: i64,
+    /// Whether the last classified screen said the harness was mid-turn.
+    ///
+    /// The complement of [`cue`](Self::cue) and just as unobtainable from
+    /// anywhere else: a harness thinking hard writes nothing, so `busy`,
+    /// `last_output_at`, and `state` cannot tell it apart from one sitting at an
+    /// idle composer. The classifier already computes this to veto vague cues,
+    /// so keeping it is free and is what lets the rail animate a working row
+    /// instead of drawing every live session the same static dot.
+    pub(crate) working: bool,
 }
 
 /// The parts of a session that never change after it is opened.
@@ -220,6 +229,10 @@ pub struct SessionHandle {
     /// The exit status, or [`NO_EXIT_CODE`].
     pub(super) exit_code: AtomicI64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.
+    ///
+    /// Also stamped when a queued write fails, so the failure cue it produces
+    /// carries the moment the write failed rather than the last (possibly
+    /// minutes-old) output. See [`SessionHandle::record_error`].
     pub(super) last_output_at: AtomicI64,
     /// Bumped every time the emulator consumes input.
     ///
@@ -257,6 +270,16 @@ pub struct SessionHandle {
     /// are: [`try_claim`](super::SessionHandle::try_claim) tests it per session
     /// on every dispatch.
     pub(super) retained: AtomicBool,
+    /// Whether the child was deliberately asked to exit rather than dying on
+    /// its own.
+    ///
+    /// Set by [`mark_closed`](SessionHandle::mark_closed), which only the
+    /// deliberate-close paths call — an operator closing the harness, the
+    /// executor finishing a bounded turn that never answered, an orchestrator
+    /// interrupting a session it owns. The signal-derived exit status such a
+    /// kill leaves behind is the harness obeying the request, not a lifecycle
+    /// failure, so the lifecycle cue must not read it as one.
+    pub(super) closed_by_request: AtomicBool,
     /// How many bytes sit in [`SessionIo::writes`] still unwritten.
     ///
     /// The budget a caller is admitted against, so a child that never drains its

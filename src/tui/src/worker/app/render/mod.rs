@@ -7,9 +7,11 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-use super::super::pty::{PtyState, SessionRow, ATTENTION_GLYPH};
+use super::super::pty::{row_cue, AttentionKind, PtyState, SessionRow, ATTENTION_GLYPH};
 use super::super::screen::screen_lines;
 use super::types::{Screen, WorkerApp, TABS, TAB_MASTER, TAB_SESSIONS, TAB_WORKSPACES};
+use crate::ui::theme::FRAME_MS;
+use crate::ui::util::SPINNER;
 
 mod master;
 mod prompt;
@@ -376,26 +378,46 @@ fn session_line(
     // pane is often the only thing watching an unattended worker, and that state
     // looks exactly like a slow turn from every other signal here — same glyph,
     // same colour, same silence — right up until the task times out.
-    let waiting = row
-        .attention
+    // The screen classifier only covers a live terminal prompt. `row_cue`
+    // adds the facts held by the session itself: a retained task completed or
+    // a child failed after its last screen paint. Keep this list in agreement
+    // with the main rail and waiting counter.
+    let cue = row_cue(row, now);
+    let completed = cue
         .as_ref()
-        .filter(|_| row.state.is_running())
-        .map(|cue| format!(" · {ATTENTION_GLYPH} {}", cue.label(now)));
+        .is_some_and(|cue| cue.kind == AttentionKind::Completed);
+    let failed = cue.as_ref().is_some_and(|cue| cue.kind.is_failure());
+    let alerting = cue.as_ref().is_some_and(|_| !completed);
+    let detail = cue.as_ref().map(|cue| {
+        format!(
+            " · {} {}",
+            if failed {
+                '✕'
+            } else if completed {
+                '✓'
+            } else {
+                ATTENTION_GLYPH
+            },
+            cue.label(now)
+        )
+    });
+    let frame = (now.max(0) as u64 / FRAME_MS) as usize;
     let mut style = Style::default().fg(state_color(row.state));
-    if waiting.is_some() {
-        style = Style::default()
-            .fg(theme.attention)
-            .add_modifier(Modifier::BOLD);
-        if theme.attention_blink {
-            style = style.add_modifier(Modifier::SLOW_BLINK);
-        }
+    if alerting {
+        // Use the same software pulse as the main rail. Terminal blink
+        // modifiers are commonly ignored by tmux and cannot honor the
+        // operator's configured attention cadence.
+        style = theme.pulse(if failed { Color::Red } else { theme.attention }, frame);
     }
     if selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    let glyph = match &waiting {
+    let glyph = match cue.as_ref() {
+        Some(cue) if cue.kind.is_failure() => "✕".to_string(),
+        Some(cue) if cue.kind == AttentionKind::Completed => "✓".to_string(),
         Some(_) => ATTENTION_GLYPH.to_string(),
+        None if row.working => SPINNER[frame % SPINNER.len()].to_string(),
         None => row.state.glyph().to_string(),
     };
-    crate::ui::agent_lane::line(glyph, row.label.clone(), waiting.unwrap_or(quiet), style)
+    crate::ui::agent_lane::line(glyph, row.label.clone(), detail.unwrap_or(quiet), style)
 }

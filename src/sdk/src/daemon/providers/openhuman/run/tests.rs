@@ -70,8 +70,7 @@ fn turn_and_iteration_boundaries_fold_to_status() {
     assert_eq!(kind, "status");
     assert_eq!(payload["detail"], "iteration 3/40");
 
-    let (kind, payload) =
-        only_event(&mut fold, &AgentProgress::TurnCompleted { iterations: 7 });
+    let (kind, payload) = only_event(&mut fold, &AgentProgress::TurnCompleted { iterations: 7 });
     assert_eq!(kind, "status");
     assert_eq!(payload["state"], "idle");
     assert_eq!(payload["detail"], "turn completed");
@@ -86,7 +85,10 @@ fn a_lone_text_delta_completes_nothing() {
         delta: "hello".to_string(),
         iteration: 1,
     });
-    assert!(events.is_empty(), "a delta is not a message yet: {events:?}");
+    assert!(
+        events.is_empty(),
+        "a delta is not a message yet: {events:?}"
+    );
 }
 
 /// Streamed text becomes one whole message at the next phase boundary.
@@ -139,7 +141,10 @@ fn a_very_long_thinking_block_is_bounded_to_its_tail() {
     let text = events[0].1["text"].as_str().expect("text payload");
     assert!(text.starts_with('…'), "tail elision marker: {text:?}");
     assert!(text.chars().count() <= 780, "snapshot exceeds the bound");
-    assert!(text.ends_with("reason "), "the tail surviving is the newest");
+    assert!(
+        text.ends_with("reason "),
+        "the tail surviving is the newest"
+    );
 }
 
 /// Telemetry sitting between tokens is not a phase boundary: flushing there

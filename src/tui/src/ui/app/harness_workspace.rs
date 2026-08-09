@@ -12,6 +12,20 @@ const MAX_RECENT_WORKSPACES: usize = 12;
 const FOLDER_SCORE_OFFSET: usize = 5;
 const KNOWN_FUZZY_SCORE_OFFSET: usize = 20;
 
+/// A known workspace before ranking: the resolved path, where it came from, and
+/// the favorite label when it is a saved shortcut.
+///
+/// Named fields rather than a `(String, String, Option<String>)` tuple so a
+/// path and its provenance cannot be swapped silently at a push site, and the
+/// provenance is a `&'static str` because the candidates are rebuilt on every
+/// keystroke — only the rows that survive filtering to become
+/// [`WorkspaceChoice`]s need their own `String`.
+struct WorkspaceCandidate {
+    path: String,
+    source: &'static str,
+    label: Option<String>,
+}
+
 impl App {
     /// Advance the launcher to its workspace step and populate the first list.
     pub(super) fn open_harness_workspace_step(&mut self, edit_default: bool) {

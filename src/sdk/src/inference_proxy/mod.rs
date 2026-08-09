@@ -49,6 +49,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use body::MAX_REWRITE_BYTES;
 pub use headers::{rewrite, MEDULLA_REFERER, MEDULLA_TITLE};
 pub use lifecycle::shared;
 pub use routing::{route_openrouter, route_run, route_spawn};

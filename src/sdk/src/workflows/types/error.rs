@@ -93,6 +93,9 @@ impl From<crate::hub::RunError> for WorkflowError {
             RunError::Timeout => Self::DispatchTimeout,
             RunError::Aborted => Self::DispatchAborted,
             RunError::Worker(message) => Self::Harness(message),
+            // A failed node's transcript is the step's own account — the
+            // workflow error that surfaces the failure carries only the message.
+            RunError::WorkerWithTranscript { message, .. } => Self::Harness(message),
             RunError::Busy(message) => Self::Unreachable(message),
             // Same shape as backpressure from a workflow's point of view: the
             // harness exists and is fine, it simply cannot be reached for this

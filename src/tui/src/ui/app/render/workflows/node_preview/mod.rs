@@ -24,6 +24,7 @@ mod live;
 mod prompt;
 mod run_detail;
 mod syntax;
+mod transcript;
 mod types;
 
 #[cfg(test)]

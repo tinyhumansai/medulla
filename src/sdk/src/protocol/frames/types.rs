@@ -94,12 +94,16 @@ pub enum HarnessProvider {
     Codex,
     /// The `opencode` CLI harness.
     Opencode,
-    /// OpenHuman's native terminal UI.
+    /// The embedded OpenHuman core.
     ///
-    /// This is an operator-facing harness only. It is intentionally absent
-    /// from the daemon's dispatchable provider list: OpenHuman owns its agent
-    /// loop and shares the host's core state rather than accepting coding-task
-    /// frames.
+    /// The one provider with no binary behind it: it is linked into this
+    /// process, and a task dispatched to it runs as an in-process agent turn
+    /// rather than a spawned CLI — see
+    /// [`crate::daemon::providers::openhuman`].
+    ///
+    /// It is dispatchable, but never *auto-selected*: it is not
+    /// interchangeable with a coding CLI, so a task reaches it only by naming
+    /// it. See [`crate::daemon::providers::detect_providers`].
     Openhuman,
 }
 
@@ -155,15 +159,35 @@ impl HarnessProvider {
     }
 
     /// Parse a provider that may receive delegated coding tasks.
-    ///
-    /// OpenHuman is intentionally excluded: its native TUI owns its own agent
-    /// loop and is only launchable by the operator-facing harness picker.
     pub fn dispatchable_from_wire(value: &str) -> Option<Self> {
         Self::from_wire(value).filter(|provider| provider.is_dispatchable())
     }
 
     /// Whether this provider accepts delegated coding-task frames.
+    ///
+    /// Every provider does. The distinction this used to draw — OpenHuman
+    /// excluded because it "owns its own agent loop" — did not survive
+    /// contact with the fact that every harness here owns one; Claude Code's
+    /// simply sits behind a process boundary instead of a function call. What
+    /// is genuinely different about OpenHuman is that it is not
+    /// *interchangeable* with a coding CLI, and that is expressed where it
+    /// belongs: it is never auto-detected as an available provider, so a task
+    /// reaches it only by naming it.
+    ///
+    /// Kept as a method rather than deleted because it is the one place that
+    /// question is asked, and a provider that genuinely cannot take a frame may
+    /// yet be added.
     pub fn is_dispatchable(self) -> bool {
+        true
+    }
+
+    /// Whether running this provider means spawning an executable.
+    ///
+    /// True for every coding CLI, and the reason a host detects them by looking
+    /// on `PATH`. False for OpenHuman, which is linked into this process — so
+    /// asking `PATH` about it would answer `false` on a host that can run it
+    /// perfectly well.
+    pub fn needs_binary(self) -> bool {
         !matches!(self, Self::Openhuman)
     }
 

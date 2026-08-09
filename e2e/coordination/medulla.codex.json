@@ -1,0 +1,22 @@
+{
+  "_comment": "Daemon config for the Codex leg of the coordination e2e. `codexOverrides` is on because a bare OPENAI_BASE_URL is not enough for Codex — it prefers a signed-in account and refuses an uncatalogued model — so Medulla's `-c` provider block and derived model catalog are what get the mock answering. `baseUrl` keeps the /v1 suffix: Codex appends only /responses. The top-level [router] is the same endpoint by another route: the capability probe spawns with the daemon's router rather than with a preset (src/sdk/src/daemon/task_loop/probe.rs), and harness.sh exports the matching MEDULLA_CODEX_* knobs into the daemon environment so that probe gets the overrides too. The port placeholder is substituted by write_harness_config.",
+  "router": {
+    "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT/v1",
+    "apiKeyEnv": "MOCK_LLM_API_KEY"
+  },
+  "customHarnesses": [
+    {
+      "id": "mock-harness",
+      "name": "Mock Codex",
+      "baseHarness": "codex",
+      "model": "mock-model",
+      "hostId": "e2e",
+      "default": true,
+      "apiKeyEnv": "MOCK_LLM_API_KEY",
+      "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT/v1",
+      "codexOverrides": true,
+      "reasoningEffort": "low",
+      "contextWindow": 300000
+    }
+  ]
+}

@@ -477,7 +477,23 @@ pub struct WorkflowsConfig {
     pub evolve: EvolveSettings,
 }
 
-/// Reject operator-only harnesses at the persisted workflow-dispatch boundary.
+/// Reject a harness that cannot take a dispatched task, at the persisted
+/// workflow-dispatch boundary.
+///
+/// Every built-in harness currently can, including OpenHuman — naming it here
+/// is how an operator says "run unrouted nodes on my own core", which is a
+/// legitimate choice rather than the misconfiguration this once treated it as.
+/// So this rejects nothing today.
+///
+/// Kept anyway, and kept *here*: this is the one place a provider reaches the
+/// dispatch path from persisted config rather than from a node an author
+/// wrote, and the node path already refuses the same thing
+/// ([`crate::flow_engine::harness_choice::HarnessSelector::parse`]). A build
+/// that adds a genuinely operator-only provider should be caught at both doors,
+/// not just the one someone remembered.
+///
+/// The message lists what *is* accepted rather than naming three harnesses
+/// literally, so it cannot drift from the enum the way the previous wording had.
 fn deserialize_dispatch_provider<'de, D>(
     deserializer: D,
 ) -> Result<Option<HarnessProvider>, D::Error>
@@ -486,9 +502,11 @@ where
 {
     let provider = Option::<HarnessProvider>::deserialize(deserializer)?;
     match provider {
-        Some(provider) if !provider.is_dispatchable() => Err(serde::de::Error::custom(
-            "workflows.defaultProvider must be claude, codex, or opencode",
-        )),
+        Some(provider) if !provider.is_dispatchable() => Err(serde::de::Error::custom(format!(
+            "workflows.defaultProvider is `{}`, which cannot run a dispatched task — use one of {}",
+            provider.as_str(),
+            crate::flow_engine::harness_choice::HarnessSelector::builtin_names().join(", "),
+        ))),
         provider => Ok(provider),
     }
 }

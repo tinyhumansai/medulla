@@ -257,13 +257,19 @@ fn agent_command_removes_the_embedded_core_workspace() {
 }
 
 /// A routed Codex preset reaching ACP dispatch must carry its model and its
-/// provider overrides on the argv.
+/// provider overrides **in the environment**.
 ///
-/// The regression this pins: ACP built a bare `codex-acp`, so the preset's
-/// `model` was dropped and `codex_overrides` never ran. Codex then served the
-/// operator's own default model from their own ChatGPT account while the routed
-/// endpoint sat unused in the environment — the run looked healthy and not one
-/// request reached the configured provider.
+/// Two regressions in one, and both were silent. First ACP built a bare
+/// `codex-acp`, so the preset's model was dropped and `codex_overrides` never
+/// ran at all. Then the overrides were put on the argv — which `codex-acp`
+/// parses only for its `login` and `cli` subcommands and ignores completely in
+/// server mode, where it reads `CODEX_CONFIG` and `MODEL_PROVIDER` from the
+/// environment instead. Either way Codex served the operator's own default model
+/// from their own account while the routed endpoint sat unused beside it: the
+/// run looked healthy and not one request reached the configured provider.
+///
+/// Hence the assertion is on `environment()`, not on argv. An argv-only check is
+/// exactly what let the second regression through.
 #[cfg(unix)]
 #[test]
 fn codex_acp_command_carries_the_routed_model_and_overrides() {
@@ -314,29 +320,39 @@ fn codex_acp_command_carries_the_routed_model_and_overrides() {
         args.get(model_at + 1).map(String::as_str),
         Some("deepseek/deepseek-v4-flash-0731")
     );
-    // The `-c` block is only derivable where the installed Codex has cached a
-    // model catalog, which a unit environment need not have. Assert the argv
-    // carries whatever `launch_args` yields for these same inputs, so the
-    // wiring is pinned without depending on that cache being present.
-    let expected = crate::codex_overrides::launch_args(
-        HarnessProvider::Codex,
-        options.model.as_deref(),
-        &super::super::execution::acp_env(&options).unwrap(),
+
+    let environment = agent.config().environment();
+    assert_eq!(
+        environment
+            .get(crate::codex_overrides::MODEL_PROVIDER_ENV)
+            .map(String::as_str),
+        Some("medulla"),
+        "codex-acp selects its provider from MODEL_PROVIDER: {environment:?}"
+    );
+    let config: serde_json::Value = serde_json::from_str(
+        environment
+            .get(crate::codex_overrides::CONFIG_ENV)
+            .expect("routed Codex ACP must carry CODEX_CONFIG"),
     )
-    .unwrap_or_default();
-    for argument in &expected {
-        assert!(
-            args.contains(argument),
-            "routed Codex ACP argv must carry {argument:?}: {args:?}"
-        );
-    }
-    if !expected.is_empty() {
-        assert!(
-            args.iter()
-                .any(|argument| argument == "preferred_auth_method=\"apikey\""),
-            "without this a signed-in ChatGPT account outranks the routed key: {args:?}"
-        );
-    }
+    .expect("CODEX_CONFIG must be a JSON document");
+    assert_eq!(config["model"], "deepseek/deepseek-v4-flash-0731");
+    assert_eq!(config["model_provider"], "medulla");
+    assert_eq!(
+        config["model_providers"]["medulla"]["base_url"], "http://127.0.0.1:36277/openai",
+        "the routed endpoint is the whole point of the block"
+    );
+    assert_eq!(
+        config["model_providers"]["medulla"]["env_key"], "OPENAI_API_KEY",
+        "the key is resolved by name from the environment, never inlined"
+    );
+    assert_eq!(
+        config["preferred_auth_method"], "apikey",
+        "without this a signed-in ChatGPT account outranks the routed key"
+    );
+    assert!(
+        config["model_catalog_json"].is_string(),
+        "the derived catalog governs the tool shapes sent to the provider: {config}"
+    );
 }
 
 /// An unrouted Codex ACP run is left exactly as it was: no endpoint means no
@@ -360,11 +376,11 @@ fn codex_acp_command_stays_unrouted_without_an_endpoint() {
         !args.iter().any(|argument| argument == "-m"),
         "no model was configured, so none may be selected: {args:?}"
     );
+    let environment = agent.config().environment();
     assert!(
-        !args
-            .iter()
-            .any(|argument| argument.starts_with("model_provider=")),
-        "an unrouted run must keep Codex's own provider: {args:?}"
+        !environment.contains_key(crate::codex_overrides::CONFIG_ENV)
+            && !environment.contains_key(crate::codex_overrides::MODEL_PROVIDER_ENV),
+        "an unrouted run must keep Codex's own provider: {environment:?}"
     );
 }
 

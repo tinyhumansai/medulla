@@ -66,8 +66,31 @@ impl DaemonRuntime {
     fn select_provider(&self, requested: Option<HarnessProvider>) -> Option<HarnessProvider> {
         let providers = &self.inner.config.providers;
         match requested {
-            Some(requested) => providers.contains(&requested).then_some(requested),
+            Some(requested) => {
+                // A task that named the embedded core gets it, whether or not
+                // this worker "offers" it. `config.providers` is the list of
+                // coding CLIs found on PATH (see
+                // [`crate::daemon::providers::detect_providers`]), and
+                // OpenHuman is never on it — it has no binary to find.
+                // Rejecting it here would admit a direct `harness: "openhuman"`
+                // task on the control socket only to refuse it, and
+                // substituting a coding CLI would change what the task is for.
+                // Every other request must be offered: an uninstalled CLI named
+                // by a requester is a genuine "no available provider" failure.
+                if requested == HarnessProvider::Openhuman {
+                    return Some(requested);
+                }
+                providers.contains(&requested).then_some(requested)
+            }
             None => {
+                // An OpenHuman default is honoured the same way an explicit
+                // request for it is: the embedded core needs no binary to
+                // detect, so an operator who configured `openhuman` as the
+                // default means exactly that, even on a machine where no coding
+                // CLI was found.
+                if self.inner.config.default_provider == HarnessProvider::Openhuman {
+                    return Some(self.inner.config.default_provider);
+                }
                 if providers.contains(&self.inner.config.default_provider) {
                     Some(self.inner.config.default_provider)
                 } else {

@@ -43,6 +43,7 @@ impl HarnessDispatch for StubDispatch {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }
@@ -78,6 +79,7 @@ impl HarnessDispatch for ErrorThenHangDispatch {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }

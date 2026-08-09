@@ -54,6 +54,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         config_path,
         credential_dir,
         agent_id,
+        only_providers,
         startup_status,
         transport,
         endpoint,
@@ -65,7 +66,11 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         attribution,
         hooks,
     } = config;
-    let providers = medulla::daemon::providers::detect_providers(&env, None, None);
+    // Restricted exactly as the headless daemon restricts it: `--providers` is
+    // the operator saying which coding agents this worker may run, and a screen
+    // that ignored it would offer — and settle on — one they excluded.
+    let providers =
+        medulla::daemon::providers::detect_providers(&env, only_providers.as_deref(), None);
     let sessions = PtyManager::new();
     let logs = LogBuffer::new();
     // Persist the daemon's narration. The screen only helps while someone is

@@ -77,7 +77,7 @@ has no config for them.
 | `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. |
 | `fleet` | The declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog. |
 | `router` | A custom OpenAI-compatible router the daemon spawns harnesses against. Absent leaves every harness unrouted. |
-| `customHarnesses` | Named presets that run an OpenRouter model through Claude Code, Codex, or OpenCode. |
+| `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the embedded OpenHuman core. |
 | `budget` | Operator-declared per-provider budgets. Absent leaves every harness advertising an estimate. |
 | `onboarding` | Welcome-flow completion state. |
 | `update` | `check = true`/`false` for the background release check. `MEDULLA_NO_UPDATE_CHECK` is the env kill-switch. |
@@ -210,7 +210,7 @@ wherever a harness is named, including a workflow step's `harness` key.
 [[customHarnesses]]
 id = "deepseek"
 name = "DeepSeek via Claude"
-baseHarness = "claude"                # claude, codex, or opencode
+baseHarness = "claude"                # claude, codex, opencode, or openhuman
 model = "deepseek/deepseek-chat"
 fastModel = "deepseek/deepseek-chat"
 hostId = "this-device"                # must match [host].address
@@ -224,7 +224,7 @@ contextWindow = 114000                # optional
 | --- | --- |
 | `id` | Required. Letters, numbers, `.`, `-`, and `_` only, because it crosses the fleet protocol. |
 | `name` | Required. The operator-facing label. |
-| `baseHarness` | Required. `claude`, `codex`, or `opencode`. |
+| `baseHarness` | Required. `claude`, `codex`, `opencode`, or `openhuman`. |
 | `model` | Required. The OpenRouter model id used for the main turn. |
 | `fastModel` | Optional. The cheaper model for Claude Code's Sonnet and Haiku tiers. Empty falls back to `model`. |
 | `contextWindow` | Optional, in tokens. Claude Code's auto-compaction threshold, and the window a `codexOverrides` preset declares to Codex. |
@@ -238,7 +238,39 @@ contextWindow = 114000                # optional
 How the model reaches the CLI depends on the base harness. Claude Code takes it
 through the model-tier variables, with `model` on the Opus tier and `fastModel`
 on the Sonnet, Haiku, and small-fast tiers, so sub-agents stay on OpenRouter too.
-Codex and OpenCode take it through their own `-m` argument.
+Codex and OpenCode take it through their own `-m` argument. OpenHuman takes it as
+the `model_override` on the core call — see below.
+
+### Choosing the model an OpenHuman turn runs on
+
+A workflow step may name the harness id `openhuman`, and that turn runs in
+Medulla's own process on the embedded core rather than in a spawned CLI. Without
+a choice it runs on the core's `default_model`, the cloud alias a turn
+self-reports as `Chat V1 (Orchestrator)`. Three routes name a different one, and
+they resolve in this order, highest first:
+
+1. `MEDULLA_OPENHUMAN_MODEL` (deprecated spelling: `TINYPLACE_OPENHUMAN_MODEL`)
+2. `MEDULLA_HARNESS_MODEL` (deprecated spelling: `TINYPLACE_HARNESS_MODEL`)
+3. the step's own `config.model`, or the workflow's `defaults.model`
+4. the `[[customHarnesses]]` preset the step selected, through its `model`
+5. `medulla workflow run --model <name>`, then `[workflows] defaultModel`
+6. nothing — the core's own `default_model` answers
+
+The environment sits on top for the same reason `MEDULLA_<P>_BIN` does: it is the
+operator's override of what the configuration says, applied to the machine they
+are standing at, with no file to edit. An exported-but-blank value counts as
+unset.
+
+Two preset fields mean less for `openhuman` than for a spawned CLI, and it is
+worth knowing which. `baseUrl` and `apiKeyEnv` describe an endpoint Medulla
+points a *child process* at; an OpenHuman turn has no child, and the embedded
+core resolves its own provider bindings and credentials from the account's
+configuration. They are therefore inert here — and the corollary is that the core
+must already be configured with a provider that serves the model you name. A
+model no configured provider serves is not an error: the core's agent loop falls
+through to its resolved default and records that it skipped the override. For the
+same reason an `openhuman` preset needs no OpenRouter key to be advertised as
+capacity, unlike every other base harness.
 
 `apiKeyEnv` holds a variable name and never a value. The key stays in the process
 environment, and neither the config file nor the app's own state ever holds it. A

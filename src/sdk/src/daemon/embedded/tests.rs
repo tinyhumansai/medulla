@@ -391,6 +391,28 @@ async fn an_explicitly_named_default_provider_is_honoured_when_it_is_installed()
 }
 
 #[tokio::test]
+async fn an_openhuman_default_starts_even_with_no_coding_cli_detected() {
+    // OpenHuman has no binary for `detect_providers` to find, yet the embedded
+    // core is always available in-process — so a host configured to default to
+    // it must start on a machine with no coding CLI at all, and its default
+    // provider must be the openhuman it was told to serve.
+    let network = LocalBridgeNetwork::new();
+    let host = EmbeddedDaemon::start_with_executor(
+        Arc::new(network.bind("host").unwrap()) as Arc<dyn Bridge>,
+        "host",
+        EmbeddedDaemonOptions {
+            default_provider: Some(HarnessProvider::Openhuman),
+            ..options(env_with_nothing())
+        },
+        replying_executor("unused"),
+    )
+    .expect("the embedded core is always available, so an openhuman default must start");
+
+    assert_eq!(host.default_provider(), HarnessProvider::Openhuman);
+    assert!(host.providers().is_empty());
+}
+
+#[tokio::test]
 async fn an_explicit_workspace_is_resolved_rather_than_the_launch_directory() {
     // The workspace decides what a peer's task can edit, so "the directory I
     // named" and "the directory I happened to launch from" must not be confused.

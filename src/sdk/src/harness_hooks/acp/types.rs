@@ -2,6 +2,8 @@
 
 use serde_json::{Map, Value};
 
+use crate::harness_hooks::HookSpec;
+
 /// What an ACP-dispatched spawn carries so the operator's hooks run, and what it
 /// could not carry.
 ///
@@ -19,6 +21,8 @@ pub struct AcpDelivery {
     /// keeps the hook vocabulary free of a transport dependency it otherwise
     /// has no use for.
     pub session_meta: Option<Map<String, Value>>,
+    /// Observation-only hooks Medulla runs after ACP tool completion.
+    pub local_post_tool_use: Vec<HookSpec>,
     /// Operator-facing notes: hooks this transport could not install, and why.
     pub notes: Vec<String>,
 }
@@ -29,6 +33,6 @@ impl AcpDelivery {
     /// Notes alone do not count: a delivery that only explains why nothing was
     /// installed has nothing to apply.
     pub fn is_empty(&self) -> bool {
-        self.session_meta.is_none()
+        self.session_meta.is_none() && self.local_post_tool_use.is_empty()
     }
 }

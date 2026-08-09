@@ -134,6 +134,17 @@ pub struct TaskOutcome {
     /// session, and claiming one of its nodes' sessions would name the wrong
     /// place.
     pub session_id: Option<String>,
+    /// What the harness said while it served the task, in order.
+    ///
+    /// Empty unless the dispatch asked for it. Only the workflow dispatch does:
+    /// a node runs headless with nobody watching, so without this the run view
+    /// could say a step took four minutes without being able to say what
+    /// happened in them. An ordinary task frame has a live status stream and a
+    /// requester reading it, and does not pay for a second copy.
+    ///
+    /// Bounded by the collector that produced it — see
+    /// [`crate::harness_transcript`].
+    pub transcript: Vec<crate::harness_transcript::TranscriptEntry>,
 }
 
 /// Why a dispatch failed.
@@ -155,6 +166,28 @@ pub enum RunError {
     Aborted,
     /// The worker returned an `error` frame (carrying its message).
     Worker(String),
+    /// A workflow node's harness failed after saying something worth keeping.
+    ///
+    /// The workflow dispatch folds its node's transcript *while* the harness
+    /// runs, so on failure the account exists and this variant carries it
+    /// alongside the message — the ordinary [`Worker`](Self::Worker) has no
+    /// place for it, and a failed step is exactly the one whose diagnostic
+    /// trail the run view wants (the prompt says what was asked, the error says
+    /// what went wrong, and neither shows the tool that kept failing in
+    /// between). Only the workflow dispatch constructs it; a worker that fails
+    /// over the wire sends a plain [`Worker`](Self::Worker) frame, which
+    /// carries no transcript.
+    ///
+    /// Downstream consumers that only care about *why* the task failed treat
+    /// this as a [`Worker`](Self::Worker) with the same message — the transcript
+    /// is the step's own account, not part of the wire error.
+    WorkerWithTranscript {
+        /// The failure message, as [`Worker`](Self::Worker) would carry it.
+        message: String,
+        /// What the harness said before it failed, in order. Bounded by the
+        /// collector that produced it — see [`crate::harness_transcript`].
+        transcript: Vec<crate::harness_transcript::TranscriptEntry>,
+    },
     /// The worker shed load rather than failing: it was already holding its
     /// maximum admitted-but-unfinished tasks and refused this one
     /// (`daemon at capacity …; retry later`).
@@ -185,6 +218,9 @@ impl std::fmt::Display for RunError {
             RunError::Timeout => write!(f, "bridge task timed out"),
             RunError::Aborted => write!(f, "task aborted by orchestrator"),
             RunError::Worker(m) => write!(f, "worker error: {m}"),
+            // Same message as `Worker`: the transcript is the step's own
+            // account, delivered out-of-band, not part of the rendered error.
+            RunError::WorkerWithTranscript { message, .. } => write!(f, "worker error: {message}"),
             RunError::Busy(m) => write!(f, "worker busy: {m}"),
             RunError::Held(m) => write!(f, "harness held by operator: {m}"),
             RunError::Transport(m) => write!(f, "transport error: {m}"),

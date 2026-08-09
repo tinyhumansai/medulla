@@ -49,6 +49,12 @@ pub(super) async fn medulla_mcp_servers(
         use crate::mcp::attach;
         use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
 
+        // A launch serving a workflow `agent` node gets no Medulla tools on
+        // either transport — see [`crate::harness_tools`]. Ahead of the grant
+        // below so nothing is minted for a session that will not carry it.
+        if crate::harness_tools::withheld(task_env) {
+            return Vec::new();
+        }
         // An operator who turned workflows off should not have harnesses handed
         // tools that would be refused. Resolved through the shared policy so
         // this transport and the CLI one cannot come to disagree about which
@@ -133,6 +139,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         tracing::warn!(provider = options.provider.as_str(), "{note}");
     }
     let session_meta = delivery.session_meta;
+    let local_post_tool_use = delivery.local_post_tool_use;
     // Read before `options` is picked apart below, and cloned because the
     // session setup runs inside an async move closure.
     #[cfg(feature = "workflows")]
@@ -157,6 +164,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // authority while the harness is still running.
     let mut agent_env = acp_env(&options)?;
     let _hook_grant = crate::harness_hooks::seed_hook_grant(&session_key, &mut agent_env);
+    // The ACP server process receives `agent_env`; the local PostToolUse
+    // fallback spawns hooks from this same process, so it gets the same
+    // per-session environment — the hook grant and task-specific router /
+    // attribution variables among it — or a hook that reports back finds
+    // nothing to report to.
+    let hook_env = agent_env.clone();
     let agent = agent_for_with_env(&options, agent_env)?;
     let task_env = options.env.clone();
     let state = Arc::new(Mutex::new(FoldState::with_workspace(
@@ -166,6 +179,13 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         options.on_workspace_context,
     )));
     let notification_state = state.clone();
+    let hook_cwd = PathBuf::from(&options.cwd);
+    // The ACP session id is not known until `session/new` (or `session/load`)
+    // answers. Hooks that correlate by session id should see the real id, not
+    // the synthetic grant key minted before the request; the shared cell is
+    // filled in as soon as the id is learned.
+    let hook_session = Arc::new(Mutex::new(session_key.clone()));
+    let connection_hook_session = hook_session.clone();
     let approve = options.skip_permissions;
     let cwd = PathBuf::from(&options.cwd);
     let resume = options.resume_session_id.clone();
@@ -179,7 +199,19 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                notification_state.lock().unwrap().fold(notification.update);
+                let completed = notification_state.lock().unwrap().fold(notification.update);
+                if let Some(completed) = completed {
+                    let session_id = hook_session.lock().unwrap().clone();
+                    crate::harness_hooks::acp::run_post_tool_use(
+                        &local_post_tool_use,
+                        &hook_cwd,
+                        &hook_env,
+                        &session_id,
+                        &completed.tool_name,
+                        &completed.input,
+                    )
+                    .await;
+                }
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -252,10 +284,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                 }
             };
 
-            // Publish a newly learned ACP id before prompting. Notifications
-            // produced by the prompt may immediately report workspace state;
-            // the daemon must already have a binding for that callback to
-            // update rather than dropping the first turn's context.
+            // Publish the real ACP id to hooks before prompting, then announce
+            // it to the daemon. Notifications produced by the prompt may
+            // immediately report workspace state; the daemon must already have
+            // a binding for that callback to update rather than dropping the
+            // first turn's context.
+            *connection_hook_session.lock().unwrap() = session_id.to_string();
             if let Some(callback) = on_session {
                 callback(session_id.to_string());
             }
@@ -338,8 +372,14 @@ pub(super) fn agent_for(options: &RunTaskOptions) -> Result<AcpAgent, String> {
 /// [`agent_for`] as the pure configuration entry point used by focused tests.
 fn agent_for_with_env(
     options: &RunTaskOptions,
-    env: HashMap<String, String>,
+    mut env: HashMap<String, String>,
 ) -> Result<AcpAgent, String> {
+    // Codex's routed provider block reaches its ACP server through the
+    // environment, not argv — see `codex_acp_overrides_env`. Applied before the
+    // config is built so the overlay below carries it.
+    for (key, value) in codex_acp_overrides_env(options, &env)? {
+        env.insert(key, value);
+    }
     let config = match options.provider {
         HarnessProvider::Claude => {
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
@@ -388,23 +428,41 @@ fn codex_acp_args(
         "-y".to_string(),
         "@agentclientprotocol/codex-acp@latest".to_string(),
     ];
-    let model = options
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|model| !model.is_empty());
-    if let Some(model) = model {
+    if let Some(model) = codex_acp_model(options) {
         args.push("-m".to_string());
         args.push(model.to_string());
     }
-    // A routed run cannot safely fall back to the operator's default account
-    // or endpoint: its catalog governs the provider's supported tool shapes.
-    // Match the direct spawn seam and return a usable error before ACP starts.
-    args.extend(
-        crate::codex_overrides::launch_args(options.provider, model, env)
-            .map_err(|error| error.to_string())?,
-    );
+    // The routed provider block does NOT ride here. `codex-acp` parses argv only
+    // for its `login` and `cli` subcommands; in server mode it ignores it and
+    // reads `CODEX_CONFIG`/`MODEL_PROVIDER` from the environment instead, which
+    // is what `codex_acp_overrides_env` puts there. `-m` is kept because it is
+    // harmless either way and documents the intent at the spawn.
+    let _ = env;
     Ok(args)
+}
+
+/// The routed model for a Codex ACP spawn, trimmed and non-empty.
+fn codex_acp_model(options: &RunTaskOptions) -> Option<&str> {
+    options
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+}
+
+/// The routed-provider configuration a Codex ACP spawn needs, in the form its
+/// server actually reads.
+///
+/// A routed run cannot safely fall back to the operator's default account or
+/// endpoint — its catalog governs the provider's supported tool shapes — so a
+/// catalog that cannot be derived is an error before ACP starts, matching the
+/// direct spawn seam.
+fn codex_acp_overrides_env(
+    options: &RunTaskOptions,
+    env: &HashMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    crate::codex_overrides::acp_env(options.provider, codex_acp_model(options), env)
+        .map_err(|error| error.to_string())
 }
 
 /// The environment handed to the ACP agent process.

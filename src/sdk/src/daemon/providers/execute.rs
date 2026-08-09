@@ -56,6 +56,14 @@ pub fn with_auth_hint(message: &str) -> String {
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
 pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    // Ahead of everything, including the credential scrub below. Every line
+    // after this one prepares a *child process* — its environment, its router,
+    // its argv — and OpenHuman has no child: the turn runs in this process
+    // against the embedded core. Scrubbing the core's own workspace out of the
+    // environment on its way to the core would be exactly backwards.
+    if super::openhuman::uses_embedded_core(&options) {
+        return super::openhuman::run_openhuman_task(options).await;
+    }
     // This has to precede every transport choice below. ACP and the pooled
     // app-server return before the CLI spawn seam, but each child is still an
     // external harness and must never inherit the embedded core's credential
@@ -239,12 +247,18 @@ async fn run_provider_attempt(
     // than only by `medulla skills install`, so a workflow authored, disabled,
     // or deleted since the last install is described correctly here. Empty for
     // a provider with no directory flag, so those argvs are unchanged.
+    //
+    // Skipped entirely when this launch is getting no Medulla tools: every one
+    // of these skills instructs the model to call `workflow_run`, and a session
+    // told to call a tool it was not served spends a turn discovering that.
     #[cfg(feature = "workflows")]
-    extra_args.extend(crate::workflows::skills::refresh_managed(
-        spec.provider,
-        &spec.env,
-        std::path::Path::new(&spec.cwd),
-    ));
+    if !crate::harness_tools::withheld(&spec.env) {
+        extra_args.extend(crate::workflows::skills::refresh_managed(
+            spec.provider,
+            &spec.env,
+            std::path::Path::new(&spec.cwd),
+        ));
+    }
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,

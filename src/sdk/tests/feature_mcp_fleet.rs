@@ -56,6 +56,7 @@ impl FleetOps for RecordingFleet {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 

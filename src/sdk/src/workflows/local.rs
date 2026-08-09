@@ -135,9 +135,11 @@ impl LocalWorkflowHost {
     ///
     /// # Errors
     ///
-    /// Fails when no coding-agent CLI is installed, or when either bridge
-    /// address cannot be bound — both are situations an operator has to see,
-    /// rather than a host that starts and then rejects every task.
+    /// Fails when no coding-agent CLI is installed — unless the host's default
+    /// is `openhuman`, which the embedded core serves in-process without a
+    /// binary to detect — or when either bridge address cannot be bound. Both
+    /// are situations an operator has to see, rather than a host that starts
+    /// and then rejects every task.
     pub fn start(options: EmbeddedDaemonOptions) -> Result<Self, String> {
         let network = LocalBridgeNetwork::new();
         let worker = network.bind(LOCAL_WORKER_ADDRESS)?;
@@ -165,6 +167,23 @@ impl LocalWorkflowHost {
     pub fn abort(&self) {
         self.dispatch.abort_in_flight();
     }
+}
+
+/// Point the embedded core at this host before it can boot lazily.
+///
+/// Every path in this module starts an embedded daemon that may dispatch an
+/// `agent` node to the embedded core, which boots on first use
+/// ([`crate::core_host::shared`]) and reads its environment during
+/// construction. The TUI and `medulla run` bind the core at startup; none of
+/// these do, so each binds what it knows before starting the host: the core's
+/// state directory derived from `MEDULLA_HOME`, and the agent's action
+/// directory from the workspace the run resolved to. A caller with the full
+/// layered config binds the backend URLs too — see
+/// [`crate::core_host::bind_from_config`].
+fn bind_core(env: &std::collections::HashMap<String, String>, workspace: &str) {
+    let home = crate::home::medulla_home(env);
+    crate::core_host::bind_workspace(env, &home);
+    crate::core_host::bind_action_dir(env, Some(std::path::Path::new(workspace)));
 }
 
 /// One local run, described before it starts.
@@ -319,8 +338,10 @@ impl LocalRun<'_> {
     ///
     /// # Errors
     ///
-    /// Fails when no coding-agent CLI is installed, when the workflow or the
-    /// host is disabled, or when the run record cannot be written.
+    /// Fails when no coding-agent CLI is installed (unless the host's default is
+    /// `openhuman`, served by the embedded core without a binary to detect),
+    /// when the workflow or the host is disabled, or when the run record cannot
+    /// be written.
     pub async fn start(self) -> Result<StartedRun, crate::workflows::WorkflowError> {
         use crate::flow_engine::{folding_sink, CapabilitySettings, HostServices};
         use crate::workflows::{RunContext, StoreWorkflowResolver};
@@ -383,6 +404,12 @@ impl LocalRun<'_> {
         }
         let (host_env, fleet_depth) = nested_harness_env(env).await?;
         settings.fleet_depth = fleet_depth;
+
+        // The embedded daemon below may dispatch a node to the embedded core,
+        // which boots lazily and reads its environment during construction.
+        // This path only holds the `workflows` section, not the full config, so
+        // it binds what it does know before the host starts.
+        bind_core(env, &workspace);
 
         let host = LocalWorkflowHost::start(
             EmbeddedDaemonOptions {
@@ -593,6 +620,10 @@ pub async fn author_here(
         "acp".to_string(),
     );
     crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+    // An authoring turn may dispatch to the embedded core; bind it before the
+    // host starts so a lazy boot reads this account's state, not ambient
+    // `~/.openhuman`.
+    bind_core(&env, &cwd.to_string_lossy());
 
     let host = LocalWorkflowHost::start(
         EmbeddedDaemonOptions {
@@ -680,6 +711,10 @@ pub async fn evolve_here(
         "acp".to_string(),
     );
     crate::mcp::preflight(&env, cwd).map_err(crate::workflows::WorkflowError::Engine)?;
+    // A review may dispatch to the embedded core; bind it before the host
+    // starts so a lazy boot reads this account's state, not ambient
+    // `~/.openhuman`.
+    bind_core(&env, &cwd.to_string_lossy());
 
     let host = LocalWorkflowHost::start(
         EmbeddedDaemonOptions {

@@ -111,6 +111,24 @@ fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
 }
 
 #[test]
+fn harnesses_page_marks_openhuman_presets_as_embedded_without_a_router_key() {
+    let mut a = app();
+    a.tab_index = tab("Hosts");
+    a.routing_index = RP_HARNESSES;
+    a.routing_focused = true;
+    a.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "openhuman | OpenHuman | openhuman | some/model | | this-device",
+    )
+    .expect("valid OpenHuman custom harness")];
+
+    let out = render(&mut a);
+
+    assert!(out.contains("OpenHuman"));
+    assert!(out.contains("embedded core"));
+    assert!(!out.contains("key missing"));
+}
+
+#[test]
 fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     use super::types::{SessionPicker, SessionPickerStep, WorkspaceChoice};
     use crate::ui::harness_pane::HarnessChoice;

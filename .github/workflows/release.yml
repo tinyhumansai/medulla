@@ -1,9 +1,9 @@
 name: Release
 
-# One-click release: pick a semver bump, and this workflow runs the end-to-end
-# harness suite, then updates Cargo.toml/Cargo.lock, commits, pushes a matching
-# vX.Y.Z tag, builds the `medulla` binary for each supported target, and
-# publishes a GitHub Release with the packaged binaries attached.
+# One-click release: pick a semver bump, and this workflow updates
+# Cargo.toml/Cargo.lock, commits, pushes a matching vX.Y.Z tag, builds the
+# `medulla` binary for each supported target, and publishes a GitHub Release
+# with the packaged binaries attached.
 #
 # Always releases from main (checks out and pushes back to main regardless of
 # where it is dispatched). The release is created in this same workflow, so the
@@ -34,59 +34,12 @@ permissions:
   contents: write
 
 jobs:
-  # The docker/tmux/opencode end-to-end suite. It used to run on every push
-  # and pull request, where it was by far the slowest check — it builds a
-  # harness image and drives three container scenarios, so it dominated the
-  # wait on changes that could not affect it. It gates releases instead:
-  # this is the one moment the whole harness has to be known good, and it
-  # runs before `tag` so a failure costs nothing — no version bump is
-  # committed and no tag is pushed.
-  e2e-docker:
-    name: E2E (docker + tmux + opencode)
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      # `ref: main` for the same reason the `tag` job pins it: this workflow
-      # always releases from main whatever ref it was dispatched from, so
-      # gating on the dispatch ref would test one tree and ship another.
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-          persist-credentials: false
-          submodules: false
-
-      - name: Initialize submodules
-        run: bash scripts/init-submodules.sh
-
-      - uses: docker/setup-buildx-action@v3
-
-      # Build the harness image once with a GHA layer cache (the Rust build
-      # stage is the expensive layer; warm runs skip it entirely), then run the
-      # suites in fully network-isolated containers via run-docker.sh.
-      - name: Build harness image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: e2e/coordination/Dockerfile
-          tags: medulla-e2e:latest
-          load: true
-          provenance: false
-          cache-from: type=gha
-          # A transient GHA cache-service failure must not discard a successfully
-          # built and loaded image or prevent the offline scenarios from running.
-          cache-to: type=gha,mode=max,ignore-error=true
-
-      - name: Coordination round trip (run.sh, --network none)
-        run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
-
-      - name: Functional scenarios (tests.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests.sh
-
-      - name: Multi-agent scenarios (tests_multi.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
-
+  # No e2e gate here any more: the docker/tmux harness suites moved back to CI,
+  # which runs them on every pull request and every push to main. This workflow
+  # always releases from main, so by the time it runs that commit has already
+  # been through all fifteen suite/harness combinations — re-running them here
+  # would gate on a result that is already known.
   tag:
-    needs: e2e-docker
     runs-on: ubuntu-latest
     # Grants access to the environment-scoped GitHub App secrets.
     environment: Production

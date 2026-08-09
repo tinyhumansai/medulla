@@ -29,6 +29,7 @@ fn run(id: &str, status: RunStatus) -> RunRecord {
             input: None,
             output: None,
             diagnostics: Vec::new(),
+            transcript: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,

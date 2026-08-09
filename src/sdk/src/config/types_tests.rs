@@ -541,11 +541,32 @@ fn an_explicit_empty_template_catalog_opts_out_of_coding_defaults() {
     assert!(!serde_json::to_string(&cfg).unwrap().contains("\"fleet\""));
 }
 
+/// Naming the embedded core as the workflow default is a choice, not a
+/// misconfiguration: it says "run unrouted nodes on my own core". This
+/// asserted the refusal until OpenHuman gained a task executor of its own.
 #[test]
-fn workflows_reject_an_operator_only_default_provider() {
-    let error =
-        serde_json::from_str::<TuiConfig>(r#"{"workflows":{"defaultProvider":"openhuman"}}"#)
-            .unwrap_err();
+fn workflows_accept_the_embedded_core_as_a_default_provider() {
+    let config: TuiConfig =
+        serde_json::from_str(r#"{"workflows":{"defaultProvider":"openhuman"}}"#)
+            .expect("the embedded core is a dispatchable default");
 
-    assert!(error.to_string().contains("claude, codex, or opencode"));
+    assert_eq!(
+        config.workflows.default_provider,
+        Some(medulla_protocol_provider())
+    );
+}
+
+/// The provider this module's tests mean by "the embedded core".
+fn medulla_protocol_provider() -> crate::protocol::HarnessProvider {
+    crate::protocol::HarnessProvider::Openhuman
+}
+
+/// A name that is not a harness at all is still refused, so "openhuman is
+/// accepted" cannot quietly become "anything is".
+#[test]
+fn workflows_reject_a_default_provider_that_is_not_a_harness() {
+    let error = serde_json::from_str::<TuiConfig>(r#"{"workflows":{"defaultProvider":"nope"}}"#)
+        .unwrap_err();
+
+    assert!(error.to_string().contains("nope"), "{error}");
 }

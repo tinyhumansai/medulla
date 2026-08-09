@@ -4,8 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use super::super::pty::{LaunchSpec, PtyManager};
-use super::probe::IdleClaim;
+use super::super::pty::{LaunchSpec, PtyManager, SessionRow};
 
 /// Checkout and branch last reported by a reusable harness session.
 pub(super) type WorkspaceContext = (Option<String>, Option<String>, Option<String>);

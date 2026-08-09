@@ -78,7 +78,11 @@ impl PtyManager {
 }
 
 /// Reclassify one live screen unless it was sampled too recently.
-fn refresh(session: &SessionHandle, now: i64) {
+fn refresh(
+    session: &SessionHandle,
+    hook_log: Option<&medulla::harness_hooks::HookEventLog>,
+    now: i64,
+) {
     let (seen_bells, generation, pending_completion_bells) = {
         let mut state = lock(&session.attention);
         if now.saturating_sub(state.checked_at) < ATTENTION_INTERVAL_MS {

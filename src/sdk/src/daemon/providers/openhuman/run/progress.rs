@@ -93,7 +93,9 @@ impl ProgressFold {
                     }
                 }
                 if let Some(kind) = mapped {
-                    events.extend(split_kind(&kind).into_iter().collect::<Vec<_>>());
+                    if let Some(pair) = split_kind(&kind) {
+                        events.push(pair);
+                    }
                 }
                 events
             }

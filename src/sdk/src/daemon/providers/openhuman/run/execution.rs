@@ -11,12 +11,9 @@
 //! are scoped around the dispatch rather than passed as parameters — see
 //! [`run_openhuman_task`] and the task-locals it enters.
 
-use std::path::PathBuf;
-
 use openhuman_core::openhuman::agent::turn_origin::{
     with_origin, AgentTurnOrigin, TrustedAutomationSource,
 };
-use openhuman_core::openhuman::agent::turn_workspace::with_workspace;
 use serde_json::{json, Value};
 
 use crate::protocol::HarnessProvider;

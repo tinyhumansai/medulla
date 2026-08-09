@@ -115,7 +115,16 @@ fn refresh(
     let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
     let working = attention::is_working(&contents);
     let rang = eligible_bells > 0 && !working;
+    // Screen first — a permission menu the scraper can read is more specific
+    // than the generic "waiting" a Notification report names — then the hook,
+    // which is the harness saying so itself and the one cue a reworded prompt
+    // or a full-screen TUI cannot defeat — then the bell, the vaguest cue,
+    // which loses to anything named.
+    let hook = hook_log.and_then(|log| {
+        attention::hook_attention(session.provider(), session.grant_session(), working, log, now)
+    });
     let cue = attention::detect(session.provider(), &contents)
+        .or(hook)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
 
     let mut state = lock(&session.attention);

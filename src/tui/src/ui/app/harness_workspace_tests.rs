@@ -320,7 +320,10 @@ fn saving_under_a_resolved_absolute_path_replaces_a_relative_favorite() {
         1,
         "a relative entry must not survive beside the same directory re-saved absolutely"
     );
-    assert_eq!(app.loaded.config.harness.favorite_workspaces[0].name, "new alias");
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].name,
+        "new alias"
+    );
     assert_eq!(
         app.loaded.config.harness.favorite_workspaces[0].path,
         repo.to_string_lossy()

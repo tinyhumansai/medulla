@@ -13,7 +13,6 @@ use ratatui::layout::Rect;
 use crate::ui::composer::TextPrompt;
 use medulla::client::FeedbackType;
 
-
 /// The modal state for the "resume a chat" picker overlay.
 pub(in crate::ui::app) struct ResumePicker {
     /// The resumable chats to choose from.

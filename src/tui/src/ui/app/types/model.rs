@@ -568,7 +568,6 @@ impl Default for FeedbackState {
     }
 }
 
-
 /// Cached credential-presence flags displayed by Routing's Manage Keys pane.
 #[derive(Default)]
 pub(in crate::ui::app) struct CredentialStatus {

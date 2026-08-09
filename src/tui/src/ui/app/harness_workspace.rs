@@ -228,7 +228,11 @@ impl App {
     fn after_saving_favorite(&mut self, saved: &str) {
         self.refresh_harness_workspace_choices();
         if let Some(picker) = &mut self.session_picker {
-            if picker.workspace_choices.iter().any(|choice| choice.path == saved) {
+            if picker
+                .workspace_choices
+                .iter()
+                .any(|choice| choice.path == saved)
+            {
                 picker.workspace_index = 0;
                 picker.workspace_picked = true;
             } else {

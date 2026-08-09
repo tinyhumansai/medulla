@@ -281,15 +281,13 @@ impl Signals {
         match self {
             #[cfg(unix)]
             Signals::Unix { sigint, sigterm } => {
-                // Each branch polls only the streams that were installed; a
-                // registration that failed (None) is a transient that resolves
-                // to `pending`, so the branch never fires for a signal that was
-                // not actually registered.
-                let sigint = sigint.as_mut().map(|s| s.recv());
-                let sigterm = sigterm.as_mut().map(|s| s.recv());
+                // Each branch polls only the streams that were installed by
+                // [`Signals::install`]; a registration that failed (`None`)
+                // awaits forever, so the branch never fires for a signal that
+                // was not actually registered.
                 tokio::select! {
-                    _ = sigint.into() => {}
-                    _ = sigterm.into() => {}
+                    _ = recv_signal(sigint.as_mut()) => {}
+                    _ = recv_signal(sigterm.as_mut()) => {}
                 }
             }
             #[cfg(not(unix))]

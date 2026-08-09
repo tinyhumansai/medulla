@@ -22,8 +22,7 @@ mod watchdog;
 mod tests;
 
 pub(super) use execution::reply_text;
-pub(super) use execution::run_openhuman_task;
-pub(super) use types::{EventSink, ProgressFold};
+pub(in crate::daemon::providers) use execution::run_openhuman_task;
 
 use crate::protocol::HarnessProvider;
 

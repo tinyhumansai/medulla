@@ -20,11 +20,13 @@ use super::bridge::{
 use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
 
 mod child;
+mod types;
 
 #[cfg(test)]
 mod tests;
 
 use child::{spawn_child, ChildSession};
+use types::Signals;
 
 /// How long to wait for the PTY reader to copy the child's final output before
 /// restoring the terminal. Bounded so a wedged reader cannot hang the exit.

@@ -155,8 +155,22 @@ impl PtyManager {
                 next_id: AtomicU64::new(1),
                 now,
                 clipboard: queue,
+                hook_log: std::sync::OnceLock::new(),
             }),
         }
+    }
+
+    /// Hand the manager the lifecycle-report log the attention poller reads
+    /// `Notification` cues from.
+    ///
+    /// Set once, before the first session opens. The log is the same
+    /// [`HookEventLog`] the control plane records into and the Hooks page reads
+    /// out of; cloning it shares the one buffer. A second call is a no-op — the
+    /// poller has already taken the first — and is ignored so a relogin that
+    /// rebuilds the wiring cannot silently swap the log out from under live
+    /// sessions.
+    pub fn set_hook_log(&self, log: medulla::harness_hooks::HookEventLog) {
+        let _ = self.inner.hook_log.set(log);
     }
 
     fn now(&self) -> i64 {

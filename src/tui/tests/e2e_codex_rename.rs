@@ -87,6 +87,7 @@ done
         PtySessionExecutor::new(sessions.clone(), env.clone(), cwd.clone()).into_run_task();
     let (session_tx, session_rx) = tokio::sync::oneshot::channel();
     let run = tokio::spawn((run_task)(RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         provider: HarnessProvider::Codex,

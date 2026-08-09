@@ -279,18 +279,44 @@ async fn a_timed_out_stop_hook_is_killed_without_failing_the_turn() {
     );
 }
 
+/// One byte on top of the pipe buffer: commands that close stdin deterministically
+/// hit a broken-pipe write with a payload this big, whichever side of the race
+/// the write lands on.
+const STDIN_RACE_PAYLOAD: &[u8] = &[b'x'; 1 << 20];
+
 #[cfg(unix)]
 #[tokio::test]
-async fn a_hook_that_never_reads_its_stdin_still_passes() {
-    // `git add -A && git commit` reads nothing, exits while the payload is
-    // still being written, and the write fails with EPIPE. Treating that as a
-    // hook failure made a pre-hook veto the tool call it had just approved.
-    run_command(
-        &spec("exit 0"),
-        &vec![b'x'; 1024 * 1024],
+async fn an_enforced_hook_whose_stdin_write_fails_vetoes() {
+    // The command closes its stdin immediately and stays alive briefly, so the
+    // payload cannot fully arrive. An enforced (pre-hook) run must surface the
+    // write failure: the hook never received its input, so approving the tool
+    // call as if it had would run it unvetted.
+    let err = run_command(
+        &spec("exec 0<&-; sleep 0.2"),
+        STDIN_RACE_PAYLOAD,
         true,
         &Default::default(),
     )
     .await
-    .expect("a hook that ignores a large payload still passes");
+    .expect_err("an enforced hook whose stdin write fails must veto");
+    assert!(
+        err.to_string().contains("pipe"),
+        "expected a pipe error, got: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stop_hook_whose_stdin_write_fails_is_observational() {
+    // The race this guards: a stop hook may close its stdin — or exit — before
+    // the payload is written. The hook observes, so that write failure must not
+    // fail the turn; swallowing it is exactly the non-enforced path's job.
+    run_command(
+        &spec("exec 0<&-; sleep 0.2"),
+        STDIN_RACE_PAYLOAD,
+        false,
+        &Default::default(),
+    )
+    .await
+    .expect("a stop hook whose stdin write fails is observational");
 }

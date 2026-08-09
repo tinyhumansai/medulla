@@ -43,6 +43,10 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string);
+    let workflow_node = obj
+        .get("workflowNode")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
 
     let usage = obj
         .get("usage")
@@ -153,6 +157,7 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         custom_harness,
         model,
         tool_mode,
+        workflow_node,
         workflow,
         workflow_fingerprint,
         workflow_inputs,

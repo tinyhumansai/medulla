@@ -13,11 +13,12 @@ use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::SessionClass;
 
 use super::super::types::{Abort, RunTaskOptions};
-use super::run::{reply_text, uses_embedded_core};
+use super::run::{reply_text, turn_workspace_root, uses_embedded_core};
 
 /// Options naming `provider`, with everything else at its least interesting.
 fn options(provider: HarnessProvider) -> RunTaskOptions {
     RunTaskOptions {
+        origin: super::super::types::RunTaskOrigin::DelegatedTask,
         provider,
         transport: HarnessTransport::Cli,
         prompt: "do the thing".to_string(),
@@ -101,6 +102,62 @@ async fn an_aborted_task_fails_without_booting_a_core() {
         .await
         .expect_err("an aborted task must not run");
     assert!(error.contains("aborted before start"), "{error}");
+}
+
+/// A dispatch that named no working directory grants no root: the turn stays on
+/// the core's own workspace rather than on whatever the process happened to be
+/// standing in.
+#[test]
+fn an_unset_working_directory_grants_no_root() {
+    assert!(turn_workspace_root("").is_none());
+    assert!(turn_workspace_root("   ").is_none());
+}
+
+/// A path that does not exist is a host's mistake, not a reason to fail the
+/// turn — and granting a root nothing resolves under would be meaningless.
+#[test]
+fn a_missing_working_directory_grants_no_root() {
+    let missing = std::env::temp_dir().join("medulla-openhuman-not-here-6f1a2b");
+    assert!(turn_workspace_root(missing.to_str().unwrap()).is_none());
+}
+
+/// A file is not a workspace. Caught here rather than left to fail once per
+/// tool call inside the turn.
+#[test]
+fn a_file_is_not_a_workspace_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("not-a-dir");
+    std::fs::write(&file, b"x").expect("write");
+    assert!(turn_workspace_root(file.to_str().unwrap()).is_none());
+}
+
+/// The run's checkout resolves to an absolute, canonical path — the form the
+/// core's containment check compares against, so a symlinked or `..`-laden
+/// path still contains the files written under it.
+#[test]
+fn the_runs_checkout_resolves_to_a_canonical_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let nested = dir.path().join("checkout");
+    std::fs::create_dir(&nested).expect("mkdir");
+    let indirect = nested.join("..").join("checkout");
+    let resolved = turn_workspace_root(indirect.to_str().unwrap()).expect("an existing directory");
+    assert!(resolved.is_absolute());
+    assert_eq!(resolved, nested.canonicalize().expect("canonical"));
+}
+
+/// Spaces are valid path characters, including at either end of a checkout's
+/// name; the workspace grant must preserve them rather than treating `cwd` as
+/// user-facing prose.
+#[test]
+fn a_working_directory_with_edge_whitespace_is_preserved() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let checkout = dir.path().join(" checkout ");
+    std::fs::create_dir(&checkout).expect("mkdir");
+
+    assert_eq!(
+        turn_workspace_root(checkout.to_str().expect("utf-8 path")),
+        Some(checkout.canonicalize().expect("canonical")),
+    );
 }
 
 /// With nothing in the environment the turn asks for whatever the dispatch

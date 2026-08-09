@@ -297,7 +297,7 @@ impl Signals {
                 // loop would treat the failed install as a Ctrl-C and kill the
                 // child. Degrade to never resolving instead.
                 if tokio::signal::ctrl_c().await.is_err() {
-                    std::future::pending().await;
+                    std::future::pending::<()>().await;
                 }
             }
             Signals::Unavailable => std::future::pending().await,

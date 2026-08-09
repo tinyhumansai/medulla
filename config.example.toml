@@ -135,6 +135,11 @@ tokenEnv = "MEDULLA_TOKEN"
 # This is the only way to state the choice: it travels in the request body, so
 # neither a model-id suffix nor baseUrl can express it. A suffix such as
 # "z-ai/glm-5.2:streamlake" is accepted by OpenRouter and silently ignored.
+#
+# The pin is applied only when the request body is a JSON object within the
+# rewrite limit (32 MiB). A larger body, a non-object body (e.g. streamed file
+# uploads), or one that already names its own "provider.only" is forwarded
+# unchanged — the pin is skipped rather than refusing the request.
 # providerOnly = ["streamlake"]
 
 # ---------------------------------------------------------------------------

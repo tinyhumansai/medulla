@@ -306,7 +306,10 @@ fn codex_thread_label_and_index_map_agree_on_duplicate_ids() {
     );
 
     let map = codex_index_map(&env);
-    assert_eq!(map.get("codex-1").map(String::as_str), Some("land-auth-flow"));
+    assert_eq!(
+        map.get("codex-1").map(String::as_str),
+        Some("land-auth-flow")
+    );
     assert_eq!(
         codex_thread_label(&env, "codex-1").as_deref(),
         Some("land-auth-flow")

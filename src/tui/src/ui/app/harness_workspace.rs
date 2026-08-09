@@ -171,8 +171,14 @@ impl App {
         // offer a save that is not there, and a later successful save could
         // silently persist it.
         let mut favorites = self.loaded.config.harness.favorite_workspaces.clone();
-        favorites
-            .retain(|favorite| !favorite.name.eq_ignore_ascii_case(name) && favorite.path != path);
+        // Compare effective resolved paths rather than the stored spellings: a
+        // favorite saved from relative input (e.g. `repo` against the host
+        // workspace) must not survive beside the same directory re-saved under
+        // its resolved absolute path — a re-alias, not a second directory.
+        favorites.retain(|favorite| {
+            !favorite.name.eq_ignore_ascii_case(name)
+                && harnesses.resolve_workspace(&favorite.path) != path
+        });
         favorites.insert(
             0,
             medulla::config::FavoriteWorkspace {

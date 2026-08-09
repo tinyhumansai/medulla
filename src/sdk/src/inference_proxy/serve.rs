@@ -285,21 +285,47 @@ async fn forward_body(
             req.into_body().into_data_stream(),
         )));
     }
-    let over_limit = req
-        .body()
-        .size_hint()
-        .lower()
-        .gt(&(body::MAX_REWRITE_BYTES as u64));
-    if over_limit {
-        tracing::warn!(
-            "request body exceeds the rewrite limit; forwarding without the provider pin"
-        );
+
+    // The declared size is only a fast path: a chunked request's lower bound is
+    // 0 even when it will not stay small, so the loop below counts real bytes
+    // and falls back to an unpinned stream once the limit is reached. Relying
+    // on `size_hint` alone would let a chunked body allocate without bound.
+    if req.body().size_hint().lower() > body::MAX_REWRITE_BYTES as u64 {
         return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(
             req.into_body().into_data_stream(),
         )));
     }
 
-    let collected = req.into_body().collect().await?.to_bytes();
+    // Read one frame at a time, keeping a running byte count. Everything
+    // buffered fits the rewrite limit by construction; the frames already
+    // consumed are prepended to the still-unread tail when the limit trips, so
+    // falling back to a stream costs the upstream nothing and loses nothing.
+    let mut tail = Box::pin(req.into_body().into_data_stream());
+    let mut buffered = Vec::new();
+    let mut bytes_seen = 0usize;
+    while let Some(chunk) = tail.next().await {
+        let chunk = chunk?;
+        bytes_seen += chunk.len();
+        if bytes_seen > body::MAX_REWRITE_BYTES {
+            tracing::warn!(
+                "request body exceeds the rewrite limit; forwarding without the provider pin"
+            );
+            let prefix = buffered
+                .into_iter()
+                .map(|bytes| Ok::<Bytes, hyper::Error>(bytes));
+            let stream = futures::stream::iter(prefix).chain(tail);
+            return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(
+                stream,
+            )));
+        }
+        buffered.push(chunk);
+    }
+
+    let mut frame_buffer = Vec::with_capacity(bytes_seen);
+    for chunk in &buffered {
+        frame_buffer.extend_from_slice(chunk);
+    }
+    let collected = Bytes::from(frame_buffer);
     Ok(
         match body::inject_provider_only(&collected, provider_only) {
             Some(rewritten) => ForwardBody::Rewritten(rewritten),

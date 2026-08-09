@@ -25,6 +25,7 @@ use super::*;
 mod admission_tests;
 mod capability_tests;
 mod custom_harness_tests;
+mod origin_tests;
 mod provider_tests;
 mod system_info_tests;
 mod task_attribution_tests;

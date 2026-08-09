@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use http::{HeaderMap, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::body::{Body as _, Frame, Incoming};

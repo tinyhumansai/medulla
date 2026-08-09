@@ -445,7 +445,16 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
-            origin: if frame.workflow_node {
+            // `workflowNode` is trusted only from a device-local sender. The
+            // workflow plane is a daemon-local dispatch: the workflow host runs
+            // each `agent` node over an in-process loopback bridge, so the only
+            // frames that legitimately carry the marker arrive from a peer this
+            // daemon itself serves. A remote authenticated peer can write the
+            // key into its own JSON, so there it must be read as ordinary
+            // delegated work — otherwise the marker would let any such peer
+            // mint `RunTaskOrigin::Workflow`, which is what suppresses the
+            // embedded harness's approval prompts.
+            origin: if sender_device_local && frame.workflow_node {
                 crate::daemon::providers::RunTaskOrigin::Workflow
             } else {
                 crate::daemon::providers::RunTaskOrigin::DelegatedTask

@@ -199,21 +199,11 @@ impl PtySessionExecutor {
                 return Ok(result);
             }
 
-            // Refresh the Codex thread label from the session index
-            // periodically after initial transcript discovery.
-            // `fold_available` only queries the index on first sighting
-            // (when `TailPoll.located` is emitted); a later /rename would
-            // otherwise not be observable until a subsequent turn recreates
-            // the tailer.
-            if provider == HarnessProvider::Codex && poll_ticks.is_multiple_of(30) {
-                if let Some(sid) = self.sessions.row(id).and_then(|row| row.session_id.clone()) {
-                    if let Some(name) =
-                        medulla::session_history::codex_thread_label(&self.env, &sid)
-                    {
-                        self.sessions.record_thread_name(id, name);
-                    }
-                }
-            }
+            // Codex `/rename` names are re-read for the session's whole life by
+            // the manager's per-session label poller (`PtyManager::spawn_codex_label_poller`),
+            // which is keyed to the PTY session lifecycle and therefore also runs
+            // while the turn is held, idle, or retained. Nothing else re-reads
+            // the index here.
 
             if !tailer.is_located() && started.elapsed() > LOCATE_BUDGET {
                 // A harness writes its transcript once it starts a turn, so an

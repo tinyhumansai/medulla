@@ -119,13 +119,14 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
 
     // snake_case, not camelCase: `AgentChatParams` carries no `rename_all`, so
     // the controller deserializes the field names as they are spelled in Rust.
-    // `AgentChatParams` carries no origin or workspace field; those trust
-    // decisions instead ride task-locals through the full core dispatch — see
-    // the scopes below.
+    // `cwd` is optional on the core side and roots the turn's file and shell
+    // tools in the node's checkout; the origin trust decision rides a
+    // task-local instead — see the scope below.
     let params = json!({
         "message": prompt,
         "model_override": model,
         "thread_id": thread_id,
+        "cwd": &cwd,
     });
 
     // Annotated with the core's own alias rather than inferred: the sender half

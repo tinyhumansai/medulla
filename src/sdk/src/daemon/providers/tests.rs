@@ -576,6 +576,8 @@ async fn a_bounded_read_keeps_records_at_or_under_the_cap() {
         LineRead::Line
     );
     assert_eq!(buf, b"trailing");
+}
+
 /// Build a fake claude CLI at `path` from `body`, and the options that run it
 /// with `timeout_ms` as the idle budget. Shared by the watchdog tests below.
 #[cfg(unix)]

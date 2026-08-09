@@ -131,11 +131,7 @@ pub(crate) async fn run(
                 }
             }
             recv = sub.recv(), if !runtime_sub_closed => {
-                if matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
-                    // The runtime is gone and will never publish again; disarm
-                    // the arm so the loop does not spin on an ever-ready error.
-                    runtime_sub_closed = true;
-                } else if runtime_ping_needs_refresh(&recv) {
+                if runtime_ping_needs_refresh(&mut runtime_sub_closed, &recv) {
                     app.refresh_snapshot();
                     if should_refresh_context(&mut app) {
                         run_cmd(

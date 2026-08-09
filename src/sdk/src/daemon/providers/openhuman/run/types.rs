@@ -10,7 +10,11 @@ use super::super::super::types::OnEvent;
 /// (when there is one) reaches the callback; a caller that could bump one
 /// without the others is a caller that can report a count the transcript does
 /// not support.
-pub(super) struct EventSink {
+///
+/// Visible to the module's parent so [`super`] can re-export it
+/// (`pub(super) use types::EventSink`), matching how the folder's consumers
+/// reach it; the emission behaviour itself lives in [`super::events`].
+pub(in super::super) struct EventSink {
     /// The caller's per-event callback, when it registered one.
     pub(super) on_event: Option<OnEvent>,
     /// Number of events emitted so far — what

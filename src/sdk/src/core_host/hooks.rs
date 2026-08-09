@@ -225,20 +225,22 @@ pub(super) async fn run_command(
     let mut child = process.spawn()?;
     let timeout = Duration::from_secs(spec.timeout().unwrap_or(DEFAULT_HOOK_TIMEOUT_SECS));
     let waited = tokio::time::timeout(timeout, async {
-        let write_result = if let Some(mut stdin) = child.stdin.take() {
+        if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
-            stdin.write_all(payload).await
-        } else {
-            Ok(())
-        };
-        let status = child.wait().await?;
-        Ok::<_, std::io::Error>((status, write_result))
+            // A hook that does not read its stdin — `git add -A && git commit`
+            // is an entirely reasonable one — exits while the payload is still
+            // in flight, and the write fails with EPIPE. That is the hook
+            // succeeding, not failing, so the error is dropped and the exit
+            // status is left to decide: propagating it made such a `PreToolUse`
+            // hook veto the tool call it had just approved.
+            let _ = stdin.write_all(payload).await;
+        }
+        child.wait().await
     })
     .await;
     match waited {
-        Ok(Ok((status, write_result))) => {
+        Ok(Ok(status)) => {
             if enforce_status {
-                write_result?;
                 anyhow::ensure!(status.success(), "hook command exited with {status}");
             }
             Ok(())

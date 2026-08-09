@@ -286,23 +286,21 @@ const STDIN_RACE_PAYLOAD: &[u8] = &[b'x'; 1 << 20];
 
 #[cfg(unix)]
 #[tokio::test]
-async fn an_enforced_hook_whose_stdin_write_fails_vetoes() {
+async fn an_enforced_hook_whose_stdin_write_fails_is_still_observational() {
     // The command closes its stdin immediately and stays alive briefly, so the
-    // payload cannot fully arrive. An enforced (pre-hook) run must surface the
-    // write failure: the hook never received its input, so approving the tool
-    // call as if it had would run it unvetted.
-    let err = run_command(
+    // payload cannot fully arrive — the same race a hook that simply never
+    // drains its stdin (`git add -A && git commit`) hits. Surfacing that write
+    // failure as a veto made a `PreToolUse` hook veto the tool call it had just
+    // approved with `exit 0`, so only the exit status decides now, for enforced
+    // hooks exactly as for observational ones.
+    run_command(
         &spec("exec 0<&-; sleep 0.2"),
         STDIN_RACE_PAYLOAD,
         true,
         &Default::default(),
     )
     .await
-    .expect_err("an enforced hook whose stdin write fails must veto");
-    assert!(
-        err.to_string().contains("pipe"),
-        "expected a pipe error, got: {err}"
-    );
+    .expect("a stdin write failure alone must not veto an enforced hook");
 }
 
 #[cfg(unix)]

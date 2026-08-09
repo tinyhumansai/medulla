@@ -203,9 +203,6 @@ fn a_long_workspace_list_windows_onto_the_selected_folder() {
     // where the harness step windows. On a short popup the rows past the fold
     // were never painted and never recorded a hit box, so ↓ walked the selection
     // onto an invisible, unclickable directory and Enter started a session there.
-    use ratatui::backend::TestBackend;
-    use ratatui::Terminal;
-
     let root = tempfile::tempdir().unwrap();
     let mut app = picker_on_workspace_step(root.path());
     {

@@ -391,7 +391,13 @@ fn write_managed(
 fn write_atomically(path: &Path, body: &str) -> io::Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
-    fs::write(&temp, body)?;
+    // A partial write (quota exhausted, I/O error) must not leave its uniquely
+    // named temp file behind either: each retry mints a fresh name, so a run of
+    // failures under a full quota would otherwise accumulate orphans.
+    if let Err(source) = fs::write(&temp, body) {
+        let _ = fs::remove_file(&temp);
+        return Err(source);
+    }
     match fs::rename(&temp, path) {
         Ok(()) => Ok(()),
         Err(source) => {

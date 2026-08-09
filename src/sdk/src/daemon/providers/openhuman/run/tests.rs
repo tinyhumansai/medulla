@@ -52,6 +52,29 @@ fn only_event(fold: &mut ProgressFold, progress: &AgentProgress) -> (String, ser
     mapped.remove(0)
 }
 
+/// `TurnCompleted` drops the pending text instead of flushing it: the executor
+/// re-emits the completed reply from the core's return value as its own closing
+/// `agent_message`, so flushing here would double the turn's final words.
+/// Thinking is *not* dropped with it — the answer's reasoning is recorded.
+#[test]
+fn turn_completed_clears_text_but_still_flushes_thinking() {
+    let mut fold = ProgressFold::default();
+    fold.fold(&AgentProgress::TextDelta {
+        delta: "the final reply".to_string(),
+        iteration: 1,
+    });
+    fold.fold(&AgentProgress::ThinkingDelta {
+        delta: "its reasoning".to_string(),
+        iteration: 1,
+    });
+    let events = fold.fold(&AgentProgress::TurnCompleted { iterations: 7 });
+    assert_eq!(events.len(), 2, "status + the reasoning snapshot, no doubled message");
+    assert_eq!(events[0].0, "agent_thinking");
+    assert_eq!(events[0].1["text"], "its reasoning");
+    assert_eq!(events[1].0, "status");
+    assert_eq!(events[1].1["state"], "idle");
+}
+
 #[test]
 fn turn_and_iteration_boundaries_fold_to_status() {
     let mut fold = ProgressFold::default();

@@ -386,3 +386,41 @@ async fn one_key_pinned_two_ways_does_not_leak_a_pin_across_presets() {
         "the unpinned preset's traffic must be untouched"
     );
 }
+
+#[tokio::test]
+async fn a_pinned_request_over_the_rewrite_limit_is_streamed_without_the_pin() {
+    let upstream = MockOpenRouter::start(Reply::Json("{}".to_string())).await;
+    let proxy = ProxyHandle::start(upstream.root.clone()).expect("proxy starts");
+    let endpoint = proxy.endpoint_for_credential(UPSTREAM_KEY, &["streamlake".to_string()]);
+
+    // One byte past the rewrite limit, so `forward_body` must not buffer it:
+    // the safety valve streams the body unpinned rather than applying the pin.
+    // Any smaller body would rewrite, and this test exists to pin the valve.
+    let payload = format!(
+        "{{\"model\":\"z-ai/glm-5.2\",\"prompt\":\"{}\"}}",
+        "x".repeat(medulla::inference_proxy::MAX_REWRITE_BYTES)
+    );
+
+    reqwest::Client::new()
+        .post(format!(
+            "{}/v1/messages",
+            endpoint.base_url(medulla::inference_proxy::UpstreamShape::Anthropic)
+        ))
+        .bearer_auth(&endpoint.token)
+        .body(payload.clone())
+        .send()
+        .await
+        .expect("request reaches the proxy");
+
+    let received = upstream.only_request();
+    assert_eq!(
+        received.body, payload,
+        "an oversized pinned body is forwarded verbatim"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(&received.body).expect("forwarded body is JSON");
+    assert!(
+        body.get("provider").is_none(),
+        "no provider pin is applied past the rewrite limit"
+    );
+}

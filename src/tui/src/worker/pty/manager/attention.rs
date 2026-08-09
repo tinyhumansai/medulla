@@ -33,7 +33,7 @@ impl PtyManager {
             if !handle.is_running() {
                 return;
             }
-            refresh(&handle, (inner.now)());
+            refresh(&handle, inner.hook_log.get(), (inner.now)());
         });
     }
 

@@ -334,7 +334,7 @@ async fn run_provider_attempt(
     }
 
     let stdout = child.stdout.take().ok_or("child has no stdout")?;
-    let stderr = child.stderr.take().ok_or("child has no stderr")?;
+    let mut stderr = child.stderr.take().ok_or("child has no stderr")?;
 
     // stderr tail collector, which doubles as a heartbeat source: a child that
     // is logging to stderr is demonstrably alive even while it emits no parsed

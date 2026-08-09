@@ -469,6 +469,26 @@ async fn stderr_chatter_keeps_a_working_child_alive() {
     assert_eq!(result.unwrap().reply, "built");
 }
 
+/// Progress that never terminates in a newline — a spinner rewritten in place
+/// with `\r` — is still proof of life. A `read_until(b'\n')` loop would hold
+/// its buffer until the pipe closed, so the heartbeat must come from each chunk
+/// as it arrives or a busy child that just happens to frame progress with `\r`
+/// is killed as idle.
+#[cfg(unix)]
+#[tokio::test]
+async fn carriage_return_progress_keeps_a_working_child_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_bin, options) = idle_probe_options(
+        dir.path(),
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 12 ]; do printf 'compiling crate %d\\r' \"$i\" >&2; sleep 0.1; i=$((i+1)); done\nprintf '\\n'\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"built\"}'\n",
+        300,
+    );
+
+    let result = super::execute::run_provider_task(options).await;
+
+    assert_eq!(result.unwrap().reply, "built");
+}
+
 /// stdout records this build does not map still prove the child is running, so
 /// they must push the deadline out too — only a silent pipe means idle.
 #[cfg(unix)]

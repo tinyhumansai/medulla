@@ -211,12 +211,16 @@ impl App {
 
     /// Re-anchor the launcher on the workspace that was just favorited.
     ///
-    /// Saving promotes the new favorite to the head of the ranked list, so the
-    /// arrowed cursor (which pointed at the saved row beforehand) would otherwise
-    /// keep its old index and silently select a *different* directory now parked
-    /// in that row — and Enter would start the harness there instead of the
-    /// workspace the operator just saved. Re-run the completions and set the
-    /// selection onto the head row, so the highlight follows the favorite.
+    /// Saving the favorite is the operator's way of saying Enter should start
+    /// the harness there, so the arrowed cursor — which pointed at the saved
+    /// row beforehand — must follow the saved workspace to the row it now
+    /// occupies rather than keep its old index and silently select a
+    /// *different* directory parked in that row. The ranking orders by match
+    /// score first and insertion order second, so the promoted favorite only
+    /// leads the list when it also scores best against the active query;
+    /// otherwise it lands at a non-zero row. Re-run the completions and place
+    /// the cursor on the actual row of the saved workspace, so the highlight
+    /// and Enter both follow the favorite.
     ///
     /// When the rename happens under a filter whose query only matched the old
     /// label, the saved favorite is absent from the refreshed list: the refresh
@@ -228,12 +232,12 @@ impl App {
     fn after_saving_favorite(&mut self, saved: &str) {
         self.refresh_harness_workspace_choices();
         if let Some(picker) = &mut self.session_picker {
-            if picker
+            if let Some(index) = picker
                 .workspace_choices
                 .iter()
-                .any(|choice| choice.path == saved)
+                .position(|choice| choice.path == saved)
             {
-                picker.workspace_index = 0;
+                picker.workspace_index = index;
                 picker.workspace_picked = true;
             } else {
                 picker.workspace_query = saved.to_string();

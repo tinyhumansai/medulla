@@ -85,8 +85,22 @@ fn a_lagged_runtime_subscription_still_refreshes_the_snapshot() {
     // has changed — the subscription overflowed and dropped notifications — was
     // the one that redrew nothing, leaving the UI stale until an unrelated event
     // happened along.
-    assert!(runtime_ping_needs_refresh(&Ok(())));
-    assert!(runtime_ping_needs_refresh(&Err(RecvError::Lagged(7))));
-    // A closed channel has no newer snapshot behind it.
-    assert!(!runtime_ping_needs_refresh(&Err(RecvError::Closed)));
+    assert!(runtime_ping_needs_refresh(&mut false, &Ok(())));
+    assert!(runtime_ping_needs_refresh(&mut false, &Err(RecvError::Lagged(7))));
+}
+
+#[test]
+fn a_closed_runtime_subscription_disarms_the_refresh_arm() {
+    use tokio::sync::broadcast::error::RecvError;
+
+    // When the last sender goes away, `recv()` yields `Closed` and stays ready
+    // forever. An always-ready select arm would spin at 100% CPU without this —
+    // the first `Closed` must latch the arm shut, not just skip one redraw.
+    let mut shut = false;
+    assert!(!runtime_ping_needs_refresh(&mut shut, &Err(RecvError::Closed)));
+    assert!(shut, "the arm latches shut on the first Closed");
+    assert!(
+        !runtime_ping_needs_refresh(&mut shut, &Ok(())),
+        "later (unreachable) wakeups are ignored once shut"
+    );
 }

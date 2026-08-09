@@ -43,9 +43,7 @@ const PROGRESS_CAPACITY: usize = 256;
 /// aborted or falls silent for `timeout_ms`, or when the core itself refuses
 /// the call — the same failure vocabulary a spawned provider returns, so a
 /// caller does not branch on which harness ran.
-pub async fn run_openhuman_task(
-    options: RunTaskOptions,
-) -> Result<RunTaskResult, String> {
+pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
     let RunTaskOptions {
         prompt,
         cwd,

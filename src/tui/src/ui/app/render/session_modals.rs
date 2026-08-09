@@ -30,11 +30,11 @@ impl App {
         let (rows, title) = match picker.step {
             SessionPickerStep::Harness => (
                 picker.choices.len(),
-                "Choose a harness type — ↑/↓ · Enter workspace · Esc cancel",
+                "Choose a harness type — Enter workspace · Esc cancel",
             ),
             SessionPickerStep::Workspace => (
                 picker.workspace_choices.len(),
-                "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
+                "Choose workspace — type to filter · Enter start · Esc back",
             ),
         };
         let height = (rows as u16).saturating_add(7).clamp(8, 18);

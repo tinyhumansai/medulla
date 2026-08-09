@@ -327,9 +327,19 @@ pub(crate) async fn run(
 /// the UI stale until some unrelated event happened to wake it, exactly when
 /// the most had changed.
 ///
-/// `Closed` is the one wakeup that refreshes nothing: the runtime is gone, so
-/// there is no newer snapshot to read.
-fn runtime_ping_needs_refresh(recv: &Result<(), tokio::sync::broadcast::error::RecvError>) -> bool {
+/// `Closed` is the one wakeup that refreshes nothing — and it is *terminal*:
+/// the runtime is gone, so no newer snapshot will ever arrive, and the caller
+/// sets `shut` from it so the loop disarms the arm instead of spinning on an
+/// ever-ready error. That is what keeps the select from busy-looping after the
+/// last sender drops.
+fn runtime_ping_needs_refresh(
+    shut: &mut bool,
+    recv: &Result<(), tokio::sync::broadcast::error::RecvError>,
+) -> bool {
+    if matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
+        *shut = true;
+        return false;
+    }
     matches!(
         recv,
         Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_))

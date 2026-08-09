@@ -19,6 +19,7 @@ fn preset(id: &str, host_id: &str) -> CustomHarnessConfig {
         base_url: String::new(),
         codex_overrides: false,
         reasoning_effort: None,
+        provider_only: Vec::new(),
     }
 }
 

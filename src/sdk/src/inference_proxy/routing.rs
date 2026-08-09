@@ -67,6 +67,10 @@ pub fn route_openrouter(
             api_key_env: Some(PROXY_TOKEN_ENV.to_string()),
             models: router.models.clone(),
             providers,
+            // Deliberately not propagated to the child: the pin is applied by
+            // the proxy on the way out, and the child has no say in it. Passing
+            // it on would only invite a harness to contradict it.
+            provider_only: Vec::new(),
         },
         env: vec![(PROXY_TOKEN_ENV.to_string(), proxy.token.clone())],
         scrub_env,
@@ -129,7 +133,7 @@ pub fn route_run(
     if route_openrouter(router, provider, &probe, &name).is_none() {
         return Ok(None);
     }
-    let endpoint = shared(env)?.endpoint_for_key(&key);
+    let endpoint = shared(env)?.endpoint_for_credential(&key, &router.provider_only);
     Ok(route_openrouter(router, provider, &endpoint, &name))
 }
 

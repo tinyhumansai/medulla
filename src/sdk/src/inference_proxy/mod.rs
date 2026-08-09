@@ -25,6 +25,7 @@
 //!
 //! # Layout
 //!
+//! - [`body`] — the request-body rewrite that applies an upstream-provider pin.
 //! - [`headers`] — the pure request-header rewrite. All attribution policy.
 //! - [`lifecycle`] — listener startup and process-wide proxy ownership.
 //! - [`routing`] — provider-scoped router and child-environment rewriting.
@@ -38,6 +39,7 @@
 //! Medulla-routed runs only. A harness the operator has separately configured to
 //! reach OpenRouter through its own config file still bypasses this proxy.
 
+mod body;
 mod headers;
 mod lifecycle;
 mod routing;

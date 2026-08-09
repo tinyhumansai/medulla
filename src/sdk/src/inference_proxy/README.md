@@ -30,7 +30,20 @@ child harness                 this module                    OpenRouter
 
 One listener serves the whole process. The token, not the port, separates
 credentials: two presets sharing an `apiKeyEnv` share a token, two with
-different keys do not.
+different keys do not — and so do two that pin different upstream providers,
+since the pin is part of a credential's identity.
+
+## Upstream-provider pinning
+
+A preset may name the OpenRouter serving providers allowed to answer its
+requests (`providerOnly`). OpenRouter carries that preference in the request
+*body*, not a header or the URL, so it is the one thing this proxy rewrites
+beyond the headers: a pinned run's request is buffered, `provider.only` is
+merged in, and the result is forwarded. Unpinned runs — every run today that
+does not ask for it — keep the pure streaming forward.
+
+An unrecognized model-id suffix (`z-ai/glm-5.2:streamlake`) is accepted by
+OpenRouter and silently ignored, which is why the body is the only honest seam.
 
 ## Contents
 
@@ -44,6 +57,8 @@ different keys do not.
 - [`headers.rs`](./headers.rs) — the pure request-header rewrite. All attribution
   policy lives here: what is stripped, what is injected, what is forwarded
   verbatim.
+- [`body.rs`](./body.rs) — the request-body rewrite that applies an
+  upstream-provider pin, and the buffering limit that bounds it.
 - [`serve.rs`](./serve.rs) — the accept loop, the loopback-peer and token guards,
   mount-to-upstream mapping, and the bidirectional streaming forward.
 - [`tests.rs`](./tests.rs) — offline unit tests for the rewrite, host

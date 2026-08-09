@@ -529,6 +529,7 @@ fn config_subpage_shows_effective_router_without_the_key_value() {
         api_key_env: Some(KEY_ENV.into()),
         models: std::collections::HashMap::new(),
         providers,
+        provider_only: Vec::new(),
     });
 
     let rt = Arc::new(MockRuntime::demo());

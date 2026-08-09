@@ -258,3 +258,55 @@ fn runnability_follows_the_detected_clis_except_for_the_embedded_core() {
             .unwrap();
     assert!(openhuman.runnable_on(&[]));
 }
+
+#[test]
+fn an_upstream_provider_pin_is_normalized_and_reaches_the_router() {
+    let preset: CustomHarnessConfig = serde_json::from_value(serde_json::json!({
+        "id": "glm",
+        "name": "GLM 5.2 via Claude",
+        "baseHarness": "claude",
+        "model": "z-ai/glm-5.2",
+        "hostId": "this-device",
+        // As an operator would copy them off OpenRouter's dashboard, which
+        // presents slugs capitalized and padded.
+        "providerOnly": ["  StreamLake ", "Novita", ""],
+    }))
+    .unwrap();
+    let preset = preset.normalize().unwrap();
+
+    assert_eq!(preset.provider_only, vec!["streamlake", "novita"]);
+    // Order is the operator's preference order and must survive.
+    assert_eq!(preset.router().provider_only, vec!["streamlake", "novita"]);
+}
+
+#[test]
+fn an_unpinned_preset_leaves_provider_choice_to_openrouter() {
+    let preset =
+        CustomHarnessConfig::from_editor_line("glm | GLM | claude | z-ai/glm-5.2 | | this-device")
+            .unwrap();
+    assert!(preset.provider_only.is_empty());
+    assert!(preset.router().provider_only.is_empty());
+}
+
+#[test]
+fn a_pin_round_trips_through_a_config_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.toml");
+    std::fs::write(
+        &path,
+        r#"
+[[customHarnesses]]
+id = "glm"
+name = "GLM 5.2 via Claude"
+baseHarness = "claude"
+model = "z-ai/glm-5.2"
+hostId = "this-device"
+providerOnly = ["streamlake"]
+"#,
+    )
+    .unwrap();
+
+    let presets = super::load_custom_harnesses(&path).unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].provider_only, vec!["streamlake"]);
+}

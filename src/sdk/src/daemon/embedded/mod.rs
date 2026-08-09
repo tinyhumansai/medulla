@@ -330,7 +330,12 @@ async fn drain_loop(
                 stats.received += 1;
             }
             let frame = decode_task_frame(&message.text);
-            runtime.handle_message(message.from, message.text, frame);
+            // The bridge knows whether the sender is this device's own
+            // in-process peer (the workflow host), which is the receiver's only
+            // verifiable ground for trusting a frame's `workflowNode` marker;
+            // see [`DaemonRuntime::handle_message_from`].
+            let sender_device_local = bridge.is_device_local(&message.from).await;
+            runtime.handle_message_from(message.from, message.text, frame, sender_device_local);
         }
     }
 }

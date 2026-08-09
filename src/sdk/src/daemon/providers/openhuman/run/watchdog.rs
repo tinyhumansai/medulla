@@ -27,7 +27,7 @@ use tokio::time::Instant;
 
 use super::super::super::types::Abort;
 use super::core_contract::AgentProgress;
-use super::events::EventSink;
+use super::types::EventSink;
 
 /// Drive `call` to completion under an idle watchdog.
 ///

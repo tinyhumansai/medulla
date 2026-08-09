@@ -395,7 +395,10 @@ pub async fn run_daemon(
 async fn drain_once(transport: &LinkBridge, runtime: &DaemonRuntime) {
     for message in transport.drain_inbox(50).await {
         let frame = crate::protocol::decode_task_frame(&message.text);
-        runtime.handle_message(message.from, message.text, frame);
+        // Like the serve loop above: a host-link peer is never device-local, so
+        // it can never claim workflow authority through the frame marker.
+        let sender_device_local = transport.is_device_local(&message.from).await;
+        runtime.handle_message_from(message.from, message.text, frame, sender_device_local);
     }
 }
 

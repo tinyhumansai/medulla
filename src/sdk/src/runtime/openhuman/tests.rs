@@ -450,6 +450,32 @@ fn silence_past_the_deadline_settles_the_turn_but_keeps_the_text() {
 }
 
 #[test]
+fn a_run_of_unconfirmed_echoes_still_respects_the_retention_caps() {
+    // Each echo files a provisional row, and only the backend's confirmed copy
+    // retires it. A dead or stalled backend never sends one, so the echo path
+    // alone must enforce the same caps `append_events` applies to batches —
+    // otherwise its rows grow without bound.
+    use crate::runtime::event_log::{CHAT_CAP, EVENT_CAP};
+    let cell = SnapshotCell::new();
+    let overflow = 100u64;
+    for _ in 0..EVENT_CAP as u64 + overflow {
+        cell.echo_user("hello");
+    }
+    let snap = cell.snapshot();
+    assert_eq!(snap.events.len(), EVENT_CAP, "the full log honours the cap");
+    assert_eq!(
+        snap.chat_events.len(),
+        CHAT_CAP,
+        "the chat view honours its own (smaller) cap"
+    );
+    assert_eq!(
+        snap.events[0].seq,
+        overflow as u64 + 1,
+        "the oldest rows are the ones dropped"
+    );
+}
+
+#[test]
 fn the_watchdog_is_disarmed_by_the_first_batch_to_arrive() {
     // Once the backend is talking, liveness is the batch's to report — a
     // watchdog still armed would settle a turn that is genuinely producing.

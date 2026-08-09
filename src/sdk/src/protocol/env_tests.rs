@@ -140,6 +140,74 @@ fn provider_bin_override_and_default() {
         provider_bin(HarnessProvider::Openhuman, &e),
         "/opt/openhuman"
     );
+    // The conventional namespaced spelling outranks the bare legacy one, which
+    // is kept so a host configured before the convention keeps working.
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_BIN", "/new/openhuman"),
+        ("OPENHUMAN_BIN", "/opt/openhuman"),
+    ]);
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &e),
+        "/new/openhuman"
+    );
+}
+
+#[test]
+fn model_override_prefers_the_provider_key_then_the_generic_one() {
+    use crate::protocol::env::model_override;
+
+    assert!(model_override(HarnessProvider::Openhuman, &env(&[])).is_none());
+    // Generic alone applies to every provider.
+    let e = env(&[("MEDULLA_HARNESS_MODEL", "generic/model")]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("generic/model")
+    );
+    assert_eq!(
+        model_override(HarnessProvider::Claude, &e).as_deref(),
+        Some("generic/model")
+    );
+    // Per-provider beats generic.
+    let e = env(&[
+        ("MEDULLA_HARNESS_MODEL", "generic/model"),
+        ("MEDULLA_OPENHUMAN_MODEL", "deepseek/deepseek-v4-pro"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("deepseek/deepseek-v4-pro")
+    );
+    // …and leaves another provider on the generic value.
+    assert_eq!(
+        model_override(HarnessProvider::Codex, &e).as_deref(),
+        Some("generic/model")
+    );
+    // The deprecated spelling is read directly behind each MEDULLA_ name.
+    let e = env(&[("TINYPLACE_OPENHUMAN_MODEL", "  legacy/model  ")]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("legacy/model")
+    );
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_MODEL", "new/model"),
+        ("TINYPLACE_OPENHUMAN_MODEL", "legacy/model"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("new/model")
+    );
+    // Exported but blank is a shell accident, not a request for "".
+    let e = env(&[("MEDULLA_OPENHUMAN_MODEL", "   ")]);
+    assert!(model_override(HarnessProvider::Openhuman, &e).is_none());
+    // A blank higher-precedence value must not mask a usable fallback.
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_MODEL", "   "),
+        ("TINYPLACE_OPENHUMAN_MODEL", "legacy/model"),
+        ("MEDULLA_HARNESS_MODEL", "generic/model"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("legacy/model")
+    );
 }
 
 #[test]

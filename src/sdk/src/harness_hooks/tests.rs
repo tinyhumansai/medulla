@@ -121,7 +121,14 @@ fn codex_omits_notification_and_session_end() {
             "{event:?}",
         );
         assert!(!event.supported_by(HarnessProvider::Opencode), "{event:?}");
-        assert!(!event.supported_by(HarnessProvider::Openhuman), "{event:?}");
+        assert_eq!(
+            event.supported_by(HarnessProvider::Openhuman),
+            matches!(
+                event,
+                HookEvent::PreToolUse | HookEvent::PostToolUse | HookEvent::Stop
+            ),
+            "{event:?}",
+        );
     }
 }
 
@@ -247,11 +254,18 @@ fn codex_installs_session_end_because_the_cli_does_raise_that_event() {
 #[test]
 fn unadapted_providers_report_every_hook_rather_than_ignoring_it() {
     let hooks = config(vec![hook(HookEvent::PostToolUse, "*", "checkpoint")]);
-    for provider in [HarnessProvider::Opencode, HarnessProvider::Openhuman] {
-        let injection = hook_injection(provider, &hooks);
-        assert!(injection.args.is_empty(), "{provider:?}");
-        assert_eq!(injection.dropped.len(), 1, "{provider:?}");
-    }
+    // OpenCode carries no hook delivery at all, so a hook it cannot run is
+    // reported rather than silently dropped.
+    let injection = hook_injection(HarnessProvider::Opencode, &hooks);
+    assert!(injection.args.is_empty());
+    assert_eq!(injection.dropped.len(), 1);
+
+    // OpenHuman routes its supported events to the embedded core at boot — this
+    // spawn-side injection carries no argv, and PostToolUse is supported, so it
+    // is neither delivered here nor reported as dropped.
+    let injection = hook_injection(HarnessProvider::Openhuman, &hooks);
+    assert!(injection.args.is_empty());
+    assert!(injection.dropped.is_empty(), "{:?}", injection.dropped);
 }
 
 #[test]

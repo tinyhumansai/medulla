@@ -175,7 +175,8 @@ host configured before the rename keeps working:
 | `MEDULLA_HARNESS_DM_TO` / `MEDULLA_<P>_DM_TO` / `MEDULLA_OPENHUMAN_OWNER` | Owner to forward the session envelopes to. |
 | `MEDULLA_HARNESS_RECEIVE_FROM` / `MEDULLA_<P>_RECEIVE_FROM` | Peer whose input control frames / plain DMs are injected (defaults to the owner). |
 | `MEDULLA_HARNESS_RECEIVE=0` / `MEDULLA_<P>_RECEIVE=0` | Disable inbound input injection. |
-| `MEDULLA_<P>_BIN` (`MEDULLA_CODEX_BIN`, `MEDULLA_CLAUDE_BIN`, `MEDULLA_OPENCODE_BIN`) | Override the provider binary. |
+| `MEDULLA_<P>_BIN` (`MEDULLA_CODEX_BIN`, `MEDULLA_CLAUDE_BIN`, `MEDULLA_OPENCODE_BIN`, `MEDULLA_OPENHUMAN_BIN`) | Override the provider binary. OpenHuman's bare `OPENHUMAN_BIN` predates the convention and is still read behind the namespaced pair. |
+| `MEDULLA_HARNESS_MODEL` / `MEDULLA_<P>_MODEL` | Override the model a turn runs on. Read today by the embedded OpenHuman harness (`MEDULLA_OPENHUMAN_MODEL`); see [Custom harness presets](configuration.md#custom-harness-presets) for the full precedence. |
 | `MEDULLA_<P>_SESSIONS_DIR` | Override the transcript directory the tailer watches. |
 
 If no owner is configured (and `--no-bridge` was not passed), the wrapper prints
@@ -250,6 +251,7 @@ medulla workflow mcp                   # serve the workflow tools over MCP
 | Flag | Effect |
 | --- | --- |
 | `--input <json>` | Trigger payload for `run` / `dry-run`. |
+| `--model <name>` | The model a step runs on when it names none of its own, for this invocation. Replaces `[workflows] defaultModel`; an empty value clears it. On `defaults`, pins it in the saved workflow instead. |
 | `--run-id <id>` | Id to give the run (default: a fresh one). |
 | `--approve <node-id>` | Gate to release on `resume` (repeatable). |
 | `--reject <node-id>` | Gate to refuse on `resume` (repeatable). |

@@ -255,7 +255,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // and every drive method would otherwise return the same error behind a UI
     // that looks live. It takes the offline demo, exactly as `--mock` does.
     if runtime.is_none() {
-        match medulla::core_host::boot().await {
+        match medulla::core_host::boot_with_hooks(&loaded.config.hooks).await {
             Ok(core) => {
                 // A token from the sign-in gate above: the core now exists, and
                 // it was booted against the home the gate chose, so this is the
@@ -797,7 +797,7 @@ pub(super) fn available_primary_presets(
 ) -> Vec<medulla::config::CustomHarnessConfig> {
     presets
         .iter()
-        .filter(|preset| preset.host_id == host_id && providers.contains(&preset.base_harness))
+        .filter(|preset| preset.host_id == host_id && preset.runnable_on(providers))
         .cloned()
         .collect()
 }

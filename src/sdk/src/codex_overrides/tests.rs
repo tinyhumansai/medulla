@@ -64,6 +64,11 @@ fn write_codex_cache(dir: &std::path::Path) {
 }
 
 /// The `-c` pairs as a map, so assertions name a key rather than an index.
+///
+/// Values are un-escaped back to what the override actually holds. The argv
+/// carries TOML basic strings, so `model_catalog_json` — a path — arrives with
+/// its separators doubled on Windows, and an assertion comparing it against the
+/// real path would fail there and only there.
 fn overrides(args: &[String]) -> HashMap<String, String> {
     let mut pairs = HashMap::new();
     let mut rest = args.iter();
@@ -71,17 +76,33 @@ fn overrides(args: &[String]) -> HashMap<String, String> {
         assert_eq!(flag, "-c", "every override is introduced by -c");
         let assignment = rest.next().expect("-c is followed by an assignment");
         let (key, value) = assignment.split_once('=').expect("assignment has a value");
-        // `value` is the output of `toml_string`, which escapes backslashes and
-        // quotes. Decode those escapes so the comparison is against the real
-        // value both transports deliver (e.g. a `C:\...` catalog path on
-        // Windows), not against the argv-encoded form.
-        let decoded = value
-            .trim_matches('"')
-            .replace("\\\\", "\\")
-            .replace("\\\"", "\"");
-        pairs.insert(key.to_string(), decoded);
+pairs.insert(key.to_string(), unescape_toml_string(value));
     }
     pairs
+}
+
+/// Undo `toml_string`: strip the surrounding quotes and take the character after
+/// each backslash literally.
+///
+/// A left-to-right scan rather than two `replace` passes, which would disagree
+/// with the encoder on a value ending in an escaped backslash.
+fn unescape_toml_string(rendered: &str) -> String {
+    let inner = rendered
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(rendered);
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(escaped) = chars.next() {
+                out.push(escaped);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -485,4 +506,39 @@ fn acp_env_is_empty_without_the_opt_in_or_for_another_harness() {
     )
     .unwrap()
     .is_empty());
+}
+
+/// A value carrying backslashes survives the argv round trip unchanged.
+///
+/// The regression this pins was Windows-only and therefore invisible here: the
+/// catalog path is the one override whose value contains separators, so
+/// `-c model_catalog_json="C:\…"` renders them doubled and a comparison against
+/// the real path failed on Windows alone. Asserting the round trip with an
+/// explicit backslashed value makes that a failure on every platform.
+#[test]
+fn a_backslashed_value_survives_the_argv_round_trip() {
+    let windows_path = r"C:\Users\dev\.medulla\codex-catalogs\model-a1b2.json";
+
+    let rendered = format!("model_catalog_json={}", toml_string(windows_path));
+    let parsed = overrides(&["-c".to_string(), rendered]);
+
+    assert_eq!(
+        parsed.get("model_catalog_json").map(String::as_str),
+        Some(windows_path)
+    );
+}
+
+/// The same for a value holding both an escaped quote and a trailing backslash,
+/// where a two-pass `replace` decoder disagrees with the encoder.
+#[test]
+fn escaped_quotes_and_trailing_backslashes_round_trip() {
+    for value in [r#"a "quoted" segment"#, r"ends with a backslash\", r"\\"] {
+        let rendered = format!("k={}", toml_string(value));
+        let parsed = overrides(&["-c".to_string(), rendered]);
+        assert_eq!(
+            parsed.get("k").map(String::as_str),
+            Some(value),
+            "round trip lost {value:?}"
+        );
+    }
 }

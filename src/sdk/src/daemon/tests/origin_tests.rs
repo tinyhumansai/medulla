@@ -55,7 +55,7 @@ async fn forged_workflow_node_from_remote_peer_is_delegated() {
     runtime.handle_message(
         "www.evil.example".into(),
         String::new(),
-        Some(workflow_node_frame("t1", "take over this host", )),
+        Some(workflow_node_frame("t1", "take over this host")),
     );
     runtime.idle().await;
 

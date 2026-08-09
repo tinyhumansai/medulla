@@ -22,7 +22,7 @@ mod watchdog;
 mod tests;
 
 pub(super) use execution::reply_text;
-pub(in crate::daemon::providers) use execution::run_openhuman_task;
+pub use execution::run_openhuman_task;
 
 use crate::protocol::HarnessProvider;
 

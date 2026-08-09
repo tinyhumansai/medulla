@@ -386,8 +386,9 @@ fn write_managed(
 /// root — but `install` on the user scope takes no lock, and a leftover temp
 /// file from a killed process must not be adopted as the next writer's buffer.
 ///
-/// A failed rename leaves the temp file behind rather than the target damaged,
-/// which is the right way round.
+/// A failed rename removes the temp file rather than leaving it behind, and
+/// the target is untouched — the reader still sees the whole previous file,
+/// and no uniquely named orphan accumulates for a later writer to trip over.
 fn write_atomically(path: &Path, body: &str) -> io::Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));

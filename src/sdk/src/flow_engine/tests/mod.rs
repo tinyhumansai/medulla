@@ -98,11 +98,13 @@ pub(super) fn empty_resolver(root: &std::path::Path) -> Arc<StoreWorkflowResolve
     ))
 }
 
-pub(super) fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
-    let mut settings = CapabilitySettings::rooted_at(root);
-    settings.default_worker_address = "local-worker".into();
-    Arc::new(settings)
-}
+/// A capability settings tree rooted at `root`, with the default worker
+    /// address pinned to the local test worker.
+    pub(super) fn settings(root: &std::path::Path) -> Arc<CapabilitySettings> {
+        let mut settings = CapabilitySettings::rooted_at(root);
+        settings.default_worker_address = "local-worker".into();
+        Arc::new(settings)
+    }
 
 /// A one-agent-node graph: trigger into an agent, which is the smallest thing
 /// that exercises the dispatch path end to end.

@@ -11,15 +11,22 @@
 //! Medulla socket bridge (`platform/socket/medulla/envelope.rs`) — an operator
 //! consuming a transcript should not be able to tell whether the turn reached
 //! them over a socket or through this function.
+//!
+//! One difference is deliberate. The bridge forwards each `TextDelta` /
+//! `ThinkingDelta` as its own event because the socket has no downstream bound
+//! to protect, but this fold also feeds a *bounded* transcript — see
+//! [`crate::harness_transcript`] — and a status path that treats an
+//! `agent_thinking` event as the whole reasoning so far. So the deltas are
+//! accumulated here and emitted whole at the next phase boundary, in the shape
+//! that mirror targets.
 
 use serde_json::Value;
 
-use crate::protocol::{
-    ApprovalRequestPayload, HarnessEventKind, StatusPayload, TextPayload, ToolCallPayload,
-    ToolResultPayload,
-};
-
 use super::core_contract::AgentProgress;
+use super::types::ProgressFold;
+use crate::protocol::{
+    ApprovalRequestPayload, HarnessEventKind, StatusPayload, ToolCallPayload, ToolResultPayload,
+};
 
 /// Tool family stamped on an OpenHuman tool call.
 ///
@@ -29,25 +36,74 @@ use super::core_contract::AgentProgress;
 /// the same one the socket bridge gives.
 const TOOL_KIND: &str = "other";
 
-/// The semantic events one progress event folds into.
+/// Characters of reasoning kept in one emitted thinking snapshot.
 ///
-/// Returns an empty vector for the variants that carry no user-facing stream
-/// frame — argument-delta fragments, cost rollups, per-call model accounting,
-/// task-board writes, sub-agent internals — so the transcript stays inside the
-/// `agent_message / agent_thinking / tool_call / tool_result / status /
-/// approval_request` vocabulary [`HarnessEventKind`] enumerates.
-///
-/// A vector rather than an [`Option`] because the fold is one-to-*many* in
-/// principle: a future variant carrying both a status change and a message has
-/// somewhere to put both without changing every caller.
-pub(super) fn semantic_events(progress: &AgentProgress) -> Vec<(String, Value)> {
-    match event_kind(progress) {
-        Some(kind) => split_kind(&kind).into_iter().collect(),
-        None => Vec::new(),
+/// The same bound the ACP fold applies (`retain_tail(780)`): most of a
+/// reasoning block is the model working outward from its premise, and once the
+/// most recent 780 characters still show what it concluded, that is enough for
+/// an operator deciding whether to let the turn continue.
+const MAX_SNAPSHOT_CHARS: usize = 780;
+
+impl ProgressFold {
+    /// Fold one progress event into the semantic events it completes.
+    ///
+    /// `TextDelta` / `ThinkingDelta` accumulate into the fold and complete
+    /// nothing by themselves; the next *structural* event — a tool call, an
+    /// iteration, an approval gate, the turn ending — closes the utterance and
+    /// emits it whole: one `agent_message` per completed message, and one
+    /// `agent_thinking` carrying the full reasoning snapshot, redacted and
+    /// bounded, so the status throttler's newest-is-the-whole assumption holds.
+    ///
+    /// Telemetry sitting between tokens (`TurnCostUpdated`) is not a boundary:
+    /// it must not split a message in half, so nothing is flushed until a
+    /// boundary that mapps to a stream frame. `TurnCompleted` is the exception
+    /// that proves the text rule — the caller re-emits the completed reply as
+    /// its own closing `agent_message` after the watchdog returns, so clearing
+    /// the pending text here avoids doubling the turn's final words, while the
+    /// reasoning is still flushed so the answer's thinking is recorded.
+    pub(super) fn fold(&mut self, progress: &AgentProgress) -> Vec<(String, Value)> {
+        match progress {
+            AgentProgress::TextDelta { delta, .. } => {
+                self.text.push_str(delta);
+                Vec::new()
+            }
+            AgentProgress::ThinkingDelta { delta, .. } => {
+                self.thinking.push_str(delta);
+                Vec::new()
+            }
+            boundary => {
+                let mapped = event_kind(boundary);
+                let mut events = Vec::new();
+                if mapped.is_some() {
+                    if matches!(boundary, AgentProgress::TurnCompleted { .. }) {
+                        self.text.clear();
+                    } else if !self.text.is_empty() {
+                        events.push((
+                            "agent_message".into(),
+                            json!({ "text": std::mem::take(&mut self.text) }),
+                        ));
+                    }
+                    if !self.thinking.is_empty() {
+                        let snapshot = crate::daemon::status::redact_reasoning(&self.thinking);
+                        self.thinking.clear();
+                        let mut snapshot = snapshot;
+                        retain_tail(&mut snapshot, MAX_SNAPSHOT_CHARS);
+                        events.push(("agent_thinking".into(), json!({ "text": snapshot })));
+                    }
+                }
+                if let Some(kind) = mapped {
+                    events.extend(split_kind(&kind).into_iter().collect::<Vec<_>>());
+                }
+                events
+            }
+        }
     }
 }
 
 /// The typed event one progress variant folds into, when it folds into one.
+///
+/// Delta variants are handled by [`ProgressFold::fold`] before they reach this
+/// matcher, so none are listed here.
 fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
     let kind = match progress {
         AgentProgress::TurnStarted => HarnessEventKind::Status(StatusPayload {
@@ -63,14 +119,6 @@ fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
             detail: format!("iteration {iteration}/{max_iterations}"),
             active_call_id: None,
         }),
-        AgentProgress::TextDelta { delta, .. } => HarnessEventKind::AgentMessage(TextPayload {
-            text: delta.clone(),
-        }),
-        AgentProgress::ThinkingDelta { delta, .. } => {
-            HarnessEventKind::AgentThinking(TextPayload {
-                text: delta.clone(),
-            })
-        }
         AgentProgress::ToolCallStarted {
             call_id,
             tool_name,
@@ -88,7 +136,6 @@ fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
             call_id,
             success,
             output,
-            output_chars,
             ..
         } => HarnessEventKind::ToolResult(ToolResultPayload {
             call_id: call_id.clone(),
@@ -97,8 +144,12 @@ fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
             // report, and inventing 0/1 from `success` would read as one.
             exit_code: None,
             is_error: !*success,
+            // `output_bytes` is the byte length of the output, and status
+            // consumers render it as such — derive it from the bytes we carry
+            // rather than the core's character count, which under-reports any
+            // non-ASCII output.
             output: output.clone(),
-            output_bytes: *output_chars as i64,
+            output_bytes: output.len() as i64,
         }),
         AgentProgress::SubagentAwaitingUser {
             task_id, question, ..
@@ -113,6 +164,9 @@ fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
             detail: "turn completed".to_string(),
             active_call_id: None,
         }),
+        // Everything else (arg deltas, cost/usage rollups, per-call model
+        // accounting, subagent-internal frames, task-board writes, raw
+        // TurnContent) carries no distinct stream frame in this vocabulary.
         _ => return None,
     };
     Some(kind)
@@ -128,4 +182,26 @@ fn split_kind(kind: &HarnessEventKind) -> Option<(String, Value)> {
     let name = tagged.get("kind")?.as_str()?.to_string();
     let payload = tagged.get("payload").cloned().unwrap_or(Value::Null);
     Some((name, payload))
+}
+
+/// Bound a reasoning snapshot while retaining the most recent text.
+///
+/// The most recent characters are the conclusion, which is the part worth
+/// keeping; the slab of working-out before them is what gets dropped. Applied
+/// after redaction — truncating first can remove the prefix that makes a
+/// credential detectable.
+fn retain_tail(value: &mut String, max_chars: usize) {
+    if value.chars().count() <= max_chars {
+        return;
+    }
+    let keep = max_chars.saturating_sub(1);
+    let tail = value
+        .chars()
+        .rev()
+        .take(keep)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    *value = format!("…{tail}");
 }

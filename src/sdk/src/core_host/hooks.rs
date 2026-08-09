@@ -225,16 +225,20 @@ pub(super) async fn run_command(
     let mut child = process.spawn()?;
     let timeout = Duration::from_secs(spec.timeout().unwrap_or(DEFAULT_HOOK_TIMEOUT_SECS));
     let waited = tokio::time::timeout(timeout, async {
-        if let Some(mut stdin) = child.stdin.take() {
+        let write_result = if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
-            stdin.write_all(payload).await?;
-        }
-        child.wait().await
+            stdin.write_all(payload).await
+        } else {
+            Ok(())
+        };
+        let status = child.wait().await?;
+        Ok::<_, std::io::Error>((status, write_result))
     })
     .await;
     match waited {
-        Ok(Ok(status)) => {
+        Ok(Ok((status, write_result))) => {
             if enforce_status {
+                write_result?;
                 anyhow::ensure!(status.success(), "hook command exited with {status}");
             }
             Ok(())

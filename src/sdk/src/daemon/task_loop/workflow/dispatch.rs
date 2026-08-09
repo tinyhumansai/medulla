@@ -31,6 +31,8 @@ pub(in crate::daemon) struct RuntimeDispatch {
     /// The authenticated sender the workflow is being run for, so nodes inherit
     /// the same conversation attribution an ordinary task would get.
     conversation: String,
+    /// Why this dispatcher is issuing its harness turn.
+    origin: crate::daemon::providers::RunTaskOrigin,
 }
 
 impl RuntimeDispatch {
@@ -39,7 +41,17 @@ impl RuntimeDispatch {
         Self {
             runtime,
             conversation,
+            origin: crate::daemon::providers::RunTaskOrigin::Workflow,
         }
+    }
+
+    /// Set the authority source for this dispatcher's turns.
+    pub(in crate::daemon) fn with_origin(
+        mut self,
+        origin: crate::daemon::providers::RunTaskOrigin,
+    ) -> Self {
+        self.origin = origin;
+        self
     }
 
     /// The custom harness preset `request` names, resolved against this host.
@@ -194,6 +206,7 @@ impl HarnessDispatch for RuntimeDispatch {
         ));
 
         let options = RunTaskOptions {
+            origin: self.origin,
             conversation: self.conversation.clone(),
             // A workflow node is discrete work, like the task frame that
             // started the graph — nodes share a conversation for attribution,

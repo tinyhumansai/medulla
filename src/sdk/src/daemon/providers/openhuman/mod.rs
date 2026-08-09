@@ -31,16 +31,27 @@
 //! — so a bounded workflow node gets a fresh thread and a resumed conversation
 //! keeps its own, exactly as the CLI providers' session ids behave.
 //!
+//! [`run::run_openhuman_task`] also tells the core two things about the turn
+//! that a CLI provider states with argv and a working directory: who authorized
+//! it, and which checkout it works in. Both are scoped around the dispatch —
+//! see that function.
+//!
+//! # Hooks
+//!
+//! Present, and not through argv. [`crate::harness_hooks`] installs lifecycle
+//! hooks onto a *child's* command line, and there is no child here — so
+//! [`crate::core_host::hooks`] registers the operator's `PreToolUse`,
+//! `PostToolUse`, and `Stop` hooks directly on the core at boot instead. They
+//! are process-global rather than per-dispatch, which is the one difference an
+//! operator sees: a hook declared for OpenHuman fires for every turn this
+//! process runs, not only for the ones a workflow node dispatched.
+//!
 //! # What is deliberately absent
 //!
-//! *Hooks.* [`crate::harness_hooks`] installs lifecycle hooks onto a child's
-//! argv, and there is no child. A turn here is a function call in this process,
-//! so the thing hooks exist to observe — a separate program doing work on its
-//! own — is not happening. Reported once at dispatch rather than left for an
-//! operator to infer from an empty hook log.
-//!
-//! *Managed skills and MCP tools.* Same reason, and in this case no loss: the
-//! core reaches Medulla through the process it is already inside.
+//! *Managed skills and MCP tools.* [`crate::harness_hooks`]'s remaining job is
+//! to hand a child process a skills directory and an MCP config, and neither
+//! survives having no child. In this case no loss: the core reaches Medulla
+//! through the process it is already inside.
 
 //! *A model of its own.* The turn runs on whatever the operator chose — see
 //! [`model`] for every route to that choice and the order they resolve in.

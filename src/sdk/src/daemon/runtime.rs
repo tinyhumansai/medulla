@@ -113,7 +113,33 @@ impl DaemonRuntime {
 
     /// Fire-and-forget dispatch of one inbound message. Never panics to the
     /// caller; the work runs on a spawned task tracked by [`DaemonRuntime::idle`].
+    ///
+    /// The sender is treated as remote, so a frame's `workflow_node` marker
+    /// cannot purchase workflow authority on this call: only
+    /// [`handle_message_from`](Self::handle_message_from), which knows the
+    /// sender is on this device's own loopback, may honour it.
     pub fn handle_message(&self, from: String, text: String, frame: Option<TaskFrame>) {
+        self.handle_message_from(from, text, frame, false)
+    }
+
+    /// Fire-and-forget dispatch of one inbound message, with the sender's
+    /// device-locality supplied by the transport that delivered it.
+    ///
+    /// `sender_device_local` is the receiver's own answer to "is `from` served
+    /// on this device", never anything the frame declares. It is the one thing
+    /// that lets a plain task frame carry
+    /// [`RunTaskOrigin::Workflow`](crate::daemon::providers::RunTaskOrigin::Workflow):
+    /// the local workflow host dispatches its `agent` nodes over an in-process
+    /// loopback bridge, while a remote authenticated peer can simply write the
+    /// marker into its own JSON — so the daemon must distinguish the two, and
+    /// device-locality is the only receiver-verifiable property that does.
+    pub fn handle_message_from(
+        &self,
+        from: String,
+        text: String,
+        frame: Option<TaskFrame>,
+        sender_device_local: bool,
+    ) {
         // A screen message is never a prompt. The plain-text path types whatever
         // it is given into a harness, so a `medulla.screen.v1` body reaching it
         // is executed rather than ignored — a subscribe arriving as an
@@ -130,7 +156,7 @@ impl DaemonRuntime {
         let this = self.clone();
         tokio::spawn(async move {
             match frame {
-                Some(frame) => this.handle_frame(from, frame).await,
+                Some(frame) => this.handle_frame(from, frame, sender_device_local).await,
                 None => this.handle_plain_text(from, text).await,
             }
             if this.inner.inflight_count.fetch_sub(1, Ordering::SeqCst) == 1 {

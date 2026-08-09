@@ -283,6 +283,37 @@ fn codex_thread_label_reads_the_persisted_rename() {
 }
 
 #[test]
+fn codex_thread_label_and_index_map_agree_on_duplicate_ids() {
+    // The index is append-only: a second /rename for the same id appends a
+    // second record. Both the single-id lookup and the batch map must surface
+    // the newest (last) record, or the rail and the Sessions tab diverge.
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-1","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    let map = codex_index_map(&env);
+    assert_eq!(map.get("codex-1").map(String::as_str), Some("land-auth-flow"));
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("land-auth-flow")
+    );
+}
+
+#[test]
 fn codex_thread_label_for_cwd_finds_the_newest_rollout_in_the_folder() {
     let home = tempfile::tempdir().unwrap();
     let sessions = home.path().join("codex").join("sessions");

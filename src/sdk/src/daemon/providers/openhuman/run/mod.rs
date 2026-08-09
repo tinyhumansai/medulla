@@ -1,12 +1,26 @@
 //! Executing one task as an in-process OpenHuman agent turn.
+//!
+//! The turn itself is a single core call; everything around it is supervision:
+//! [`core_contract`] names what the core promises to stream back,
+//! [`progress`] folds that stream into Medulla's event vocabulary, [`events`]
+//! owns the outgoing transcript, and [`watchdog`] keeps the turn alive for as
+//! long as it is genuinely working.
 
-use std::time::Duration;
+mod core_contract;
+mod events;
+mod progress;
+mod watchdog;
+
+#[cfg(test)]
+mod tests;
 
 use serde_json::{json, Value};
 
-use crate::protocol::{HarnessEvent, HarnessProvider};
+use crate::protocol::HarnessProvider;
 
 use super::super::types::{RunTaskOptions, RunTaskResult};
+use core_contract::{with_progress_sink, AgentProgress, ProgressSink};
+use events::EventSink;
 
 /// The core method that runs a full agent turn.
 ///
@@ -15,6 +29,17 @@ use super::super::types::{RunTaskOptions, RunTaskResult};
 /// completion, which would make an OpenHuman node a strictly worse `llm` node
 /// rather than a harness.
 const AGENT_CHAT: &str = "openhuman.inference_agent_chat";
+
+/// Slack, in progress events, between the core and this supervisor.
+///
+/// The core *awaits* its sends, so this bound is backpressure on the turn
+/// itself: too small and a chatty turn stalls the model between tokens waiting
+/// for the watchdog to be scheduled. `TextDelta` arrives roughly per token, so
+/// the burst to absorb is a streamed paragraph, not a tool call — a few hundred
+/// events. 256 covers that while capping the queue at a few hundred small enum
+/// values, and the loop drains continuously rather than in batches, so the
+/// steady state sits near empty.
+const PROGRESS_CAPACITY: usize = 256;
 
 /// Whether `options` should run on the embedded core rather than a spawned CLI.
 ///
@@ -31,9 +56,9 @@ pub fn uses_embedded_core(options: &RunTaskOptions) -> bool {
 /// # Errors
 ///
 /// Returns a sentence when the core cannot be started, when the turn is
-/// aborted or exceeds `timeout_ms`, or when the core itself refuses the call —
-/// the same failure vocabulary a spawned provider returns, so a caller does not
-/// branch on which harness ran.
+/// aborted or falls silent for `timeout_ms`, or when the core itself refuses
+/// the call — the same failure vocabulary a spawned provider returns, so a
+/// caller does not branch on which harness ran.
 pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
     let RunTaskOptions {
         prompt,
@@ -44,7 +69,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         abort,
         resume_session_id,
         hooks,
-        mut on_event,
+        on_event,
         on_session,
         ..
     } = options;
@@ -80,59 +105,58 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         callback(thread_id.clone());
     }
 
-    // Synthesized rather than folded from a stream: there is no transcript to
-    // tail, so the prompt and the reply are the only two things this turn can
-    // honestly report. Emitting them keeps an OpenHuman step's recorded
-    // transcript the same shape as every other harness's, which is what lets
-    // the run view render one without knowing which provider ran it.
-    emit(&mut on_event, "user_prompt", json!({ "text": prompt }));
+    let mut sink = EventSink::new(on_event);
+
+    // Synthesized rather than folded from the progress stream: the core reports
+    // the prompt back only as part of `TurnContent`, at the end, and a
+    // transcript whose first line arrives last is not one an operator can watch.
+    // Emitting it here keeps an OpenHuman step's transcript the same shape as
+    // every other harness's, which is what lets the run view render one without
+    // knowing which provider ran it.
+    sink.emit("user_prompt", json!({ "text": prompt }));
 
     // snake_case, not camelCase: `AgentChatParams` carries no `rename_all`, so
     // the controller deserializes the field names as they are spelled in Rust.
+    // `cwd` is optional on the core side; passing it lets the turn's tools
+    // resolve relative paths against the node's workspace rather than the
+    // Medulla process's startup directory.
     let params = json!({
         "message": prompt,
         "model_override": model,
         "thread_id": thread_id,
+        "cwd": &cwd,
     });
-    // Scoped around the whole core call, not just around the hook: the tool
-    // hooks that read it fire from inside the agent loop this call drives, and a
-    // task-local is the only per-turn channel to a callback registered once,
-    // process-globally, at boot. Without it a `PostToolUse` auto-commit hook is
-    // told the Medulla process's startup directory and checkpoints the wrong
-    // repository. See `core_host::turn_cwd`.
-    let cwd = std::path::PathBuf::from(&cwd);
-    let call = crate::core_host::turn_cwd::with_turn_cwd(
-        Some(cwd.as_path()),
-        core.raw().invoke(AGENT_CHAT, params),
+
+    // Annotated with the core's own alias rather than inferred: the sender half
+    // *is* the contract's `ProgressSink`, and saying so keeps a future change to
+    // its element type a compile error here instead of a silent mismatch.
+    let (progress_tx, mut progress_rx): (ProgressSink, _) =
+        tokio::sync::mpsc::channel::<AgentProgress>(PROGRESS_CAPACITY);
+    let cwd_path = std::path::PathBuf::from(&cwd);
+
+    // Two task-local scopes around the same call, composed by wrapping:
+    //
+    // * `with_turn_cwd` is read by the process-global lifecycle hooks while a
+    //   tool runs — without it a `PostToolUse` auto-commit hook is told the
+    //   Medulla process's startup directory and checkpoints the wrong
+    //   repository. See `core_host::turn_cwd`.
+    // * `with_progress_sink` is read by the core when it builds this turn's
+    //   agent, and is what makes the watchdog below an idle watchdog rather
+    //   than a stopwatch.
+    let call = with_progress_sink(
+        progress_tx,
+        crate::core_host::turn_cwd::with_turn_cwd(
+            Some(cwd_path.as_path()),
+            core.raw().invoke(AGENT_CHAT, params),
+        ),
     );
 
-    // The same idle ceiling a spawned provider gets, applied to the whole turn
-    // rather than to the gap between events: an in-process call produces no
-    // events to reset a watchdog with, so "idle" and "running" are the same
-    // observation here. `timeout_ms` of 0 means the operator set no ceiling.
-    let outcome = if timeout_ms == 0 {
-        tokio::select! {
-            result = call => result,
-            _ = abort.cancelled() => return Err("openhuman task aborted".to_string()),
-        }
-    } else {
-        tokio::select! {
-            result = call => result,
-            _ = abort.cancelled() => return Err("openhuman task aborted".to_string()),
-            _ = tokio::time::sleep(Duration::from_millis(timeout_ms)) => {
-                return Err(format!("openhuman task idle for {timeout_ms}ms (no events)"));
-            }
-        }
-    };
+    let outcome = watchdog::drive(call, &mut progress_rx, &abort, timeout_ms, &mut sink).await?;
 
     let reply = match outcome {
         Ok(value) => reply_text(value),
         Err(err) => {
-            emit(
-                &mut on_event,
-                "error",
-                json!({ "message": err, "fatal": true }),
-            );
+            sink.emit("error", json!({ "message": err, "fatal": true }));
             return Err(format!("openhuman turn failed: {err}"));
         }
     };
@@ -141,37 +165,20 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     } else {
         reply
     };
-    emit(&mut on_event, "agent_message", json!({ "text": reply }));
+    sink.emit("agent_message", json!({ "text": reply }));
 
     Ok(RunTaskResult {
         provider: HarnessProvider::Openhuman,
         reply,
-        // One prompt in, one answer out. Counted honestly rather than reported
-        // as zero: a caller reading `events == 0` concludes nothing happened.
-        events: 2,
+        // What the turn actually produced: the synthesized prompt and reply
+        // plus every folded progress event, counted as they were emitted.
+        events: sink.emitted(),
         // The core bills its own turns against the operator's account and does
         // not report per-call token counts through this method, so claiming a
         // number here would invent one.
         usage: None,
         session_id: Some(thread_id),
     })
-}
-
-/// Hand one synthesized event to the caller's callback, when there is one.
-fn emit(on_event: &mut Option<super::super::types::OnEvent>, kind: &str, payload: Value) {
-    let Some(callback) = on_event.as_mut() else {
-        return;
-    };
-    callback(&crate::daemon::mappers::HarnessSemanticEvent {
-        line: 0,
-        timestamp_ms: crate::clock::now_millis(),
-        record_type: format!("openhuman:{kind}"),
-        event: HarnessEvent {
-            kind: kind.to_string(),
-            payload,
-            ..Default::default()
-        },
-    });
 }
 
 /// The answer text out of whatever shape the controller returned.

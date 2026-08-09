@@ -134,7 +134,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // its element type a compile error here instead of a silent mismatch.
     let (progress_tx, mut progress_rx): (ProgressSink, _) =
         tokio::sync::mpsc::channel::<AgentProgress>(PROGRESS_CAPACITY);
-    let cwd_path = PathBuf::from(&cwd);
+    let cwd_path = std::path::PathBuf::from(&cwd);
 
     // Task-local scopes around the same call, composed by wrapping, in the
     // order the supervisor's own scopes read shortest-lived-first:
@@ -146,8 +146,6 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     //   tool runs — without it a `PostToolUse` auto-commit hook is told the
     //   Medulla process's startup directory and checkpoints the wrong
     //   repository. See `core_host::turn_cwd`.
-    // * `scoped_workspace` roots the turn's tools in the run's checkout and
-    //   grants that tree read/write for the duration of the turn.
     // * `scoped_origin` labels a workflow node's external-effect tools as
     //   operator-authorized automation; every other dispatch stays unlabelled
     //   and OpenHuman's approval gate fails closed for it.
@@ -155,10 +153,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         progress_tx,
         crate::core_host::turn_cwd::with_turn_cwd(
             Some(cwd_path.as_path()),
-            scoped_workspace(
-                &cwd,
-                scoped_origin(origin, &thread_id, core.raw().invoke(AGENT_CHAT, params)),
-            ),
+            scoped_origin(origin, &thread_id, core.raw().invoke(AGENT_CHAT, params)),
         ),
     );
 

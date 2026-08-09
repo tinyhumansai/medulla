@@ -13,7 +13,7 @@ use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::SessionClass;
 
 use super::super::types::{Abort, RunTaskOptions};
-use super::run::{reply_text, turn_workspace_root, uses_embedded_core};
+use super::run::{reply_text, uses_embedded_core};
 
 /// Options naming `provider`, with everything else at its least interesting.
 fn options(provider: HarnessProvider) -> RunTaskOptions {

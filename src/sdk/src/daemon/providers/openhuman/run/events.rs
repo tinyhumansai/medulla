@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::protocol::HarnessEvent;
 
 use super::core_contract::AgentProgress;
+use super::super::super::types::OnEvent;
 use super::types::EventSink;
 
 impl EventSink {

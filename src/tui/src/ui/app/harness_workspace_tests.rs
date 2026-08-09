@@ -273,6 +273,61 @@ fn saving_a_favorite_reanchors_the_cursor_on_the_saved_workspace() {
 }
 
 #[test]
+fn saving_a_favorite_reanchors_the_cursor_on_its_actual_row_when_filtered_behind_another_match() {
+    // The ranking orders by match score first, so a favorite whose path does
+    // not score best against the active query does not lead the list: a
+    // different entry outranks it and the saved workspace lands at a non-zero
+    // row. Hard-coding the cursor onto row 0 there would make Enter start the
+    // harness in that outranking directory instead of the workspace just
+    // favorited — the cursor must follow the saved workspace to its real row.
+    let root = tempfile::tempdir().unwrap();
+    let zap = root.path().join("zap");
+    let zap_mark = root.path().join("zap-mark");
+    std::fs::create_dir(&zap).unwrap();
+    std::fs::create_dir(&zap_mark).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(root.path());
+    app.set_config_path(config.clone());
+    // An existing favorite matches the query exactly and therefore outranks the
+    // newly saved one, whose name only prefixes the query.
+    app.loaded.config.harness.favorite_workspaces = vec![medulla::config::FavoriteWorkspace {
+        name: "daily".into(),
+        path: zap.to_string_lossy().into_owned(),
+    }];
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_query = "zap".into();
+    app.refresh_harness_workspace_choices();
+
+    app.save_favorite_workspace("mark", zap_mark.to_str().unwrap());
+
+    let picker = app.session_picker.as_ref().unwrap();
+    let saved_index = picker
+        .workspace_choices
+        .iter()
+        .position(|choice| choice.path == zap_mark.to_string_lossy())
+        .expect("the saved workspace is still offered as a completion");
+    assert!(
+        saved_index > 0,
+        "the pre-existing exact-match favorite must outrank the freshly saved one"
+    );
+    assert_eq!(
+        picker.workspace_index, saved_index,
+        "the cursor follows the saved workspace to its actual ranked row"
+    );
+    assert!(
+        picker.workspace_picked,
+        "Enter must still honour the highlighted row after the refresh"
+    );
+    assert_eq!(
+        app.selected_picker_workspace()
+            .map(std::path::PathBuf::from),
+        Some(zap_mark.clone()),
+        "Enter must start in the workspace that was just favorited, not the outranking row"
+    );
+}
+
+#[test]
 fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("medulla");

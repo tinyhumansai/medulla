@@ -17,12 +17,17 @@
 pub(super) enum Signals {
     /// Unix signal streams, held for the life of the run loop so a signal
     /// arriving between iterations is still delivered.
+    ///
+    /// Each stream is optional: the two register independently, so a failure
+    /// to install one (say SIGTERM) does not cost the one that succeeded
+    /// (SIGINT). A non-`None` field is a live listener; `None` is that
+    /// registration's "could not be installed" state and never fires.
     #[cfg(unix)]
     Unix {
         /// SIGINT — an operator interrupt.
-        sigint: tokio::signal::unix::Signal,
+        sigint: Option<tokio::signal::unix::Signal>,
         /// SIGTERM — a supervisor or `kill` asking us to stop.
-        sigterm: tokio::signal::unix::Signal,
+        sigterm: Option<tokio::signal::unix::Signal>,
     },
     /// Non-Unix hosts, where Ctrl-C is the only portable termination signal.
     #[cfg(not(unix))]

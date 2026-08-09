@@ -165,6 +165,30 @@ fn an_unterminated_oversized_line_discards_to_its_blank_line() {
 }
 
 #[test]
+fn an_oversized_tail_with_its_own_newline_still_ends_the_discarded_line() {
+    let mut parser = SseParser::new();
+    let mut out = Vec::new();
+    // An oversized line cut mid-flight sets in_discarded_line.
+    let flood = format!("data: {}", "x".repeat(MAX_FRAME_BYTES + 1));
+    assert!(parser.feed(&flood, &mut out).is_err());
+    // Its tail is itself larger than the cap before ending in a newline, so the
+    // newline-terminated oversized branch consumes the terminator. That newline
+    // finishes the discarded line, so the first blank line to arrive afterwards
+    // is the frame boundary again — not another line terminator.
+    let tail = format!("{}\n", "y".repeat(MAX_FRAME_BYTES + 1));
+    assert!(parser.feed(&tail, &mut out).is_err());
+    // The frame's blank boundary ends the discard; a genuinely new frame parses.
+    parser.feed("\ndata: ok\n\n", &mut out).unwrap();
+    assert_eq!(
+        out,
+        vec![SseFrame {
+            id: None,
+            data: "ok".to_string(),
+        }]
+    );
+}
+
+#[test]
 fn an_oversized_newline_terminated_line_is_capped_too() {
     let mut parser = SseParser::new();
     let mut out = Vec::new();

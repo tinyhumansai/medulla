@@ -304,3 +304,18 @@ impl Signals {
         }
     }
 }
+
+/// Await the next arrival on `sig`, or forever if that stream was never
+/// installed.
+///
+/// On Unix the two signals register independently, so a stream may be `None`
+/// while its counterpart is live. A `None` stream must still be a valid
+/// `select!` branch that simply never wins — it is not an immediate signal.
+#[cfg(unix)]
+async fn recv_signal(sig: Option<&mut tokio::signal::unix::Signal>) {
+    if let Some(signal) = sig {
+        let _ = signal.recv().await;
+    } else {
+        std::future::pending().await;
+    }
+}

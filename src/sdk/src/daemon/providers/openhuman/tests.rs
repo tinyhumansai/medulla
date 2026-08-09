@@ -102,3 +102,59 @@ async fn an_aborted_task_fails_without_booting_a_core() {
         .expect_err("an aborted task must not run");
     assert!(error.contains("aborted before start"), "{error}");
 }
+
+/// With nothing in the environment the turn asks for whatever the dispatch
+/// already resolved — the node's model, the preset's, or the host default,
+/// which by this point are one value.
+#[test]
+fn the_resolved_model_is_used_when_the_environment_names_none() {
+    assert_eq!(
+        super::effective_model(Some("deepseek/deepseek-v4-pro".into()), &HashMap::new()).as_deref(),
+        Some("deepseek/deepseek-v4-pro")
+    );
+    assert!(super::effective_model(None, &HashMap::new()).is_none());
+}
+
+/// The operator's environment override outranks it: this is the knob that
+/// answers "run this machine's turns on that model" without editing a config
+/// file or a graph.
+#[test]
+fn the_environment_override_outranks_the_resolved_model() {
+    let env: HashMap<String, String> = [(
+        "MEDULLA_OPENHUMAN_MODEL".to_string(),
+        "openrouter/chosen".to_string(),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        super::effective_model(Some("preset/model".into()), &env).as_deref(),
+        Some("openrouter/chosen")
+    );
+
+    // The generic key applies too, one tier lower.
+    let env: HashMap<String, String> = [(
+        "MEDULLA_HARNESS_MODEL".to_string(),
+        "generic/model".to_string(),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        super::effective_model(Some("preset/model".into()), &env).as_deref(),
+        Some("generic/model")
+    );
+}
+
+/// A blank on either side falls through rather than asking the core for the
+/// empty model: `--model ""` and an exported-but-empty variable are both ways
+/// of saying "no preference".
+#[test]
+fn blank_choices_fall_through_to_the_next_route() {
+    let env: HashMap<String, String> = [("MEDULLA_OPENHUMAN_MODEL".to_string(), "  ".to_string())]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        super::effective_model(Some("  preset/model  ".into()), &env).as_deref(),
+        Some("preset/model")
+    );
+    assert!(super::effective_model(Some("   ".into()), &env).is_none());
+}

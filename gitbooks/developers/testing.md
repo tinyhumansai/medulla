@@ -69,6 +69,24 @@ owner driver (src/sdk/examples/coordination_owner; a real medulla-link endpoint)
   ← Reply frame back over the link, asserted on content, usage, and delivery
 ```
 
+### When CI runs them
+
+Every pull request and every push to `main`, as a three-way matrix — one leg per
+coding CLI, each running all five suites in `--network none` containers.
+
+They spent a while gated behind the release workflow instead, because they were
+the slowest check by a wide margin and dominated the wait on changes that could
+not affect them. Both halves of that have been addressed: the coding CLIs now
+arrive with a pinned base image rather than being downloaded per build, so a run
+pays for the Rust stage and nothing else; and an `e2e-relevant` job diffs the
+pull request against its base, so one that touches only documentation skips the
+matrix entirely. A push to `main` always runs it, since `main` is what a release
+builds from.
+
+Gating a release on them was the wrong moment anyway: a harness regression
+surfaced at release time is blocking a ship, when it could have blocked the pull
+request that caused it.
+
 ### The two images
 
 The harness image is built from two pieces, and the split is what keeps CI fast:

@@ -10,8 +10,10 @@
 //! workflow would see.
 //!
 //! Claude carries hooks through its session metadata. Codex's ACP app-server
-//! currently runs no hooks, so it reports that limitation instead. Attribution
-//! is already applied through the inherited `prepare-commit-msg` environment.
+//! executes no lifecycle hooks itself, so its `PostToolUse` hooks run *locally*
+//! in Medulla's own process after each completed tool call (see [`runner`]),
+//! observation-only. Attribution is already applied through the inherited
+//! `prepare-commit-msg` environment.
 
 use serde_json::{json, Map, Value};
 
@@ -19,8 +21,13 @@ use crate::protocol::HarnessProvider;
 
 use super::types::HooksConfig;
 
+mod runner;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
+pub use runner::run_post_tool_use;
 pub use types::AcpDelivery;
 
 /// Build the ACP-transport delivery installing `hooks` into `provider`.
@@ -47,13 +54,39 @@ pub fn delivery(provider: HarnessProvider, hooks: &HooksConfig) -> AcpDelivery {
             delivery.session_meta = Some(claude_session_meta(&document));
         }
         HarnessProvider::Codex => {
-            delivery.notes.push(format!(
-                "{} hook(s) are not installed for this Codex session: it is dispatched over ACP, \
-                 and `codex app-server` runs no hooks however they are delivered. Launch this \
-                 harness without {}=acp for them to fire.",
-                applicable.len(),
-                crate::daemon::providers::HARNESS_PROTOCOL_ENV,
-            ));
+            delivery.local_post_tool_use = applicable
+                .into_iter()
+                .filter(|hook| hook.event == super::types::HookEvent::PostToolUse)
+                .cloned()
+                .collect();
+            let unsupported =
+                hooks.for_provider(provider).len() - delivery.local_post_tool_use.len();
+            if unsupported > 0 {
+                delivery.notes.push(format!(
+                    "{unsupported} hook(s) are not installed for this Codex ACP session: \\
+                     `codex app-server` does not run lifecycle hooks other than Medulla's \\
+                     PostToolUse fallback."
+                ));
+            }
+            // An operator hook delivered through the fallback behaves
+            // differently from a directly-spawned Codex hook: ACP gives the
+            // client no way to amend a tool call it did not execute, so stdout
+            // feedback is discarded. State that instead of letting the hook
+            // look identical to the direct path. Medulla's own built-ins are
+            // observation-only by design and need no note.
+            if delivery
+                .local_post_tool_use
+                .iter()
+                .any(|hook| !hook.builtin)
+            {
+                delivery.notes.push(
+                    "a non-Medulla PostToolUse hook is run locally for this Codex ACP \
+                     session, observation-only: the fallback cannot forward the hook's \
+                     stdout decision into the session, because ACP gives the client no \
+                     way to amend a tool call it did not execute."
+                        .to_string(),
+                );
+            }
         }
         // Unreachable in practice: `HooksConfig::for_provider` filters on
         // `HookEvent::supported_by`, which is false for every event on both, so

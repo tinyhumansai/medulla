@@ -139,6 +139,7 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         tracing::warn!(provider = options.provider.as_str(), "{note}");
     }
     let session_meta = delivery.session_meta;
+    let local_post_tool_use = delivery.local_post_tool_use;
     // Read before `options` is picked apart below, and cloned because the
     // session setup runs inside an async move closure.
     #[cfg(feature = "workflows")]
@@ -163,6 +164,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // authority while the harness is still running.
     let mut agent_env = acp_env(&options)?;
     let _hook_grant = crate::harness_hooks::seed_hook_grant(&session_key, &mut agent_env);
+    // The ACP server process receives `agent_env`; the local PostToolUse
+    // fallback spawns hooks from this same process, so it gets the same
+    // per-session environment — the hook grant and task-specific router /
+    // attribution variables among it — or a hook that reports back finds
+    // nothing to report to.
+    let hook_env = agent_env.clone();
     let agent = agent_for_with_env(&options, agent_env)?;
     let task_env = options.env.clone();
     let state = Arc::new(Mutex::new(FoldState::with_workspace(
@@ -172,6 +179,13 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         options.on_workspace_context,
     )));
     let notification_state = state.clone();
+    let hook_cwd = PathBuf::from(&options.cwd);
+    // The ACP session id is not known until `session/new` (or `session/load`)
+    // answers. Hooks that correlate by session id should see the real id, not
+    // the synthetic grant key minted before the request; the shared cell is
+    // filled in as soon as the id is learned.
+    let hook_session = Arc::new(Mutex::new(session_key.clone()));
+    let connection_hook_session = hook_session.clone();
     let approve = options.skip_permissions;
     let cwd = PathBuf::from(&options.cwd);
     let resume = options.resume_session_id.clone();
@@ -185,7 +199,19 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                notification_state.lock().unwrap().fold(notification.update);
+                let completed = notification_state.lock().unwrap().fold(notification.update);
+                if let Some(completed) = completed {
+                    let session_id = hook_session.lock().unwrap().clone();
+                    crate::harness_hooks::acp::run_post_tool_use(
+                        &local_post_tool_use,
+                        &hook_cwd,
+                        &hook_env,
+                        &session_id,
+                        &completed.tool_name,
+                        &completed.input,
+                    )
+                    .await;
+                }
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -258,10 +284,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                 }
             };
 
-            // Publish a newly learned ACP id before prompting. Notifications
-            // produced by the prompt may immediately report workspace state;
-            // the daemon must already have a binding for that callback to
-            // update rather than dropping the first turn's context.
+            // Publish the real ACP id to hooks before prompting, then announce
+            // it to the daemon. Notifications produced by the prompt may
+            // immediately report workspace state; the daemon must already have
+            // a binding for that callback to update rather than dropping the
+            // first turn's context.
+            *connection_hook_session.lock().unwrap() = session_id.to_string();
             if let Some(callback) = on_session {
                 callback(session_id.to_string());
             }

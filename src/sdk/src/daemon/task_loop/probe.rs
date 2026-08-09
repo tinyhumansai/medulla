@@ -47,7 +47,7 @@ impl DaemonRuntime {
             .iter()
             .filter(|harness| {
                 harness.key_present(&self.inner.config.env)
-                    && self.inner.config.providers.contains(&harness.base_harness)
+                    && harness.runnable_on(&self.inner.config.providers)
             })
             .map(|harness| CustomHarnessAdvert {
                 id: harness.id.clone(),

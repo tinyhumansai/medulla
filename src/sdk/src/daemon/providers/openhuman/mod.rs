@@ -42,9 +42,14 @@
 //! *Managed skills and MCP tools.* Same reason, and in this case no loss: the
 //! core reaches Medulla through the process it is already inside.
 
+//! *A model of its own.* The turn runs on whatever the operator chose — see
+//! [`model`] for every route to that choice and the order they resolve in.
+
+mod model;
 mod run;
 
 #[cfg(test)]
 mod tests;
 
+pub use model::effective_model;
 pub use run::{run_openhuman_task, uses_embedded_core};

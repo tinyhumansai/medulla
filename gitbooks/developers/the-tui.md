@@ -53,7 +53,7 @@ edits the selected one, `d` deletes it, and `r` re-reads presets and detected
 credentials.
 
 Add and edit use one compact line,
-`id | name | claude|codex|opencode | model | fast-model | host-id`. The fields
+`id | name | claude|codex|opencode|openhuman | model | fast-model | host-id`. The fields
 that line has no room for (`apiKeyEnv`, `baseUrl`, `contextWindow`, `default`,
 and the Codex overrides) are carried over from the existing entry, so editing
 here never resets them; set them in the config file. Saving writes the file, but

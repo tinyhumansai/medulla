@@ -46,7 +46,10 @@
 //! - **OpenCode** exposes hooks as a scripted plugin API rather than a
 //!   declarative command hook, and is not adapted yet; its hooks are reported as
 //!   [`DroppedHook`]s rather than silently ignored.
-//! - **OpenHuman** runs in-process and has no external harness to configure.
+//! - **OpenHuman** runs in-process and has no external harness to configure; its
+//!   `PreToolUse`, `PostToolUse`, and `Stop` hooks are instead routed to the
+//!   embedded core's embedder hooks at boot (see [`crate::core_host::hooks`]),
+//!   so `hook_injection` here carries no argv for it.
 //!
 //! Both delivery paths were verified end-to-end against the versions named
 //! above: a `SessionStart` hook injected this way fires on Claude Code, and on
@@ -68,8 +71,6 @@ mod native;
 mod report;
 mod types;
 
-#[cfg(test)]
-mod acp_tests;
 #[cfg(test)]
 mod tests;
 
@@ -206,7 +207,7 @@ fn unsupported_reason(provider: HarnessProvider, event: HookEvent) -> String {
                 .to_string()
         }
         HarnessProvider::Openhuman => {
-            "OpenHuman runs in-process and has no external harness config to install hooks into"
+            "OpenHuman's embedded runner currently raises PreToolUse, PostToolUse, and Stop"
                 .to_string()
         }
         HarnessProvider::Claude | HarnessProvider::Codex => {

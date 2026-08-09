@@ -7,8 +7,8 @@
 # The base carries tmux, python3, node and all three real coding CLIs, plus the
 # primed ACP npm cache — roughly 600 MB of downloads that do not change when the
 # source does. `e2e/coordination/Dockerfile` layers this run's compiled binaries
-# onto it, so the release gate pulls this image instead of re-fetching every CLI
-# on a cold layer cache.
+# onto it, so CI pulls this image instead of re-fetching every CLI on a cold
+# layer cache.
 #
 # Manual, and on changes to the base Dockerfile itself. Not on every push: the
 # CLI versions are pinned build args, so a rebuild is a deliberate act — a

@@ -40,6 +40,23 @@ impl FoldState {
         }
     }
 
+    /// The directory this session is currently working in, when the stream has
+    /// announced one that differs from the launch directory.
+    ///
+    /// A harness starts in the daemon's configured checkout and frequently
+    /// continues in a linked worktree it creates mid-session; the `worktree`
+    /// helper's completed report is the first authoritative announcement of that
+    /// move (see [`crate::daemon::mappers`]). Lifecycle hooks that run on
+    /// Medulla's side of the ACP boundary read this rather than the launch
+    /// directory, or a `PostToolUse` auto-commit hook checkpoints the repository
+    /// the session *started* in after every edit made somewhere else.
+    ///
+    /// `None` until such a report is seen, which is also the honest answer for a
+    /// session that never leaves its launch directory.
+    pub(super) fn workspace_cwd(&self) -> Option<&str> {
+        self.workspace_context.cwd.as_deref()
+    }
+
     /// Fold a standard ACP update into Medulla's existing semantic event model.
     pub(super) fn fold(&mut self, update: SessionUpdate) -> Option<CompletedToolCall> {
         self.last_activity = Instant::now();

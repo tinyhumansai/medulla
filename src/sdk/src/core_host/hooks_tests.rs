@@ -144,6 +144,49 @@ async fn a_post_tool_command_is_handed_the_turns_directory_on_stdin() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_hook_command_starts_in_the_turns_directory() {
+    // A hook script that shells out to `git` without an explicit `-C` resolves
+    // its repository from where it was started, so the command's own working
+    // directory has to agree with the payload's `cwd`. It used to inherit
+    // Medulla's process directory instead.
+    let turn = tempfile::tempdir().expect("temp dir");
+    let recorded = turn.path().join("pwd.txt");
+    let hook = MedullaToolHook::new(
+        Vec::new(),
+        vec![spec_with(
+            &format!("pwd > {}", recorded.display()),
+            "*",
+            Some(5),
+        )],
+    );
+    with_turn_cwd(Some(turn.path()), async {
+        hook.after_tool(&tool_context("Write"))
+            .await
+            .expect("the post-tool command runs")
+    })
+    .await;
+    let observed = std::fs::read_to_string(&recorded).expect("the hook recorded its directory");
+    assert_eq!(
+        std::fs::canonicalize(observed.trim()).expect("the recorded directory exists"),
+        std::fs::canonicalize(turn.path()).expect("the turn directory exists"),
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_turn_directory_that_no_longer_exists_falls_back_to_the_process_one() {
+    // A worktree named by an earlier turn can be gone by the time a hook runs.
+    // Spawning into it would fail the hook outright; the process directory at
+    // least runs it, which is what happened before a turn directory existed.
+    let removed = tempfile::tempdir().expect("temp dir");
+    let path = removed.path().to_path_buf();
+    drop(removed);
+    let observed = with_turn_cwd(Some(&path), async { hook_working_dir() }).await;
+    assert_eq!(observed, None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn an_openhuman_post_tool_callback_passes_native_input_to_the_command() {
     let hook = MedullaToolHook::new(
         Vec::new(),
@@ -234,4 +277,20 @@ async fn a_timed_out_stop_hook_is_killed_without_failing_the_turn() {
         started.elapsed() < std::time::Duration::from_secs(4),
         "the stop hook must return after its timeout, not command completion"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_hook_that_never_reads_its_stdin_still_passes() {
+    // `git add -A && git commit` reads nothing, exits while the payload is
+    // still being written, and the write fails with EPIPE. Treating that as a
+    // hook failure made a pre-hook veto the tool call it had just approved.
+    run_command(
+        &spec("exit 0"),
+        &vec![b'x'; 1024 * 1024],
+        true,
+        &Default::default(),
+    )
+    .await
+    .expect("a hook that ignores a large payload still passes");
 }

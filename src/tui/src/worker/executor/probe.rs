@@ -17,7 +17,7 @@ use medulla::daemon::providers::RunTaskOptions;
 use medulla::protocol::HarnessProvider;
 use medulla::sessions::SessionClass;
 
-use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin, SessionRow};
+use super::super::pty::{LaunchSpec, SessionControl, SessionOrigin};
 use super::types::{IdleClaim, OpenedSession, SessionPlan, SessionProbe};
 use super::PtySessionExecutor;
 

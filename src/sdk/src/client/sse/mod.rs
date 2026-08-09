@@ -170,6 +170,11 @@ impl SseParser {
         self.discarding = true;
     }
 
+    /// Apply one complete input line (terminating newline already removed).
+    ///
+    /// A blank line terminates the in-progress frame and pushes it to `out`.
+    /// Returns [`SseOverflow`] when the accumulated `data:` payload would
+    /// exceed [`MAX_FRAME_BYTES`]; the frame is then dropped.
     fn feed_line(&mut self, line: &str, out: &mut Vec<SseFrame>) -> ParseResult {
         if line.is_empty() {
             // Blank line terminates the frame.

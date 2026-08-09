@@ -401,7 +401,8 @@ fn codex_thread_label_for_cwd_needs_an_unambiguous_folder() {
     );
 
     assert_eq!(codex_thread_label_for_cwd(&env, &project_str), None);
-    // A transcript with no recorded cwd is not a candidate either.
+    // A transcript with no recorded cwd is not a candidate either, nor is one
+    // whose head window yields no summary at all.
     write_session(
         &sessions,
         "rollout-cwdless.jsonl",
@@ -410,6 +411,11 @@ fn codex_thread_label_for_cwd_needs_an_unambiguous_folder() {
             "payload":{"session_id":"codex-c"}
         })
         .to_string(),
+    );
+    write_session(
+        &sessions,
+        "rollout-nonesummary.jsonl",
+        &serde_json::json!({"type":"response_item"}).to_string(),
     );
     let alone = home.path().join("solo").to_string_lossy().into_owned();
     fs::create_dir_all(&alone).unwrap();

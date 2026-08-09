@@ -163,6 +163,25 @@ pub(super) fn slug_label(text: &str) -> String {
     slug(text)
 }
 
+/// Read Codex's persisted name for the newest session rooted at `cwd`.
+///
+/// The id-keyed [`codex_thread_label`] is the right read once a transcript has
+/// been located, because identity beats recency. This is the fallback for a
+/// session nothing has located yet — one an operator created and typed into
+/// directly, which never enters the transcript executor — where the best
+/// identity on offer is "the newest Codex rollout in this working directory".
+pub fn codex_thread_label_for_cwd(env: &HashMap<String, String>, cwd: &str) -> Option<String> {
+    let discovered = super::scan::discover_session_file(
+        env,
+        SessionAgentKind::Codex,
+        cwd,
+        0,
+        &std::collections::HashSet::new(),
+        None,
+    )?;
+    codex_thread_label(env, &discovered.id)
+}
+
 /// Read Codex's persisted name for `session_id`, when it has one.
 ///
 /// Codex records `/rename` names in `session_index.jsonl` beside its `sessions`

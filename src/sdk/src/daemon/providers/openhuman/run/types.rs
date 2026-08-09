@@ -1,7 +1,6 @@
 //! Private state retained while folding one turn's progress stream.
 
 use super::super::super::types::OnEvent;
-use super::progress::ProgressFold;
 
 /// Accumulating sink for the semantic events one turn produces.
 ///

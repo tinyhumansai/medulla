@@ -267,9 +267,10 @@ fn an_upstream_provider_pin_is_normalized_and_reaches_the_router() {
         "baseHarness": "claude",
         "model": "z-ai/glm-5.2",
         "hostId": "this-device",
-        // As an operator would copy them off OpenRouter's dashboard, which
-        // presents slugs capitalized and padded.
-        "providerOnly": ["  StreamLake ", "Novita", ""],
+        // As an operator might copy them off OpenRouter's dashboard, which
+        // presents slugs capitalized and padded. `streamlake` recurs after
+        // `novita`, so a naive adjacent-only dedup would leave the repeat.
+        "providerOnly": ["  StreamLake ", "Novita", "", "streamlake"],
     }))
     .unwrap();
     let preset = preset.normalize().unwrap();

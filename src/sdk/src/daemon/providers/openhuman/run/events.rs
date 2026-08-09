@@ -1,27 +1,17 @@
-//! The turn's outgoing event stream: one place that owns the caller's callback,
-//! the transcript line counter, and the count of what was actually produced.
+//! The turn's outgoing event stream: the behaviour of the [`super::types::EventSink`].
 //!
-//! Kept as a type rather than three loose `&mut` parameters because the three
-//! move together — every emission advances the line, bumps the count, and (when
-//! there is one) reaches the callback. A caller that could bump one without the
-//! others is a caller that can report a count the transcript does not support.
+//! The sink's shape lives in [`super::types`]; this module implements it —
+//! every emission advances the line, bumps the count, and (when there is one)
+//! reaches the callback. The counter is shared with [`super`]'s executor so a
+//! turn can report how many events it produced without the observer having
+//! recorded them in step.
 
 use serde_json::Value;
 
 use crate::protocol::HarnessEvent;
 
-use super::super::super::types::OnEvent;
 use super::core_contract::AgentProgress;
-use super::progress::semantic_events;
-
-/// Accumulating sink for the semantic events one turn produces.
-pub(super) struct EventSink {
-    /// The caller's per-event callback, when it registered one.
-    on_event: Option<OnEvent>,
-    /// Number of events emitted so far — what [`super::super::super::types::RunTaskResult::events`]
-    /// reports.
-    emitted: usize,
-}
+use super::types::EventSink;
 
 impl EventSink {
     /// A sink feeding `on_event`, or counting silently when it is `None`.
@@ -29,6 +19,7 @@ impl EventSink {
         Self {
             on_event,
             emitted: 0,
+            fold: Default::default(),
         }
     }
 
@@ -54,13 +45,16 @@ impl EventSink {
         });
     }
 
-    /// Fold one core progress event and emit whatever it maps to.
+    /// Fold one core progress event and emit whatever it completes.
     ///
-    /// Emits nothing for the progress variants that carry no stream frame; the
-    /// watchdog still treats the event as liveness, which is the point of
-    /// keeping the two decisions apart.
+    /// Deltas are held by the fold until a phase boundary, so a chatty turn
+    /// emits whole messages and reasoning snapshots rather than one event per
+    /// token — the bounded transcript keeps the end of the turn (the reply and
+    /// the last tool calls) instead of exhausting its cap on a streamed
+    /// paragraph. The watchdog still credits every event as liveness, which is
+    /// the point of keeping the two decisions apart.
     pub(super) fn emit_progress(&mut self, progress: &AgentProgress) {
-        for (kind, payload) in semantic_events(progress) {
+        for (kind, payload) in self.fold.fold(progress) {
             self.emit(&kind, payload);
         }
     }

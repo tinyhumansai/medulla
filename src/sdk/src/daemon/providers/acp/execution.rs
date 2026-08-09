@@ -120,6 +120,27 @@ async fn exchange_parent_grant(_socket: PathBuf, _token: String) -> Option<(Path
 /// Environment switch selecting ACP instead of legacy provider JSONL.
 pub const HARNESS_PROTOCOL_ENV: &str = "MEDULLA_HARNESS_PROTOCOL";
 
+/// The directory a locally-run lifecycle hook should see for this tool call:
+/// the checkout the session is working in *now*, or the launch directory when
+/// it never announced a move.
+///
+/// `tracked` is the session's folded workspace directory (see
+/// [`super::fold`]), which is how Medulla learns that a session created a
+/// worktree and continued there. A `PostToolUse` auto-commit hook resolves its
+/// repository from this, so handing it the launch directory after such a move
+/// checkpoints the wrong checkout — the ACP counterpart of what
+/// [`crate::core_host::turn_cwd`] fixes for the embedded core.
+///
+/// A tracked directory that does not exist is ignored rather than passed on:
+/// the report may name a worktree that has since been removed, and spawning
+/// into a missing directory fails the hook instead of merely misplacing it.
+pub(super) fn hook_cwd_for(tracked: Option<&str>, launch: &std::path::Path) -> PathBuf {
+    tracked
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| launch.to_path_buf())
+}
+
 /// Whether this task explicitly requests the ACP transport.
 pub(in crate::daemon::providers) fn uses_acp(options: &RunTaskOptions) -> bool {
     options
@@ -199,12 +220,26 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                let completed = notification_state.lock().unwrap().fold(notification.update);
+                // The session's *current* directory, read under the same lock
+                // that just folded the update, so a tool call that moved the
+                // session into a worktree is already reflected when this call's
+                // own hooks run. `hook_cwd` — the launch directory — is the
+                // fallback for a session that never announced a move.
+                let (completed, session_cwd) = {
+                    let mut state = notification_state.lock().unwrap();
+                    let completed = state.fold(notification.update);
+                    let cwd = completed
+                        .is_some()
+                        .then(|| state.workspace_cwd().map(str::to_owned))
+                        .flatten();
+                    (completed, cwd)
+                };
                 if let Some(completed) = completed {
                     let session_id = hook_session.lock().unwrap().clone();
+                    let cwd = hook_cwd_for(session_cwd.as_deref(), &hook_cwd);
                     crate::harness_hooks::acp::run_post_tool_use(
                         &local_post_tool_use,
-                        &hook_cwd,
+                        &cwd,
                         &hook_env,
                         &session_id,
                         &completed.tool_name,

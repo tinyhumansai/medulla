@@ -225,20 +225,22 @@ pub(super) async fn run_command(
     let mut child = process.spawn()?;
     let timeout = Duration::from_secs(spec.timeout().unwrap_or(DEFAULT_HOOK_TIMEOUT_SECS));
     let waited = tokio::time::timeout(timeout, async {
-        let write_result = if let Some(mut stdin) = child.stdin.take() {
+        if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
-            stdin.write_all(payload).await
-        } else {
-            Ok(())
-        };
-        let status = child.wait().await?;
-        Ok::<_, std::io::Error>((status, write_result))
+            // A hook that does not read its stdin — `git add -A && git commit`
+            // is an entirely reasonable one — exits while the payload is still
+            // in flight, and the write fails with EPIPE. That is the hook
+            // succeeding, not failing, so the error is dropped and the exit
+            // status is left to decide: propagating it made such a `PreToolUse`
+            // hook veto the tool call it had just approved.
+            let _ = stdin.write_all(payload).await;
+        }
+        child.wait().await
     })
     .await;
     match waited {
-        Ok(Ok((status, write_result))) => {
+        Ok(Ok(status)) => {
             if enforce_status {
-                write_result?;
                 anyhow::ensure!(status.success(), "hook command exited with {status}");
             }
             Ok(())
@@ -282,13 +284,36 @@ async fn terminate_hook_process(child: &mut tokio::process::Child) {
     let _ = child.wait().await;
 }
 
+/// The directory a hook command should start in, when the running turn declared
+/// one that still exists.
+///
+/// `None` outside a turn scope (a TUI chat turn, an MCP call, or the
+/// `tokio::spawn`-ed post-turn hook), and for a declared directory that has
+/// since been removed — in both cases the child inherits this process's
+/// directory, which is what it did before this existed and is a directory that
+/// is certain to be there. Spawning into a missing directory would instead fail
+/// the hook outright.
+pub(super) fn hook_working_dir() -> Option<std::path::PathBuf> {
+    super::turn_cwd::current_turn_cwd().filter(|path| path.is_dir())
+}
+
 /// A `sh -c` / `cmd /C` child for `command`, with hook JSON piped in on stdin.
+///
+/// The child starts in [`hook_working_dir`], not in Medulla's own process
+/// directory: a hook script that runs `git commit` without an explicit `-C`
+/// resolves the repository from where it was started, so inheriting this
+/// process's directory made it operate on whichever checkout Medulla was
+/// launched from. The payload's `cwd` said the right thing while `$PWD` said
+/// another — the two now agree.
 fn shell_command(command: &str, environment: &HashMap<String, String>) -> tokio::process::Command {
     let mut process = tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" });
     if cfg!(windows) {
         process.args(["/C", command]);
     } else {
         process.args(["-c", command]);
+    }
+    if let Some(cwd) = hook_working_dir() {
+        process.current_dir(cwd);
     }
     process
         .envs(environment)

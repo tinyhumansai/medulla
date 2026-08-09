@@ -336,6 +336,12 @@ fn runtime_ping_needs_refresh(
     shut: &mut bool,
     recv: &Result<(), tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
+    // Once shut, nothing refreshes: the closure is terminal, so any wakeup
+    // that still arrives (the drained tail of the channel) was detached from
+    // a snapshot we can no longer read.
+    if *shut {
+        return false;
+    }
     if matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
         *shut = true;
         return false;

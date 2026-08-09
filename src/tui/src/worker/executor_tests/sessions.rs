@@ -381,11 +381,6 @@ fn the_session_probe_runs_off_the_runtime_thread() {
     // A single-threaded runtime makes the fix observable: if the probe still ran
     // inline nothing else could be served before it answered, so a task spawned
     // beside it would not have run by the time it returns.
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    use crate::worker::executor::SessionProbe;
-
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_string_lossy().into_owned();
     let (executor, _env) = harness(dir.path(), &cwd);

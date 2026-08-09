@@ -60,6 +60,7 @@ impl RecordingDispatch {
         })
     }
 
+    /// The requests this dispatch has received so far, in arrival order.
     pub(super) fn requests(&self) -> Vec<TaskRequest> {
         self.seen.lock().unwrap().clone()
     }

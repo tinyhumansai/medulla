@@ -217,11 +217,26 @@ impl App {
     /// in that row — and Enter would start the harness there instead of the
     /// workspace the operator just saved. Re-run the completions and set the
     /// selection onto the head row, so the highlight follows the favorite.
-    fn after_saving_favorite(&mut self) {
+    ///
+    /// When the rename happens under a filter whose query only matched the old
+    /// label, the saved favorite is absent from the refreshed list: the refresh
+    /// dropped the old match while the new name does not match the unchanged
+    /// query, leaving the list empty or leading with an unrelated row. Forcing
+    /// the cursor onto row 0 there would make Enter reject the workspace or
+    /// start the harness in that row, so the query is re-pointed at the saved
+    /// workspace instead — the one row Enter must still land on.
+    fn after_saving_favorite(&mut self, saved: &str) {
         self.refresh_harness_workspace_choices();
         if let Some(picker) = &mut self.session_picker {
-            picker.workspace_index = 0;
-            picker.workspace_picked = true;
+            if picker.workspace_choices.iter().any(|choice| choice.path == saved) {
+                picker.workspace_index = 0;
+                picker.workspace_picked = true;
+            } else {
+                picker.workspace_query = saved.to_string();
+                picker.workspace_index = 0;
+                picker.workspace_picked = false;
+                self.refresh_harness_workspace_choices();
+            }
         }
     }
 

@@ -74,8 +74,9 @@ pub(in crate::ui::app) struct SessionPicker {
     /// that offers a single completion leaves the cursor on row zero however
     /// deliberately it was moved there. Set by the arrows, cleared whenever the
     /// query changes, and read by
-    /// [`selected_picker_workspace`](App::selected_picker_workspace) to decide
-    /// whether an entered directory outranks the completions listed under it.
+    /// [`selected_picker_workspace`](crate::ui::app::App::selected_picker_workspace)
+    /// to decide whether an entered directory outranks the completions listed
+    /// under it.
     pub(in crate::ui::app) workspace_picked: bool,
 }
 

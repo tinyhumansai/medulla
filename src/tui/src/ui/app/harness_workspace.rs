@@ -216,12 +216,8 @@ impl App {
             self.set_status("Could not serialize favorite workspaces");
             return;
         };
-        match medulla::config::persist_setting(
-            config_path,
-            "harness",
-            "favoriteWorkspaces",
-            value,
-        ) {
+        match medulla::config::persist_setting(config_path, "harness", "favoriteWorkspaces", value)
+        {
             Ok(()) => {
                 self.loaded.config.harness.favorite_workspaces = favorites;
                 self.set_status(format!("Saved favorite {name} · {path}"));

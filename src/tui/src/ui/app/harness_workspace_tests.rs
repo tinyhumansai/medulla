@@ -463,11 +463,7 @@ fn saving_a_favorite_without_a_config_path_keeps_it_in_memory_only() {
             path: workspace.to_string_lossy().into_owned(),
         }]
     );
-    assert!(
-        app.status().contains("this run only"),
-        "{}",
-        app.status()
-    );
+    assert!(app.status().contains("this run only"), "{}", app.status());
     let picker = app.session_picker.as_ref().unwrap();
     assert!(
         picker.workspace_picked,
@@ -494,11 +490,7 @@ fn saving_a_favorite_without_hosting_is_rejected() {
 
     app.save_favorite_workspace("mark", "/nowhere");
 
-    assert!(
-        app.status().contains("not hosting"),
-        "{}",
-        app.status()
-    );
+    assert!(app.status().contains("not hosting"), "{}", app.status());
     assert!(
         app.loaded.config.harness.favorite_workspaces.is_empty(),
         "no favorite can be recorded without a hosted workspace"

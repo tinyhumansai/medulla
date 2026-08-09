@@ -55,6 +55,7 @@
 //! structural fallback be as liberal as it is.
 
 mod detect;
+mod hook;
 mod session;
 mod types;
 
@@ -62,6 +63,7 @@ mod types;
 mod tests;
 
 pub use detect::{bell_cue, detect, is_working};
+pub use hook::hook_attention;
 pub use session::{lifecycle_cue, row_cue};
 pub use types::{AttentionKind, HarnessAttention};
 

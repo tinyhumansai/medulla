@@ -480,7 +480,7 @@ async fn carriage_return_progress_keeps_a_working_child_alive() {
     let dir = tempfile::tempdir().unwrap();
     let (_bin, options) = idle_probe_options(
         dir.path(),
-        "#!/bin/sh\ni=0\nwhile [ $i -lt 12 ]; do printf 'compiling crate %d\\r' \"$i\" >&2; sleep 0.1; i=$((i+1)); done\nprintf '\\n'\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"built\"}'\n",
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 12 ]; do printf 'compiling crate %d\\r' \"$i\" >&2; sleep 0.1; i=$((i+1)); done\nprintf '\\n' >&2\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"built\"}'\n",
         300,
     );
 

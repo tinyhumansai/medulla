@@ -1,14 +1,10 @@
-//! Unit tests for harness attention detection.
-//!
-//! The screens here are written the way the harnesses draw them — box borders,
-//! carets, wrapped lines — because that layout is exactly what the matcher has
-//! to survive.
+//! Prompt, dialog and choice recognition: the distinctive menus each harness
+//! paints when it is asking the operator something.
 
 use medulla::protocol::HarnessProvider;
 
-use super::detect::{detect, is_selected_option, is_working};
-use super::types::{AttentionKind, HarnessAttention};
-
+use super::super::detect::{detect, is_selected_option, is_working};
+use super::super::types::AttentionKind;
 /// Claude's tool-permission prompt, as the CLI paints it.
 const CLAUDE_PERMISSION: &str = "\
 ╭──────────────────────────────────────────────╮
@@ -94,6 +90,27 @@ fn a_retained_plan_option_does_not_relabel_a_new_menu() {
 fn a_working_harness_wants_nothing() {
     assert!(detect(HarnessProvider::Claude, CLAUDE_WORKING).is_none());
     assert!(is_working(CLAUDE_WORKING));
+}
+
+#[test]
+fn retained_plan_options_do_not_override_active_work() {
+    let screen = "Earlier plan menu:\n\
+                  ❯ 1. Yes, and auto-accept edits\n\
+                    2. Yes, and manually approve edits\n\
+                  ✻ Implementing… (12s · esc to interrupt)\n\
+                    >";
+
+    assert!(detect(HarnessProvider::Claude, screen).is_none());
+}
+
+#[test]
+fn a_plan_menu_above_an_idle_composer_is_not_current() {
+    let screen = "Would you like to proceed?\n\
+                  ❯ 1. Yes, and auto-accept edits\n\
+                    3. No, keep planning\n\
+                    >";
+
+    assert!(detect(HarnessProvider::Claude, screen).is_none());
 }
 
 #[test]
@@ -220,6 +237,24 @@ fn a_retained_numbered_menu_above_the_composer_is_not_a_choice() {
     assert!(detect(HarnessProvider::Codex, screen).is_none());
 }
 
+/// A permission menu the operator already answered stays in scrollback above
+/// the restored composer; its marker labels must not recreate the approval cue.
+#[test]
+fn an_answered_permission_menu_above_an_idle_composer_is_not_an_approval() {
+    let screen = "  ❯ 1. Yes\n    2. Yes, and don't ask again\n    3. No, and tell Claude what to do\n  ✓ Ran the command\n  > ";
+    assert_eq!(detect(HarnessProvider::Claude, screen), None);
+}
+
+/// OpenCode's permission labels are too generic for the marker table, so they
+/// are matched structurally instead. The same scrollback rule applies: an
+/// answered menu's retained labels above the restored composer must not
+/// recreate the approval cue on every poll.
+#[test]
+fn an_answered_opencode_permission_menu_above_an_idle_composer_is_not_an_approval() {
+    let screen = "  Allow once   Always allow   Reject\n  ✓ Ran the command\n  > Try \"fix the failing test\"";
+    assert_eq!(detect(HarnessProvider::Opencode, screen), None);
+}
+
 #[test]
 fn a_composer_caret_is_not_an_option() {
     // A caret with prose after it is a composer, which is what a harness shows
@@ -232,31 +267,14 @@ fn a_composer_caret_is_not_an_option() {
     assert!(is_selected_option("  ❯ 1. Yes"));
     assert!(is_selected_option("│ › 3) Skip until next version"));
 }
-
+/// The plan-exit menu names planning rather than falling back to the generic
+/// permission wording, even when the pane is too narrow for the structural walk
+/// to rejoin "keep planning" across its wrap.
 #[test]
-fn a_named_cue_outranks_a_bell() {
-    let bell = HarnessAttention::new(AttentionKind::Bell, "rang", 0);
-    let approval = HarnessAttention::new(AttentionKind::Approval, "asking", 10);
-    assert!(approval.supersedes(&bell));
-    assert!(!bell.supersedes(&approval));
-}
-
-#[test]
-fn the_same_cue_keeps_its_first_seen_time() {
-    let first = HarnessAttention::new(AttentionKind::Approval, "asking", 100);
-    let again = HarnessAttention::new(AttentionKind::Approval, "asking", 900);
-    // Equal kinds do not displace, which is what preserves `since` — a prompt
-    // repainted every frame must not read as newly arrived every frame.
-    assert!(!again.supersedes(&first));
-}
-
-#[test]
-fn the_label_states_how_long_it_has_waited() {
-    let cue = HarnessAttention::new(
-        AttentionKind::Approval,
-        "claude is asking permission",
-        1_000,
-    );
-    assert_eq!(cue.label(1_400), "claude is asking permission");
-    assert_eq!(cue.label(13_000), "claude is asking permission · 12s");
+fn the_plan_exit_menu_is_named_by_its_accept_options() {
+    let screen =
+        "Ready to code?\n❯ 1. Yes, and auto-accept edits\n  2. Yes, and manually approve edits";
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+    assert!(what.contains("planning"), "{what}");
 }

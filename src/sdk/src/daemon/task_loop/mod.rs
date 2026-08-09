@@ -23,7 +23,19 @@ use super::types::DaemonRuntime;
 
 impl DaemonRuntime {
     /// Route a decoded task frame to its handler; responses are ignored.
-    pub(super) async fn handle_frame(&self, from: String, frame: TaskFrame) {
+    ///
+    /// `sender_device_local` is the receiver's own verdict on `from`, carried in
+    /// from the transport that delivered the frame (see
+    /// [`handle_message_from`](crate::daemon::DaemonRuntime::handle_message_from)).
+    /// It alone may let a plain task frame's `workflow_node` marker buy
+    /// [`RunTaskOrigin::Workflow`](crate::daemon::providers::RunTaskOrigin::Workflow);
+    /// [`run::handle_task`](Self::handle_task) is where that decision is gated.
+    pub(super) async fn handle_frame(
+        &self,
+        from: String,
+        frame: TaskFrame,
+        sender_device_local: bool,
+    ) {
         match frame.kind {
             // A frame naming a workflow runs that saved graph instead of
             // handing its text to a harness as an instruction.
@@ -51,7 +63,7 @@ impl DaemonRuntime {
                 )
                 .await
             }
-            TaskFrameKind::Task => self.handle_task(from, frame).await,
+            TaskFrameKind::Task => self.handle_task(from, frame, sender_device_local).await,
             TaskFrameKind::Input => self.handle_input(from, frame).await,
             TaskFrameKind::Abort => self.handle_abort(from, frame).await,
             TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,

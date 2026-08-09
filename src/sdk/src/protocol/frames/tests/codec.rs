@@ -2,9 +2,9 @@
 //! round-trips, optional-field handling, and tolerant capabilities parsing.
 
 use crate::protocol::{
-    decode_task_frame, encode_task_frame, parse_agent_capabilities, BudgetSource, BudgetWindow,
-    EncodeFrameInput, HarnessBudget, HarnessProvider, HarnessReadiness, HarnessTransport,
-    TaskFrameKind, MEDULLA_TASK_PROTO,
+    decode_task_frame, encode_task_frame, encode_workflow_node_task_frame,
+    parse_agent_capabilities, BudgetSource, BudgetWindow, EncodeFrameInput, HarnessBudget,
+    HarnessProvider, HarnessReadiness, HarnessTransport, TaskFrameKind, MEDULLA_TASK_PROTO,
 };
 use serde_json::json;
 
@@ -39,6 +39,38 @@ fn encodes_a_minimal_frame() {
     assert!(value.get("harness").is_none());
     assert!(value.get("provider").is_none());
     assert!(value.get("model").is_none());
+}
+
+/// A workflow agent instruction is distinct from a frame that starts a saved
+/// workflow, but its authority marker must survive the runner/daemon boundary.
+#[test]
+fn workflow_node_marker_round_trips() {
+    let body = encode_workflow_node_task_frame(EncodeFrameInput {
+        transport: None,
+        kind: TaskFrameKind::Task,
+        task_id: "wf:run:agent#1".to_string(),
+        text: "inspect the checkout".to_string(),
+        ts: "2026-08-08T00:00:00.000Z".to_string(),
+        correlation_id: None,
+        harness: None,
+        provider: Some(HarnessProvider::Openhuman),
+        custom_harness: None,
+        model: None,
+        tool_mode: None,
+        workflow: None,
+        workflow_fingerprint: None,
+        workflow_inputs: Default::default(),
+        conversation: None,
+        fleet_depth: 0,
+    });
+
+    let value: serde_json::Value = serde_json::from_str(&body).expect("frame JSON");
+    assert_eq!(value["workflowNode"], true);
+    assert!(
+        decode_task_frame(&body)
+            .expect("workflow-node frame decodes")
+            .workflow_node
+    );
 }
 
 #[test]

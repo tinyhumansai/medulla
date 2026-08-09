@@ -48,6 +48,7 @@ async fn run(
     let kinds = Arc::new(Mutex::new(Vec::<String>::new()));
     let sink = kinds.clone();
     let options = RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -172,6 +173,7 @@ async fn spawn_failure_for_missing_binary() {
         "/nonexistent/definitely-not-here"
     );
     let options = RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -209,6 +211,7 @@ async fn abort_before_start_returns_immediately() {
     let abort = Abort::new();
     abort.abort();
     let options = RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -250,6 +253,7 @@ async fn abort_mid_run_kills_child() {
         abort_bg.abort();
     });
     let options = RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -291,6 +295,7 @@ async fn stdin_input_reaches_child_and_echoes_in_reply() {
             Arc::new(Mutex::new(None));
         let register = stdin_tx.clone();
         let options = RunTaskOptions {
+            origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
             hooks: medulla::harness_hooks::HooksConfig::default(),
             transport: Default::default(),
             conversation: String::new(),
@@ -348,6 +353,7 @@ async fn stdin_is_immediate_eof_for_batch_cli() {
         let registered = Arc::new(Mutex::new(false));
         let register = registered.clone();
         let options = RunTaskOptions {
+            origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
             hooks: medulla::harness_hooks::HooksConfig::default(),
             transport: Default::default(),
             conversation: String::new(),

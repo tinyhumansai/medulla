@@ -335,7 +335,10 @@ impl PtyManager {
             } else {
                 String::new()
             };
-            handle.record_error(format!("{}: {err}{lost}", handle.id()));
+            handle.record_error(
+                format!("{}: {err}{lost}", handle.id()),
+                medulla::clock::now_millis(),
+            );
         });
     }
 }

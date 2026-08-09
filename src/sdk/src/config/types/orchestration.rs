@@ -251,6 +251,24 @@ pub struct HarnessSection {
     /// orchestrated tasks may run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_workspaces: Vec<String>,
+    /// Saved directory shortcuts for the manual harness launcher.
+    ///
+    /// Favorites are deliberately separate from recent history: a favorite is
+    /// an operator's named destination and remains useful even after it has not
+    /// been used for a while. Like history, it does not grant the orchestrator
+    /// access to the directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub favorite_workspaces: Vec<FavoriteWorkspace>,
+}
+
+/// A durable, operator-chosen name for a directory used by the manual launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteWorkspace {
+    /// The short name shown in the directory picker and matched by search.
+    pub name: String,
+    /// The directory the favorite opens.
+    pub path: String,
 }
 
 impl Default for HarnessSection {
@@ -259,6 +277,7 @@ impl Default for HarnessSection {
             handback: "ask".to_string(),
             skip_permissions: false,
             recent_workspaces: Vec::new(),
+            favorite_workspaces: Vec::new(),
         }
     }
 }

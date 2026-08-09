@@ -33,11 +33,11 @@ pub use control::{
 };
 pub use frames::{
     decode_task_frame, dispatchable_flavors, encode_task_frame, encode_task_frame_with_attachments,
-    encode_task_frame_with_usage, encode_task_frame_with_work, parse_agent_capabilities,
-    AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert, EncodeFrameInput,
-    FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness, HarnessTransport,
-    TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert, CODEX_SERVER_FLAVOR,
-    MEDULLA_TASK_PROTO,
+    encode_task_frame_with_usage, encode_task_frame_with_work, encode_workflow_node_task_frame,
+    parse_agent_capabilities, AgentCapabilities, BudgetSource, BudgetWindow, CustomHarnessAdvert,
+    EncodeFrameInput, FrameAttachments, HarnessBudget, HarnessProvider, HarnessReadiness,
+    HarnessTransport, TaskFrame, TaskFrameKind, TokenUsage, WorkflowAdvert, WorkflowInputAdvert,
+    CODEX_SERVER_FLAVOR, MEDULLA_TASK_PROTO,
 };
 pub use screen::{
     apply_frame, build_frame, changed_rows, coalesce_runs, encode_screen_message,

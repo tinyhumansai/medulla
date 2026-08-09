@@ -11,7 +11,10 @@ pub(in crate::ui::app::render::sessions::rail) struct HarnessLineStyle {
     /// Whether the harness currently needs operator attention.
     pub(in crate::ui::app::render::sessions::rail) alerting: bool,
     /// State or attention glyph drawn by the state field.
-    pub(in crate::ui::app::render::sessions::rail) state_glyph: char,
+    ///
+    /// A string rather than a `char` because the working state can animate:
+    /// the glyph is one frame of a spinner, chosen by the caller.
+    pub(in crate::ui::app::render::sessions::rail) state_glyph: String,
     /// Style for primary status fields.
     pub(in crate::ui::app::render::sessions::rail) primary: Style,
     /// Style for secondary branch and path fields.

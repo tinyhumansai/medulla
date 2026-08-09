@@ -33,5 +33,5 @@ pub use execute::{is_transient_lock, run_provider_task, with_auth_hint};
 pub use openhuman::{run_openhuman_task, uses_embedded_core};
 pub use types::{
     Abort, ExistsOnPath, OnEvent, OnStdin, OnWorkspaceContext, RunTaskFn, RunTaskOptions,
-    RunTaskResult,
+    RunTaskOrigin, RunTaskResult,
 };

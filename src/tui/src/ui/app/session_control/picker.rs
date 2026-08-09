@@ -7,7 +7,8 @@ use medulla::protocol::HarnessProvider;
 
 use crate::ui::harness_pane::HarnessChoice;
 
-use super::super::types::{tab_pos, App, SessionPicker, SessionPickerStep};
+use super::super::types::{tab_pos, App, Prompt, PromptKind, SessionPicker, SessionPickerStep};
+use crate::ui::composer::Draft;
 
 impl App {
     /// Open the "start a session" picker, or spawn directly when the command
@@ -156,6 +157,18 @@ impl App {
                 }
             }
             KeyCode::Tab => self.complete_harness_workspace(),
+            KeyCode::Char('F') if event.modifiers == KeyModifiers::SHIFT => {
+                let Some(workspace) = self.selected_picker_workspace() else {
+                    self.set_status("Choose an existing directory before saving a favorite");
+                    return;
+                };
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::FavoriteWorkspaceAdd(workspace.clone()),
+                    title: format!("Save favorite for {workspace}"),
+                    draft: Draft::new(),
+                });
+                self.set_status("Favorite name · Enter save · Esc cancel");
+            }
             KeyCode::Backspace => {
                 if let Some(picker) = &mut self.session_picker {
                     picker.workspace_query.pop();

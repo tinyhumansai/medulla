@@ -31,7 +31,19 @@ const HEARTBEAT_STATUS: &str = "still working";
 
 impl DaemonRuntime {
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
-    pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
+    ///
+    /// `sender_device_local` is the receiver's own verdict on `from`, carried in
+    /// from the transport (see
+    /// [`handle_message_from`](crate::daemon::DaemonRuntime::handle_message_from)).
+    /// It is the only thing that may let the frame's `workflow_node` marker
+    /// grant [`RunTaskOrigin::Workflow`] — the marker alone is caller-controlled
+    /// JSON and cannot be trusted from a remote peer.
+    pub(super) async fn handle_task(
+        &self,
+        from: String,
+        frame: TaskFrame,
+        sender_device_local: bool,
+    ) {
         let correlation = frame.correlation_id.clone();
         let custom_harness = match frame.custom_harness.as_deref() {
             Some(id) => match self
@@ -433,6 +445,20 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
+            // `workflowNode` is trusted only from a device-local sender. The
+            // workflow plane is a daemon-local dispatch: the workflow host runs
+            // each `agent` node over an in-process loopback bridge, so the only
+            // frames that legitimately carry the marker arrive from a peer this
+            // daemon itself serves. A remote authenticated peer can write the
+            // key into its own JSON, so there it must be read as ordinary
+            // delegated work — otherwise the marker would let any such peer
+            // mint `RunTaskOrigin::Workflow`, which is what suppresses the
+            // embedded harness's approval prompts.
+            origin: if sender_device_local && frame.workflow_node {
+                crate::daemon::providers::RunTaskOrigin::Workflow
+            } else {
+                crate::daemon::providers::RunTaskOrigin::DelegatedTask
+            },
             // The *authenticated* sender, never anything from the frame body: a
             // frame cannot be trusted to name its own author. This says *whose*
             // the run is; `session_class` separately says whether it may share
@@ -687,6 +713,7 @@ impl DaemonRuntime {
             .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
+            origin: crate::daemon::providers::RunTaskOrigin::Conversation,
             conversation: from.clone(),
             // A conversational message continues the sender's session — that is
             // what makes a DM a conversation rather than a series of unrelated

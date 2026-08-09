@@ -152,6 +152,7 @@ fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
 /// A `RunTaskOptions` carrying `attribution`, with everything else inert.
 fn attribution_options(attribution: bool) -> RunTaskOptions {
     RunTaskOptions {
+        origin: crate::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: crate::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -439,5 +440,45 @@ fn windows_cmd_quoting_preserves_embedded_toml_quotes() {
     assert_eq!(
         super::super::execution::quote_windows_cmd_arg("model_provider=\"medulla\""),
         "\"model_provider=\"\"medulla\"\"\""
+    );
+}
+
+#[test]
+fn a_local_hook_runs_in_the_worktree_the_session_moved_to() {
+    // The Codex ACP PostToolUse fallback spawns hooks from Medulla's own
+    // process, so the directory is Medulla's to choose. Choosing the launch one
+    // after the session moved is how an auto-commit hook checkpointed the wrong
+    // repository.
+    let launch = tempfile::tempdir().expect("temp dir");
+    let worktree = tempfile::tempdir().expect("temp dir");
+    let tracked = worktree.path().to_string_lossy().into_owned();
+
+    assert_eq!(
+        super::super::execution::hook_cwd_for(Some(&tracked), launch.path()),
+        worktree.path(),
+    );
+}
+
+#[test]
+fn a_session_that_never_moved_keeps_its_launch_directory() {
+    let launch = tempfile::tempdir().expect("temp dir");
+    assert_eq!(
+        super::super::execution::hook_cwd_for(None, launch.path()),
+        launch.path(),
+    );
+}
+
+#[test]
+fn a_worktree_that_has_since_been_removed_is_not_spawned_into() {
+    // Spawning into a missing directory fails the hook outright; the launch
+    // directory at least runs it.
+    let launch = tempfile::tempdir().expect("temp dir");
+    let removed = tempfile::tempdir().expect("temp dir");
+    let tracked = removed.path().to_string_lossy().into_owned();
+    drop(removed);
+
+    assert_eq!(
+        super::super::execution::hook_cwd_for(Some(&tracked), launch.path()),
+        launch.path(),
     );
 }

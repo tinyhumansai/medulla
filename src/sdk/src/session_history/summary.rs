@@ -203,6 +203,11 @@ pub fn codex_thread_label(env: &HashMap<String, String>, session_id: &str) -> Op
 /// recent-session list) can load the index once and look up every session
 /// against the same map, rather than re-reading and re-parsing the file
 /// per session.
+///
+/// `session_index.jsonl` is append-only: each `/rename` writes a new record for
+/// the same id, so when several records share an id the last one — the newest
+/// rename — wins. [`codex_thread_label`] routes through this map for the same
+/// guarantee.
 pub fn codex_index_map(env: &HashMap<String, String>) -> HashMap<String, String> {
     let Some(index_path) = (|| {
         super::scan::codex_sessions_dir(env)

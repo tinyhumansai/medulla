@@ -3,8 +3,8 @@
 
 use super::scan::{collect_session_files, is_here, is_session_file, sessions_dir_for};
 use super::summary::{
-    as_message_content, codex_thread_label, codex_thread_label_for_cwd, extract_text,
-    first_prompt_text, read_claude_summary, read_codex_summary, slug_label,
+    as_message_content, codex_index_map, codex_thread_label, codex_thread_label_for_cwd,
+    extract_text, first_prompt_text, read_claude_summary, read_codex_summary, slug_label,
 };
 use super::*;
 use crate::ui::util::SLUG_MAX_CHARS;

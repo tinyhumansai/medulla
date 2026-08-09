@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Weak};
 
+use medulla::protocol::HarnessProvider;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtyPair, PtySize};
 
 use super::super::handle::{release_queued, SessionHandle, SessionMeta};
@@ -230,6 +231,14 @@ impl PtyManager {
         self.spawn_writer(Arc::downgrade(&handle), writer, queued, queued_bytes);
         self.spawn_attention_poller(Arc::downgrade(&handle));
         self.spawn_checkout_poller(Arc::downgrade(&handle));
+        // Codex persists `/rename` in a file it never says anything about on the
+        // wire, so the rail's only way to learn one while a session is held,
+        // idle, or retained is to re-read that file on a timer until the
+        // session dies. Only Codex has an index to watch; claude names arrive
+        // as OSC titles.
+        if spec.provider == HarnessProvider::Codex {
+            self.spawn_codex_label_poller(Arc::downgrade(&handle), spec.env.clone());
+        }
         self.spawn_reader(handle, reader);
 
         Ok(id)

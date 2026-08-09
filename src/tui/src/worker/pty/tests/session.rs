@@ -54,25 +54,33 @@ fn a_terminal_title_update_surfaces_as_the_thread_name() {
 }
 
 #[test]
-fn clearing_a_terminal_title_clears_the_thread_name() {
+fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
+    // The screen layer ignores empty OSC title samples so that a thread name
+    // discovered from the Codex session index (or from a prior non-empty title)
+    // is not erased by ordinary harness output that includes no title escape.
     let manager = PtyManager::new();
     let id = manager
-        .open(sh(
-            "printf '\\033]2;Named thread\\007'; read line; printf '\\033]2;   \\007'; sleep 30",
-        ))
+        .open(sh("printf '\\033]2;Named thread\\007'; read line; \
+             printf '\\033]2;\\007'; echo empty-title-done; sleep 30"))
         .unwrap();
     wait_for("initial thread name", || {
         manager.row(&id).and_then(|row| row.thread_name).as_deref() == Some("Named thread")
     });
 
     manager.write(&id, b"clear\n").unwrap();
-    wait_for("cleared thread name", || {
-        manager
-            .row(&id)
-            .is_some_and(|row| row.thread_name.is_none())
+    // The empty title must NOT overwrite: the name stays. The child writes its
+    // empty OSC sequence *then* the marker, and the reader thread feeds bytes to
+    // the emulator in order — so a marker on screen proves the empty sample has
+    // already passed through `process` before the name is checked. (A fixed
+    // sleep raced the reader and made this test flaky.)
+    wait_for("the empty title to have been emitted", || {
+        screen_text(&manager, &id).contains("empty-title-done")
     });
-
-    assert_eq!(manager.row(&id).unwrap().thread_name, None);
+    assert_eq!(
+        manager.row(&id).and_then(|row| row.thread_name),
+        Some("Named thread".to_string()),
+        "empty OSC title must not clear a previously set thread name"
+    );
     manager.close(&id);
 }
 

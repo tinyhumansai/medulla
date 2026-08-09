@@ -20,8 +20,8 @@
 //! other caller reads, [`screen`] is the emulator surface the UI renders,
 //! [`attention`] keeps each row's "this harness wants you" flag current,
 //! [`checkout`] does the same for the repository, worktree, and branch it is
-//! working in, and [`clipboard`] carries a harness's own copies out to the
-//! operator's terminal.
+//! working in, [`labels`] for a Codex session's renamed thread, and
+//! [`clipboard`] carries a harness's own copies out to the operator's terminal.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
 //! `portable-pty` offers only synchronous `Read`/`Write`, and parking either on
@@ -201,6 +201,7 @@ impl PtyManager {
 mod attention;
 mod checkout;
 mod clipboard;
+mod labels;
 mod open;
 mod screen;
 mod session;

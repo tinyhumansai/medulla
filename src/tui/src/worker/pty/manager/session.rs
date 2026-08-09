@@ -192,6 +192,13 @@ impl PtyManager {
         }
     }
 
+    /// Record a harness thread name learned from provider-owned session state.
+    pub(in crate::worker) fn record_thread_name(&self, id: &str, thread_name: String) {
+        if let Some(session) = self.handle(id) {
+            session.record_thread_name(thread_name);
+        }
+    }
+
     /// Ask a session's harness to exit, then reap it.
     ///
     /// Sends the child a kill rather than typing `/exit`: the harnesses disagree

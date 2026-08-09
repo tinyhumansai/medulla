@@ -31,7 +31,19 @@ const HEARTBEAT_STATUS: &str = "still working";
 
 impl DaemonRuntime {
     /// Admit, execute, and reply to a `task` frame, forwarding throttled status.
-    pub(super) async fn handle_task(&self, from: String, frame: TaskFrame) {
+    ///
+    /// `sender_device_local` is the receiver's own verdict on `from`, carried in
+    /// from the transport (see
+    /// [`handle_message_from`](crate::daemon::DaemonRuntime::handle_message_from)).
+    /// It is the only thing that may let the frame's `workflow_node` marker
+    /// grant [`RunTaskOrigin::Workflow`] — the marker alone is caller-controlled
+    /// JSON and cannot be trusted from a remote peer.
+    pub(super) async fn handle_task(
+        &self,
+        from: String,
+        frame: TaskFrame,
+        sender_device_local: bool,
+    ) {
         let correlation = frame.correlation_id.clone();
         let custom_harness = match frame.custom_harness.as_deref() {
             Some(id) => match self

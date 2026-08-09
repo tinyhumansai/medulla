@@ -14,8 +14,8 @@ use tokio::sync::mpsc;
 use super::super::super::types::Abort;
 use super::core_contract::AgentProgress;
 use super::types::ProgressFold;
-use super::EventSink;
 use super::watchdog::drive;
+use super::EventSink;
 
 /// The `(kind, payload)` pairs a test sink recorded, shared with the assertion.
 type EventLog = Arc<Mutex<Vec<(String, serde_json::Value)>>>;

@@ -122,6 +122,11 @@ impl SseParser {
             if nl > MAX_FRAME_BYTES {
                 self.line_buf.drain(..=nl);
                 self.discard_frame();
+                // This newline terminates the oversized line: if we were already
+                // inside a discarded line's tail (the no-newline branch set the
+                // flag), the next blank line is a frame boundary again, not
+                // another line terminator.
+                self.in_discarded_line = false;
                 overflowed = true;
                 continue;
             }

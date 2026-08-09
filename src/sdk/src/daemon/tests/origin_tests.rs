@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, Mutex as StdMutex};
 
-use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult, RunTaskOrigin};
+use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskOrigin, RunTaskResult};
 use crate::daemon::DaemonRuntime;
 use crate::protocol::{TaskFrame, TaskFrameKind};
 
@@ -87,10 +87,7 @@ async fn device_local_workflow_node_keeps_workflow_origin() {
     );
     runtime.idle().await;
 
-    assert_eq!(
-        seen.lock().unwrap().as_slice(),
-        &[RunTaskOrigin::Workflow]
-    );
+    assert_eq!(seen.lock().unwrap().as_slice(), &[RunTaskOrigin::Workflow]);
 }
 
 #[tokio::test]

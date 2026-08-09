@@ -290,12 +290,7 @@ pub(super) fn spawn_inbox_drain(
                 // workflow authority here. Ask the transport rather than
                 // hard-coding `false` so the verdict tracks the link.
                 let sender_device_local = transport.is_device_local(&message.from).await;
-                runtime.handle_message_from(
-                    message.from,
-                    message.text,
-                    frame,
-                    sender_device_local,
-                );
+                runtime.handle_message_from(message.from, message.text, frame, sender_device_local);
             }
             // Returns early when the link's pump delivers, so a subscribe is
             // acted on at about a round trip rather than up to a poll interval

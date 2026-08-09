@@ -39,8 +39,8 @@ pub use program::*;
 pub use types::*;
 
 use futures::stream::Stream;
-use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;

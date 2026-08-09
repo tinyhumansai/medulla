@@ -375,7 +375,13 @@ pub async fn run_daemon(
             _ = transport.wait_for_inbox(poll) => {
                 for message in transport.drain_inbox(50).await {
                     let frame = decode_task_frame(&message.text);
-                    runtime.handle_message(message.from, message.text, frame);
+                    // Every peer here is remote — the standalone daemon serves
+                    // only over the host link — so a frame's `workflowNode`
+                    // marker can never buy workflow authority. The transport
+                    // states the verdict rather than hard-coding `false` here so
+                    // a future device-local transport needs no reminder.
+                    let sender_device_local = transport.is_device_local(&message.from).await;
+                    runtime.handle_message_from(message.from, message.text, frame, sender_device_local);
                 }
             }
         }

@@ -174,7 +174,7 @@ pub(in crate::daemon::providers) async fn run_openhuman_task(
 /// anything returns `{ "result": …, "logs": [...] }`. Whether a given method
 /// logs is an implementation detail that can change without notice, so both are
 /// accepted rather than the one this method happens to emit today.
-pub(super) fn reply_text(value: Value) -> String {
+pub(in crate::daemon::providers) fn reply_text(value: Value) -> String {
     let payload = value
         .get("result")
         .filter(|_| value.get("logs").is_some_and(Value::is_array))

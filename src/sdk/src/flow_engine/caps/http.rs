@@ -193,6 +193,8 @@ impl AllowlistHttpClient {
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .resolve_to_addrs(bare, addrs)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT)
             .build()
             .map_err(|err| {
                 EngineError::Capability(format!("http_request: cannot build client: {err}"))

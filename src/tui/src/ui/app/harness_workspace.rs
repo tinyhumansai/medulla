@@ -191,7 +191,7 @@ impl App {
             self.set_status(format!(
                 "Saved favorite {name} · this run only — no config file"
             ));
-            self.after_saving_favorite();
+            self.after_saving_favorite(&path);
             return;
         };
         match medulla::config::persist_setting(

@@ -470,7 +470,7 @@ fn a_run_of_unconfirmed_echoes_still_respects_the_retention_caps() {
     );
     assert_eq!(
         snap.events[0].seq,
-        overflow as u64 + 1,
+        overflow + 1,
         "the oldest rows are the ones dropped"
     );
 }

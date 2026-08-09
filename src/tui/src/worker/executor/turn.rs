@@ -111,14 +111,7 @@ impl PtySessionExecutor {
         let mut started = tokio::time::Instant::now();
         let mut last_line_at = medulla::clock::now_millis();
 
-        // `TailPoll.located` is emitted only on first sighting, so the
-        // Codex thread label discovered there would not reflect a later
-        // /rename.  We stash the harness session id after the first
-        // location and periodically re-index in the background.
-        let mut poll_ticks: u64 = 0;
-
         loop {
-            poll_ticks = poll_ticks.wrapping_add(1);
             // Taking control is an ownership transfer, not merely a display
             // preference, so it is answered before aborts or transcript output:
             // from here the executor must not send Ctrl-C, report a stale

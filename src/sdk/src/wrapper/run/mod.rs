@@ -250,18 +250,20 @@ fn merge_attribution_env_into_config(config: &mut WrapperConfig) {
 impl Signals {
     /// Install handlers for the host's termination signals.
     ///
-    /// Registration failure is not fatal: it degrades to [`Signals::Unavailable`],
+    /// Each Unix stream registers independently, so a failure to install one
+    /// signal does not cost the others: whichever succeeded is kept. Only when
+    /// nothing could be installed does the source become [`Signals::Unavailable`],
     /// which never fires.
     pub(super) fn install() -> Self {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            match (
-                signal(SignalKind::interrupt()),
-                signal(SignalKind::terminate()),
-            ) {
-                (Ok(sigint), Ok(sigterm)) => Signals::Unix { sigint, sigterm },
-                _ => Signals::Unavailable,
+            let sigint = signal(SignalKind::interrupt()).ok();
+            let sigterm = signal(SignalKind::terminate()).ok();
+            if sigint.is_none() && sigterm.is_none() {
+                Signals::Unavailable
+            } else {
+                Signals::Unix { sigint, sigterm }
             }
         }
         #[cfg(not(unix))]
@@ -279,14 +281,26 @@ impl Signals {
         match self {
             #[cfg(unix)]
             Signals::Unix { sigint, sigterm } => {
+                // Each branch polls only the streams that were installed; a
+                // registration that failed (None) is a transient that resolves
+                // to `pending`, so the branch never fires for a signal that was
+                // not actually registered.
+                let sigint = sigint.as_mut().map(|s| s.recv());
+                let sigterm = sigterm.as_mut().map(|s| s.recv());
                 tokio::select! {
-                    _ = sigint.recv() => {}
-                    _ = sigterm.recv() => {}
+                    _ = sigint.into() => {}
+                    _ = sigterm.into() => {}
                 }
             }
             #[cfg(not(unix))]
             Signals::CtrlC => {
-                let _ = tokio::signal::ctrl_c().await;
+                // A registration error is a disabled source, not an immediate
+                // signal: awaiting it must not complete the branch, or the run
+                // loop would treat the failed install as a Ctrl-C and kill the
+                // child. Degrade to never resolving instead.
+                if tokio::signal::ctrl_c().await.is_err() {
+                    std::future::pending().await;
+                }
             }
             Signals::Unavailable => std::future::pending().await,
         }

@@ -178,7 +178,13 @@ pub(crate) fn session_files_for_cwd(
     agent: SessionAgentKind,
     cwd: &str,
 ) -> Vec<DiscoveredSession> {
-    let here = safe_resolve(cwd);
+    // An unresolvable `here` proves nothing. Two `None` resolves compare equal,
+    // so without this guard a single session whose cwd also fails to resolve
+    // would pass the match below and be attributed to this folder on no
+    // evidence at all — the very mislabeling this function exists to prevent.
+    let Some(here) = safe_resolve(cwd) else {
+        return Vec::new();
+    };
     let mut files = collect_session_files(agent, &sessions_dir_for(env, agent));
     files.sort_by_key(|file| std::cmp::Reverse(file.mtime_ms));
     files
@@ -187,7 +193,7 @@ pub(crate) fn session_files_for_cwd(
             let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
             let summary = read_session_summary(agent, &file.path)?;
             let session_cwd = summary.cwd?;
-            (safe_resolve(&session_cwd) == here).then_some(DiscoveredSession {
+            (safe_resolve(&session_cwd) == Some(here)).then_some(DiscoveredSession {
                 path: canonical,
                 id: summary.id,
                 cwd: Some(session_cwd),

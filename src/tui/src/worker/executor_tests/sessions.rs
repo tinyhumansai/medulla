@@ -1,5 +1,10 @@
 //! Session reuse, concurrency, and the prompt-injection failure paths.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use crate::worker::executor::SessionProbe;
+
 use super::*;
 
 #[tokio::test]

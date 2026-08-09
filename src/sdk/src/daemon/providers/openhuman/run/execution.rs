@@ -13,7 +13,7 @@ use crate::protocol::HarnessProvider;
 
 use super::super::super::types::{RunTaskOptions, RunTaskResult};
 use super::core_contract::{with_progress_sink, AgentProgress, ProgressSink};
-use super::types::EventSink;
+use super::EventSink;
 use super::watchdog;
 
 /// The core method that runs a full agent turn.

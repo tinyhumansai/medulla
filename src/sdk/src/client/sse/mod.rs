@@ -21,6 +21,15 @@ use futures::stream::{Stream, StreamExt};
 use crate::client::error::{ClientError, Result};
 use crate::client::types::EventEnvelope;
 
+mod types;
+pub use types::ParseResult;
+pub use types::SeqDedup;
+pub use types::SseFrame;
+pub use types::SseOverflow;
+pub use types::SseParser;
+pub use types::MAX_FRAME_BYTES;
+use types::StreamState;
+
 impl SseParser {
     /// Create an empty parser.
     pub fn new() -> Self {

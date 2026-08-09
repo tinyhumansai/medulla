@@ -355,9 +355,11 @@ fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());
     // Enough lines to push history off a 30-row screen, and no mouse reporting.
+    // Codex stands in for "some harness": the stand-in never turns on bracketed
+    // paste or alternate scrolling, so the wheel must fall through to our own
+    // emulator rather than be synthesized into cursor keys.
     let id = sessions
-        .open(sh_for(
-            HarnessProvider::Claude,
+        .open(sh(
             "i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done; sleep 30",
         ))
         .unwrap();
@@ -387,6 +389,37 @@ fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     harnesses.scroll_to_live(&id);
     assert!(text(&harnesses, &id).contains("line-200"));
     sessions.close(&id);
+}
+
+#[test]
+fn an_exited_codex_session_scrolls_our_retained_history() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // A codex that raised its input layer (bracketed paste) and then exited:
+    // there is no child to synthesize cursor keys for any more, so the wheel
+    // must move the emulator's own retained lines — the ones the operator is
+    // reading how the session ended.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?2004h'; i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done",
+        ))
+        .unwrap();
+
+    wait_for("the codex stand-in to exit", || !harnesses.is_running(&id));
+    wait_for("the retained screen to hold the tail", || {
+        text(&harnesses, &id).contains("line-200")
+    });
+    // The input layer was up, but the child is gone: cursor keys have no
+    // listener, which is exactly the case that must fall through.
+    assert_eq!(harnesses.sessions.bracketed_paste(&id), Some(true));
+    assert!(harnesses.write(&id, b"x").is_err());
+
+    harnesses.scroll(&id, 0, 0, true, 40);
+    let scrolled = text(&harnesses, &id);
+    assert!(
+        !scrolled.contains("line-200"),
+        "an exited codex must scroll its retained history:\n{scrolled}"
+    );
 }
 
 #[test]

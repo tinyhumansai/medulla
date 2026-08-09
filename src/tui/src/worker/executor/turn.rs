@@ -219,7 +219,12 @@ impl PtySessionExecutor {
                     provider.as_str()
                 ));
             }
-            let idle_ms = medulla::clock::now_millis().saturating_sub(last_line_at);
+            // `now_millis` is wall-clock (`SystemTime`), so a backward step (an
+            // NTP sync, a suspend/resume) makes the delta negative. Casting a
+            // negative i64 to u64 wraps to a huge value, which would fire the
+            // idle timeout below and stop a harness that is merely the victim
+            // of a clock change. A zero floor keeps the watchdog silent instead.
+            let idle_ms = medulla::clock::now_millis().saturating_sub(last_line_at).max(0);
             // The configured idle ceiling, checked first so a caller-set budget
             // shorter than the fixed ones below actually takes effect instead of
             // being silently outlived by them. `timeout_ms == 0` means no

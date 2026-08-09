@@ -1,4 +1,13 @@
-//! Unit tests for task-specific harness environment construction.
+//! Unit tests for task-specific harness environment construction and for the
+//! task-loop's own registration claim (concurrent duplicate rejection).
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use super::super::tests::{base_config, recording_send};
+use super::super::types::{DaemonRuntime, RunningTask};
+use crate::daemon::providers::{Abort, RunTaskFn, RunTaskOptions, RunTaskResult};
+use crate::protocol::HarnessProvider;
 
 #[cfg(feature = "workflows")]
 #[test]

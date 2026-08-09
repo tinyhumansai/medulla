@@ -36,7 +36,7 @@ fn origin_runner(seen: Arc<StdMutex<Vec<RunTaskOrigin>>>) -> RunTaskFn {
 
 /// A `Task` frame with the `workflowNode` marker set, as the workflow host's
 /// loopback dispatch (and any forger) would send it.
-fn workflow_node_frame(task_id: &str, text: &str) -> crate::protocol::TaskFrame {
+fn workflow_node_frame(task_id: &str, text: &str) -> TaskFrame {
     TaskFrame {
         workflow_node: true,
         ..task_frame(task_id, text, None)

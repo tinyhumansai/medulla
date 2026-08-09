@@ -56,7 +56,7 @@ impl ProgressFold {
     ///
     /// Telemetry sitting between tokens (`TurnCostUpdated`) is not a boundary:
     /// it must not split a message in half, so nothing is flushed until a
-    /// boundary that mapps to a stream frame. `TurnCompleted` is the exception
+    /// boundary that maps to a stream frame. `TurnCompleted` is the exception
     /// that proves the text rule — the caller re-emits the completed reply as
     /// its own closing `agent_message` after the watchdog returns, so clearing
     /// the pending text here avoids doubling the turn's final words, while the

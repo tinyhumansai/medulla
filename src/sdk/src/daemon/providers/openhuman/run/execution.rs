@@ -57,11 +57,11 @@ const PROGRESS_CAPACITY: usize = 256;
 ///   trust root a user-authored cron job's do. That is exactly
 ///   [`TrustedAutomationSource::Workflow`], which is what this scopes. See
 ///   [`scoped_origin`].
-/// * **Workspace.** The run names a checkout ([`RunTaskOptions::cwd`]). Scoping
-///   it makes it both the turn's working directory and a read/write root for
-///   the path policy, so a write into that tree is not refused as an escape
-///   from the core's own `workspace_dir`. See [`scoped_workspace`] on why the
-///   grant is no stronger than a configured trusted root.
+/// * **Workspace.** The run names a checkout ([`RunTaskOptions::cwd`]):
+///   `AgentChatParams::cwd` roots the turn's file and shell tools there, so
+///   relative paths resolve inside the node's checkout rather than the Medulla
+///   process's startup directory, and [`crate::core_host::turn_cwd`] scopes the
+///   same tree for the process-global lifecycle hooks.
 ///
 /// # Errors
 ///

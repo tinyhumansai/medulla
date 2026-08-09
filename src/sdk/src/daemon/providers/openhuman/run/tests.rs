@@ -13,7 +13,8 @@ use tokio::sync::mpsc;
 
 use super::super::super::types::Abort;
 use super::core_contract::AgentProgress;
-use super::types::{EventSink, ProgressFold};
+use super::types::ProgressFold;
+use super::EventSink;
 use super::watchdog::drive;
 
 /// The `(kind, payload)` pairs a test sink recorded, shared with the assertion.

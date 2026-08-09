@@ -4,10 +4,11 @@
 //! opencode SQLite-lock exits with jittered exponential backoff.
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -411,33 +412,43 @@ async fn run_provider_attempt(
     }
 
     let stdout = child.stdout.take().ok_or("child has no stdout")?;
-    let stderr = child.stderr.take().ok_or("child has no stderr")?;
+    let mut stderr = child.stderr.take().ok_or("child has no stderr")?;
 
-    // stderr tail collector.
+    // stderr tail collector, which doubles as a heartbeat source: a child that
+    // is logging to stderr is demonstrably alive even while it emits no parsed
+    // events, and killing it as "idle" throws away real work.
     let stderr_tail = Arc::new(Mutex::new(String::new()));
+    // Monotonic origin for encoding stderr beats (see `stderr_beat`); sharing
+    // one base with the watchdog below lets it tell how old a beat is.
+    let beat_base = Instant::now();
+    // Holds the timestamp (micros since `beat_base`) of the most recent stderr
+    // output rather than a bare counter, so the idle watchdog can re-arm from
+    // the beat's *own* time instead of from whenever it next happens to check.
+    let stderr_beat = Arc::new(AtomicU64::new(0));
     let stderr_task = {
         let stderr_tail = stderr_tail.clone();
+        let stderr_beat = stderr_beat.clone();
+        // `beat_base` is `Copy`, so the `async move` block captures it by copy;
+        // it remains in scope for the watchdog's stale-beat arithmetic below.
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut buf = Vec::new();
+            // Stderr is read as raw chunks rather than `read_until(b'\n')` lines:
+            // a spinner rewrites its progress in place with `\r` and never emits a
+            // newline, so a newline-framed read would not return until the pipe
+            // closed and the heartbeat would go stale even though bytes keep
+            // arriving — killing a visibly working child as idle. Reading a chunk
+            // at a time refreshes the beat on every byte arrival, which is exactly
+            // the "any output is proof of life" the idle watchdog promises. The
+            // diagnostic tail is a byte window for error messages, not a
+            // line-parsed log, so losing the framing costs nothing there.
+            let mut chunk = [0u8; 4096];
             loop {
-                buf.clear();
-                // Bounded for the same reason as stdout: only the last
-                // `TAIL_CAP` bytes are ever kept, so a child writing one endless
-                // stderr line must not be buffered whole to produce them.
-                // An oversized record keeps its trailing `TAIL_CAP` bytes in
-                // `buf`, so the tail still carries whatever diagnostic the child
-                // wrote — including the opencode `database is locked` marker the
-                // retry loop keys on — even when a single record blew past the
-                // ceiling.
-                match read_line_bounded(&mut reader, &mut buf, MAX_RECORD_BYTES, Some(TAIL_CAP))
-                    .await
-                {
-                    Ok(LineRead::Eof) => break,
-                    Ok(LineRead::Oversized) | Ok(LineRead::Line) => {
-                        let chunk = String::from_utf8_lossy(&buf);
+                match stderr.read(&mut chunk).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        stderr_beat
+                            .store(beat_base.elapsed().as_micros() as u64, Ordering::Relaxed);
                         let mut tail = stderr_tail.lock().unwrap();
-                        tail.push_str(&chunk);
+                        tail.push_str(&String::from_utf8_lossy(&chunk[..n]));
                         *tail = tail_bytes(&tail);
                     }
                     Err(_) => break,
@@ -468,9 +479,18 @@ async fn run_provider_attempt(
     let mut line_no: i64 = 0;
     let mut stdout_tail = String::new();
 
-    // Idle watchdog: killed only after `timeout_ms` with NO new event; each event
-    // pushes the deadline out. Armed at start to cover a child that emits nothing.
+    // Idle watchdog: killed only after `timeout_ms` with NO sign of life; each
+    // one pushes the deadline out. Armed at start to cover a child that emits
+    // nothing at all.
+    //
+    // "Sign of life" is deliberately wider than "parsed event". A harness that
+    // spends twenty minutes inside one tool call — a cold `cargo test`, a long
+    // lint — emits no semantic events for the whole of it, and treating that as
+    // a hang killed sessions mid-task and discarded everything they had not yet
+    // pushed. Any output on either pipe now counts, so the watchdog still fires
+    // on a genuinely wedged child while a working one is left alone.
     let mut deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+    let mut seen_stderr = stderr_beat.load(Ordering::Relaxed);
     let mut buf = Vec::new();
 
     let idle_error = format!(
@@ -489,6 +509,26 @@ async fn run_provider_attempt(
                 return Err(format!("{} task aborted", provider_name(spec.provider)));
             }
             _ = tokio::time::sleep_until(deadline) => {
+                // stderr arrives on its own task, so it cannot push the deadline
+                // out directly; the deadline firing is where it is claimed. A
+                // beat since the deadline was armed means the child spoke during
+                // the window and is not idle.
+                let beat = stderr_beat.load(Ordering::Relaxed);
+                if beat != seen_stderr {
+                    seen_stderr = beat;
+                    // Re-arm from the beat's *own* timestamp, not from now: a
+                    // beat may have gone stale while stdout kept pushing the
+                    // window out, and a stale beat must not grant the child a
+                    // second full timeout once it finally hangs. If even the
+                    // beat's window has lapsed, the child is idle after all.
+                    let beat_deadline = beat_base
+                        + Duration::from_micros(beat)
+                        + Duration::from_millis(spec.timeout_ms);
+                    if beat_deadline > Instant::now() {
+                        deadline = beat_deadline;
+                        continue;
+                    }
+                }
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 report_workspace_context(&mapper, spec);
@@ -497,10 +537,20 @@ async fn run_provider_attempt(
             read = read_line_bounded(&mut reader, &mut buf, MAX_RECORD_BYTES, None) => {
                 match read {
                     Ok(LineRead::Eof) => break,
-                    // Unparseable oversized record — already discarded, and the
-                    // reader is positioned on the next one.
-                    Ok(LineRead::Oversized) => continue,
+                    // An oversized record is still proof of life: the bounded
+                    // reader already discarded it, but a harness emitting only
+                    // huge JSON records is not hung, so refresh the idle
+                    // deadline rather than letting it trip on the original one.
+                    Ok(LineRead::Oversized) => {
+                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+                        continue;
+                    }
                     Ok(LineRead::Line) => {
+                        // Any output is proof of life, whether or not it maps to
+                        // an event: refresh the idle window before parsing so a
+                        // child busy inside one long tool call that emits only
+                        // unmappable records is not killed as idle.
+                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
                         let raw = String::from_utf8_lossy(&buf);
                         let raw = raw.trim_end_matches(['\n', '\r']);
                         stdout_tail.push_str(raw);
@@ -528,9 +578,9 @@ async fn run_provider_attempt(
                             on_event.as_mut(),
                         );
                         line_no += 1;
-                        if produced {
-                            deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
-                        }
+                        // Mapped or not, the record arrived from a living child,
+                        // so the idle window was already refreshed above.
+                        let _ = produced;
                     }
                     Err(_) => break,
                 }

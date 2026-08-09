@@ -98,14 +98,22 @@ impl LocalSessions {
 
     /// Scroll `session_id` by one wheel notch at pane-relative `(col, row)`.
     ///
-    /// Two paths, chosen by what the child asked for rather than by what we
-    /// would prefer:
+    /// The path is chosen by what the child is *doing right now* rather than by
+    /// what we would prefer:
     ///
+    /// - the harness is gone, so none of the forwarding paths below can reach it
+    ///   — the wheel moves the emulator's own retained lines, which is how the
+    ///   operator read how the session ended;
     /// - the harness enabled mouse reporting (Claude Code and Codex both do), so
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - the harness enables alternate scrolling without mouse reporting (Codex),
+    /// - Codex does not negotiate mouse reports in current releases. Once its
+    ///   input layer is up (bracketed paste — the readiness signal the pane
+    ///   reads from the emulator) its TUI
+    ///   consumes cursor keys to move through the transcript, so a notch becomes
+    ///   cursor-key input even when it does not advertise alternate scrolling;
+    /// - another harness enables alternate scrolling without mouse reporting,
     ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
     ///   specifies;
     /// - otherwise our emulator's own retained lines move instead. Not as good,
@@ -117,15 +125,34 @@ impl LocalSessions {
     /// own history. A mouse-reporting harness receives one notch and decides
     /// what that notch means itself.
     pub fn scroll(&self, session_id: &str, col: u16, row: u16, up: bool, rows: usize) {
+        // A dead child cannot receive a wheel event, however it configured its
+        // terminal while it lived: the row is retained so the operator can read
+        // how it ended, and a notch must move that — not write cursor keys (or a
+        // report) into a pty nobody is reading, which would also strand the
+        // wheel forever. Every forwarding path below is therefore gated on the
+        // session still running.
+        if !self.is_running(session_id) {
+            self.sessions.scroll_history(session_id, rows, up);
+            return;
+        }
         if let Some((mode, encoding)) = self.sessions.mouse_protocol(session_id) {
             if let Some(bytes) = mouse::wheel(mode, encoding, col, row, up) {
-                // A failed write means the child died; the pane notices on its
-                // next frame, and a lost wheel notch is not worth a message.
+                // A failed write means the child died between the last frame and
+                // this notch; the pane notices on its next draw, and a lost
+                // wheel notch is not worth a message.
                 let _ = self.sessions.write(session_id, &bytes);
                 return;
             }
         }
-        if self.sessions.alternate_scroll(session_id) == Some(true) {
+        // Codex gets cursor keys only once its input layer is up: a codex that
+        // is still painting (or a shell standing in for one) has nothing to
+        // consume them, and sending them would only garble its first paint.
+        let codex = self
+            .sessions
+            .row(session_id)
+            .is_some_and(|row| row.provider == medulla::protocol::HarnessProvider::Codex)
+            && self.sessions.bracketed_paste(session_id) == Some(true);
+        if codex || self.sessions.alternate_scroll(session_id) == Some(true) {
             let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };
             let mut bytes = Vec::with_capacity(arrow.len() * rows);
             for _ in 0..rows {

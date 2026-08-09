@@ -7,8 +7,10 @@ use ratatui::text::{Line as TLine, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::agents::AgentLane;
-use crate::ui::util::slug;
-use crate::worker::pty::{HarnessAttention, SessionControl, SessionRow, ATTENTION_GLYPH};
+use crate::ui::util::{slug, SPINNER};
+use crate::worker::pty::{
+    AttentionKind, HarnessAttention, PtyState, SessionControl, SessionRow, ATTENTION_GLYPH,
+};
 
 use super::super::super::super::rail::{RailRow, NEW_SESSION_LABEL};
 use super::super::super::super::types::App;
@@ -95,7 +97,7 @@ impl App {
             RailRow::WorkflowRun(run) => self.workflow_run_line(run, active, now),
             RailRow::Session(session) => match (&session.task, &session.local) {
                 (Some(task), _) => {
-                    self.task_session_line(task, session.last, active, waiting_sessions)
+                    self.task_session_line(task, session.last, active, waiting_sessions, now)
                 }
                 (None, Some(local)) => self
                     .own_session_lines(local, active, super::RAIL_MAX_CONTENT, now)
@@ -126,9 +128,8 @@ impl App {
 impl App {
     /// Format one operator-started harness using the configured status-line layout.
     ///
-    /// PTY attention overrides the ordinary state glyph and adds a textual cue,
-    /// while the operator's field placement and visibility choices remain in
-    /// force for the status line itself.
+    /// Lifecycle state chooses the glyph and colour, while the operator's field
+    /// placement and visibility choices remain in force for the status line.
     pub(in crate::ui::app::render) fn own_session_lines(
         &self,
         row: &SessionRow,
@@ -136,30 +137,42 @@ impl App {
         width: usize,
         now: i64,
     ) -> Vec<TLine<'static>> {
-        let waiting = self.harness_attention(row);
-        let alerting = waiting.is_some();
-        let style = if waiting.is_some() {
-            let mut attention = Style::default()
-                .fg(self.theme.attention)
-                .add_modifier(Modifier::BOLD);
-            if self.theme.attention_blink {
-                attention = attention.add_modifier(Modifier::SLOW_BLINK);
-            }
-            if active {
-                attention.add_modifier(Modifier::REVERSED)
+        let cue = self.harness_attention(row, now);
+        let failed = cue.as_ref().is_some_and(|cue| cue.kind.is_failure());
+        let completed = cue
+            .as_ref()
+            .is_some_and(|cue| cue.kind == AttentionKind::Completed);
+        let alerting = cue.is_some() && !completed;
+        let style = if failed || (cue.is_some() && !completed) {
+            let colour = if failed {
+                color("red")
             } else {
-                attention
+                self.theme.attention
+            };
+            let pulse = self.theme.pulse(colour, self.frame);
+            if active {
+                pulse.add_modifier(Modifier::REVERSED)
+            } else {
+                pulse
             }
         } else if active {
             self.theme.selection()
+        } else if row.working {
+            Style::default().fg(color("green"))
         } else if row.control == SessionControl::User {
             Style::default().fg(color("cyan"))
         } else {
             Style::default()
         };
-        let glyph = match &waiting {
-            Some(_) => ATTENTION_GLYPH,
-            None => row.state.glyph(),
+        let glyph = match cue.as_ref() {
+            Some(cue) if cue.kind.is_failure() => "✕".to_string(),
+            Some(cue) if cue.kind == AttentionKind::Completed => "✓".to_string(),
+            Some(_) => ATTENTION_GLYPH.to_string(),
+            None if row.working => SPINNER[self.frame % SPINNER.len()].to_string(),
+            // Attached sessions suppress lifecycle cues, but a failed exit
+            // must still retain its state glyph.
+            None if matches!(row.state, PtyState::Exited { .. }) => row.state.glyph().to_string(),
+            None => row.state.glyph().to_string(),
         };
         let detail_style = if active {
             style
@@ -170,7 +183,7 @@ impl App {
             active,
             width,
             alerting,
-            state_glyph: glyph,
+            state_glyph: glyph.clone(),
             primary: style,
             detail: detail_style,
         };
@@ -180,8 +193,8 @@ impl App {
             home_dir().as_deref(),
             render,
         );
-        if let Some(cue) = waiting {
-            let text = format!("  {ATTENTION_GLYPH} {}", cue.label(now));
+        if let Some(cue) = cue {
+            let text = format!("  {glyph} {}", cue.label(now));
             lines.extend(wrap_line(
                 &TLine::from(Span::styled(text, style)),
                 width,
@@ -191,12 +204,12 @@ impl App {
         lines
     }
 
-    /// The cue a harness row should blink about, if it should.
-    pub(super) fn harness_attention(&self, row: &SessionRow) -> Option<HarnessAttention> {
-        if !row.state.is_running() || self.harness_focus.is_attached_to(&row.id) {
+    /// The cue a harness row should draw, including lifecycle failures.
+    pub(super) fn harness_attention(&self, row: &SessionRow, now: i64) -> Option<HarnessAttention> {
+        if self.harness_focus.is_attached_to(&row.id) {
             return None;
         }
-        row.attention.clone()
+        crate::worker::pty::row_cue(row, now)
     }
 
     /// Format the `+N more` paging control for a lane the fold has paged.
@@ -230,32 +243,56 @@ impl App {
         last: bool,
         active: bool,
         waiting_sessions: &HashSet<String>,
+        now: i64,
     ) -> TLine<'static> {
         let branch = if last { "└" } else { "├" };
-        let needs_input = self.task_attention(&task.task_id, waiting_sessions);
+        let cue = self.task_attention_cue(&task.task_id, waiting_sessions, now);
+        let failed = cue.as_ref().is_some_and(|cue| cue.kind.is_failure());
+        // Only a cue that blocks counts as waiting. The waiting-set was built
+        // from blocking cues, but the recomputed cue can have shifted to a
+        // non-blocking one (a prompt answered, a turn settled) by the time the
+        // row is drawn; a `Completed` retention is not "needs input".
+        let waiting = cue.as_ref().is_some_and(|cue| cue.kind.blocks());
         let mut style = if active {
             self.theme.selection()
         } else {
             Style::default()
         };
-        if needs_input {
-            style = style.fg(self.theme.attention);
-            if self.theme.attention_blink {
-                style = style.add_modifier(Modifier::SLOW_BLINK);
-            }
+        if waiting {
+            // A harness that died is bad news and draws red, exactly as every
+            // other failed-session surface draws it; anything else the harness
+            // is waiting on keeps the configured attention colour. The two are
+            // told apart before either is read.
+            let colour = if failed {
+                color("red")
+            } else {
+                self.theme.attention
+            };
+            let pulse = self.theme.pulse(colour, self.frame);
+            style = if active {
+                // Preserve the selected-row background while letting the
+                // waiting state pulse its foreground and cadence.
+                self.theme.selection().patch(pulse)
+            } else {
+                pulse
+            };
         }
-        let status_style = if active || needs_input {
+        let status_style = if active || waiting {
             style
         } else {
             style.fg(color(task.status.color()))
         };
-        let status = if needs_input {
+        let status = match &cue {
+            // A harness that died is not "needs input": nothing a person can
+            // type will bring it back, and the generic waiting label would hide
+            // the explanation this row is the only surface left to give. Say
+            // what failed and how long ago, like the operator-owned rows do.
+            Some(cue) if failed => cue.label(now),
             // The one state the task's own status cannot express: the harness
             // has stopped on something only a person can answer, which the
             // backend never sees and so never reports.
-            NEEDS_INPUT_LABEL
-        } else {
-            task.status.label()
+            Some(_) => NEEDS_INPUT_LABEL.to_string(),
+            None => task.status.label().to_string(),
         };
         let chip = task
             .work
@@ -274,7 +311,7 @@ impl App {
             .unwrap_or_default();
         TLine::from(vec![
             Span::styled(format!("   {branch} {} · ", task.task_id), style),
-            Span::styled(status.to_string(), status_style),
+            Span::styled(status, status_style),
             Span::styled(format!("{chip}{title}"), style),
         ])
     }

@@ -43,6 +43,7 @@ fn options(
     );
     (
         RunTaskOptions {
+            origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
             provider: HarnessProvider::Codex,
             transport: HarnessTransport::AppServer,
             prompt: prompt.to_string(),

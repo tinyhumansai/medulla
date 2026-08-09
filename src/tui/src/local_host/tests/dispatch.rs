@@ -19,6 +19,7 @@ use super::env_with_only_claude;
 /// conversation, just enough to reach the executor the dispatcher picks.
 fn dispatch_options(provider: HarnessProvider, bin_env_key: &str) -> RunTaskOptions {
     RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         provider,

@@ -93,6 +93,12 @@ impl Abort {
 pub struct RunTaskOptions {
     /// The coding-agent CLI to spawn.
     pub provider: HarnessProvider,
+    /// The dispatch path that requested this run.
+    ///
+    /// Providers normally treat this as observability context. The embedded
+    /// OpenHuman adapter uses it as a security boundary: only an authored
+    /// workflow node may receive unattended automation trust.
+    pub origin: RunTaskOrigin,
     /// The flavor of `provider` this run uses.
     ///
     /// [`Cli`](HarnessTransport::Cli) — the default — forks the provider's
@@ -181,6 +187,21 @@ pub struct RunTaskOptions {
     pub on_session: Option<OnSession>,
     /// Persists repository context for a later resumed turn.
     pub on_workspace_context: Option<OnWorkspaceContext>,
+}
+
+/// The Medulla entry point that dispatched a provider task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTaskOrigin {
+    /// A node in an operator-authored workflow graph.
+    Workflow,
+    /// An authenticated peer's discrete delegated task.
+    DelegatedTask,
+    /// A conversational message from an authenticated peer.
+    Conversation,
+    /// An interactive local session turn.
+    Interactive,
+    /// Medulla's own provider-capability probe.
+    CapabilityProbe,
 }
 
 /// The outcome of a headless run.

@@ -1,5 +1,8 @@
 //! Focused tests for bounded folder completion and fuzzy ranking.
 
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+
 use super::harness_workspace::{
     absolute, folder_completions, fuzzy_subsequence_score, match_score, workspace_match_score,
 };

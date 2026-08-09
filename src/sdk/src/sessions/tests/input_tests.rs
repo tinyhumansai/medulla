@@ -26,6 +26,7 @@ fn task_frame(kind: TaskFrameKind, task_id: &str, text: &str) -> TaskFrame {
         usage: None,
         work: None,
         tool_mode: None,
+        workflow_node: false,
         workflow: None,
         workflow_fingerprint: None,
         workflow_inputs: Default::default(),

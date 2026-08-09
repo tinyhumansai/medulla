@@ -68,6 +68,17 @@ pub fn install(core: Arc<EmbeddedCore>) -> bool {
 /// every later caller — see the module docs on why a failed boot is not
 /// retried.
 pub async fn shared() -> Result<Arc<EmbeddedCore>, String> {
+    shared_with_hooks(&crate::harness_hooks::HooksConfig::default()).await
+}
+
+/// This process's core, booting one with `hooks` if nobody has installed any.
+///
+/// The hooks are supplied by the dispatcher rather than read from ambient
+/// process state so headless workflow runs preserve the same configured hook
+/// policy as a TUI-hosted core.
+pub async fn shared_with_hooks(
+    hooks: &crate::harness_hooks::HooksConfig,
+) -> Result<Arc<EmbeddedCore>, String> {
     SHARED
         .get_or_init(|| async {
             // A host that never bound the core — a workflow run, an MCP
@@ -83,7 +94,7 @@ pub async fn shared() -> Result<Arc<EmbeddedCore>, String> {
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
             let home = crate::home::medulla_home(&env);
             super::bind_workspace(&env, &home);
-            super::boot()
+            super::boot_with_hooks(hooks)
                 .await
                 .map(Arc::new)
                 .map_err(|err| format!("could not start the embedded OpenHuman core: {err}"))

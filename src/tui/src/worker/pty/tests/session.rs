@@ -229,6 +229,25 @@ async fn writing_to_an_exited_session_is_refused() {
 }
 
 #[test]
+fn a_recorded_write_error_stamps_the_moment_it_happened() {
+    // The failure cue stamps itself with last_output_at, so a write error on a
+    // session that has produced no output for minutes must not inherit that
+    // stale output time — the brand-new failure would claim an age it does not
+    // have, forever, if the child stayed alive.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    let handle = manager.handle(&id).expect("a live handle");
+    let now = medulla::clock::now_millis();
+
+    handle.record_error("write queue full".to_string(), now);
+
+    let row = manager.row(&id).unwrap();
+    assert_eq!(row.last_error.as_deref(), Some("write queue full"));
+    assert_eq!(row.last_output_at, now);
+    manager.close(&id);
+}
+
+#[test]
 fn a_running_session_cannot_be_forgotten() {
     // Dropping the record while the child lives would orphan it holding a pty.
     let manager = PtyManager::new();

@@ -299,7 +299,12 @@ impl DaemonRuntime {
         }
         let session = EvolveSession {
             store,
-            dispatch: Arc::new(RuntimeDispatch::new(self.clone(), from.to_string())),
+            // An evolution pass is restricted to proposal tools. It is not an
+            // authored workflow node and must not inherit workflow authority.
+            dispatch: Arc::new(
+                RuntimeDispatch::new(self.clone(), from.to_string())
+                    .with_origin(crate::daemon::providers::RunTaskOrigin::DelegatedTask),
+            ),
             worker_address: self.inner.config.default_provider.as_str().to_string(),
             provider: Some(self.inner.config.default_provider),
             model: self.inner.config.model.clone(),

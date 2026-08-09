@@ -17,6 +17,10 @@ use super::super::types::{App, SessionPickerStep};
 
 const HARNESS_TRAILER_LINES: usize = 3;
 
+/// Width allotted to a workspace row's path (or favorite label and path)
+/// before the dim provenance suffix is appended.
+const WORKSPACE_ROW_WIDTH: usize = 43;
+
 impl App {
     /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {
@@ -26,11 +30,11 @@ impl App {
         let (rows, title) = match picker.step {
             SessionPickerStep::Harness => (
                 picker.choices.len(),
-                "Choose a harness type — ↑/↓ · Enter workspace · Esc cancel",
+                "Choose a harness type — Enter workspace · Esc cancel",
             ),
             SessionPickerStep::Workspace => (
                 picker.workspace_choices.len(),
-                "Choose workspace — type to filter · Tab complete · Enter start · Esc back",
+                "Choose workspace — type to filter · Enter start · Esc back",
             ),
         };
         let height = (rows as u16).saturating_add(7).clamp(8, 18);
@@ -139,14 +143,23 @@ impl App {
                             } else {
                                 Style::default()
                             };
-                            TLine::from(vec![
-                                Span::styled(
-                                    format!(
-                                        "{marker}{}",
-                                        medulla::ui::util::clip_left(&choice.path, 43)
-                                    ),
-                                    style,
+                            // A bare path is clipped from the left, so the tail
+                            // that identifies the directory survives. A named
+                            // favorite instead clips from both ends: `★ name ·`
+                            // is the distinguishing part the operator added, and
+                            // clipping from the left would delete it whenever
+                            // the path below runs long.
+                            let display = match &choice.label {
+                                Some(label) => medulla::ui::util::clip_middle(
+                                    &format!("★ {label} · {}", choice.path),
+                                    WORKSPACE_ROW_WIDTH,
                                 ),
+                                None => {
+                                    medulla::ui::util::clip_left(&choice.path, WORKSPACE_ROW_WIDTH)
+                                }
+                            };
+                            TLine::from(vec![
+                                Span::styled(format!("{marker}{display}"), style),
                                 Span::styled(
                                     format!("  {}", choice.source),
                                     Style::default().add_modifier(Modifier::DIM),
@@ -166,12 +179,15 @@ impl App {
                 Style::default().add_modifier(Modifier::DIM),
             )));
         }
-        // Said here as well as in the status line, because it is the one fact
-        // that makes this different from every other way to start a session —
-        // and it is now a statement rather than a question, so it is said on
-        // both steps and never asked.
+        // The one fact that makes this picker different from every other way
+        // to start a session is that the session is unmanaged, so that is
+        // stated on both steps. The keyboard verbs beside it are step-specific:
+        // Tab complete and Shift+F save favorite need the workspace step's
+        // text field and chosen directory, and advertising them on the harness
+        // step — where neither key is bound — would send an operator pressing
+        // the hint into silence.
         lines.push(TLine::from(Span::styled(
-            "  unmanaged · the orchestrator will not dispatch into it",
+            harness_picker_hint(picker.step),
             Style::default().add_modifier(Modifier::DIM),
         )));
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
@@ -336,6 +352,22 @@ impl App {
             hint,
         ];
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
+    }
+}
+
+/// The footer hint under the picker, stated per step.
+///
+/// `↑/↓ choose` applies to both steps, and the "unmanaged" statement is true
+/// of any hand-started session, so both are said everywhere. `Tab complete`
+/// and `Shift+F save favorite` are only meaningful on the workspace step — the
+/// one with a text field to complete and a chosen directory to remember — and
+/// the keys are not bound on the harness step, so the hint is not shown there.
+pub(super) fn harness_picker_hint(step: SessionPickerStep) -> &'static str {
+    match step {
+        SessionPickerStep::Harness => "  ↑/↓ choose · unmanaged",
+        SessionPickerStep::Workspace => {
+            "  ↑/↓ choose · Tab complete · Shift+F save favorite · unmanaged"
+        }
     }
 }
 

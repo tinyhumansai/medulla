@@ -10,6 +10,17 @@ pub fn encode_task_frame(input: EncodeFrameInput) -> String {
     build(input, FrameAttachments::default()).encode()
 }
 
+/// Serialize a task issued by an `agent` node within an authenticated workflow.
+///
+/// The marker survives loopback and remote task dispatch, allowing the worker
+/// to grant OpenHuman's workflow origin to the node without confusing it with
+/// an ordinary delegated task frame.
+pub fn encode_workflow_node_task_frame(input: EncodeFrameInput) -> String {
+    let mut frame = build(input, FrameAttachments::default());
+    frame.workflow_node = true;
+    frame.encode()
+}
+
 /// [`encode_task_frame`] with reported token usage (reply frames).
 pub fn encode_task_frame_with_usage(input: EncodeFrameInput, usage: Option<TokenUsage>) -> String {
     build(
@@ -72,6 +83,7 @@ fn build(input: EncodeFrameInput, attachments: FrameAttachments) -> TaskFrame {
         custom_harness: input.custom_harness.map(String::into_boxed_str),
         model: input.model,
         tool_mode: input.tool_mode,
+        workflow_node: false,
         workflow: input.workflow,
         workflow_fingerprint: input.workflow_fingerprint,
         workflow_inputs: input.workflow_inputs,

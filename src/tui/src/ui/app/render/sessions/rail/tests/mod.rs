@@ -13,6 +13,7 @@ use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
+use crate::ui::util::SPINNER;
 use crate::worker::pty::{AttentionKind, HarnessAttention, PtyState, SessionControl, SessionRow};
 
 use super::rows::{display_session_title, lane_title};
@@ -50,7 +51,7 @@ fn none_waiting() -> std::collections::HashSet<String> {
     std::collections::HashSet::new()
 }
 
-fn lane() -> AgentLane {
+pub(super) fn lane() -> AgentLane {
     AgentLane {
         key: "k".into(),
         label: "worker".into(),
@@ -176,8 +177,10 @@ pub(super) fn harness_row(cwd: &str) -> SessionRow {
         control: SessionControl::User,
         origin: crate::worker::pty::SessionOrigin::User,
         retained: false,
+        closed_by_request: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 
@@ -199,6 +202,18 @@ fn an_operator_harness_uses_one_compact_line_like_the_orchestrator() {
         lines[0].to_string(),
         "● codex · unmanaged · main · /workspace/medulla"
     );
+}
+
+/// A working harness uses the animated spinner when no attention cue overrides it.
+#[test]
+fn a_working_operator_harness_uses_the_spinner_glyph() {
+    let app = app();
+    let mut row = harness_row("/workspace/medulla");
+    row.working = true;
+
+    let lines = app.own_session_lines(&row, false, 48, NOW);
+
+    assert!(lines[0].to_string().starts_with(SPINNER[0]));
 }
 
 #[test]

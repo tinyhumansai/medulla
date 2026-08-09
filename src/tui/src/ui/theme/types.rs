@@ -16,4 +16,11 @@ pub struct Theme {
     pub attention: Color,
     /// Whether cues that require operator attention blink.
     pub attention_blink: bool,
+    /// Length of one attention pulse in milliseconds — bright for the first
+    /// half, dim for the second.
+    ///
+    /// Held in milliseconds rather than the seconds the operator configures so
+    /// [`Theme`] stays [`Eq`]: the pulse is compared for equality all over the
+    /// render tests, and a float field would make that comparison partial.
+    pub attention_blink_ms: u64,
 }

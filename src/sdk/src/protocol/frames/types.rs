@@ -557,6 +557,19 @@ pub struct TaskFrame {
     /// tools — which is the pre-existing behaviour, not a new hazard.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tool_mode: Option<String>,
+    /// Whether this task was emitted by a workflow's `agent` node.
+    ///
+    /// This is distinct from [`workflow`](Self::workflow), which asks the
+    /// receiving worker to start a whole saved graph. A workflow node instead
+    /// carries one instruction, but its OpenHuman turn needs the workflow
+    /// approval origin. Absent on older and ordinary frames, which remain
+    /// delegated tasks.
+    #[serde(
+        rename = "workflowNode",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub workflow_node: bool,
     /// Inbound-only: the continuity group this task belongs to, when the sender
     /// wants successive tasks to share one harness session.
     ///

@@ -141,8 +141,15 @@ impl SessionHandle {
     /// is kept instead. Last-one-wins: the interesting failure is the current
     /// one, and a session whose pty has stopped accepting bytes will not recover
     /// to produce a different one.
-    pub(in super::super) fn record_error(&self, error: String) {
+    ///
+    /// `now` also becomes the row's last-activity time. The failure cue stamps
+    /// itself with [`last_output_at`](Self::last_output_at), and a quiet session
+    /// may have produced no output for minutes before its writer failed — without
+    /// the stamp the brand-new failure would claim it had been waiting that whole
+    /// idle period, forever, if the child stayed alive.
+    pub(in super::super) fn record_error(&self, error: String, now: i64) {
         lock(&self.cold).last_error = Some(error);
+        self.last_output_at.store(now, Ordering::Release);
     }
 
     /// Record the thread name discovered outside the terminal stream.
@@ -157,6 +164,7 @@ impl SessionHandle {
     /// The operator-facing projection of this session, for the list pane.
     pub fn row(&self) -> SessionRow {
         let cold = lock(&self.cold);
+        let attention = lock(&self.attention);
         SessionRow {
             id: self.meta.id.clone(),
             label: cold.label.clone(),
@@ -180,8 +188,14 @@ impl SessionHandle {
             control: self.control(),
             origin: self.meta.origin,
             retained: self.is_retained(),
+            closed_by_request: self.is_closed_by_request(),
             name: cold.name.clone(),
-            attention: lock(&self.attention).cue.clone(),
+            attention: attention.cue.clone(),
+            // Only meaningful while the child is alive: the last screen a dead
+            // session painted may still carry "esc to interrupt", and a row
+            // spinning forever after its harness exited is a lie the rail
+            // cannot recover from.
+            working: attention.working && self.is_running(),
             mcp_grant_session: self.meta.mcp_grant_session.clone(),
         }
     }

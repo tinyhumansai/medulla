@@ -391,12 +391,3 @@ pub fn event_stream(
         state.next().await.map(|item| (item, state))
     })
 }
-
-mod types;
-pub use types::ParseResult;
-pub use types::SeqDedup;
-pub use types::SseFrame;
-pub use types::SseOverflow;
-pub use types::SseParser;
-use types::StreamState;
-pub use types::MAX_FRAME_BYTES;

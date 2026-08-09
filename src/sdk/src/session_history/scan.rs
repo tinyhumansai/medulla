@@ -190,7 +190,7 @@ pub(crate) fn session_files_for_cwd(
             (safe_resolve(&session_cwd) == here).then_some(DiscoveredSession {
                 path: canonical,
                 id: summary.id,
-                cwd: session_cwd,
+                cwd: Some(session_cwd),
             })
         })
         .collect()

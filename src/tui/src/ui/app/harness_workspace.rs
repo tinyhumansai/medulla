@@ -194,11 +194,19 @@ impl App {
             self.after_saving_favorite(&path);
             return;
         };
+        // A favourite is two strings, so serialization cannot realistically
+        // fail — but the value has to come from somewhere the handler controls,
+        // so a serialization error reports a status instead of panicking inside
+        // the UI command.
+        let Ok(value) = toml::Value::try_from(favorites.clone()) else {
+            self.set_status("Could not serialize favorite workspaces");
+            return;
+        };
         match medulla::config::persist_setting(
             config_path,
             "harness",
             "favoriteWorkspaces",
-            toml::Value::try_from(favorites.clone()).expect("favorite workspaces serialize"),
+            value,
         ) {
             Ok(()) => {
                 self.loaded.config.harness.favorite_workspaces = favorites;

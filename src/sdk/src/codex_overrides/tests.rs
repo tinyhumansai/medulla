@@ -76,7 +76,7 @@ fn overrides(args: &[String]) -> HashMap<String, String> {
         assert_eq!(flag, "-c", "every override is introduced by -c");
         let assignment = rest.next().expect("-c is followed by an assignment");
         let (key, value) = assignment.split_once('=').expect("assignment has a value");
-pairs.insert(key.to_string(), unescape_toml_string(value));
+        pairs.insert(key.to_string(), unescape_toml_string(value));
     }
     pairs
 }

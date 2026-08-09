@@ -121,7 +121,7 @@ fn refresh(
     // or a full-screen TUI cannot defeat — then the bell, the vaguest cue,
     // which loses to anything named.
     let hook = hook_log.and_then(|log| {
-        attention::hook_attention(session.provider(), session.grant_session(), working, log, now)
+        attention::hook_attention(session.provider(), session.grant_session(), working, log)
     });
     let cue = attention::detect(session.provider(), &contents)
         .or(hook)

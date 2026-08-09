@@ -29,6 +29,19 @@ use crate::flow_engine::settings::CapabilitySettings;
 /// The `connection_ref` prefix naming an HTTP credential.
 pub const HTTP_CRED_PREFIX: &str = "http_cred:";
 
+/// How long a workflow HTTP request waits for a TCP/TLS connection.
+///
+/// A black-holed peer must fail the node, not hang it forever. Mirrors the
+/// SDK client defaults (`src/sdk/src/client/mod.rs`) so outbound workflow
+/// HTTP is held to the same liveness budget as the rest of the product.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a workflow HTTP request tolerates a silent socket mid-response.
+///
+/// An idle timeout, not a whole-request one: a peer that keeps sending bytes
+/// (a streamed response) must not be cut off schedule.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// A credential the host injects into an outbound request.
 #[derive(Debug, Clone)]
 pub struct HttpCredential {

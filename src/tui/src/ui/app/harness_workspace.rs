@@ -12,6 +12,20 @@ const MAX_RECENT_WORKSPACES: usize = 12;
 const FOLDER_SCORE_OFFSET: usize = 5;
 const KNOWN_FUZZY_SCORE_OFFSET: usize = 20;
 
+/// A known workspace before ranking: the resolved path, where it came from, and
+/// the favorite label when it is a saved shortcut.
+///
+/// Named fields rather than a `(String, String, Option<String>)` tuple so a
+/// path and its provenance cannot be swapped silently at a push site, and the
+/// provenance is a `&'static str` because the candidates are rebuilt on every
+/// keystroke — only the rows that survive filtering to become
+/// [`WorkspaceChoice`]s need their own `String`.
+struct WorkspaceCandidate {
+    path: String,
+    source: &'static str,
+    label: Option<String>,
+}
+
 impl App {
     /// Advance the launcher to its workspace step and populate the first list.
     pub(super) fn open_harness_workspace_step(&mut self, edit_default: bool) {
@@ -145,6 +159,113 @@ impl App {
         .map_err(|error| format!("workspace history was not saved ({error})"))
     }
 
+    /// Persist `workspace` as a named shortcut for the manual launcher.
+    ///
+    /// A name replaces any older favorite with the same spelling, while the
+    /// path is de-duplicated so one directory cannot occupy several top-ranked
+    /// rows under different aliases.
+    pub(in crate::ui::app) fn save_favorite_workspace(&mut self, name: &str, workspace: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.set_status("Favorite name cannot be empty");
+            return;
+        }
+        let Some(harnesses) = &self.local_sessions else {
+            self.set_status("This device is not hosting, so it has no workspace favorites");
+            return;
+        };
+        let path = harnesses.resolve_workspace(workspace);
+        if !Path::new(&path).is_dir() {
+            self.set_status("Favorites must point to an existing directory");
+            return;
+        }
+        // Build the candidate list without touching the live one: persistence
+        // is the commit point, so a write failure must not leave a favorite in
+        // memory that the config file never recorded — the picker would then
+        // offer a save that is not there, and a later successful save could
+        // silently persist it.
+        let mut favorites = self.loaded.config.harness.favorite_workspaces.clone();
+        // Compare effective resolved paths rather than the stored spellings: a
+        // favorite saved from relative input (e.g. `repo` against the host
+        // workspace) must not survive beside the same directory re-saved under
+        // its resolved absolute path — a re-alias, not a second directory.
+        favorites.retain(|favorite| {
+            !favorite.name.eq_ignore_ascii_case(name)
+                && harnesses.resolve_workspace(&favorite.path) != path
+        });
+        favorites.insert(
+            0,
+            medulla::config::FavoriteWorkspace {
+                name: name.to_string(),
+                path: path.clone(),
+            },
+        );
+        let Some(config_path) = &self.config_path else {
+            self.loaded.config.harness.favorite_workspaces = favorites;
+            self.set_status(format!(
+                "Saved favorite {name} · this run only — no config file"
+            ));
+            self.after_saving_favorite(&path);
+            return;
+        };
+        // A favourite is two strings, so serialization cannot realistically
+        // fail — but the value has to come from somewhere the handler controls,
+        // so a serialization error reports a status instead of panicking inside
+        // the UI command.
+        let Ok(value) = toml::Value::try_from(favorites.clone()) else {
+            self.set_status("Could not serialize favorite workspaces");
+            return;
+        };
+        match medulla::config::persist_setting(config_path, "harness", "favoriteWorkspaces", value)
+        {
+            Ok(()) => {
+                self.loaded.config.harness.favorite_workspaces = favorites;
+                self.set_status(format!("Saved favorite {name} · {path}"));
+                self.after_saving_favorite(&path);
+            }
+            Err(error) => self.set_status(format!("Could not save favorite ({error})")),
+        }
+    }
+
+    /// Re-anchor the launcher on the workspace that was just favorited.
+    ///
+    /// Saving the favorite is the operator's way of saying Enter should start
+    /// the harness there, so the arrowed cursor — which pointed at the saved
+    /// row beforehand — must follow the saved workspace to the row it now
+    /// occupies rather than keep its old index and silently select a
+    /// *different* directory parked in that row. The ranking orders by match
+    /// score first and insertion order second, so the promoted favorite only
+    /// leads the list when it also scores best against the active query;
+    /// otherwise it lands at a non-zero row. Re-run the completions and place
+    /// the cursor on the actual row of the saved workspace, so the highlight
+    /// and Enter both follow the favorite.
+    ///
+    /// When the rename happens under a filter whose query only matched the old
+    /// label, the saved favorite is absent from the refreshed list: the refresh
+    /// dropped the old match while the new name does not match the unchanged
+    /// query, leaving the list empty or leading with an unrelated row. Forcing
+    /// the cursor onto row 0 there would make Enter reject the workspace or
+    /// start the harness in that row, so the query is re-pointed at the saved
+    /// workspace instead — the one row Enter must still land on.
+    fn after_saving_favorite(&mut self, saved: &str) {
+        self.refresh_harness_workspace_choices();
+        if let Some(picker) = &mut self.session_picker {
+            if let Some(index) = picker
+                .workspace_choices
+                .iter()
+                .position(|choice| choice.path == saved)
+            {
+                picker.workspace_index = index;
+                picker.workspace_picked = true;
+            } else {
+                picker.workspace_query = saved.to_string();
+                picker.workspace_index = 0;
+                picker.workspace_picked = false;
+                self.refresh_harness_workspace_choices();
+            }
+        }
+    }
+
     /// Rank recent, configured, and filesystem-derived workspace suggestions.
     fn workspace_choices(&self, query: &str) -> Vec<WorkspaceChoice> {
         let Some(harnesses) = &self.local_sessions else {
@@ -154,25 +275,53 @@ impl App {
         let process_dir = std::env::current_dir().unwrap_or_else(|_| base.to_path_buf());
         let resolved_query = harnesses.resolve_workspace(query);
         let mut known = Vec::new();
-        for path in &self.loaded.config.harness.recent_workspaces {
-            known.push((absolute(path, base), "recent"));
+        for favorite in &self.loaded.config.harness.favorite_workspaces {
+            known.push(WorkspaceCandidate {
+                path: absolute(&favorite.path, base),
+                source: "favorite",
+                label: Some(favorite.name.clone()),
+            });
         }
-        known.push((harnesses.workspace.clone(), "default"));
+        for path in &self.loaded.config.harness.recent_workspaces {
+            known.push(WorkspaceCandidate {
+                path: absolute(path, base),
+                source: "recent",
+                label: None,
+            });
+        }
+        known.push(WorkspaceCandidate {
+            path: harnesses.workspace.clone(),
+            source: "default",
+            label: None,
+        });
         if !self.loaded.config.host.workspace.trim().is_empty() {
-            known.push((
-                absolute(&self.loaded.config.host.workspace, &process_dir),
-                "registered",
-            ));
+            known.push(WorkspaceCandidate {
+                path: absolute(&self.loaded.config.host.workspace, &process_dir),
+                source: "registered",
+                label: None,
+            });
         }
         for path in &self.loaded.config.host.workspaces {
-            known.push((absolute(path, &process_dir), "registered"));
+            known.push(WorkspaceCandidate {
+                path: absolute(path, &process_dir),
+                source: "registered",
+                label: None,
+            });
         }
         for host in &self.loaded.config.hosts {
             if !host.workspace.trim().is_empty() {
-                known.push((absolute(&host.workspace, &process_dir), "registered"));
+                known.push(WorkspaceCandidate {
+                    path: absolute(&host.workspace, &process_dir),
+                    source: "registered",
+                    label: None,
+                });
             }
             for path in &host.workspaces {
-                known.push((absolute(path, &process_dir), "registered"));
+                known.push(WorkspaceCandidate {
+                    path: absolute(path, &process_dir),
+                    source: "registered",
+                    label: None,
+                });
             }
         }
 
@@ -180,10 +329,21 @@ impl App {
         let mut ranked = known
             .into_iter()
             .enumerate()
-            .filter(|(_, (path, _))| Path::new(path).is_dir())
-            .filter_map(|(order, (path, source))| {
-                match_score(&path, query)
-                    .map(|score| (score, order, WorkspaceChoice { path, source }))
+            .filter(|(_, candidate)| Path::new(&candidate.path).is_dir())
+            .filter_map(|(order, candidate)| {
+                workspace_match_score(&candidate.path, candidate.label.as_deref(), query).map(
+                    |score| {
+                        (
+                            score,
+                            order,
+                            WorkspaceChoice {
+                                path: candidate.path,
+                                source: candidate.source.to_string(),
+                                label: candidate.label,
+                            },
+                        )
+                    },
+                )
             })
             .collect::<Vec<_>>();
 
@@ -198,7 +358,8 @@ impl App {
                             folder_order + index,
                             WorkspaceChoice {
                                 path,
-                                source: "folder",
+                                source: "folder".to_string(),
+                                label: None,
                             },
                         )
                     }),
@@ -219,6 +380,23 @@ impl App {
             .filter(|choice| seen.insert(choice.path.clone()))
             .take(MAX_WORKSPACE_CHOICES)
             .collect()
+    }
+}
+
+/// Match a saved name and its path, keeping whichever scores better.
+///
+/// A favorite is searchable by both spellings an operator can use, and the two
+/// can disagree: a query that names the directory exactly is a strictly better
+/// match than one that only loosely resembles the label. `or_else` would skip
+/// the path score whenever the label scored at all, so a favorite could rank
+/// behind a plain filesystem completion for the same directory and lose the
+/// row to path de-duplication — the exact case the name was added to fix.
+pub(super) fn workspace_match_score(path: &str, label: Option<&str>, query: &str) -> Option<usize> {
+    let label_score = label.and_then(|label| match_score(label, query));
+    let path_score = match_score(path, query);
+    match (label_score, path_score) {
+        (Some(label_score), Some(path_score)) => Some(label_score.min(path_score)),
+        (label_score, path_score) => label_score.or(path_score),
     }
 }
 

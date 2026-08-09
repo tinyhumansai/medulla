@@ -46,6 +46,35 @@ fn harness_choice_window_keeps_the_selection_visible() {
     );
     assert_eq!(super::session_modals::harness_choice_window(2, 1, 13), 0..2);
 }
+
+#[test]
+fn harness_picker_hint_only_advertises_bound_keys() {
+    use crate::ui::app::types::SessionPickerStep;
+
+    let harness = super::session_modals::harness_picker_hint(SessionPickerStep::Harness);
+    assert!(
+        !harness.contains("Tab complete"),
+        "Tab is not bound on the harness step, so the hint must not advertise it: {harness}"
+    );
+    assert!(
+        !harness.contains("Shift+F"),
+        "Shift+F is not bound on the harness step, so the hint must not advertise it: {harness}"
+    );
+    assert!(
+        harness.contains("unmanaged"),
+        "the harness step still states that a hand-started session is unmanaged"
+    );
+
+    let workspace = super::session_modals::harness_picker_hint(SessionPickerStep::Workspace);
+    assert!(
+        workspace.contains("Tab complete"),
+        "the workspace step advertises the completion key it actually binds"
+    );
+    assert!(
+        workspace.contains("Shift+F save favorite"),
+        "the workspace step advertises the favorite key it actually binds"
+    );
+}
 #[test]
 fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
     // The bug this pins: `release_session` was only reached from

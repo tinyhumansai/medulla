@@ -1,5 +1,7 @@
 //! Running-task registration: claiming the per-task `running` record.
 
+use std::collections::hash_map::Entry;
+
 use super::super::types::{DaemonRuntime, RunningTask};
 
 impl DaemonRuntime {
@@ -13,7 +15,6 @@ impl DaemonRuntime {
     /// remove the shared key — leaving a harness running that no abort, input,
     /// or screen frame can reach.
     pub(in crate::daemon) fn register_running(&self, key: &str, task: RunningTask) -> bool {
-        use std::collections::hash_map::Entry;
         match self.inner.running.lock().unwrap().entry(key.to_string()) {
             Entry::Occupied(_) => false,
             Entry::Vacant(slot) => {

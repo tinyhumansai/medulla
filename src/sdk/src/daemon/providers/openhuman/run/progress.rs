@@ -20,7 +20,7 @@
 //! accumulated here and emitted whole at the next phase boundary, in the shape
 //! that mirror targets.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::core_contract::AgentProgress;
 use super::types::ProgressFold;

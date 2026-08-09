@@ -18,8 +18,10 @@ use bytes::Bytes;
 /// A rewrite has to hold the whole body to parse it, which is exactly what the
 /// streaming forward exists to avoid. 32 MiB clears any realistic prompt — a
 /// million-token context serializes well under it — while bounding what a
-/// single request can pin in memory.
-pub(super) const MAX_REWRITE_BYTES: usize = 32 * 1024 * 1024;
+/// single request can pin in memory. A pinned request whose body exceeds this
+/// is forwarded without the pin rather than buffered (see
+/// [`crate::inference_proxy::serve`]).
+pub const MAX_REWRITE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Merge `provider.only` into a JSON request body.
 ///

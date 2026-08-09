@@ -18,7 +18,7 @@ use medulla::protocol::HarnessProvider;
 use medulla::sessions::SessionClass;
 
 use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin, SessionRow};
-use super::types::{OpenedSession, SessionPlan, SessionProbe};
+use super::types::{IdleClaim, OpenedSession, SessionPlan, SessionProbe};
 use super::PtySessionExecutor;
 
 impl PtySessionExecutor {

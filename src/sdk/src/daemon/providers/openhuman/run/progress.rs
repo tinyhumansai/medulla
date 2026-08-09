@@ -84,10 +84,11 @@ impl ProgressFold {
                         ));
                     }
                     if !self.thinking.is_empty() {
-                        let snapshot = crate::daemon::status::redact_reasoning(&self.thinking);
-                        self.thinking.clear();
-                        let mut snapshot = snapshot;
+                        // Redact before bounding: truncating first can remove
+                        // the prefix that makes a credential detectable.
+                        let mut snapshot = crate::daemon::status::redact_reasoning(&self.thinking);
                         retain_tail(&mut snapshot, MAX_SNAPSHOT_CHARS);
+                        self.thinking.clear();
                         events.push(("agent_thinking".into(), json!({ "text": snapshot })));
                     }
                 }

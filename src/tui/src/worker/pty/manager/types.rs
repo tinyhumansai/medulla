@@ -1,4 +1,8 @@
 //! Data types for the worker PTY manager.
+use std::sync::OnceLock;
+
+use medulla::harness_hooks::HookEventLog;
+
 #[allow(unused_imports)]
 use super::*;
 /// A clock in epoch ms (injectable for tests).

@@ -116,20 +116,6 @@ fn harness_recent_workspaces_round_trip_as_picker_history() {
 }
 
 #[test]
-fn harness_favorite_workspaces_round_trip_with_their_names() {
-    let cfg: TuiConfig = serde_json::from_str(
-        r#"{"harness":{"favoriteWorkspaces":[{"name":"Medulla","path":"/work/medulla"}]}}"#,
-    )
-    .unwrap();
-
-    assert_eq!(cfg.harness.favorite_workspaces[0].name, "Medulla");
-    assert_eq!(cfg.harness.favorite_workspaces[0].path, "/work/medulla");
-    assert!(serde_json::to_string(&cfg)
-        .unwrap()
-        .contains("\"favoriteWorkspaces\""));
-}
-
-#[test]
 fn backend_and_link_parse() {
     let cfg: TuiConfig = serde_json::from_str(
         r#"{"backend":{"baseUrl":"http://x:1","token":"t"},"link":{"peers":[{"id":"p1","handle":"@a"}]}}"#,

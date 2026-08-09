@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult, RunTaskOrigin};
 use crate::daemon::DaemonRuntime;
-use crate::protocol::TaskFrameKind;
+use crate::protocol::{TaskFrame, TaskFrameKind};
 
 use super::{base_config, decoded_frames, recording_send, task_frame};
 

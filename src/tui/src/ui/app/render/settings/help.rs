@@ -53,11 +53,12 @@ impl App {
             TLine::from("Account: Enter twice to log out · Usage: r refresh"),
             TLine::from(" "),
             TLine::from(Span::styled("Changes", bold)),
-            TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),
+            TLine::from("On a session row, press d to inspect the Git diff since that session launched"),
             TLine::from("↑↓ select files · j/k move by line · [/] jump hunks · PageUp/PageDown move faster"),
             TLine::from(
                 "c comments on a line or hunk · e edits it · C comments on or edits the file · r refreshes",
             ),
+            TLine::from("d or Esc puts the harness terminal back"),
             TLine::from(" "),
             TLine::from(Span::styled("Mouse", bold)),
             TLine::from("Click a tab to switch views · click a rail row to select it · wheel scrolls"),

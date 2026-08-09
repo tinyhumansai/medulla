@@ -529,21 +529,16 @@ impl App {
     /// active subpage.
     pub(super) fn tab_enter_cmd(&mut self) -> Option<Cmd> {
         // Arriving at a tab should put the keyboard on the thing the tab is
-        // *about*. Both of these used to land it somewhere else — Hosts on its
-        // two-item menu — so the first arrow press did
-        // nothing visible and the list had to be clicked before it would move.
-        match self.tab() {
-            "Changes" => {
-                self.refresh_changes();
-            }
-            // The list is the page; the menu is two rows and reachable with `1`
-            // and `2`, or with Esc.
-            "Hosts" => self.routing_focused = true,
-            // Safe because the rail forwards typing: a printable key moves focus
-            // to the composer and lands the character there, so nothing is lost
-            // by not starting in it.
-            _ => {}
+        // *about*. Hosts used to land on its two-item menu, so the first arrow
+        // press did nothing visible and the list had to be clicked before it
+        // would move — the list is the page, and the menu is two rows reachable
+        // with `1` and `2` or Esc.
+        if self.tab() == "Hosts" {
+            self.routing_focused = true;
         }
+        // No other tab needs a nudge: the rail forwards typing, so a printable
+        // key moves focus to the composer and lands the character there, and
+        // nothing is lost by not starting in it.
         match self.tab() {
             "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
             // The workflow store is files on this machine, so entering the tab

@@ -23,11 +23,9 @@ fn compact_tab_labels_shorten_the_current_wide_destinations() {
     assert_eq!(super::compact_tab_label("Sessions", true), "Sess");
     assert_eq!(super::compact_tab_label("Workflows", true), "Flows");
     assert_eq!(super::compact_tab_label("Subconscious", true), "Sub");
-    assert_eq!(super::compact_tab_label("Changes", true), "Diff");
     assert_eq!(super::compact_tab_label("Feedback", true), "Feed");
     assert_eq!(super::compact_tab_label("Settings", true), "Set");
     assert_eq!(super::compact_tab_label("Hosts", true), "Hosts");
-    assert_eq!(super::compact_tab_label("Changes", false), "Changes");
 }
 
 #[test]
@@ -130,16 +128,19 @@ fn a_stale_harness_diff_does_not_advertise_agents_shortcuts_on_another_tab() {
     assert!(!output.contains("d/Esc harness"), "{output}");
 }
 
-/// Put the Changes tab in front of a patch whose selected line is far wider
-/// than the diff pane, so one rendered row wraps past the whole viewport.
+/// Put the harness diff pane in front of a patch whose selected line is far
+/// wider than the diff pane, so one rendered row wraps past the whole viewport.
+///
+/// The diff is reached only as a session pane (`d` on a row) now that the
+/// top-level Changes tab is gone, so this renders through `draw_harness_diff`
+/// — the same path the Sessions tab takes — rather than a removed tab arm.
 fn app_on_an_oversized_diff_line() -> App {
     use crate::ui::app::changes::types::ChangedFile;
+    use crate::ui::app::types::{tab_pos, PaneView};
 
     let mut app = app();
-    app.tab_index = crate::ui::app::types::TABS
-        .iter()
-        .position(|t| *t == "Changes")
-        .expect("Changes tab");
+    app.tab_index = tab_pos("Sessions");
+    app.pane_view = PaneView::Diff;
     app.changes.root = Some(std::path::PathBuf::from("/repo"));
     app.changes.baseline = Some("baseline".to_owned());
     app.changes.files = vec![ChangedFile {
@@ -162,7 +163,9 @@ fn a_wrapped_diff_bounds_the_scroll_by_the_rows_it_actually_occupies() {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
 
-    terminal.draw(|f| app.draw(f)).expect("draw");
+    terminal
+        .draw(|f| app.draw_harness_diff(f, f.area()))
+        .expect("draw");
 
     // The oversized line wraps to many rows, so the bound has to exceed the
     // three logical patch lines rather than counting them one row each.
@@ -179,9 +182,13 @@ fn a_cursor_on_an_oversized_line_holds_a_stable_scroll_offset() {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
 
-    terminal.draw(|f| app.draw(f)).expect("draw");
+    terminal
+        .draw(|f| app.draw_harness_diff(f, f.area()))
+        .expect("draw");
     let first = app.changes.scroll;
-    terminal.draw(|f| app.draw(f)).expect("draw again");
+    terminal
+        .draw(|f| app.draw_harness_diff(f, f.area()))
+        .expect("draw again");
 
     // Showing the top of the row keeps consecutive frames identical instead of
     // oscillating between the row's top and bottom edges.

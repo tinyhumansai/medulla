@@ -27,8 +27,8 @@ pub use types::SeqDedup;
 pub use types::SseFrame;
 pub use types::SseOverflow;
 pub use types::SseParser;
-pub use types::MAX_FRAME_BYTES;
 use types::StreamState;
+pub use types::MAX_FRAME_BYTES;
 
 impl SseParser {
     /// Create an empty parser.

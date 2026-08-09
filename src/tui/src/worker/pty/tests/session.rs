@@ -60,10 +60,8 @@ fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
     // is not erased by ordinary harness output that includes no title escape.
     let manager = PtyManager::new();
     let id = manager
-        .open(sh(
-            "printf '\\033]2;Named thread\\007'; read line; \
-             printf '\\033]2;\\007'; echo empty-title-done; sleep 30",
-        ))
+        .open(sh("printf '\\033]2;Named thread\\007'; read line; \
+             printf '\\033]2;\\007'; echo empty-title-done; sleep 30"))
         .unwrap();
     wait_for("initial thread name", || {
         manager.row(&id).and_then(|row| row.thread_name).as_deref() == Some("Named thread")

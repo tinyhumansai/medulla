@@ -68,7 +68,11 @@ fn turn_completed_clears_text_but_still_flushes_thinking() {
         iteration: 1,
     });
     let events = fold.fold(&AgentProgress::TurnCompleted { iterations: 7 });
-    assert_eq!(events.len(), 2, "status + the reasoning snapshot, no doubled message");
+    assert_eq!(
+        events.len(),
+        2,
+        "status + the reasoning snapshot, no doubled message"
+    );
     assert_eq!(events[0].0, "agent_thinking");
     assert_eq!(events[0].1["text"], "its reasoning");
     assert_eq!(events[1].0, "status");

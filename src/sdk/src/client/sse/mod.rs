@@ -286,6 +286,7 @@ impl StreamState {
         let mut req = self
             .http
             .get(&self.url)
+            .headers(self.default_headers.clone())
             .header(reqwest::header::ACCEPT, "text/event-stream");
         if let Some(cursor) = self.dedup.cursor() {
             req = req.header("Last-Event-ID", cursor.to_string());
@@ -374,11 +375,13 @@ impl StreamState {
 /// the returned stream to stop.
 pub fn event_stream(
     http: reqwest::Client,
+    default_headers: reqwest::header::HeaderMap,
     url: String,
     last_event_id: Option<u64>,
 ) -> impl Stream<Item = Result<EventEnvelope>> {
     let state = StreamState {
         http,
+        default_headers,
         url,
         parser: SseParser::new(),
         dedup: SeqDedup::new(last_event_id),

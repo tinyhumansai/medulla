@@ -237,6 +237,18 @@ async fn me_carries_bearer_and_unwraps() {
 }
 
 #[tokio::test]
+async fn http_requests_identify_medulla() {
+    let (base, req) =
+        spawn_stub_capture(ok_envelope("HTTP/1.1 200 OK", json!({ "sub": "user-1" }))).await;
+    let client = MedullaClient::new(base, "jwt-abc");
+    client.me().await.unwrap();
+
+    let sent = req.await.unwrap();
+    assert!(sent.contains("x-sdk-name: medulla"), "{sent}");
+    assert!(!sent.contains("x-sdk-name: openhuman"), "{sent}");
+}
+
+#[tokio::test]
 async fn team_usage_fetches_and_unwraps() {
     let data = json!({
         "plan": "pro",

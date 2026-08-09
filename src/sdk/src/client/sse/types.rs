@@ -81,6 +81,7 @@ pub struct SeqDedup {
 /// Internal driver state for the reconnecting stream.
 pub(super) struct StreamState {
     pub(super) http: reqwest::Client,
+    pub(super) default_headers: reqwest::header::HeaderMap,
     pub(super) url: String,
     pub(super) parser: SseParser,
     pub(super) dedup: SeqDedup,

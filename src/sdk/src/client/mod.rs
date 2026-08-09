@@ -39,6 +39,7 @@ pub use program::*;
 pub use types::*;
 
 use futures::stream::Stream;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -61,6 +62,12 @@ const DEFAULT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// schedule. Comfortably longer than the backend's `: ping` heartbeat, and long
 /// enough for a slow model turn that has not yet emitted a byte.
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Header through which the backend attributes traffic to a TinyHumans product.
+const PRODUCT_IDENTITY_HEADER: &str = "x-sdk-name";
+
+/// Product identity reported by this client for backend attribution.
+const PRODUCT_IDENTITY: &str = "medulla";
 
 /// The HTTP client used when the caller supplies none.
 ///
@@ -107,11 +114,13 @@ impl MedullaClientBuilder {
             .to_string();
         let jwt = self.jwt.unwrap_or_default();
         let http = self.http.unwrap_or_else(default_http_client);
+        let default_headers = product_identity_headers();
         MedullaClient {
-            sdk: build_sdk(&base_url, &jwt, http.clone()),
+            sdk: build_sdk(&base_url, &jwt, http.clone(), default_headers.clone()),
             base_url,
             jwt,
             http,
+            default_headers,
         }
     }
 }
@@ -120,10 +129,29 @@ impl MedullaClientBuilder {
 ///
 /// The host's `reqwest::Client` is passed in rather than letting the SDK build
 /// its own, so both halves of this client share one transport policy.
-fn build_sdk(base_url: &str, jwt: &str, http: reqwest::Client) -> TinyHumansClient {
+fn build_sdk(
+    base_url: &str,
+    jwt: &str,
+    http: reqwest::Client,
+    default_headers: HeaderMap,
+) -> TinyHumansClient {
     TinyHumansClient::new(base_url)
         .with_http_client(http)
+        .with_default_headers(default_headers)
         .with_token(Some(jwt.to_string()))
+}
+
+/// Headers shared by the SDK transport and the hand-rolled SSE transport.
+///
+/// Constructed once with [`MedullaClient`], so every backend request reports
+/// the same product identity regardless of its transport.
+fn product_identity_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(PRODUCT_IDENTITY_HEADER),
+        HeaderValue::from_static(PRODUCT_IDENTITY),
+    );
+    headers
 }
 
 /// Decode an SDK response body into one of this crate's typed DTOs.
@@ -177,7 +205,12 @@ impl MedullaClient {
     /// Rebuilds the SDK client, which captures the credential at construction.
     pub fn set_jwt(&mut self, jwt: impl Into<String>) {
         self.jwt = jwt.into();
-        self.sdk = build_sdk(&self.base_url, &self.jwt, self.http.clone());
+        self.sdk = build_sdk(
+            &self.base_url,
+            &self.jwt,
+            self.http.clone(),
+            self.default_headers.clone(),
+        );
     }
 
     /// Issue a request through the SDK's raw transport and decode the unwrapped
@@ -536,7 +569,12 @@ impl MedullaClient {
             enc(session_id),
             enc(&self.jwt),
         );
-        sse::event_stream(self.http.clone(), url, last_event_id)
+        sse::event_stream(
+            self.http.clone(),
+            self.default_headers.clone(),
+            url,
+            last_event_id,
+        )
     }
 
     // --- Orchestration ---------------------------------------------------

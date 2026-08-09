@@ -316,6 +316,6 @@ async fn recv_signal(sig: Option<&mut tokio::signal::unix::Signal>) {
     if let Some(signal) = sig {
         let _ = signal.recv().await;
     } else {
-        std::future::pending().await;
+        std::future::pending::<()>().await;
     }
 }

@@ -18,6 +18,7 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
+use medulla::protocol::HarnessProvider;
 use medulla::runtime::CapacitySnapshot;
 
 use super::super::super::types::{App, CredentialStatus};
@@ -89,8 +90,11 @@ impl App {
                 .custom_harness_index
                 .min(self.custom_harnesses.len().saturating_sub(1));
             for (index, harness) in self.custom_harnesses.iter().enumerate() {
-                let key_present = self.credential_status.key_for(&harness.api_key_env);
-                let availability = if key_present {
+                let embedded_core = harness.base_harness == HarnessProvider::Openhuman;
+                let ready = embedded_core || self.credential_status.key_for(&harness.api_key_env);
+                let availability = if embedded_core {
+                    "embedded core"
+                } else if ready {
                     "key connected"
                 } else {
                     "key missing"
@@ -106,7 +110,7 @@ impl App {
                 );
                 let style = if index == selected {
                     self.theme.selection()
-                } else if key_present {
+                } else if ready {
                     Style::default().fg(Color::Green)
                 } else {
                     dim

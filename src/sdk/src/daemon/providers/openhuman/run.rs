@@ -37,7 +37,9 @@ pub fn uses_embedded_core(options: &RunTaskOptions) -> bool {
 pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
     let RunTaskOptions {
         prompt,
+        cwd,
         model,
+        env,
         timeout_ms,
         abort,
         resume_session_id,
@@ -46,6 +48,10 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         on_session,
         ..
     } = options;
+
+    // The operator's environment override outranks whatever the dispatch
+    // resolved; see [`super::model`] for the whole precedence order.
+    let model = super::effective_model(model, &env);
 
     // Said once, at the top, rather than left for an operator to infer from an
     // empty hook log. There is no child process here, so there is no argv for
@@ -88,7 +94,17 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         "model_override": model,
         "thread_id": thread_id,
     });
-    let call = core.raw().invoke(AGENT_CHAT, params);
+    // Scoped around the whole core call, not just around the hook: the tool
+    // hooks that read it fire from inside the agent loop this call drives, and a
+    // task-local is the only per-turn channel to a callback registered once,
+    // process-globally, at boot. Without it a `PostToolUse` auto-commit hook is
+    // told the Medulla process's startup directory and checkpoints the wrong
+    // repository. See `core_host::turn_cwd`.
+    let cwd = std::path::PathBuf::from(&cwd);
+    let call = crate::core_host::turn_cwd::with_turn_cwd(
+        Some(cwd.as_path()),
+        core.raw().invoke(AGENT_CHAT, params),
+    );
 
     // The same idle ceiling a spawned provider gets, applied to the whole turn
     // rather than to the gap between events: an in-process call produces no

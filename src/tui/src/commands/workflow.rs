@@ -239,6 +239,14 @@ fn local_context(
         settings.default_worker_address = LOCAL_WORKER_ADDRESS.to_string();
     }
 
+    // `--model` occupies exactly the slot `[workflows] defaultModel` does, for
+    // one invocation: it is the model a step runs on when the step named none
+    // of its own. Applied to the capability settings *and* to the embedded
+    // daemon below, because a node reaches the model through whichever of the
+    // two answered first.
+    let default_model = run_model(parsed, &loaded.config.workflows);
+    settings.default_model = default_model.clone();
+
     // A workflow's `agent` step may name a custom harness preset (see
     // `flow_engine::harness_choice`); the embedded daemon this command starts
     // must know that preset exists, or it rejects the step as not configured
@@ -255,8 +263,7 @@ fn local_context(
     let host = LocalWorkflowHost::start(
         EmbeddedDaemonOptions {
             workspace: workspace.clone(),
-            model: (!loaded.config.workflows.default_model.is_empty())
-                .then(|| loaded.config.workflows.default_model.clone()),
+            model: default_model,
             default_provider: loaded.config.workflows.default_provider,
             custom_harnesses,
             ..Default::default()
@@ -307,6 +314,28 @@ fn local_context(
         },
         run_id,
     ))
+}
+
+/// The model this run's steps default to: `--model <name>`, else the host's
+/// `[workflows] defaultModel`.
+///
+/// A *default*, not a command: it is what an `agent` step runs on when neither
+/// the step nor the harness preset it selected named a model of its own, which
+/// is the same slot the config key fills. That includes a step dispatched to
+/// the embedded OpenHuman core, where it becomes the turn's `model_override`
+/// — the one route to choosing that model without editing anything on disk,
+/// short of the `MEDULLA_OPENHUMAN_MODEL` environment override that outranks
+/// it (see [`medulla::daemon::providers::openhuman::effective_model`]).
+///
+/// An explicitly empty `--model ""` clears the configured default for this run
+/// rather than being ignored, matching what the same flag means on
+/// `workflow defaults`.
+fn run_model(parsed: &WorkflowArgs, config: &medulla::config::WorkflowsConfig) -> Option<String> {
+    let chosen = match parsed.model.as_deref() {
+        Some(model) => model,
+        None => config.default_model.as_str(),
+    };
+    (!chosen.trim().is_empty()).then(|| chosen.trim().to_string())
 }
 
 /// The trigger payload for a run, from `--input` or the empty object.
@@ -472,3 +501,7 @@ fn progress_line(frame: &str) -> String {
         Progress::Status(text) => format!("· {text}"),
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_tests.rs"]
+mod tests;

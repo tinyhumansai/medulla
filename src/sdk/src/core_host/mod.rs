@@ -39,12 +39,18 @@ use openhuman_core::embed::{Core, CoreError};
 use openhuman_core::{CoreBuilder, DomainSet, HostKind, ServiceSet, TokenSource};
 
 pub mod auth;
+mod hooks;
 pub mod shared;
+pub mod turn_cwd;
 
 #[cfg(test)]
 mod auth_tests;
 #[cfg(test)]
+mod hooks_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_cwd_tests;
 
 /// The embed facade, re-exported so a host can name what [`boot`] returns
 /// without depending on the `openhuman` crate directly.
@@ -256,6 +262,24 @@ pub fn bind_from_config(
 /// Propagates any failure from [`CoreBuilder::build`] — a workspace that cannot
 /// be created, or a token source that cannot be resolved.
 pub async fn boot() -> anyhow::Result<Core> {
+    boot_with_hooks(&crate::harness_hooks::HooksConfig::default()).await
+}
+
+/// Boot the embedded core with Medulla's supported in-process lifecycle hooks.
+///
+/// Registers Medulla's configured `Stop`, `PreToolUse`, and `PostToolUse` hooks
+/// as OpenHuman embedder lifecycle hooks **before** constructing the core — see
+/// [`hooks`]. Registration is process-global, but each boot replaces Medulla's
+/// previous hook registrations, including removing a kind no longer configured.
+///
+/// # Errors
+///
+/// Propagates any failure from [`CoreBuilder::build`], the same cases as
+/// [`boot`]: a workspace that cannot be created, or a token source that cannot
+/// be resolved. A hook command that fails to spawn also surfaces here only if
+/// the core startup itself fails; hook execution happens later, at runtime.
+pub async fn boot_with_hooks(hooks: &crate::harness_hooks::HooksConfig) -> anyhow::Result<Core> {
+    hooks::register_lifecycle_hooks(hooks);
     tracing::debug!("[core_host] boot start host_kind=detect_standalone");
     let runtime = CoreBuilder::new(HostKind::detect_standalone())
         .domains(DomainSet::embedded())

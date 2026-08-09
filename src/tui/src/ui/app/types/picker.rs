@@ -180,7 +180,8 @@ pub(in crate::ui::app) struct HandbackPrompt {
 /// Only the wording of the release question turns on this — both origins ask,
 /// because both locked dispatch out of a workspace. What does *not* appear here
 /// is "started it myself": that session was never taken from anyone, so it is
-/// absent from [`App::sessions_taken`] rather than being a third variant.
+/// absent from [`App::sessions_taken`](crate::ui::app::App::sessions_taken)
+/// rather than being a third variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui::app) enum TakeOrigin {
     /// Focusing in took it, which the operator may not have realised.

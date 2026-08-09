@@ -28,6 +28,8 @@ mod tests;
 pub(super) use execution::reply_text;
 pub use execution::run_openhuman_task;
 
+pub(super) use types::EventSink;
+
 use crate::protocol::HarnessProvider;
 
 use super::super::types::RunTaskOptions;

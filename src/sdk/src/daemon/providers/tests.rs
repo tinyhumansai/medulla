@@ -423,6 +423,8 @@ fn idle_probe_options(
     std::fs::write(&harness, body).unwrap();
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let options = RunTaskOptions {
+        // A watchdog test drives a delegated task, exactly like a peer would.
+        origin: super::types::RunTaskOrigin::DelegatedTask,
         transport: Default::default(),
         conversation: "peer".into(),
         session_class: crate::sessions::SessionClass::Unbound,

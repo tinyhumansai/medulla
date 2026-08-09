@@ -196,6 +196,12 @@ impl SnapshotCell {
             };
             state.events.push(envelope.clone());
             state.chat_events.push(envelope);
+            // The provisional row is retired when the confirmed copy arrives,
+            // but a stalled turn never gets one — same retention the backend
+            // path applies in `append_events`, so a run of echo-only turns
+            // under a dead backend still respects the caps.
+            trim_to_cap(&mut state.events, EVENT_CAP);
+            trim_to_cap(&mut state.chat_events, CHAT_CAP);
             state.running = true;
 
             let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());

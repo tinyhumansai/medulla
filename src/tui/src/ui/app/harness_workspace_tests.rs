@@ -293,3 +293,95 @@ fn a_failed_favorite_save_does_not_replace_the_in_memory_favorites() {
     );
     assert!(app.status().contains("Could not save favorite"));
 }
+
+#[test]
+fn saving_under_a_resolved_absolute_path_replaces_a_relative_favorite() {
+    // A favorite persisted from relative input (`repo` against the host
+    // workspace) resolves to the same directory as an absolute re-save of it,
+    // so the de-duplication must compare effective resolved paths — otherwise
+    // the old entry survives under its stale spelling and the same directory
+    // occupies two ranked rows.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(root.path());
+    app.set_config_path(config.clone());
+    app.loaded.config.harness.favorite_workspaces = vec![medulla::config::FavoriteWorkspace {
+        name: "old alias".into(),
+        path: "repo".into(),
+    }];
+
+    app.save_favorite_workspace("new alias", repo.to_str().unwrap());
+
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces.len(),
+        1,
+        "a relative entry must not survive beside the same directory re-saved absolutely"
+    );
+    assert_eq!(app.loaded.config.harness.favorite_workspaces[0].name, "new alias");
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces[0].path,
+        repo.to_string_lossy()
+    );
+}
+
+#[test]
+fn renaming_a_filtered_favorite_cannot_fall_through_to_an_unrelated_row() {
+    // Shift+F on a favorite found only through a query matching its old label,
+    // renamed so the new label no longer matches the unchanged query: the
+    // refresh drops the old row and the promoted favorite is absent, leaving a
+    // list that is empty or leads with an unrelated match. Forcing the cursor
+    // onto row 0 would make Enter reject the workspace or launch the unrelated
+    // row, so the picker must keep the saved workspace selected.
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let other = root.path().join("other-medulla");
+    std::fs::create_dir(&other).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "[harness]\n").unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+    app.set_config_path(config.clone());
+    app.loaded.config.harness.favorite_workspaces = vec![
+        medulla::config::FavoriteWorkspace {
+            name: "daily".into(),
+            path: workspace.to_string_lossy().into_owned(),
+        },
+        medulla::config::FavoriteWorkspace {
+            name: "dailies".into(),
+            path: other.to_string_lossy().into_owned(),
+        },
+    ];
+    let picker = app.session_picker.as_mut().unwrap();
+    picker.workspace_query = "daily".into();
+    app.refresh_harness_workspace_choices();
+    assert_eq!(
+        app.session_picker
+            .as_ref()
+            .unwrap()
+            .workspace_choices
+            .first()
+            .unwrap()
+            .label
+            .as_deref(),
+        Some("daily"),
+        "the filtered favorite leads the list before the rename"
+    );
+
+    app.save_favorite_workspace("zap", workspace.to_str().unwrap());
+
+    let picker = app.session_picker.as_ref().unwrap();
+    assert_eq!(
+        picker.workspace_query,
+        workspace.to_string_lossy(),
+        "a rename that outlives its filter re-points the query at the saved workspace"
+    );
+    assert_eq!(
+        app.selected_picker_workspace()
+            .map(std::path::PathBuf::from),
+        Some(workspace.clone()),
+        "Enter must not launch the unrelated row that now leads the old filter"
+    );
+}

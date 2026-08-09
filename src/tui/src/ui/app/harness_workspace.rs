@@ -203,7 +203,7 @@ impl App {
             Ok(()) => {
                 self.loaded.config.harness.favorite_workspaces = favorites;
                 self.set_status(format!("Saved favorite {name} · {path}"));
-                self.after_saving_favorite();
+                self.after_saving_favorite(&path);
             }
             Err(error) => self.set_status(format!("Could not save favorite ({error})")),
         }

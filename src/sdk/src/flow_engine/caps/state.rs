@@ -79,9 +79,14 @@ impl StateStore for FileStateStore {
         let tmp = self
             .dir
             .join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-        tokio::fs::write(&tmp, body)
-            .await
-            .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))?;
+        // A failed write must not leave the scratch file behind either: like a
+        // failed rename, it would otherwise accumulate under the namespace
+        // directory, and because every attempt names a fresh UUID, retries
+        // under a full disk would pile up partial `.tmp` files.
+        if let Err(err) = tokio::fs::write(&tmp, body).await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(EngineError::Capability(format!("state: {key}: {err}")));
+        }
         if let Err(err) = tokio::fs::rename(&tmp, &path).await {
             // A failed rename must not leave scratch files accumulating in the
             // namespace directory.

@@ -188,20 +188,13 @@ pub fn codex_thread_label_for_cwd(env: &HashMap<String, String>, cwd: &str) -> O
 /// directory rather than updating the terminal title.  Claude has no equivalent
 /// index, so callers use this only for Codex and retain the transcript-prompt
 /// fallback when the index has not caught up yet.
+///
+/// The lookup goes through [`codex_index_map`] so this single-session read and
+/// the batch loader pick the same winning record when the index holds several
+/// entries for an id — the newest, last one — instead of the single read
+/// disagreeing with the recent-session list.
 pub fn codex_thread_label(env: &HashMap<String, String>, session_id: &str) -> Option<String> {
-    let index = super::scan::codex_sessions_dir(env)
-        .parent()?
-        .join("session_index.jsonl");
-    let contents = std::fs::read_to_string(index).ok()?;
-    contents.lines().find_map(|line| {
-        let record: Value = serde_json::from_str(line).ok()?;
-        let object = record.as_object()?;
-        (object.get("id").and_then(Value::as_str) == Some(session_id))
-            .then(|| object.get("thread_name").and_then(Value::as_str))
-            .flatten()
-            .map(slug_label)
-            .filter(|label| !label.is_empty())
-    })
+    codex_index_map(env).get(session_id).cloned()
 }
 
 /// Load the Codex session-index into an id-to-label map.

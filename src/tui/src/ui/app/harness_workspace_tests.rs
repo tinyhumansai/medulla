@@ -443,3 +443,64 @@ fn renaming_a_filtered_favorite_cannot_fall_through_to_an_unrelated_row() {
         "Enter must not launch the unrelated row that now leads the old filter"
     );
 }
+
+#[test]
+fn saving_a_favorite_without_a_config_path_keeps_it_in_memory_only() {
+    // No config file → the favorite is committed in memory for the run, the
+    // status says so, and the launcher still re-anchors on the saved workspace
+    // even though nothing will persist.
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("medulla");
+    std::fs::create_dir(&workspace).unwrap();
+    let mut app = picker_on_workspace_step(&workspace);
+
+    app.save_favorite_workspace("mark", workspace.to_str().unwrap());
+
+    assert_eq!(
+        app.loaded.config.harness.favorite_workspaces,
+        vec![medulla::config::FavoriteWorkspace {
+            name: "mark".into(),
+            path: workspace.to_string_lossy().into_owned(),
+        }]
+    );
+    assert!(
+        app.status().contains("this run only"),
+        "{}",
+        app.status()
+    );
+    let picker = app.session_picker.as_ref().unwrap();
+    assert!(
+        picker.workspace_picked,
+        "the cursor still follows the saved workspace without a config file"
+    );
+    assert_eq!(
+        app.selected_picker_workspace()
+            .map(std::path::PathBuf::from),
+        Some(workspace.clone()),
+        "Enter starts in the workspace that was just favorited"
+    );
+}
+
+#[test]
+fn saving_a_favorite_without_hosting_is_rejected() {
+    // A device that hosts nothing cannot have workspace favorites at all, and
+    // the save says so instead of failing deeper into the command.
+    let mut loaded = medulla::config::LoadedConfig::defaults("medulla.tui.json".into());
+    loaded.config.link = Some(medulla::config::LinkConfig::default());
+    let mut app = super::types::App::new(
+        std::sync::Arc::new(medulla::runtime::mock::MockRuntime::empty()),
+        loaded,
+    );
+
+    app.save_favorite_workspace("mark", "/nowhere");
+
+    assert!(
+        app.status().contains("not hosting"),
+        "{}",
+        app.status()
+    );
+    assert!(
+        app.loaded.config.harness.favorite_workspaces.is_empty(),
+        "no favorite can be recorded without a hosted workspace"
+    );
+}

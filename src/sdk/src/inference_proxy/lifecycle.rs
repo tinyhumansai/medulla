@@ -41,7 +41,7 @@ impl ProxyHandle {
             };
         }
 
-        // Reuse the login flow's OS-seeded 128-bit nonce generator instead of
+        // Reuse the login flow's CSPRNG-backed nonce generator instead of
         // introducing a second randomness dependency for loopback tokens.
         let token = format!("mdl-{}", crate::auth::random_state_nonce());
         registry

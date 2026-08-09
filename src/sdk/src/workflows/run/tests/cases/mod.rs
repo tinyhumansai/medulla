@@ -6,6 +6,7 @@
 
 mod cancellation;
 mod continuation;
+mod finalize;
 mod loops;
 
 use std::collections::HashMap;

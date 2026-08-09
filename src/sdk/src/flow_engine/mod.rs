@@ -25,17 +25,10 @@ pub mod harness_choice;
 pub mod observability;
 pub mod settings;
 
+// The capability cases live under `tests/` as submodules once they pushed the
+// canonical `tests` file over the 500-line ceiling; see its module doc.
 #[cfg(test)]
 mod tests;
-
-// Split out of `tests` once the `medulla:shell` cases pushed it over the
-// repository's 500-line file ceiling — see that file's module doc.
-#[cfg(test)]
-mod shell_tests;
-
-// Likewise: harness and model selection, asserted on the dispatched task frame.
-#[cfg(test)]
-mod harness_selection_tests;
 
 pub(crate) use caps::build_capabilities_with_agent_evidence;
 pub use caps::{build_capabilities, build_dry_run_capabilities, open_checkpointer, HostServices};

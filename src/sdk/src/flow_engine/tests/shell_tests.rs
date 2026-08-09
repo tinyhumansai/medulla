@@ -1,8 +1,8 @@
 //! Tests for the `medulla:shell` native tool.
 //!
-//! Split out of [`super::tests`] (see that module's doc comment) once the
+//! Split out of [`super`] (see that module's doc comment) once the
 //! scripting cases pushed it over the repository's 500-line file ceiling.
-//! Everything here exercises [`super::caps::tools::MedullaToolInvoker`]
+//! Everything here exercises [`super::super::caps::tools::MedullaToolInvoker`]
 //! dispatching to `medulla:shell`, which is the tool surface a `code` node and
 //! an authored workflow step both go through.
 //!
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use serde_json::json;
 use tinyflows::caps::ToolInvoker;
 
-use super::caps::tools::MedullaToolInvoker;
-use super::settings::CapabilitySettings;
+use super::super::caps::tools::MedullaToolInvoker;
+use super::super::settings::CapabilitySettings;
 
 /// A path this platform actually considers absolute.
 const fn absolute_path() -> &'static str {

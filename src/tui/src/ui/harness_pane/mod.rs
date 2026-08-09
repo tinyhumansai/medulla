@@ -54,9 +54,16 @@ impl LocalSessions {
     /// pane stops claiming a screen for work that is over rather than showing a
     /// dead one indefinitely.
     pub fn session_for_task(&self, task_id: &str) -> Option<String> {
+        // Degrade rather than panic on a poisoned lock. This runs on the render
+        // path, every frame: an `expect` here turns one unrelated panic
+        // elsewhere into a draw loop that panics forever, and the terminal is
+        // left in raw mode with nothing on it. The guarded data is a list of
+        // runtime handles that is never mutated after construction, so the
+        // inner value is as good after a panic as before it — the same call the
+        // SDK's `SnapshotCell` makes.
         self.runtimes
             .lock()
-            .expect("local harness runtimes")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .find_map(|runtime| runtime.session_for_task(&self.hub_address, task_id))
     }

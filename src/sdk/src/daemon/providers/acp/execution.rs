@@ -420,11 +420,22 @@ fn agent_for_with_env(
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
         }
         HarnessProvider::Codex => AcpAgentConfig::new("npx").args(codex_acp_args(options, &env)?),
-        HarnessProvider::Opencode => AcpAgentConfig::new(crate::protocol::env::provider_bin(
-            HarnessProvider::Opencode,
-            &options.env,
-        ))
-        .arg("acp"),
+        // The provider-binary override is untrusted configuration that lands in
+        // an `env` argv (Unix) or `cmd.exe` line (Windows). A value containing
+        // `=` would be consumed as a variable assignment by `env` even after
+        // its `--` terminator — the name could never be executed, and the next
+        // argument would silently become the command. Reject it at the boundary
+        // instead of hoping the shell misparse is harmless.
+        HarnessProvider::Opencode => {
+            let bin = crate::protocol::env::provider_bin(HarnessProvider::Opencode, &options.env);
+            if bin.contains('=') {
+                return Err(
+                    "provider binary override must not contain `=`: `env` would treat it as a variable assignment"
+                        .to_string(),
+                );
+            }
+            AcpAgentConfig::new(bin).arg("acp")
+        }
         HarnessProvider::Openhuman => {
             unreachable!("OpenHuman's operator TUI is not an ACP coding provider")
         }
@@ -569,6 +580,11 @@ impl AcpAgentConfigExt for AcpAgentConfig {
             .iter()
             .flat_map(|name| ["-u".to_string(), (*name).to_string()])
             .collect::<Vec<_>>();
+        // The provider-binary override is untrusted configuration: without the
+        // `--` terminator, a command starting with `-` or containing `=` is
+        // eaten by `env` as an option or a variable assignment instead of being
+        // executed.
+        args.push("--".to_string());
         args.push(self.command().to_string_lossy().into_owned());
         args.extend(self.arguments().iter().cloned());
         AcpAgentConfig::new("env").args(args)

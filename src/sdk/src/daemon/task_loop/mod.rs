@@ -2,14 +2,17 @@
 //! kind of frame asks for so no file exceeds the repo's 500-line ceiling:
 //! [`probe`] answers the cached capability probe, [`system_info`] reports cheap
 //! host capacity, [`control`] delivers mid-run input and stops a task the
-//! requester has given up on, and [`run`] executes a task with its slot limit,
-//! throttled status forwarding, and plain-text fallback.
+//! requester has given up on, [`register`] claims the per-task running record,
+//! [`plain`] runs a text DM through the default provider, and [`run`] executes a
+//! task frame with its slot limit and throttled status forwarding.
 //!
 //! Routing and provider selection stay here: they are the seam the three share.
 //! Lifecycle/dispatch/reply glue lives in [`super::runtime`].
 
 mod control;
+mod plain;
 mod probe;
+mod register;
 mod run;
 mod system_info;
 #[cfg(test)]

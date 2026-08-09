@@ -335,9 +335,9 @@ impl CustomHarnessConfig {
             // The compact line has no room for the Codex knobs; a preset that
             // wants them is written in the config file, which is also where the
             // account-changing decision belongs. An upstream-provider pin is
-            // file-only for the same reason — and note that re-saving a pinned
-            // preset through the TUI editor drops the pin, exactly as it already
-            // drops `codexOverrides`.
+            // similarly absent from the line. Editing an existing preset through
+            // the TUI preserves both kinds of field for that reason — the editor
+            // save flow restores these alongside the other file-only fields.
             codex_overrides: false,
             reasoning_effort: None,
             provider_only: Vec::new(),

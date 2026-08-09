@@ -109,6 +109,15 @@ pub(crate) struct ColdFields {
     /// operator owns and may change, where provenance is a fact about how the
     /// session came to exist. `None` until somebody names it.
     pub(super) name: Option<String>,
+    /// The thread name discovered from the harness provider own session
+    /// state rather than from the terminal stream.
+    ///
+    /// Codex persists renamed threads in its session index instead of emitting
+    /// an OSC window title, so the executor supplies this separately.  When
+    /// set, it takes precedence over [[thread_name]] so that ordinary PTY
+    /// output (which may carry an empty title) cannot erase the index-backed
+    /// name.
+    pub(super) index_thread_name: Option<String>,
     /// The non-empty terminal title last advertised by the harness.
     pub(super) thread_name: Option<String>,
     /// Which repository, worktree, and branch the working directory sits in.

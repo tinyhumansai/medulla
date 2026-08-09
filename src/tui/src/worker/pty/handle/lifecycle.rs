@@ -61,6 +61,7 @@ impl SessionHandle {
                 session_id,
                 name,
                 thread_name: None,
+                index_thread_name: None,
                 // Filled in by the caller before the handle is published, and
                 // re-read on a timer from there on: see
                 // `PtyManager::spawn_checkout_poller`.

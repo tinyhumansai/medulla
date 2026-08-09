@@ -151,7 +151,7 @@ impl SessionHandle {
     /// an OSC window title, so the transcript executor supplies that value once
     /// it has identified the session.
     pub(in super::super) fn record_thread_name(&self, thread_name: String) {
-        lock(&self.cold).thread_name = Some(thread_name);
+        lock(&self.cold).index_thread_name = Some(thread_name);
     }
 
     /// The operator-facing projection of this session, for the list pane.
@@ -169,7 +169,10 @@ impl SessionHandle {
             launch_commit: self.meta.launch_commit.clone(),
             launch_checkout_identity: self.meta.launch_checkout_identity.clone(),
             session_id: cold.session_id.clone(),
-            thread_name: cold.thread_name.clone(),
+            thread_name: cold
+                .index_thread_name
+                .clone()
+                .or_else(|| cold.thread_name.clone()),
             started_at: self.meta.started_at,
             last_output_at: self.last_output_at(),
             last_error: cold.last_error.clone(),

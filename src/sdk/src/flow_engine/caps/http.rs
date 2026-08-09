@@ -123,6 +123,8 @@ impl AllowlistHttpClient {
             // can make the second request itself, where it is checked again.
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
                 .build()
                 .unwrap_or_default(),
         }

@@ -27,8 +27,9 @@ pub(in crate::ui::app) struct ResumePicker {
 /// then the session picker, then the question asked about a session being
 /// released, and finally the two that claim a row of their own below it.
 ///
-/// Produced by [`App::visible_overlays`], which is the single source of truth
-/// for what is in front of the content — see [`super::super::overlays`].
+/// Produced by [`App::visible_overlays`](crate::ui::app::App::visible_overlays),
+/// which is the single source of truth for what is in front of the content —
+/// see [`super::super::overlays`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::ui::app) enum Overlay {
     /// The prepared-decision board.

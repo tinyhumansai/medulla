@@ -314,9 +314,7 @@ async fn forward_body(
                 .into_iter()
                 .map(|bytes| Ok::<Bytes, hyper::Error>(bytes));
             let stream = futures::stream::iter(prefix).chain(tail);
-            return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(
-                stream,
-            )));
+            return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(stream)));
         }
         buffered.push(chunk);
     }

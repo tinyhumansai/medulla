@@ -43,8 +43,8 @@ fn preserves_sibling_provider_keys() {
 
 #[test]
 fn keeps_every_named_provider_in_order() {
-    let out = rewrite(r#"{"model":"m"}"#, &["streamlake", "novita"])
-        .expect("pinned body is rewritten");
+    let out =
+        rewrite(r#"{"model":"m"}"#, &["streamlake", "novita"]).expect("pinned body is rewritten");
     assert_eq!(
         out["provider"]["only"],
         serde_json::json!(["streamlake", "novita"])

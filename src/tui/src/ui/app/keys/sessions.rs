@@ -132,11 +132,6 @@ impl App {
                 self.toggle_harness_diff_pane();
                 SessionsKey::Handled(None)
             }
-            // `D` is the same diff on the Changes tab: the pane is half a
-            // screen, and a review with comments on it wants the whole one.
-            KeyCode::Char('D') if !ctrl && !alt && self.pane_session.is_some() => {
-                SessionsKey::Handled(self.open_selected_harness_changes())
-            }
             // `k` closes the harness the pane is showing — the other half of the
             // two things an operator wants from a session they are looking at
             // but not typing into. It asks first; see `close_pane_session_prompt`.

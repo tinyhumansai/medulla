@@ -443,7 +443,12 @@ async fn a_chunked_pinned_request_is_not_buffered_past_the_rewrite_limit() {
         "{{\"model\":\"z-ai/glm-5.2\",\"prompt\":\"{}\"}}",
         "z".repeat(medulla::inference_proxy::MAX_REWRITE_BYTES)
     );
-    let chunk_size = 1024 * 1024;
+    // Chunk well under the rewrite limit — half of it — so a payload one byte
+    // over the limit always spans several frames no matter where the limit
+    // sits. A fixed 1 MiB chunk would silently collapse to a single frame (and
+    // never reach the limit mid-stream, which is the very branch this test
+    // exists to pin) if `MAX_REWRITE_BYTES` were ever lowered below it.
+    let chunk_size = (medulla::inference_proxy::MAX_REWRITE_BYTES / 2).max(1);
     let frames: Vec<Result<Bytes, std::io::Error>> = payload
         .as_bytes()
         .chunks(chunk_size)

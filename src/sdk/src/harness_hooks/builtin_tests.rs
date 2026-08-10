@@ -130,7 +130,11 @@ fn notification_builtin_matches_only_operator_blocking_types() {
         .expect("a Notification built-in");
     let reported: Vec<&str> = notification.matcher.split('|').collect();
 
-    for waiting in ["permission_prompt", "elicitation_dialog", "agent_needs_input"] {
+    for waiting in [
+        "permission_prompt",
+        "elicitation_dialog",
+        "agent_needs_input",
+    ] {
         assert!(
             reported.contains(&waiting),
             "a '{waiting}' notification is the harness stopped on the operator and must be reported"

@@ -473,7 +473,7 @@ async fn a_chunked_pinned_request_is_not_buffered_past_the_rewrite_limit() {
         "DBG chunked received.len={} payload.len={} frames={} firstdiff follow",
         received.body.len(),
         payload.len(),
-        frames.len()
+        frame_count
     );
     assert_eq!(
         received.body, payload,

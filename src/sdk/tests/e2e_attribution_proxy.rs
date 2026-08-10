@@ -455,9 +455,8 @@ async fn a_chunked_pinned_request_is_not_buffered_past_the_rewrite_limit() {
         .map(Bytes::copy_from_slice)
         .map(Ok)
         .collect();
-    let frame_count = frames.len();
     assert!(
-        frame_count > 1,
+        frames.len() > 1,
         "the payload must span several chunks to trip the limit mid-stream"
     );
 

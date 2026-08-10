@@ -42,6 +42,21 @@ use crate::protocol::HarnessProvider;
 
 use super::types::{HookEvent, HookHandler, HookSpec};
 
+/// The `Notification` types the built-in reports on.
+///
+/// Only the types that mean the harness is *stopped on the operator*: a tool
+/// use awaiting approval (`permission_prompt`), an MCP elicitation form
+/// awaiting input (`elicitation_dialog`), and a background agent waiting on the
+/// operator (`agent_needs_input`). Claude Code fires `Notification` for purely
+/// informational events too — most importantly `idle_prompt`, which it raises
+/// every time a finished turn returns to the prompt — and those are not a wait
+/// on anyone. Restricting the matcher keeps them out of the hook log, so a
+/// caller reading "the last event for that session was `Notification`" can take
+/// it as "the harness is waiting on the operator" rather than "it is at rest".
+/// There is nothing to parse here: a matcher of exact values (split on `|`) is
+/// how Claude Code itself decides which notification types run the command.
+const NOTIFICATION_MATCHER: &str = "permission_prompt|elicitation_dialog|agent_needs_input";
+
 /// The lifecycle events Medulla reports on by default.
 ///
 /// `Notification` is Claude Code's alone (Codex does not raise it), so its

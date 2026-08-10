@@ -426,3 +426,56 @@ async fn a_pinned_request_over_the_rewrite_limit_is_streamed_without_the_pin() {
         "no provider pin is applied past the rewrite limit"
     );
 }
+
+#[tokio::test]
+async fn a_chunked_pinned_request_is_not_buffered_past_the_rewrite_limit() {
+    let upstream = MockOpenRouter::start(Reply::Json("{}".to_string())).await;
+    let proxy = ProxyHandle::start(upstream.root.clone()).expect("proxy starts");
+    let endpoint = proxy.endpoint_for_credential(UPSTREAM_KEY, &["streamlake".to_string()]);
+
+    // Streamed with no Content-Length, so the request arrives chunked and the
+    // proxy gets a size hint whose lower bound is 0. The size-hint fast path in
+    // `forward_body` cannot catch this body; only the incremental frame read
+    // may stop past the rewrite limit and stream the remainder unpinned. This
+    // test exists to pin that branch, which the Content-Length variant above
+    // never reaches.
+    let payload = format!(
+        "{{\"model\":\"z-ai/glm-5.2\",\"prompt\":\"{}\"}}",
+        "z".repeat(medulla::inference_proxy::MAX_REWRITE_BYTES)
+    );
+    let chunk_size = 1024 * 1024;
+    let frames: Vec<Result<Bytes, std::io::Error>> = payload
+        .as_bytes()
+        .chunks(chunk_size)
+        .map(Bytes::copy_from_slice)
+        .map(Ok)
+        .collect();
+    assert!(
+        frames.len() > 1,
+        "the payload must span several chunks to trip the limit mid-stream"
+    );
+
+    reqwest::Client::new()
+        .post(format!(
+            "{}/v1/messages",
+            endpoint.base_url(medulla::inference_proxy::UpstreamShape::Anthropic)
+        ))
+        .bearer_auth(&endpoint.token)
+        .header("content-type", "application/json")
+        .body(reqwest::Body::wrap_stream(stream::iter(frames)))
+        .send()
+        .await
+        .expect("request reaches the proxy");
+
+    let received = upstream.only_request();
+    assert_eq!(
+        received.body, payload,
+        "an oversized chunked body is forwarded verbatim"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(&received.body).expect("forwarded body is JSON");
+    assert!(
+        body.get("provider").is_none(),
+        "no provider pin is applied past the rewrite limit"
+    );
+}

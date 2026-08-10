@@ -47,6 +47,13 @@
 //! looks exactly like a session nobody has used — so a row that consulted only
 //! the screen went quiet at precisely the two moments it should not have.
 //!
+//! A seventh comes from the harness's own *reports*, and lives in [`hook`]:
+//! Claude Code raises a `Notification` lifecycle hook when it is waiting on the
+//! operator. The screen scraper is still primary — a permission menu it can read
+//! is more specific — but the hook is the fallback that names a wait the screen
+//! cannot, and the one signal a reworded prompt or a full-screen TUI cannot
+//! defeat, because the harness said so itself.
+//!
 //! Matching screen text is a heuristic and is treated as one. A false negative
 //! costs an operator the blink they would have got; a false positive costs a row
 //! that says "needs you" about a harness that is merely thinking. Neither
@@ -55,6 +62,7 @@
 //! structural fallback be as liberal as it is.
 
 mod detect;
+mod hook;
 mod session;
 mod types;
 
@@ -62,6 +70,7 @@ mod types;
 mod tests;
 
 pub use detect::{bell_cue, detect, is_working};
+pub use hook::hook_attention;
 pub use session::{lifecycle_cue, row_cue};
 pub use types::{AttentionKind, HarnessAttention};
 

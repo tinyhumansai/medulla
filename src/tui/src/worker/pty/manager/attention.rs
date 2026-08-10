@@ -33,7 +33,7 @@ impl PtyManager {
             if !handle.is_running() {
                 return;
             }
-            refresh(&handle, (inner.now)());
+            refresh(&handle, inner.hook_log.get(), (inner.now)());
         });
     }
 
@@ -78,7 +78,11 @@ impl PtyManager {
 }
 
 /// Reclassify one live screen unless it was sampled too recently.
-fn refresh(session: &SessionHandle, now: i64) {
+fn refresh(
+    session: &SessionHandle,
+    hook_log: Option<&medulla::harness_hooks::HookEventLog>,
+    now: i64,
+) {
     let (seen_bells, generation, pending_completion_bells) = {
         let mut state = lock(&session.attention);
         if now.saturating_sub(state.checked_at) < ATTENTION_INTERVAL_MS {
@@ -111,7 +115,16 @@ fn refresh(session: &SessionHandle, now: i64) {
     let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
     let working = attention::is_working(&contents);
     let rang = eligible_bells > 0 && !working;
+    // Screen first — a permission menu the scraper can read is more specific
+    // than the generic "waiting" a Notification report names — then the hook,
+    // which is the harness saying so itself and the one cue a reworded prompt
+    // or a full-screen TUI cannot defeat — then the bell, the vaguest cue,
+    // which loses to anything named.
+    let hook = hook_log.and_then(|log| {
+        attention::hook_attention(session.provider(), session.grant_session(), working, log)
+    });
     let cue = attention::detect(session.provider(), &contents)
+        .or(hook)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
 
     let mut state = lock(&session.attention);

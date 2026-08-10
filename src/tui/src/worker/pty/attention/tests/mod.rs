@@ -6,5 +6,6 @@
 
 mod cues;
 mod errors;
+mod hook;
 mod prompts;
 mod working;

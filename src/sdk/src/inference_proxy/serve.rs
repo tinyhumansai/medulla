@@ -312,7 +312,7 @@ async fn forward_body(
             );
             let prefix = buffered
                 .into_iter()
-                .map(|bytes| Ok::<Bytes, hyper::Error>(bytes));
+                .map(Ok::<Bytes, hyper::Error>);
             let stream = futures::stream::iter(prefix).chain(tail);
             return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(stream)));
         }

@@ -131,7 +131,13 @@ pub fn hooks(bin: &str) -> Vec<HookSpec> {
 fn spec(bin: &str, event: HookEvent) -> HookSpec {
     HookSpec {
         event,
-        matcher: "*".to_string(),
+        // The `Notification` matcher names exactly the notification types that
+        // mean the harness is stopped on the operator; every other event
+        // matches everything it is installed for. See `NOTIFICATION_MATCHER`.
+        matcher: match event {
+            HookEvent::Notification => NOTIFICATION_MATCHER.to_string(),
+            _ => "*".to_string(),
+        },
         handler: HookHandler::Command {
             command: format!("{} {HOOK_SUBCOMMAND} {}", shell_quote(bin), event.as_str()),
             timeout: Some(timeout_for(event)),

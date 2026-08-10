@@ -14,8 +14,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
-    SP_FEEDBACK, SP_USAGE, TABS,
+    App, Cmd, HandbackPolicy, PaneView, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES,
+    SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
 };
 
 impl App {
@@ -541,6 +541,16 @@ impl App {
         // nothing is lost by not starting in it.
         match self.tab() {
             "Feedback" => Some(Cmd::LoadFeedback(self.feedback.query.clone())),
+            // The diff pane is the Changes surface now, so entering the tab
+            // re-loads its git data the way the removed Changes tab did on
+            // entry: a repo that changed while the operator was on another tab
+            // would otherwise stay stale beneath the open diff.
+            "Sessions" => {
+                if self.pane_view == PaneView::Diff {
+                    self.refresh_changes();
+                }
+                None
+            }
             // The workflow store is files on this machine, so entering the tab
             // reads them rather than asking the runtime for anything — which is
             // why this arm returns no command and does the work here.

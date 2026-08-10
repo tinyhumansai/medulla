@@ -49,6 +49,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod body_tests;
+
 pub use body::MAX_REWRITE_BYTES;
 pub use headers::{rewrite, MEDULLA_REFERER, MEDULLA_TITLE};
 pub use lifecycle::shared;

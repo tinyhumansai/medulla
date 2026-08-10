@@ -11,6 +11,8 @@
 
 use std::time::Duration;
 
+use bytes::Bytes;
+use futures::stream;
 use medulla::inference_proxy::{ProxyHandle, MEDULLA_REFERER, MEDULLA_TITLE};
 
 #[path = "support/mock_openrouter.rs"]

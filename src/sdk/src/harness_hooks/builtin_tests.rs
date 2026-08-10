@@ -112,6 +112,44 @@ fn notification_is_claude_only_and_raises_no_codex_note() {
     );
 }
 
+/// The Notification built-in reports only the notification types that mean the
+/// harness is blocked on the operator.
+///
+/// Claude Code fires `notification` for informational events too — above all
+/// `idle_prompt`, every time a finished turn returns to the prompt — and that
+/// rest is precisely the state the TUI must not light up as "waiting on you",
+/// or the badge ticks on every session that merely finished a turn. Those
+/// types must never reach the hook log, so the ones the built-in reports stay
+/// exactly the operator-answering set. The matcher is exact-value alternation,
+/// so splitting on `|` is a faithful reading of it.
+#[test]
+fn notification_builtin_matches_only_operator_blocking_types() {
+    let notification = hooks("medulla")
+        .into_iter()
+        .find(|hook| hook.event == HookEvent::Notification)
+        .expect("a Notification built-in");
+    let reported: Vec<&str> = notification.matcher.split('|').collect();
+
+    for waiting in ["permission_prompt", "elicitation_dialog", "agent_needs_input"] {
+        assert!(
+            reported.contains(&waiting),
+            "a '{waiting}' notification is the harness stopped on the operator and must be reported"
+        );
+    }
+    for informational in [
+        "idle_prompt",
+        "auth_success",
+        "elicitation_complete",
+        "elicitation_response",
+        "agent_completed",
+    ] {
+        assert!(
+            !reported.contains(&informational),
+            "an '{informational}' notification is informational or the idle rest and must not be reported"
+        );
+    }
+}
+
 #[test]
 fn resolving_twice_is_not_additive() {
     let config = HooksConfig::default().with_builtin(hooks("medulla"));

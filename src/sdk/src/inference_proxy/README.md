@@ -42,6 +42,11 @@ beyond the headers: a pinned run's request is buffered, `provider.only` is
 merged in, and the result is forwarded. Unpinned runs — every run today that
 does not ask for it — keep the pure streaming forward.
 
+Buffering is capped at [`MAX_REWRITE_BYTES`](./body.rs). A pinned request
+whose body is not a JSON object, whose declared or measured size exceeds the
+cap, or that already names its own restricted set is forwarded unchanged — the
+pin is skipped rather than the request refused.
+
 An unrecognized model-id suffix (`z-ai/glm-5.2:streamlake`) is accepted by
 OpenRouter and silently ignored, which is why the body is the only honest seam.
 

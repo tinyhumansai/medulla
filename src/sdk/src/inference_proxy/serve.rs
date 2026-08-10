@@ -310,9 +310,7 @@ async fn forward_body(
             tracing::warn!(
                 "request body exceeds the rewrite limit; forwarding without the provider pin"
             );
-            let prefix = buffered
-                .into_iter()
-                .map(Ok::<Bytes, hyper::Error>);
+            let prefix = buffered.into_iter().map(Ok::<Bytes, hyper::Error>);
             let stream = futures::stream::iter(prefix).chain(tail);
             return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(stream)));
         }

@@ -11,6 +11,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 
+use crate::ui::app::changes::types::ChangedFile;
+use crate::ui::app::types::{tab_pos, PaneView};
 use crate::ui::app::App;
 
 fn app() -> App {
@@ -108,8 +110,6 @@ fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
 
 #[test]
 fn a_stale_harness_diff_does_not_advertise_agents_shortcuts_on_another_tab() {
-    use crate::ui::app::types::{tab_pos, PaneView};
-
     let mut app = app();
     app.tab_index = tab_pos("Overview");
     app.pane_view = PaneView::Diff;
@@ -135,9 +135,6 @@ fn a_stale_harness_diff_does_not_advertise_agents_shortcuts_on_another_tab() {
 /// top-level Changes tab is gone, so this renders through `draw_harness_diff`
 /// — the same path the Sessions tab takes — rather than a removed tab arm.
 fn app_on_an_oversized_diff_line() -> App {
-    use crate::ui::app::changes::types::ChangedFile;
-    use crate::ui::app::types::{tab_pos, PaneView};
-
     let mut app = app();
     app.tab_index = tab_pos("Sessions");
     app.pane_view = PaneView::Diff;

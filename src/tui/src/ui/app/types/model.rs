@@ -72,6 +72,11 @@ pub const TABS: [&str; 7] = [
 
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
+///
+/// This is the workflow-enabled list minus `Workflows`: every remaining tab —
+/// the fleet Overview, the Sessions rail with its `d` diff pane, Subconscious
+/// (still drawing its placeholder), Hosts, Feedback, and Settings — renders
+/// without the workflow engine.
 #[cfg(not(feature = "workflows"))]
 pub const TABS: [&str; 6] = [
     "Overview",

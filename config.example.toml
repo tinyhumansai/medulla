@@ -116,7 +116,7 @@ tokenEnv = "MEDULLA_TOKEN"
 # [[customHarnesses]]
 # id = "deepseek"
 # name = "DeepSeek via Claude"
-# baseHarness = "claude"              # claude | codex | opencode
+# baseHarness = "claude"              # claude | codex | opencode | openhuman
 # model = "deepseek/deepseek-chat"
 # fastModel = "deepseek/deepseek-chat"
 # hostId = "this-device"               # must match [host].address
@@ -124,6 +124,23 @@ tokenEnv = "MEDULLA_TOKEN"
 # apiKeyEnv = "OPENROUTER_API_KEY"
 # baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
 # contextWindow = 114000                # optional; Claude auto-compaction window
+
+# baseHarness = "openhuman" runs the turn on the embedded core rather than
+# spawning a CLI, so there is nothing to install. The preset's model, endpoint
+# and key apply to that turn only: Medulla passes the core a per-call route
+# through the same loopback proxy, and the core never persists it, so the
+# account's own OpenHuman inference is left where you set it.
+#
+# A preset that names only a model still works and still needs no OpenRouter
+# key. With nothing exported under apiKeyEnv the turn runs on whatever the
+# account's OpenHuman configuration already resolves.
+# [[customHarnesses]]
+# id = "deepseek-oh"
+# name = "DeepSeek via OpenHuman"
+# baseHarness = "openhuman"
+# model = "deepseek/deepseek-chat"
+# hostId = "this-device"
+# apiKeyEnv = "OPENROUTER_API_KEY"
 
 # ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)

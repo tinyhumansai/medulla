@@ -84,9 +84,18 @@ endpoint:
 - watched PTY sessions on the local host;
 - harnesses an operator opens by hand in the TUI.
 
-All three built-in harnesses are covered. OpenCode is accepted as a
+All three spawned harnesses are covered. OpenCode is accepted as a
 `customHarnesses` base even though it can reach OpenRouter natively, because that
 native path is exactly the one this proxy needs to take over.
+
+The embedded OpenHuman core is covered too, by a different mechanism. It is not a
+child process, so there is no environment to inject into and nothing to scrub:
+Medulla resolves the preset's key, exchanges it for a loopback token, and hands
+the core the mount and the token as a *per-call* route on
+`inference_agent_chat`. The core applies that route to the turn's own in-memory
+configuration and never persists it, so borrowing an endpoint for one node does
+not repoint the account's own inference. As with a spawned harness, the core is
+given the token and never the OpenRouter key.
 
 One limitation applies. Medulla injects environment variables at the spawn seam
 and never writes a harness's own configuration file. A harness you have

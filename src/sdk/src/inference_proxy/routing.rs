@@ -6,7 +6,7 @@ use crate::config::{RouterConfig, RouterProviderConfig, OPENROUTER_API_KEY_ENV};
 use crate::protocol::HarnessProvider;
 
 use super::lifecycle::shared;
-use super::types::{ProxyEndpoint, ProxyRouting, UpstreamShape, PROXY_TOKEN_ENV};
+use super::types::{EmbeddedRouting, ProxyEndpoint, ProxyRouting, UpstreamShape, PROXY_TOKEN_ENV};
 
 /// Whether `base_url` points at OpenRouter.
 ///
@@ -73,23 +73,40 @@ pub fn route_openrouter(
     })
 }
 
+/// The variable `router` names for its credential, when it names one.
+///
+/// A configured name is authoritative: an absent value under it means "no key",
+/// not "look somewhere else". Only an endpoint-only router falls through to the
+/// conventional names.
+fn configured_key_env(router: &RouterConfig) -> Option<&str> {
+    router
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+/// Read `name` out of `env`, treating a blank value as absent.
+fn env_key(env: &HashMap<String, String>, name: &str) -> Option<(String, String)> {
+    env.get(name)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| (name.to_string(), value.to_string()))
+}
+
 /// Resolve the OpenRouter credential named by `router` from a run environment.
 pub(super) fn resolve_key(
     router: &RouterConfig,
     provider: HarnessProvider,
     env: &HashMap<String, String>,
 ) -> Option<(String, String)> {
+    // The embedded core is not a child and never reaches a spawn seam; it routes
+    // through [`route_embedded`] instead, which resolves its own credential.
     if provider == HarnessProvider::Openhuman {
         return None;
     }
-    if let Some(name) = router
-        .api_key_env
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    {
-        let value = env.get(name).map(|value| value.trim())?;
-        return (!value.is_empty()).then(|| (name.to_string(), value.to_string()));
+    if let Some(name) = configured_key_env(router) {
+        return env_key(env, name);
     }
 
     // Endpoint-only router configuration intentionally leaves a harness's own
@@ -102,12 +119,55 @@ pub(super) fn resolve_key(
     };
     [OPENROUTER_API_KEY_ENV, provider_key]
         .into_iter()
-        .find_map(|name| {
-            env.get(name)
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(|value| (name.to_string(), value.to_string()))
-        })
+        .find_map(|name| env_key(env, name))
+}
+
+/// Resolve the credential for an in-process run.
+///
+/// Same precedence as [`resolve_key`] minus its last step: there is no child to
+/// inherit a harness's native variable, so `ANTHROPIC_AUTH_TOKEN` and
+/// `OPENAI_API_KEY` are not consulted. A preset's `apiKeyEnv` wins, and an
+/// endpoint-only router falls back to the documented OpenRouter variable.
+fn resolve_embedded_key(
+    router: &RouterConfig,
+    env: &HashMap<String, String>,
+) -> Option<(String, String)> {
+    match configured_key_env(router) {
+        Some(name) => env_key(env, name),
+        None => env_key(env, OPENROUTER_API_KEY_ENV),
+    }
+}
+
+/// Route the embedded core's inference through the shared proxy, starting it on
+/// demand.
+///
+/// Returns `Ok(None)` when the run's endpoint is not OpenRouter-bound or the
+/// named key is absent — in either case the core keeps resolving its own
+/// provider bindings from the account's configuration, which is what an
+/// operator who configured neither expects.
+///
+/// # Errors
+///
+/// The sentence [`shared`] produces when the loopback listener cannot bind.
+pub fn route_embedded(
+    router: &RouterConfig,
+    env: &HashMap<String, String>,
+) -> Result<Option<EmbeddedRouting>, String> {
+    let provider = HarnessProvider::Openhuman;
+    if !router
+        .base_url_for(provider.as_str())
+        .is_some_and(is_openrouter)
+    {
+        return Ok(None);
+    }
+    let Some((_, key)) = resolve_embedded_key(router, env) else {
+        return Ok(None);
+    };
+    let endpoint = shared(env)?.endpoint_for_key(&key);
+    Ok(Some(EmbeddedRouting {
+        base_url: endpoint.base_url(UpstreamShape::for_provider(provider)),
+        token: endpoint.token,
+    }))
 }
 
 /// Route the selected provider through the shared proxy, starting it on demand.

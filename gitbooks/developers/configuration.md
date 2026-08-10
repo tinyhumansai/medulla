@@ -261,16 +261,47 @@ operator's override of what the configuration says, applied to the machine they
 are standing at, with no file to edit. An exported-but-blank value counts as
 unset.
 
-Two preset fields mean less for `openhuman` than for a spawned CLI, and it is
-worth knowing which. `baseUrl` and `apiKeyEnv` describe an endpoint Medulla
-points a *child process* at; an OpenHuman turn has no child, and the embedded
-core resolves its own provider bindings and credentials from the account's
-configuration. They are therefore inert here — and the corollary is that the core
-must already be configured with a provider that serves the model you name. A
-model no configured provider serves is not an error: the core's agent loop falls
-through to its resolved default and records that it skipped the override. For the
-same reason an `openhuman` preset needs no OpenRouter key to be advertised as
-capacity, unlike every other base harness.
+### Running an OpenHuman turn on OpenRouter
+
+Naming a model is only half the answer: on its own the name is resolved against
+whatever providers the core already has, and one no configured provider serves is
+not an error — the agent loop falls through to its resolved default and records
+that it skipped the override.
+
+`baseUrl` and `apiKeyEnv` supply the other half, and they are live for
+`openhuman` presets. They reach the turn by a different road than they do for a
+spawned CLI, which has no child to hand an environment to: Medulla resolves the
+key named by `apiKeyEnv`, exchanges it at the loopback attribution proxy for a
+machine-local token, and passes the core the mount and that token as a
+**per-call** route. The core applies the route to that one turn's in-memory
+configuration and never writes it to disk, so pointing a workflow step at
+OpenRouter does not repoint the account's own OpenHuman inference — the next turn
+without a preset runs exactly where it did before.
+
+The route governs the four roles an agent turn runs on (chat, reasoning, agentic,
+coding). Background workloads — memory, embeddings, heartbeat, learning — stay
+where the account's configuration puts them, because they run tier-specific
+models a coding endpoint generally cannot serve.
+
+So a complete OpenHuman preset needs nothing installed and nothing pre-configured
+in the core:
+
+```toml
+[[customHarnesses]]
+id = "deepseek-oh"
+name = "DeepSeek via OpenHuman"
+baseHarness = "openhuman"
+model = "deepseek/deepseek-chat"
+hostId = "this-device"
+apiKeyEnv = "OPENROUTER_API_KEY"
+```
+
+Routing is skipped, with no error, in three cases: no key exported under
+`apiKeyEnv`, a `baseUrl` that resolves somewhere other than `openrouter.ai`, and
+a turn with no model resolved. Each leaves the turn on the account's own
+OpenHuman configuration, which is why an `openhuman` preset that names only a
+model still works and is still advertised as capacity without an OpenRouter key —
+unlike every other base harness.
 
 `apiKeyEnv` holds a variable name and never a value. The key stays in the process
 environment, and neither the config file nor the app's own state ever holds it. A

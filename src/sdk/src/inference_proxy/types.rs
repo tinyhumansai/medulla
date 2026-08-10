@@ -132,6 +132,21 @@ impl ProxyEndpoint {
     }
 }
 
+/// Where an **in-process** caller sends its OpenRouter traffic.
+///
+/// The counterpart to [`ProxyRouting`] for a run with no child. The embedded
+/// OpenHuman core is configured with these two values directly, so there is no
+/// router document to rewrite and nothing to scrub: the real key never enters a
+/// process environment on this path, because the caller resolves it, hands it to
+/// the proxy, and passes on only the loopback token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddedRouting {
+    /// The OpenAI-shaped loopback mount to point the core at.
+    pub base_url: String,
+    /// The loopback token the core presents, in place of the OpenRouter key.
+    pub token: String,
+}
+
 /// The rewrite a spawn seam applies so its child reaches OpenRouter through the
 /// proxy instead of directly.
 ///

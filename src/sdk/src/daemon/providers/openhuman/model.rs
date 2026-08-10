@@ -31,13 +31,17 @@
 //!
 //! # What choosing a model here does not do
 //!
-//! The name is handed to the core as `model_override` and the core resolves it
-//! against *its own* provider bindings. A model id no configured provider
-//! serves is not an error here: the core's agent loop falls through to its
-//! resolved default and emits its own "override skipped" diagnostic. So a
-//! preset's `baseUrl` and `apiKeyEnv` are inert for this provider — the
-//! embedded core owns its credentials and endpoints, and Medulla injects
-//! neither into a turn that spawns no child.
+//! The name is handed to the core as `model_override`, and on its own that is
+//! all it is: the core resolves the name against *its own* provider bindings,
+//! and a model id no configured provider serves is not an error here — the
+//! agent loop falls through to its resolved default and emits its own "override
+//! skipped" diagnostic.
+//!
+//! What makes a named model actually reachable is the endpoint and credential
+//! beside it, which is [`super::router`]'s job. A preset that carries a
+//! `baseUrl` and an `apiKeyEnv` states the whole answer and the turn runs there;
+//! a preset that carries only a model still depends on the core already having a
+//! provider that serves it.
 
 use std::collections::HashMap;
 

@@ -468,6 +468,12 @@ async fn a_chunked_pinned_request_is_not_buffered_past_the_rewrite_limit() {
         .expect("request reaches the proxy");
 
     let received = upstream.only_request();
+    eprintln!(
+        "DBG chunked received.len={} payload.len={} frames={} firstdiff follow",
+        received.body.len(),
+        payload.len(),
+        frames.len()
+    );
     assert_eq!(
         received.body, payload,
         "an oversized chunked body is forwarded verbatim"

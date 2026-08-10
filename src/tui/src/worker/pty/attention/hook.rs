@@ -2,18 +2,27 @@
 //!
 //! [`super::detect`] reads the screen, which is the right surface for everything
 //! a harness *says*. It is the wrong surface for the one thing a harness says
-//! through its hooks rather than its terminal: Claude Code raises a `Notification`
-//! lifecycle hook when it is waiting on the operator — a permission prompt it is
-//! holding on, or an idle "waiting for your input" — and that report is the
-//! harness saying so itself, from the one channel that does not reword its
-//! prompts, wrap its menus, or hide behind a full-screen TUI the scraper has to
-//! survive.
+//! through its hooks rather than its terminal: when Claude Code is stopped on
+//! the operator — a tool use awaiting approval, an MCP elicitation form awaiting
+//! input, a background agent waiting on you — it raises a `Notification`
+//! lifecycle hook, and that report is the harness saying so itself, from the one
+//! channel that does not reword its prompts, wrap its menus, or hide behind a
+//! full-screen TUI the scraper has to survive.
+//!
+//! Medulla's built-in Notification hook is installed with a matcher that names
+//! exactly those stopping types (see [`medulla::harness_hooks::builtin`]). Claude
+//! Code fires `Notification` for informational events as well — above all
+//! `idle_prompt`, every time a finished turn returns to the prompt — but that is
+//! the ordinary resting composer this module's
+//! [`AttentionKind::Completed`](super::types::AttentionKind::Completed) exists
+//! to keep out of the "waiting on you" count, so the built-in does not report
+//! those at all. A `Notification` in the hook log therefore *is* a wait.
 //!
 //! The screen scraper is still the primary cue: a named permission menu it can
 //! read is more specific than a generic "waiting". This is the *fallback* that
 //! fills in when the screen has nothing — a harness stopped on a prompt the
-//! markers do not recognise still stopped, and a harness waiting for input
-//! paints nothing the scraper can name at all.
+//! markers do not recognise still stopped, and an elicitation form or a
+//! background agent waiting paints nothing the scraper can name at all.
 //!
 //! Only Claude Code raises `Notification` (see
 //! [`medulla::harness_hooks::HookEvent::supported_by`]), so in practice this cue

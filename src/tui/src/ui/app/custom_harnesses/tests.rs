@@ -79,6 +79,39 @@ fn editing_a_codex_preset_keeps_its_codex_overrides_and_reasoning_effort() {
 }
 
 #[test]
+fn editing_a_pinned_preset_keeps_its_upstream_provider_pin() {
+    // Regression test: the compact editor line has no room for `providerOnly`
+    // (see `CustomHarnessConfig::from_editor_line`), so a naive save through the
+    // TUI editor silently dropped the pin on every edit of an existing preset,
+    // letting the next run fall back to OpenRouter's own provider choice.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    let mut app = app_with_config(&path);
+
+    app.save_custom_harness(
+        None,
+        "glm | GLM 5.2 | claude | z-ai/glm-5.2 | | this-device",
+    );
+    assert_eq!(app.custom_harnesses.len(), 1);
+    app.custom_harnesses[0].provider_only = vec!["streamlake".to_string(), "novita".to_string()];
+
+    // Edit the preset through the same compact-line path a real TUI edit uses,
+    // changing only the display name.
+    app.save_custom_harness(
+        Some("glm"),
+        "glm | GLM 5.2 fast | claude | z-ai/glm-5.2 | | this-device",
+    );
+
+    assert_eq!(app.custom_harnesses.len(), 1);
+    assert_eq!(app.custom_harnesses[0].name, "GLM 5.2 fast");
+    // The pin survives the edit, in the operator's original order.
+    assert_eq!(
+        app.custom_harnesses[0].provider_only,
+        vec!["streamlake".to_string(), "novita".to_string()]
+    );
+}
+
+#[test]
 fn duplicate_ids_are_rejected_without_overwriting_the_existing_preset() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");

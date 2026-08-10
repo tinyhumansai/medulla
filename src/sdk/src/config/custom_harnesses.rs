@@ -98,6 +98,19 @@ pub struct CustomHarnessConfig {
     /// Reasoning effort declared to Codex when `codexOverrides` is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// OpenRouter serving providers this preset is restricted to, by slug
+    /// (`streamlake`, `novita`, …). Empty leaves the choice to OpenRouter.
+    ///
+    /// The same model is served by many providers at prices that differ by more
+    /// than an order of magnitude, and OpenRouter's own default weighs price
+    /// against uptime and throughput rather than pinning one. Naming the
+    /// provider here is the only way to *state* the choice: the preference
+    /// travels in the request body, so neither the model id nor the endpoint
+    /// override can carry it. [`crate::inference_proxy`] applies it.
+    ///
+    /// Inert for an `openhuman` preset, which has no proxied request to amend.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_only: Vec<String>,
 }
 
 fn default_key_env() -> String {
@@ -127,6 +140,20 @@ impl CustomHarnessConfig {
             .take()
             .map(|model| model.trim().to_string())
             .filter(|model| !model.is_empty());
+        // Slugs are lowercased because OpenRouter matches them case-sensitively
+        // while its own documentation and dashboard present them capitalized
+        // ("StreamLake"). A pin that silently matched nothing would read as
+        // OpenRouter ignoring the setting rather than as a typo here. The first
+        // occurrence of each slug is kept, across the whole list rather than
+        // just adjacent entries: `dedup()` alone would leave a repeat that
+        // appears after a different slug.
+        let mut seen = std::collections::HashSet::new();
+        self.provider_only = std::mem::take(&mut self.provider_only)
+            .into_iter()
+            .map(|slug| slug.trim().to_ascii_lowercase())
+            .filter(|slug| !slug.is_empty())
+            .filter(|slug| seen.insert(slug.clone()))
+            .collect();
 
         if self.id.is_empty()
             || !self
@@ -170,6 +197,7 @@ impl CustomHarnessConfig {
         RouterConfig {
             base_url: Some(self.effective_base_url().to_string()),
             api_key_env: Some(self.api_key_env.clone()),
+            provider_only: self.provider_only.clone(),
             ..RouterConfig::default()
         }
     }
@@ -311,9 +339,13 @@ impl CustomHarnessConfig {
             base_url: String::new(),
             // The compact line has no room for the Codex knobs; a preset that
             // wants them is written in the config file, which is also where the
-            // account-changing decision belongs.
+            // account-changing decision belongs. An upstream-provider pin is
+            // similarly absent from the line. Editing an existing preset through
+            // the TUI preserves both kinds of field for that reason — the editor
+            // save flow restores these alongside the other file-only fields.
             codex_overrides: false,
             reasoning_effort: None,
+            provider_only: Vec::new(),
         }
         .normalize()
     }

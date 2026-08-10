@@ -19,6 +19,7 @@ fn preset(id: &str, base_harness: HarnessProvider, host_id: &str) -> CustomHarne
         base_url: String::new(),
         codex_overrides: false,
         reasoning_effort: None,
+        provider_only: Vec::new(),
     }
 }
 

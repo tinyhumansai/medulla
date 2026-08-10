@@ -4,6 +4,13 @@
 //! from a `Notification` lifecycle report rather than from its screen. The
 //! helper is a pure function of the hook log, so the tests drive it with a
 //! synthetic [`HookEventLog`] and no live pty.
+//!
+//! A `Notification` in the log is a genuine wait by construction: the built-in
+//! Notification hook's matcher excludes the informational types — the
+//! `idle_prompt` Claude Code fires every time a finished turn returns to the
+//! prompt is exactly the resting composer this module must not flag — so the
+//! tests below do not need to model an idle prompt themselves. The matcher
+//! itself is pinned in `medulla::harness_hooks`' built-in tests.
 
 use medulla::harness_hooks::{HookEvent, HookEventLog, HookReport};
 use medulla::protocol::HarnessProvider;

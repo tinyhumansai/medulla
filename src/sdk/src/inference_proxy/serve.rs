@@ -297,9 +297,11 @@ async fn forward_body(
     }
 
     // Read one frame at a time, keeping a running byte count. Everything
-    // buffered fits the rewrite limit by construction; the frames already
-    // consumed are prepended to the still-unread tail when the limit trips, so
-    // falling back to a stream costs the upstream nothing and loses nothing.
+    // buffered fits the rewrite limit by construction; when the limit trips the
+    // already-consumed frames are streamed ahead of the unread tail, and the
+    // frame that crossed the limit — pulled out of `tail` but never buffered —
+    // is re-emitted in its place, so falling back to a stream costs the
+    // upstream nothing and loses no byte.
     let mut tail = Box::pin(req.into_body().into_data_stream());
     let mut buffered = Vec::new();
     let mut bytes_seen = 0usize;
@@ -310,7 +312,10 @@ async fn forward_body(
             tracing::warn!(
                 "request body exceeds the rewrite limit; forwarding without the provider pin"
             );
-            let prefix = buffered.into_iter().map(Ok::<Bytes, hyper::Error>);
+            let prefix = buffered
+                .into_iter()
+                .map(Ok::<Bytes, hyper::Error>)
+                .chain(std::iter::once(Ok::<Bytes, hyper::Error>(chunk)));
             let stream = futures::stream::iter(prefix).chain(tail);
             return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(stream)));
         }

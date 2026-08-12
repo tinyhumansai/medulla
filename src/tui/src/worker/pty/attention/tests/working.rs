@@ -2,7 +2,7 @@
 //! alive. A spinner, a gerund and an elapsed timer in the live region mean a
 //! turn is in flight; a restored composer ends the live region.
 
-use super::super::detect::is_working;
+use super::super::detect::{is_idle, is_working};
 /// Current Claude Code prints no "esc to interrupt" at all — it draws a spinner,
 /// a gerund, and an elapsed timer. Captured from a live session; without this the
 /// working veto was dead for every recent Claude, and no row could say a harness
@@ -82,4 +82,12 @@ fn progress_line_lookalikes_are_not_working() {
     {
         assert!(!is_working(&screen), "{screen}");
     }
+}
+
+#[test]
+fn a_live_composer_is_explicit_idle_evidence() {
+    assert!(is_idle("last answer\n❯ Write a message\n  ? for shortcuts"));
+    assert!(is_idle("last answer\n> "));
+    assert!(!is_idle("✽ Considering… (7s · ↓ 193 tokens)"));
+    assert!(!is_idle("Do you want to proceed?\n❯ 1. Yes\n  2. No"));
 }

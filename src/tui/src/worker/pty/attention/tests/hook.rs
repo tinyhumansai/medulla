@@ -15,7 +15,7 @@
 use medulla::harness_hooks::{HookEvent, HookEventLog, HookReport};
 use medulla::protocol::HarnessProvider;
 
-use super::super::hook::hook_attention;
+use super::super::hook::{hook_attention, hook_working};
 use super::super::types::AttentionKind;
 
 /// The grant key a session's MCP fleet hook reports are filed under.
@@ -113,4 +113,50 @@ fn a_newer_non_notification_supersedes_an_older_notification() {
         hook_attention(HarnessProvider::Claude, Some(GRANT), false, &log),
         None
     );
+}
+
+#[test]
+fn prompt_and_tool_reports_keep_a_claude_turn_working() {
+    for event in [
+        HookEvent::UserPromptSubmit,
+        HookEvent::PreToolUse,
+        HookEvent::PostToolUse,
+        HookEvent::SubagentStart,
+        HookEvent::SubagentStop,
+        HookEvent::PreCompact,
+        HookEvent::PostCompact,
+    ] {
+        let log = log_with_last(event);
+        assert_eq!(
+            hook_working(Some(GRANT), &log),
+            Some(true),
+            "{event:?} should describe an active turn"
+        );
+    }
+}
+
+#[test]
+fn terminal_and_operator_wait_reports_stop_the_working_state() {
+    for event in [
+        HookEvent::SessionStart,
+        HookEvent::PermissionRequest,
+        HookEvent::Stop,
+        HookEvent::SessionEnd,
+        HookEvent::Notification,
+    ] {
+        let log = log_with_last(event);
+        assert_eq!(
+            hook_working(Some(GRANT), &log),
+            Some(false),
+            "{event:?} should not describe active work"
+        );
+    }
+}
+
+#[test]
+fn working_state_needs_a_matching_grant_and_report() {
+    let log = log_with_last(HookEvent::UserPromptSubmit);
+    assert_eq!(hook_working(None, &log), None);
+    assert_eq!(hook_working(Some("another-session"), &log), None);
+    assert_eq!(hook_working(Some(GRANT), &HookEventLog::new()), None);
 }

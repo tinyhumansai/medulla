@@ -113,7 +113,7 @@ fn refresh(
     // the whole sample. The child can emit delayed chimes and the next turn's
     // request before this 200 ms poll runs; any additional bell remains eligible.
     let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
-    let working = attention::is_working(&contents);
+    let working = working_state(&contents, session.grant_session(), hook_log);
     let rang = eligible_bells > 0 && !working;
     // Screen first — a permission menu the scraper can read is more specific
     // than the generic "waiting" a Notification report names — then the hook,
@@ -126,6 +126,11 @@ fn refresh(
     let cue = attention::detect(session.provider(), &contents)
         .or(hook)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
+    // Working and waiting are mutually exclusive session states. The screen
+    // detector can recognise a permission menu before Claude's Notification
+    // hook arrives, while the previous active-turn hook is still last in the
+    // log; the concrete cue wins that short race.
+    let working = working && cue.is_none();
 
     let mut state = lock(&session.attention);
     // Release or acknowledgement raced this sample; it owns the newer truth.
@@ -151,4 +156,27 @@ fn refresh(
             }
         }
     };
+}
+
+/// Resolve working state from the screen's live edges and hook-backed middle.
+///
+/// A visible spinner always starts work and a visible composer always ends it,
+/// even while the corresponding hook subprocess is still catching up. Between
+/// those paints, lifecycle reports supply the state without depending on
+/// Claude's changing progress vocabulary. With no report, this reduces to the
+/// original screen-only behavior.
+pub(super) fn working_state(
+    screen: &str,
+    grant: Option<&str>,
+    hook_log: Option<&medulla::harness_hooks::HookEventLog>,
+) -> bool {
+    if attention::is_working(screen) {
+        return true;
+    }
+    if attention::is_idle(screen) {
+        return false;
+    }
+    hook_log
+        .and_then(|log| attention::hook_working(grant, log))
+        .unwrap_or(false)
 }

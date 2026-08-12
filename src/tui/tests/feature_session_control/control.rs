@@ -217,7 +217,11 @@ fn clicking_away_from_an_attached_harness_honors_handback_policy() {
         "pointer navigation must ask before hiding the held pane: {out}"
     );
     assert_eq!(app.attached_session(), Some(id.as_str()));
-    assert_eq!(app.tab(), "Agents", "the pending release blocks navigation");
+    assert_eq!(
+        app.tab(),
+        "Sessions",
+        "the pending release blocks navigation"
+    );
 
     let _ = app.on_event(key(KeyCode::Char('y')));
     assert_eq!(app.attached_session(), None);

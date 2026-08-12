@@ -220,6 +220,11 @@ impl RunObserver for WorkflowRunObserver {
                 input: None,
                 output: Some(crate::workflows::bounded_evidence(&step.output)),
                 diagnostics: diagnostics.clone(),
+                // Filled by the same pass that fills `input`: both are Medulla's
+                // own evidence rather than anything the engine reports about a
+                // step, so both are attached from `AgentEvidence` once the run
+                // has settled. See [`crate::flow_engine::agent_evidence`].
+                transcript: Vec::new(),
             });
         self.raw.lock().expect("raw steps lock").push(step.clone());
         if let Some(snapshot) = &self.step_snapshot {

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 
+use crate::runtime::event_log::{trim_to_cap, CHAT_CAP, EVENT_CAP};
 use crate::runtime::types::{AgentDescriptor, RuntimeSnapshot, ThreadSummary};
 use crate::ui::events::{EventEnvelope, TuiEvent};
 
@@ -156,6 +157,11 @@ impl SnapshotCell {
             state
                 .chat_events
                 .extend(events.into_iter().filter(is_chat_row));
+            // A long-lived session's log is otherwise unbounded, and every
+            // reader deep-clones both vectors on `snapshot()`. Same retention
+            // the other runtimes apply through `ThreadEventLog`.
+            trim_to_cap(&mut state.events, EVENT_CAP);
+            trim_to_cap(&mut state.chat_events, CHAT_CAP);
             if let Some(running) = running {
                 state.running = running;
             }
@@ -190,6 +196,12 @@ impl SnapshotCell {
             };
             state.events.push(envelope.clone());
             state.chat_events.push(envelope);
+            // The provisional row is retired when the confirmed copy arrives,
+            // but a stalled turn never gets one — same retention the backend
+            // path applies in `append_events`, so a run of echo-only turns
+            // under a dead backend still respects the caps.
+            trim_to_cap(&mut state.events, EVENT_CAP);
+            trim_to_cap(&mut state.chat_events, CHAT_CAP);
             state.running = true;
 
             let mut echoes = self.echoes.lock().unwrap_or_else(|e| e.into_inner());

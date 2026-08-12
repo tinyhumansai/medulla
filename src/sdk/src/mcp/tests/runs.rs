@@ -22,6 +22,7 @@ fn record_a_run(store: &Arc<dyn WorkflowStore>, run_id: &str) {
         input: Some(json!("x".repeat(100_000))),
         output: Some(json!("y".repeat(100_000))),
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }];
     store.record_run(&record).expect("records the run");
 }

@@ -7,12 +7,10 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::ui::chat::ComposerChrome;
-
 use super::super::types::App;
 
 impl App {
-    /// Draw the inline prompt overlay (Workers add/edit, Agents answer).
+    /// Draw the inline prompt overlay (Workers add/edit, task answer).
     pub(super) fn draw_prompt(&mut self, f: &mut Frame, area: Rect) {
         let Some(prompt) = &self.prompt else { return };
         let block = crate::ui::widgets::panel(&self.theme, prompt.title.clone(), true);
@@ -21,28 +19,6 @@ impl App {
         f.render_widget(
             Paragraph::new(crate::ui::widgets::prompt_line(&prompt.draft, &self.theme)),
             inner,
-        );
-    }
-
-    /// Draw the Chat composer.
-    ///
-    /// The widget itself is [`crate::ui::chat::draw_composer`], shared with the
-    /// workflow copilot. What is decided here is only what the orchestrator
-    /// means by its three states: focus belongs to the composer whenever the
-    /// rail does not hold it, and "busy" is the chat runtime running.
-    pub(super) fn draw_composer(&mut self, f: &mut Frame, area: Rect) {
-        crate::ui::chat::draw_composer(
-            f,
-            area,
-            &self.draft,
-            &self.theme,
-            ComposerChrome {
-                focused: !self.agents_rail_focused(),
-                busy: self.snapshot.running,
-                // None: the caption row above already names what Enter submits
-                // to, and a placeholder under it would say it twice.
-                placeholder: None,
-            },
         );
     }
 

@@ -33,6 +33,7 @@ fn from_config_falls_back_per_field() {
         dim_border: Some("blue".into()),
         attention: Some("lightyellow".into()),
         attention_blink: Some(false),
+        attention_blink_seconds: None,
     };
     let t = Theme::from_config(&cfg);
     assert_eq!(t.primary, Color::Rgb(0x12, 0x34, 0x56));
@@ -157,4 +158,71 @@ fn persist_theme_preserves_unrelated_sections() {
     assert_eq!(reparsed["theme"]["primary"].as_str(), Some("red"));
     assert_eq!(reparsed["theme"]["attention"].as_str(), Some("yellow"));
     assert_eq!(reparsed["theme"]["attentionBlink"].as_bool(), Some(true));
+}
+
+/// A pulse configured in seconds becomes whole frames of the render clock, and
+/// nonsense is clamped rather than dropped: a config that asks for something
+/// unusable should still change the pulse in the direction it asked for.
+#[test]
+fn a_configured_blink_rate_is_read_in_seconds_and_clamped() {
+    let with = |seconds: Option<f64>| {
+        Theme::from_config(&ThemeConfig {
+            attention_blink_seconds: seconds,
+            ..Default::default()
+        })
+        .attention_blink_ms
+    };
+
+    assert_eq!(with(Some(2.5)), 2_500);
+    assert_eq!(with(None), Theme::default().attention_blink_ms);
+    assert_eq!(with(Some(0.0)), 200, "clamped up to the shortest pulse");
+    assert_eq!(with(Some(600.0)), 10_000, "clamped down to the longest");
+    assert_eq!(
+        with(Some(f64::NAN)),
+        Theme::default().attention_blink_ms,
+        "a value that asks for nothing takes the default"
+    );
+}
+
+/// The pulse alternates on the frame counter rather than delegating to
+/// `SLOW_BLINK`, which most terminals ignore.
+#[test]
+fn the_pulse_alternates_at_the_configured_rate() {
+    // A one-second pulse rounds each 500ms phase to six 90ms frames.
+    let theme = Theme {
+        attention_blink_ms: 1_000,
+        ..Default::default()
+    };
+    let half = (500 + FRAME_MS as usize / 2) / FRAME_MS as usize;
+
+    assert!(theme.attention_bright(0));
+    assert!(theme.attention_bright(half - 1));
+    assert!(!theme.attention_bright(half));
+    assert!(!theme.attention_bright(half * 2 - 1));
+    assert!(theme.attention_bright(half * 2));
+}
+
+/// Switching blinking off must not leave the cue stuck in its dim phase.
+#[test]
+fn a_theme_that_does_not_blink_is_always_bright() {
+    let theme = Theme {
+        attention_blink: false,
+        ..Default::default()
+    };
+
+    assert!((0..40).all(|frame| theme.attention_bright(frame)));
+}
+
+/// A period shorter than one frame still has to alternate rather than divide to
+/// zero and strobe on every tick.
+#[test]
+fn a_period_below_the_frame_rate_still_holds_each_phase_a_frame() {
+    let theme = Theme {
+        attention_blink_ms: MIN_BLINK_MS,
+        ..Default::default()
+    };
+
+    assert!(theme.attention_bright(0));
+    assert!(!theme.attention_bright(1));
+    assert!(theme.attention_bright(2));
 }

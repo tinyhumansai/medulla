@@ -47,7 +47,7 @@ pub mod types;
 #[cfg(all(test, unix))]
 mod tests;
 
-pub use attention::{AttentionKind, HarnessAttention, ATTENTION_GLYPH};
+pub use attention::{lifecycle_cue, row_cue, AttentionKind, HarnessAttention, ATTENTION_GLYPH};
 pub use cell_text::CellText;
 pub use handle::SessionHandle;
 pub use inject::inject_prompt;

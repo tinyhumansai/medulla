@@ -121,6 +121,7 @@ async fn argv_of_a_run(launch: &LaunchPolicy) -> Vec<String> {
         launch,
         env: &env,
         cwd: root.path(),
+        workspace: None,
         workflow_id: "work",
         input: tinyflows::engine::RunInput::new(json!({})),
         sink: None,

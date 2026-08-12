@@ -7,7 +7,8 @@ use medulla::protocol::HarnessProvider;
 
 use crate::ui::harness_pane::HarnessChoice;
 
-use super::super::types::{tab_pos, AgentPicker, AgentPickerStep, App, PickerPurpose};
+use super::super::types::{tab_pos, App, Prompt, PromptKind, SessionPicker, SessionPickerStep};
+use crate::ui::composer::Draft;
 
 impl App {
     /// Open the "start a session" picker, or spawn directly when the command
@@ -32,11 +33,10 @@ impl App {
                     self.set_status("No harness CLIs found on this device");
                     return;
                 }
-                self.agent_picker = Some(AgentPicker {
-                    purpose: PickerPurpose::Spawn,
+                self.session_picker = Some(SessionPicker {
                     choices,
                     index: 0,
-                    step: AgentPickerStep::Harness,
+                    step: SessionPickerStep::Harness,
                     cwd: path
                         .map(str::to_string)
                         .unwrap_or_else(|| harnesses.workspace.clone()),
@@ -75,24 +75,22 @@ impl App {
         let workspace = harnesses.resolve_workspace(cwd);
         match harnesses.open_unmanaged(&choice, &workspace, skip) {
             Ok(id) => {
-                self.tab_index = tab_pos("Agents");
+                self.tab_index = tab_pos("Sessions");
                 self.select_session_row(&id);
-                // "unmanaged" and not a friendlier synonym: it is the word the
-                // rail badge uses for the same session, and a status line that
-                // renamed the state would leave the operator matching two
+                // Names the directory, because the picker's whole second step was
+                // choosing it and a confirmation that omits the answer is not
+                // one. "unmanaged" and not a friendlier synonym: it is the word
+                // the rail badge and the picker modal both use for this state,
+                // and renaming it here would leave the operator matching two
                 // vocabularies for one fact.
                 let mut status = format!(
-                    "Started {} · unmanaged, the orchestrator will not use it",
-                    choice.display_name(),
+                    "Started {} in {workspace} · unmanaged",
+                    choice.display_name()
                 );
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }
                 self.set_status(status);
-                // The quick path always leaves a declared agent behind if the
-                // operator wants one: a session in a directory nothing declares
-                // is a real thing running that the rail can only list loose.
-                self.offer_agent_declaration(choice.id(), &workspace);
             }
             // Surfaced, never swallowed: a spawn that fails silently leaves the
             // operator waiting for a pane that is never coming.
@@ -103,28 +101,28 @@ impl App {
     }
 
     /// Route a key while the harness picker is open.
-    pub(crate) fn handle_agent_picker_key(&mut self, event: KeyEvent) {
+    pub(crate) fn handle_session_picker_key(&mut self, event: KeyEvent) {
         let step = self
-            .agent_picker
+            .session_picker
             .as_ref()
             .map(|picker| picker.step)
-            .unwrap_or(AgentPickerStep::Harness);
-        if step == AgentPickerStep::Workspace {
+            .unwrap_or(SessionPickerStep::Harness);
+        if step == SessionPickerStep::Workspace {
             self.handle_harness_workspace_key(event);
             return;
         }
         match event.code {
             KeyCode::Esc => {
-                self.agent_picker = None;
+                self.session_picker = None;
                 self.set_status("Cancelled");
             }
             KeyCode::Up => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.index = picker.index.saturating_sub(1);
                 }
             }
             KeyCode::Down => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.index = (picker.index + 1).min(picker.choices.len().saturating_sub(1));
                 }
             }
@@ -140,27 +138,39 @@ impl App {
     fn handle_harness_workspace_key(&mut self, event: KeyEvent) {
         match event.code {
             KeyCode::Esc | KeyCode::BackTab => {
-                if let Some(picker) = &mut self.agent_picker {
-                    picker.step = AgentPickerStep::Harness;
+                if let Some(picker) = &mut self.session_picker {
+                    picker.step = SessionPickerStep::Harness;
                 }
                 self.set_status("Pick a harness type · Enter workspace · Esc cancel");
             }
             KeyCode::Up => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.workspace_index = picker.workspace_index.saturating_sub(1);
                     picker.workspace_picked = !picker.workspace_choices.is_empty();
                 }
             }
             KeyCode::Down => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.workspace_index = (picker.workspace_index + 1)
                         .min(picker.workspace_choices.len().saturating_sub(1));
                     picker.workspace_picked = !picker.workspace_choices.is_empty();
                 }
             }
             KeyCode::Tab => self.complete_harness_workspace(),
+            KeyCode::Char('F') if event.modifiers == KeyModifiers::SHIFT => {
+                let Some(workspace) = self.selected_picker_workspace() else {
+                    self.set_status("Choose an existing directory before saving a favorite");
+                    return;
+                };
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::FavoriteWorkspaceAdd(workspace.clone()),
+                    title: format!("Save favorite for {workspace}"),
+                    draft: Draft::new(),
+                });
+                self.set_status("Favorite name · Enter save · Esc cancel");
+            }
             KeyCode::Backspace => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.workspace_query.pop();
                     picker.workspace_index = 0;
                     picker.workspace_picked = false;
@@ -168,7 +178,7 @@ impl App {
                 self.refresh_harness_workspace_choices();
             }
             KeyCode::Char(character) if is_text_input(event.modifiers) => {
-                if let Some(picker) = &mut self.agent_picker {
+                if let Some(picker) = &mut self.session_picker {
                     picker.workspace_query.push(character);
                     picker.workspace_index = 0;
                     picker.workspace_picked = false;
@@ -180,24 +190,15 @@ impl App {
                     self.set_status("Choose an existing directory");
                     return;
                 };
-                let purpose = self
-                    .agent_picker
-                    .as_ref()
-                    .map(|picker| picker.purpose.clone())
-                    .unwrap_or(PickerPurpose::Spawn);
                 let Some(choice) = self
-                    .agent_picker
+                    .session_picker
                     .as_ref()
                     .and_then(|picker| picker.choices.get(picker.index).cloned())
                 else {
                     self.set_status("Choose a harness type first");
                     return;
                 };
-                self.agent_picker = None;
-                if purpose == PickerPurpose::DeclareAgent {
-                    self.prompt_agent_name(choice.id(), &workspace);
-                    return;
-                }
+                self.session_picker = None;
                 self.spawn_session(choice, &workspace);
             }
             _ => {}

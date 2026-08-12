@@ -116,7 +116,7 @@ tokenEnv = "MEDULLA_TOKEN"
 # [[customHarnesses]]
 # id = "deepseek"
 # name = "DeepSeek via Claude"
-# baseHarness = "claude"              # claude | codex | opencode
+# baseHarness = "claude"              # claude | codex | opencode | openhuman
 # model = "deepseek/deepseek-chat"
 # fastModel = "deepseek/deepseek-chat"
 # hostId = "this-device"               # must match [host].address
@@ -124,6 +124,40 @@ tokenEnv = "MEDULLA_TOKEN"
 # apiKeyEnv = "OPENROUTER_API_KEY"
 # baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
 # contextWindow = 114000                # optional; Claude auto-compaction window
+#
+# providerOnly restricts which of OpenRouter's serving providers may answer.
+# One model is offered by many providers at prices that differ by more than an
+# order of magnitude, and OpenRouter's default weighs price against uptime and
+# throughput rather than pinning one — so an unpinned preset's cost can move
+# without the config changing. Slugs are OpenRouter's own, lowercased; the
+# order is your preference order.
+#
+# This is the only way to state the choice: it travels in the request body, so
+# neither a model-id suffix nor baseUrl can express it. A suffix such as
+# "z-ai/glm-5.2:streamlake" is accepted by OpenRouter and silently ignored.
+#
+# The pin is applied only when the request body is a JSON object within the
+# rewrite limit (32 MiB). A larger body, a non-object body (e.g. streamed file
+# uploads), or one that already names its own "provider.only" is forwarded
+# unchanged — the pin is skipped rather than refusing the request.
+# providerOnly = ["streamlake"]
+
+# baseHarness = "openhuman" runs the turn on the embedded core rather than
+# spawning a CLI, so there is nothing to install. The preset's model, endpoint
+# and key apply to that turn only: Medulla passes the core a per-call route
+# through the same loopback proxy, and the core never persists it, so the
+# account's own OpenHuman inference is left where you set it.
+#
+# A preset that names only a model still works and still needs no OpenRouter
+# key. With nothing exported under apiKeyEnv the turn runs on whatever the
+# account's OpenHuman configuration already resolves.
+# [[customHarnesses]]
+# id = "deepseek-oh"
+# name = "DeepSeek via OpenHuman"
+# baseHarness = "openhuman"
+# model = "deepseek/deepseek-chat"
+# hostId = "this-device"
+# apiKeyEnv = "OPENROUTER_API_KEY"
 
 # ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)
@@ -262,11 +296,44 @@ tokenEnv = "MEDULLA_TOKEN"
 # accent = "magenta"      # inline overlay borders (prompt / resume picker)
 # selectionFg = "white"   # text drawn on top of the primary selection background
 # dimBorder = "darkgray"  # panel borders
+#
+# A harness that needs you is drawn in `attention` and pulses: bright for half a
+# cycle, dim for the other half, at `attentionBlinkSeconds`. The pulse is driven
+# by Medulla's own frame clock rather than the terminal's blink attribute, which
+# most terminals and every multiplexer ignore — so it looks the same everywhere.
+# A harness that *failed* pulses red instead, whatever `attention` is set to, so
+# a question and a breakage are never the same colour.
+# attention = "yellow"          # ⚠ rows, the tab badge, "N waiting on you"
+# attentionBlink = true         # false holds those cues steady and bright
+# attentionBlinkSeconds = 1.0   # one full pulse; clamped to 0.2–10.0
 
-# Legacy harness-row toggles, kept so an older config keeps working. They are
-# read only when [statusLine] below is absent, in which case `false` means that
-# field is hidden. Settings › Status line writes [statusLine] and takes over.
+# ---------------------------------------------------------------------------
+# appearance — how the Agents sidebar arranges itself, plus the legacy
+# harness-row toggles. Settings › Appearance edits all of these live.
+#
+# sidebarGrouping picks what heads the sidebar's sections:
+#   "host"     one section per machine, drawn only once a second host exists
+#              (the default)
+#   "path"     one per workspace directory, so a checkout's agents read together
+#   "harness"  one per coding-agent CLI
+#   "none"     one flat list, no headers
+#
+# sidebarSort orders the agents in a section and the sessions under an agent:
+#   "created"  declaration order for agents, oldest-first for sessions (default)
+#   "recent"   most recently active first
+#   "name"     alphabetical
+#
+# Grouping only moves the headers: every agent keeps its own sessions, so no row
+# disappears whichever way these are set.
+#
+# showHarnessBranch/showHarnessPath are legacy, kept so an older config keeps
+# working. They are read only when [statusLine] below is absent, in which case
+# `false` means that field is hidden. Settings › Status line writes
+# [statusLine] and takes over.
+# ---------------------------------------------------------------------------
 # [appearance]
+# sidebarGrouping = "host"
+# sidebarSort = "created"
 # showHarnessBranch = true
 # showHarnessPath = true
 
@@ -275,27 +342,36 @@ tokenEnv = "MEDULLA_TOKEN"
 # out. Settings › Status line edits these live and previews the result, which
 # is by far the easier way to arrive at a layout you like.
 #
-# Every field answers three questions:
-#   where   "line1" | "line2" | "line3" | "hidden"  (at most three lines)
-#   when    "always" | "active" (only the selected row) | "alert" (only a
-#           harness that failed, exited non-zero, or recorded an error)
-#   spelled per-field, see below
+# Every field answers the same three questions, which are the rows the settings
+# page shows under each field's name:
+#   position "line1" | "line2" | "line3" | "hidden"  (at most three lines)
+#   shown    "always" | "active" (only the selected row) | "alert" (only a
+#            harness that failed, exited non-zero, or recorded an error)
+#   spelled  per-field, see below
 #
-# The defaults below reproduce the historical single-line row:
+# The defaults below are the identifying line plus the thread beneath it:
 #   ● codex · unmanaged · main · ~/work/medulla
+#     Ship the status line
 # ---------------------------------------------------------------------------
 # [statusLine]
-# state = "line1"                # the ● / ✓ / ✕ run-state glyph
+# state = "line1"                # State glyph: what the session is doing, one of
+#                                #   ⠋ spinning — a turn is in flight
+#                                #   ●          — alive, idle at its composer
+#                                #   ⚠          — waiting on you (pulses)
+#                                #   ✕          — failed or exited non-zero (pulses red)
+#                                #   ✓          — exited cleanly, or finished and held
 # stateWhen = "always"
-# harness = "line1"
+# harness = "line1"              # Harness name: which CLI is driving the session
 # harnessWhen = "always"
 # harnessStyle = "short"         # "long" (Claude Code) | "short" (claude) | "icon"
-# control = "line1"              # managed / unmanaged
+# control = "line1"              # Managed / unmanaged: Medulla's session or yours
 # controlWhen = "always"
 # controlStyle = "text"          # "text" (unmanaged) | "icon" (⊘ / ⊙)
-# branch = "line1"
+# thread = "line2"               # Thread name: the conversation being worked on
+# threadWhen = "always"
+# branch = "line1"               # Git branch: the branch the checkout is on
 # branchWhen = "always"
-# path = "line1"
+# path = "line1"                 # Working path: the checkout it is running in
 # pathWhen = "always"
 # pathStyle = "shortened"        # "full" | "shortened" (~/…/tail) | "last"
 

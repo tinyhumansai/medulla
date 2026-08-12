@@ -6,31 +6,31 @@
 //! Routing and Settings host subpages with bindings of their own,
 //! so their handling lives in focused sibling modules rather than inline here.
 //!
-//! The Agents tab carries the composer, which settles every binding conflict on
-//! that tab: printable keys always type, so no message loses a character to a
-//! shortcut. The arrows belong to the caret and the history, exactly as they did
-//! on the old Chat tab; lane selection moves to `Alt`+`↑`/`↓`, transcript
-//! scrolling to `PageUp`/`PageDown`, and task steering to `Alt`+`X`/`Alt`+`A`.
+//! The Sessions tab used to carry the orchestrator's composer, and every binding
+//! on it was arranged around that: printable keys always typed, the bare arrows
+//! drove the caret, and rail selection was pushed onto `Alt`+`↑`/`↓`. The
+//! composer went with the orchestrator, so the bare arrows walk the rail again;
+//! `Alt`+`↑`/`↓` still does too, because that is what fingers learned. Transcript
+//! scrolling stays on `PageUp`/`PageDown` and task steering on
+//! `Alt`+`X`/`Alt`+`A`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::types::{App, Cmd, TABS};
 use crate::ui::command::CopyScope;
-use crate::ui::composer::{
-    delete_before, edit_prompt, insert_at, move_caret_row, Draft, PromptAction,
-};
+use crate::ui::composer::{edit_prompt, PromptAction};
 
-mod agents;
 mod changes;
 mod harness;
 mod routing;
+mod sessions;
 mod settings;
 mod tokenmaxxing;
 #[cfg(feature = "workflows")]
 mod workflows;
 
-pub(in crate::ui::app) use agents::AgentsKey;
 use routing::RoutingKey;
+pub(in crate::ui::app) use sessions::SessionsKey;
 use settings::SettingsKey;
 use tokenmaxxing::TokenMaxxxingKey;
 #[cfg(feature = "workflows")]
@@ -107,11 +107,11 @@ impl App {
         }
 
         // The harness picker owns navigation while open.
-        if self.agent_picker.is_some() {
+        if self.session_picker.is_some() {
             if ctrl && k.code == KeyCode::Char('c') {
                 self.should_quit = true;
             } else {
-                self.handle_agent_picker_key(k);
+                self.handle_session_picker_key(k);
             }
             return None;
         }
@@ -162,21 +162,6 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
-                // On the Agents tab, *away from the orchestrator*, this is the
-                // way back to the conversation after clicking through to a
-                // session (§A7): the rail cursor returns to the orchestrator and
-                // the composer takes the keyboard.
-                //
-                // Scoped to "not already there" rather than to the tab, because
-                // the chord's other job — releasing the mouse for native
-                // drag-select — is wanted most while reading that very
-                // transcript. So it returns you first and toggles the mouse once
-                // you have arrived, and `/mouse` reaches the toggle from
-                // anywhere either way.
-                KeyCode::Char('o') if tab == "Agents" && !self.on_orchestrator_lane() => {
-                    self.focus_orchestrator();
-                    return None;
-                }
                 KeyCode::Char('o') => {
                     self.toggle_mouse();
                     return None;
@@ -204,16 +189,16 @@ impl App {
                 }
                 // Open a session. `Ctrl-T` for terminal; `Ctrl-N` is already a
                 // new thread, which is the thing it would otherwise be confused
-                // with. On a row that names an agent it opens a session *of that
-                // agent* — its declared harness in its declared workspace, named
-                // by the operator — because that is the whole point of having
-                // declared one. Anywhere else it falls back to the free-form
-                // picker, which declares nothing.
+                // with.
+                //
+                // One door, from every row: pick a harness type, pick a
+                // directory, and the session is open. It used to branch on the
+                // row under the cursor — an agent row opened a session of *that*
+                // agent, with a name prompt — so the same chord asked two
+                // different questions depending on where the cursor happened to
+                // be, and the fast case was the one nobody could predict.
                 KeyCode::Char('t') => {
-                    match self.selected_agent_id().filter(|_| tab == "Agents") {
-                        Some(agent_id) => self.open_new_session(&agent_id),
-                        None => self.open_session_picker(),
-                    }
+                    self.open_session_picker();
                     return None;
                 }
                 // Grab or give: one chord for both directions, because the rail
@@ -224,7 +209,7 @@ impl App {
                 }
                 // Walk the open threads. The bare arrows belong to the composer,
                 // so switching between conversations takes the control chord.
-                KeyCode::Up | KeyCode::Down if tab == "Agents" => {
+                KeyCode::Up | KeyCode::Down if tab == "Sessions" => {
                     let idx = self.active_thread_idx();
                     let next = if matches!(k.code, KeyCode::Up) {
                         idx.checked_sub(1)
@@ -234,7 +219,6 @@ impl App {
                     if let Some(thread) = next.and_then(|n| self.snapshot.threads.get(n)) {
                         let id = thread.id.clone();
                         self.runtime.set_active_thread(id);
-                        self.chat_scroll = 0;
                         self.agent_scroll = 0;
                         self.refresh_snapshot();
                     }
@@ -270,9 +254,6 @@ impl App {
                 return cmd;
             }
         }
-        if tab == "Changes" && self.on_changes_key(k.code) {
-            return None;
-        }
         // Workflows owns three panes, one of which is a composer, so it gets
         // first refusal on every key that is not a global chord — exactly as
         // Settings and Routing do for their subpages.
@@ -283,41 +264,11 @@ impl App {
             }
         }
 
-        // The command peek owns navigation and completion while it is open. It
-        // opens on a typed `/` and closes as soon as one is chosen, so these
-        // overrides last for exactly as long as there is a choice on screen.
-        if self.command_suggestions().is_some() {
-            match k.code {
-                KeyCode::Up | KeyCode::Down => {
-                    self.move_command_index(matches!(k.code, KeyCode::Up));
-                    return None;
-                }
-                KeyCode::Tab => {
-                    self.complete_command();
-                    return None;
-                }
-                // Enter runs the peeked command rather than the half-typed
-                // prefix: picking `/quit` from the list and pressing Enter must
-                // quit, not report `/qu` as unknown.
-                KeyCode::Enter if !shift && !alt => {
-                    self.complete_command();
-                    let value = self.draft.text.clone();
-                    return self.execute(value);
-                }
-                KeyCode::Esc => {
-                    self.draft = Draft::new();
-                    self.command_index = 0;
-                    return None;
-                }
-                _ => {}
-            }
-        }
-
         // The rail claims the bare arrows while it holds focus. Placed after the
         // global chords and the command peek so neither is shadowed, and before
         // the composer bindings, which otherwise take every arrow and character.
-        if tab == "Agents" {
-            if let AgentsKey::Handled(cmd) = self.on_agents_rail_key(k) {
+        if tab == "Sessions" {
+            if let SessionsKey::Handled(cmd) = self.on_sessions_rail_key(k) {
                 return cmd;
             }
         }
@@ -338,7 +289,7 @@ impl App {
                 return self.tab_enter_cmd();
             }
             #[cfg(feature = "workflows")]
-            KeyCode::PageUp if tab == "Agents" => {
+            KeyCode::PageUp if tab == "Sessions" => {
                 if self.on_workflow_run_row().is_some() {
                     self.wf.preview_scroll = self.wf.preview_scroll.saturating_sub(6);
                 } else {
@@ -347,7 +298,7 @@ impl App {
                 }
             }
             #[cfg(feature = "workflows")]
-            KeyCode::PageDown if tab == "Agents" => {
+            KeyCode::PageDown if tab == "Sessions" => {
                 if self.on_workflow_run_row().is_some() {
                     self.wf.preview_scroll = self.wf.preview_scroll.saturating_add(6);
                 } else {
@@ -356,98 +307,41 @@ impl App {
                 }
             }
             #[cfg(not(feature = "workflows"))]
-            KeyCode::PageUp if tab == "Agents" => {
+            KeyCode::PageUp if tab == "Sessions" => {
                 let step = self.visible_count().saturating_sub(1).max(1);
                 self.scroll_transcript(true, step);
             }
             #[cfg(not(feature = "workflows"))]
-            KeyCode::PageDown if tab == "Agents" => {
+            KeyCode::PageDown if tab == "Sessions" => {
                 let step = self.visible_count().saturating_sub(1).max(1);
                 self.scroll_transcript(false, step);
             }
-            KeyCode::Enter if tab == "Agents" && (shift || alt) => {
-                self.draft = insert_at(&self.draft.text, self.draft.cursor, "\n");
-            }
-            // Enter submits to whatever the cursor is on: an instruction to the
-            // orchestrator, or an answer to the selected agent's open question.
-            // Steering an agent from the lane the question appeared on is the
-            // whole point of folding the composer in here.
-            KeyCode::Enter if tab == "Agents" => {
-                let value = self.draft.text.clone();
-                if let Some(cmd) = self.answer_from_composer(&value) {
-                    return cmd;
-                }
-                return self.execute(value);
-            }
-            KeyCode::Backspace | KeyCode::Delete if tab == "Agents" => {
-                self.draft = delete_before(&self.draft.text, self.draft.cursor);
-                self.command_index = 0;
-            }
-            // Esc clears a draft first — that is the destructive-looking action
-            // and must stay one keypress away from a half-typed message. With
-            // nothing to clear it steps out to the rail, which is how a keyboard
-            // reaches the lane list on a terminal that cannot send Alt+Arrow.
-            KeyCode::Esc if tab == "Agents" => {
-                if self.draft.text.is_empty() {
-                    self.focus_agents_rail();
-                } else {
-                    self.draft = Draft::new();
-                }
-            }
-            KeyCode::Left if tab == "Agents" => {
-                self.draft.cursor = self.draft.cursor.saturating_sub(1);
-            }
-            KeyCode::Right if tab == "Agents" => {
-                self.draft.cursor = (self.draft.cursor + 1).min(self.draft.text.chars().count());
-            }
-            // Lane selection: `Alt` because the bare arrows now belong to the
-            // composer, and a lane list you cannot reach from the keyboard would
-            // make the merged surface worse than the two it replaced.
-            KeyCode::Up | KeyCode::Down if tab == "Agents" && alt => {
+            // Kept on `Alt` as well as the bare arrows: the chord was the only
+            // way to reach the rail while the composer held the bare ones, and
+            // muscle memory outlives the composer that caused it.
+            KeyCode::Up | KeyCode::Down if tab == "Sessions" && alt => {
                 self.agent_scroll = 0;
-                self.chat_scroll = 0;
-                self.move_agent_index(matches!(k.code, KeyCode::Up));
+                self.move_rail_index(matches!(k.code, KeyCode::Up));
                 // Arrowing onto a task watches it, exactly as clicking does.
                 if let Some(cmd) = self.retarget_watch() {
                     return Some(cmd);
                 }
             }
-            // Agents steering: cancel the selected running task, answer a pending
+            // Sessions steering: cancel the selected running task, answer a pending
             // question through the modal prompt. Enter answers it inline too.
-            KeyCode::Char('X') | KeyCode::Char('x') if tab == "Agents" && alt => {
+            KeyCode::Char('X') | KeyCode::Char('x') if tab == "Sessions" && alt => {
                 self.cancel_selected_task();
                 return None;
             }
-            KeyCode::Char('A') | KeyCode::Char('a') if tab == "Agents" && alt => {
+            KeyCode::Char('A') | KeyCode::Char('a') if tab == "Sessions" && alt => {
                 self.answer_selected_task();
                 return None;
             }
             KeyCode::Up => {
-                if tab == "Agents" {
-                    if let Some(moved) = move_caret_row(&self.draft.text, self.draft.cursor, -1) {
-                        self.draft.cursor = moved;
-                    } else {
-                        self.recall_older();
-                    }
-                } else {
-                    self.selected = self.selected.saturating_sub(1);
-                }
+                self.selected = self.selected.saturating_sub(1);
             }
             KeyCode::Down => {
-                if tab == "Agents" {
-                    if let Some(moved) = move_caret_row(&self.draft.text, self.draft.cursor, 1) {
-                        self.draft.cursor = moved;
-                    } else {
-                        self.recall_newer();
-                    }
-                } else {
-                    self.selected += 1;
-                }
-            }
-            KeyCode::Char(c) if tab == "Agents" && !ctrl && !alt => {
-                self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
-                // Narrowing the list invalidates where the cursor was pointing.
-                self.command_index = 0;
+                self.selected += 1;
             }
             _ => {}
         }

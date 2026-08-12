@@ -4,10 +4,11 @@
 //! opencode SQLite-lock exits with jittered exponential backoff.
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -18,16 +19,94 @@ use super::super::mappers::HarnessLineMapper;
 use super::detect::{
     build_resumed_run_args, extract_session_id, provider_bin, provider_name, supports_stdin,
 };
-use super::types::{OnEvent, OnStdin, RunSpec, RunTaskOptions, RunTaskResult};
+use super::types::{LineRead, OnEvent, OnStdin, RunSpec, RunTaskOptions, RunTaskResult};
 
 /// A record that never terminates in a newline is dropped past this size.
 const MAX_RECORD_BYTES: usize = 1_048_576;
+
 /// Cap on the retained stdout/stderr tail (bytes).
 pub(super) const TAIL_CAP: usize = 8192;
 /// Maximum transient-lock retry attempts.
 const LOCK_RETRY_ATTEMPTS: u32 = 5;
 /// Base backoff (ms) for the transient-lock retry.
 const LOCK_RETRY_BASE_MS: u64 = 250;
+
+/// Read one newline-terminated record into `buf`, never retaining more than
+/// `cap` bytes of any single record.
+///
+/// [`AsyncBufReadExt::read_until`] would buffer the whole line first and only
+/// then let the caller notice it was too big — so a child emitting one endless
+/// line grows the buffer without limit and the stated ceiling is not a ceiling
+/// at all. This consumes the stream in whatever chunks the reader already holds
+/// and, once the cap is passed, keeps only the trailing `retain_tail` bytes
+/// instead of the whole record.
+///
+/// With `retain_tail = Some(n)` an oversized record leaves the trailing `n`
+/// bytes of the record in `buf`, so a caller that only wants a diagnostic tail
+/// (stderr) still sees the end of an endless line. With `None` the oversized
+/// record is dropped entirely and the next read starts on the following record.
+///
+/// Like `read_until`, this is *not* cancellation safe: dropping it mid-line can
+/// lose the bytes already consumed. The run loop only cancels it on abort or
+/// idle timeout, both of which stop reading for good.
+pub(super) async fn read_line_bounded<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+    retain_tail: Option<usize>,
+) -> std::io::Result<LineRead> {
+    let mut oversized = false;
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            // EOF. A trailing record with no newline still counts as a line.
+            return Ok(if oversized {
+                LineRead::Oversized
+            } else if buf.is_empty() {
+                LineRead::Eof
+            } else {
+                LineRead::Line
+            });
+        }
+        let (take, complete) = match chunk.iter().position(|byte| *byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (chunk.len(), false),
+        };
+        // Past the ceiling: without a retained tail the record is dropped and
+        // the next read starts on the following one; with one, only the last
+        // `tail` bytes are kept as a rolling window so an endless stderr line
+        // still yields its trailing diagnostic.
+        let over = !oversized && buf.len() + take > cap;
+        oversized |= over;
+        if over && retain_tail.is_none() {
+            buf.clear();
+            buf.shrink_to_fit();
+        }
+        if retain_tail.is_some() || !oversized {
+            buf.extend_from_slice(&chunk[..take]);
+        }
+        if let Some(tail) = retain_tail {
+            trim_tail(buf, tail);
+        }
+        reader.consume(take);
+        if complete {
+            return Ok(if oversized {
+                LineRead::Oversized
+            } else {
+                LineRead::Line
+            });
+        }
+    }
+}
+
+/// Drop all but the trailing `tail` bytes of `buf`, in place. The kept slice is
+/// at most `tail` bytes, so the drain's memmove stays small even when a record
+/// blew past a much larger cap.
+fn trim_tail(buf: &mut Vec<u8>, tail: usize) {
+    if buf.len() > tail {
+        buf.drain(..buf.len() - tail);
+    }
+}
 
 /// opencode's SQLite session store throws this when runs start too close
 /// together; transient, clears on a short retry.
@@ -62,6 +141,13 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     // transport consumes the options, or Codex's next turn and all of its
     // defaulted tool calls silently snap back to where the daemon started.
     options.cwd = effective_cwd(&options.cwd, &options.workspace_context);
+    // Ahead of all child-process preparation, including the credential scrub
+    // below. OpenHuman has no child: the turn runs in this process against the
+    // embedded core. Scrubbing the core's own workspace out of the environment
+    // on its way to the core would be exactly backwards.
+    if super::openhuman::uses_embedded_core(&options) {
+        return super::openhuman::run_openhuman_task(options).await;
+    }
     // This has to precede every transport choice below. ACP and the pooled
     // app-server return before the CLI spawn seam, but each child is still an
     // external harness and must never inherit the embedded core's credential
@@ -81,22 +167,11 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
         return super::codex_server::run_codex_server_task(options).await;
     }
     if super::acp::uses_acp(&options) {
-        // ACP dispatch cannot carry Medulla hooks. Every other path injects them
-        // onto the harness CLI's own argv, but here Medulla spawns an ACP *server*
-        // (`@agentclientprotocol/claude-agent-acp`, `codex-acp`, `opencode acp`)
-        // which spawns the harness itself, so there is no argv to add to. Claude
-        // Code's env-based settings paths were checked as an alternative and do
-        // not deliver hooks either. Say so rather than let the operator believe a
-        // configured hook is running.
-        let configured = options.hooks.for_provider(options.provider).len();
-        if configured > 0 {
-            tracing::warn!(
-                provider = options.provider.as_str(),
-                hooks = configured,
-                "medulla hooks are not installed for ACP dispatch: the harness CLI is \
-                 launched by the ACP server, not by Medulla",
-            );
-        }
+        // Hooks are installed inside `run_acp_task` rather than here. This path
+        // has no harness argv to add them to — Medulla spawns an ACP *server*
+        // which spawns the harness — so delivery is per-transport and belongs
+        // where the session request and the server's environment are built. See
+        // `crate::harness_hooks::acp`.
         return super::acp::run_acp_task(options).await;
     }
     let mut on_event = options.on_event;
@@ -274,12 +349,18 @@ async fn run_provider_attempt(
     // than only by `medulla skills install`, so a workflow authored, disabled,
     // or deleted since the last install is described correctly here. Empty for
     // a provider with no directory flag, so those argvs are unchanged.
+    //
+    // Skipped entirely when this launch is getting no Medulla tools: every one
+    // of these skills instructs the model to call `workflow_run`, and a session
+    // told to call a tool it was not served spends a turn discovering that.
     #[cfg(feature = "workflows")]
-    extra_args.extend(crate::workflows::skills::refresh_managed(
-        spec.provider,
-        &spec.env,
-        std::path::Path::new(&spec.cwd),
-    ));
+    if !crate::harness_tools::withheld(&spec.env) {
+        extra_args.extend(crate::workflows::skills::refresh_managed(
+            spec.provider,
+            &spec.env,
+            std::path::Path::new(&spec.cwd),
+        ));
+    }
     extra_args.extend(spec.extra_args.iter().cloned());
     let args = build_resumed_run_args(
         spec.provider,
@@ -354,23 +435,43 @@ async fn run_provider_attempt(
     }
 
     let stdout = child.stdout.take().ok_or("child has no stdout")?;
-    let stderr = child.stderr.take().ok_or("child has no stderr")?;
+    let mut stderr = child.stderr.take().ok_or("child has no stderr")?;
 
-    // stderr tail collector.
+    // stderr tail collector, which doubles as a heartbeat source: a child that
+    // is logging to stderr is demonstrably alive even while it emits no parsed
+    // events, and killing it as "idle" throws away real work.
     let stderr_tail = Arc::new(Mutex::new(String::new()));
+    // Monotonic origin for encoding stderr beats (see `stderr_beat`); sharing
+    // one base with the watchdog below lets it tell how old a beat is.
+    let beat_base = Instant::now();
+    // Holds the timestamp (micros since `beat_base`) of the most recent stderr
+    // output rather than a bare counter, so the idle watchdog can re-arm from
+    // the beat's *own* time instead of from whenever it next happens to check.
+    let stderr_beat = Arc::new(AtomicU64::new(0));
     let stderr_task = {
         let stderr_tail = stderr_tail.clone();
+        let stderr_beat = stderr_beat.clone();
+        // `beat_base` is `Copy`, so the `async move` block captures it by copy;
+        // it remains in scope for the watchdog's stale-beat arithmetic below.
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut buf = Vec::new();
+            // Stderr is read as raw chunks rather than `read_until(b'\n')` lines:
+            // a spinner rewrites its progress in place with `\r` and never emits a
+            // newline, so a newline-framed read would not return until the pipe
+            // closed and the heartbeat would go stale even though bytes keep
+            // arriving — killing a visibly working child as idle. Reading a chunk
+            // at a time refreshes the beat on every byte arrival, which is exactly
+            // the "any output is proof of life" the idle watchdog promises. The
+            // diagnostic tail is a byte window for error messages, not a
+            // line-parsed log, so losing the framing costs nothing there.
+            let mut chunk = [0u8; 4096];
             loop {
-                buf.clear();
-                match reader.read_until(b'\n', &mut buf).await {
+                match stderr.read(&mut chunk).await {
                     Ok(0) => break,
-                    Ok(_) => {
-                        let chunk = String::from_utf8_lossy(&buf);
+                    Ok(n) => {
+                        stderr_beat
+                            .store(beat_base.elapsed().as_micros() as u64, Ordering::Relaxed);
                         let mut tail = stderr_tail.lock().unwrap();
-                        tail.push_str(&chunk);
+                        tail.push_str(&String::from_utf8_lossy(&chunk[..n]));
                         *tail = tail_bytes(&tail);
                     }
                     Err(_) => break,
@@ -401,9 +502,18 @@ async fn run_provider_attempt(
     let mut line_no: i64 = 0;
     let mut stdout_tail = String::new();
 
-    // Idle watchdog: killed only after `timeout_ms` with NO new event; each event
-    // pushes the deadline out. Armed at start to cover a child that emits nothing.
+    // Idle watchdog: killed only after `timeout_ms` with NO sign of life; each
+    // one pushes the deadline out. Armed at start to cover a child that emits
+    // nothing at all.
+    //
+    // "Sign of life" is deliberately wider than "parsed event". A harness that
+    // spends twenty minutes inside one tool call — a cold `cargo test`, a long
+    // lint — emits no semantic events for the whole of it, and treating that as
+    // a hang killed sessions mid-task and discarded everything they had not yet
+    // pushed. Any output on either pipe now counts, so the watchdog still fires
+    // on a genuinely wedged child while a working one is left alone.
     let mut deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+    let mut seen_stderr = stderr_beat.load(Ordering::Relaxed);
     let mut buf = Vec::new();
 
     let idle_error = format!(
@@ -422,18 +532,48 @@ async fn run_provider_attempt(
                 return Err(format!("{} task aborted", provider_name(spec.provider)));
             }
             _ = tokio::time::sleep_until(deadline) => {
+                // stderr arrives on its own task, so it cannot push the deadline
+                // out directly; the deadline firing is where it is claimed. A
+                // beat since the deadline was armed means the child spoke during
+                // the window and is not idle.
+                let beat = stderr_beat.load(Ordering::Relaxed);
+                if beat != seen_stderr {
+                    seen_stderr = beat;
+                    // Re-arm from the beat's *own* timestamp, not from now: a
+                    // beat may have gone stale while stdout kept pushing the
+                    // window out, and a stale beat must not grant the child a
+                    // second full timeout once it finally hangs. If even the
+                    // beat's window has lapsed, the child is idle after all.
+                    let beat_deadline = beat_base
+                        + Duration::from_micros(beat)
+                        + Duration::from_millis(spec.timeout_ms);
+                    if beat_deadline > Instant::now() {
+                        deadline = beat_deadline;
+                        continue;
+                    }
+                }
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 report_workspace_context(&mapper, spec);
                 return Err(idle_error);
             }
-            read = reader.read_until(b'\n', &mut buf) => {
+            read = read_line_bounded(&mut reader, &mut buf, MAX_RECORD_BYTES, None) => {
                 match read {
-                    Ok(0) => break, // EOF
-                    Ok(_) => {
-                        if buf.len() > MAX_RECORD_BYTES {
-                            continue; // unparseable oversized record — drop it.
-                        }
+                    Ok(LineRead::Eof) => break,
+                    // An oversized record is still proof of life: the bounded
+                    // reader already discarded it, but a harness emitting only
+                    // huge JSON records is not hung, so refresh the idle
+                    // deadline rather than letting it trip on the original one.
+                    Ok(LineRead::Oversized) => {
+                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
+                        continue;
+                    }
+                    Ok(LineRead::Line) => {
+                        // Any output is proof of life, whether or not it maps to
+                        // an event: refresh the idle window before parsing so a
+                        // child busy inside one long tool call that emits only
+                        // unmappable records is not killed as idle.
+                        deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
                         let raw = String::from_utf8_lossy(&buf);
                         let raw = raw.trim_end_matches(['\n', '\r']);
                         stdout_tail.push_str(raw);
@@ -461,9 +601,9 @@ async fn run_provider_attempt(
                             on_event.as_mut(),
                         );
                         line_no += 1;
-                        if produced {
-                            deadline = Instant::now() + Duration::from_millis(spec.timeout_ms);
-                        }
+                        // Mapped or not, the record arrived from a living child,
+                        // so the idle window was already refreshed above.
+                        let _ = produced;
                     }
                     Err(_) => break,
                 }

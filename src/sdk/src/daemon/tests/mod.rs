@@ -25,6 +25,7 @@ use super::*;
 mod admission_tests;
 mod capability_tests;
 mod custom_harness_tests;
+mod origin_tests;
 mod provider_tests;
 mod system_info_tests;
 mod task_attribution_tests;
@@ -100,6 +101,7 @@ pub(super) fn task_frame(task_id: &str, text: &str, correlation: Option<&str>) -
         custom_harness: None,
         model: None,
         tool_mode: None,
+        workflow_node: false,
         workflow: None,
         workflow_fingerprint: None,
         workflow_inputs: Default::default(),

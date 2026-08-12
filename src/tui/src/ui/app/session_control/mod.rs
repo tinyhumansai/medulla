@@ -5,8 +5,10 @@
 //! controls easy to locate without coupling their implementations.
 
 mod close;
+mod focus;
 mod handoff;
 mod picker;
+mod select;
 
 #[cfg(test)]
 pub(in crate::ui::app) use picker::is_text_input;

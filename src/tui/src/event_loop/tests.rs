@@ -6,8 +6,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use medulla_tui::ui::app::App;
 
-use super::should_refresh_context;
 use super::update_checker::spawn_update_checker;
+use super::{runtime_ping_needs_refresh, should_refresh_context};
 
 #[test]
 fn context_refresh_tracks_the_nested_settings_page() {
@@ -75,4 +75,38 @@ fn concurrent_claims_never_exceed_the_bound() {
     held.lock().expect("held frames").clear();
     assert_eq!(depth.load(Ordering::Relaxed), 0);
     assert!(super::types::PendingFrame::claim(&depth, LIMIT).is_some());
+}
+
+#[test]
+fn a_lagged_runtime_subscription_still_refreshes_the_snapshot() {
+    use tokio::sync::broadcast::error::RecvError;
+
+    // The arm used to test `recv.is_ok()`, so the one wakeup that means the most
+    // has changed — the subscription overflowed and dropped notifications — was
+    // the one that redrew nothing, leaving the UI stale until an unrelated event
+    // happened along.
+    assert!(runtime_ping_needs_refresh(&mut false, &Ok(())));
+    assert!(runtime_ping_needs_refresh(
+        &mut false,
+        &Err(RecvError::Lagged(7))
+    ));
+}
+
+#[test]
+fn a_closed_runtime_subscription_disarms_the_refresh_arm() {
+    use tokio::sync::broadcast::error::RecvError;
+
+    // When the last sender goes away, `recv()` yields `Closed` and stays ready
+    // forever. An always-ready select arm would spin at 100% CPU without this —
+    // the first `Closed` must latch the arm shut, not just skip one redraw.
+    let mut shut = false;
+    assert!(!runtime_ping_needs_refresh(
+        &mut shut,
+        &Err(RecvError::Closed)
+    ));
+    assert!(shut, "the arm latches shut on the first Closed");
+    assert!(
+        !runtime_ping_needs_refresh(&mut shut, &Ok(())),
+        "later (unreachable) wakeups are ignored once shut"
+    );
 }

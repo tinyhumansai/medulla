@@ -7,7 +7,6 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::ui::command::COMMANDS;
 use crate::ui::harness_pane::FOCUS_CHORD_LABEL;
 
 use super::super::super::types::App;
@@ -17,20 +16,30 @@ impl App {
     pub(super) fn draw_help(&mut self, f: &mut Frame, area: Rect) {
         let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
-        let mut lines = vec![
-            TLine::from("Tab / Shift-Tab switch views · Agents: type to compose, ↑↓ recall prompt history"),
+        let lines = vec![
+            TLine::from("Tab / Shift-Tab switch views · Ctrl-C quit"),
+            TLine::from("Overview: E prepared decisions"),
+            TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
+            TLine::from(" "),
+            TLine::from(Span::styled("Sessions", bold)),
+            TLine::from("Ctrl-T opens a session: pick a harness type, then a workspace directory"),
+            TLine::from("↑↓ walk the rail · Enter on the + row opens the picker"),
+            TLine::from(format!(
+                "{FOCUS_CHORD_LABEL} type into the selected session (and take it from the orchestrator)"
+            )),
+            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
+            TLine::from("d shows what the session has changed · K then y kills it · k closes it"),
+            TLine::from("⌥X cancels a dispatched task · ⌥A answers its open question"),
             TLine::from(Span::styled(
-                "In a multi-line draft ↑↓ walk the caret between rows; history recalls from the edge rows",
+                "While you hold a session the orchestrator will not dispatch into it",
                 dim,
             )),
-            TLine::from("Enter sends · Shift-Enter inserts a newline (Option-Enter if Shift-Enter sends)"),
-            TLine::from("PageUp / PageDown scrolls the transcript"),
-            TLine::from("Overview: E prepared decisions"),
-            TLine::from("Agents: Esc leaves the composer for the rail · ↑↓ walk it · Enter or type returns"),
-            TLine::from("        ⌥↑↓ walks the rail without leaving the composer (needs Option-as-Meta)"),
-            TLine::from("        ⌥X cancel task · ⌥A answer a question · Enter opens a template"),
-            TLine::from("Agents: selecting an agent with an open question makes Enter answer it"),
-            TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
+            TLine::from(" "),
+            TLine::from(Span::styled("Subconscious", bold)),
+            TLine::from(Span::styled(
+                "Intake filtering, learnings, and human approvals will live here. Nothing is wired yet.",
+                dim,
+            )),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),
@@ -43,65 +52,18 @@ impl App {
             TLine::from("Trace & Context (Debug): j / k page events and chunks"),
             TLine::from("Account: Enter twice to log out · Usage: r refresh"),
             TLine::from(" "),
-            TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
-            TLine::from(" "),
-            TLine::from(Span::styled("Sessions", bold)),
-            TLine::from(format!(
-                "{FOCUS_CHORD_LABEL} type into the selected session (and take it from the orchestrator)"
-            )),
-            TLine::from(
-                "Agents rail: Enter on + New agent declares one (harness type × workspace dir)",
-            ),
-            TLine::from(
-                "Ctrl-T opens a session of the selected agent · elsewhere it starts a loose session",
-            ),
-            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
-            TLine::from(
-                "Click a line of the orchestrator's \"sessions started\" block to open that session",
-            ),
-            TLine::from("Ctrl-O returns to the orchestrator (and, once there, releases the mouse)"),
-            TLine::from(format!(
-                "From an empty composer Esc focuses the rail · from a session {FOCUS_CHORD_LABEL} releases to it"
-            )),
-            TLine::from("On the rail ↑↓ select a running session · K then y kills it"),
-            TLine::from(Span::styled(
-                "While you hold a session the orchestrator will not dispatch into it",
-                dim,
-            )),
-            TLine::from(" "),
             TLine::from(Span::styled("Changes", bold)),
-            TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),
+            TLine::from("On a session row, press d to inspect the Git diff since that session launched"),
             TLine::from("↑↓ select files · j/k move by line · [/] jump hunks · PageUp/PageDown move faster"),
             TLine::from(
                 "c comments on a line or hunk · e edits it · C comments on or edits the file · r refreshes",
             ),
-            TLine::from(" "),
-            TLine::from(Span::styled("Copy", bold)),
-            TLine::from("Ctrl-Y copies the whole chat · /copy last copies just the latest reply"),
+            TLine::from("d or Esc puts the harness terminal back"),
             TLine::from(" "),
             TLine::from(Span::styled("Mouse", bold)),
-            TLine::from("Click a tab to switch views · in Agents/Context click a row to select · wheel scrolls"),
-            TLine::from("Ctrl-O / /mouse release the mouse to the terminal for native drag-select"),
-            TLine::from(" "),
-            TLine::from(Span::styled("Commands", bold)),
-            TLine::from(Span::styled(
-                "Type / in the composer to browse these · ↑↓ pick · Tab complete · Enter run",
-                dim,
-            )),
+            TLine::from("Click a tab to switch views · click a rail row to select it · wheel scrolls"),
+            TLine::from("Ctrl-O releases the mouse to the terminal for native drag-select"),
         ];
-        // Rendered from the catalog rather than restated: a hand-kept list is
-        // how a command ends up documented here and missing from the parser.
-        let gutter = COMMANDS
-            .iter()
-            .map(|spec| spec.usage().chars().count())
-            .max()
-            .unwrap_or(0);
-        for spec in COMMANDS {
-            lines.push(TLine::from(vec![
-                Span::styled(format!("{:<gutter$}", spec.usage()), Style::default()),
-                Span::styled(format!("  {}", spec.description), dim),
-            ]));
-        }
         // Clamped here rather than at the key press: how far this page can
         // scroll depends on the terminal it is being drawn into, which the key
         // handler does not know.

@@ -410,3 +410,55 @@ fn acp_pr_correlation_requires_success_in_the_dispatch_workspace() {
     becomes_execute.fold(result("completed"));
     assert_eq!(contexts.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn a_worktree_report_moves_the_directory_local_hooks_run_in() {
+    // The session starts in the daemon's checkout and continues in a worktree
+    // it creates mid-session. `workspace_cwd` is what the Codex ACP PostToolUse
+    // fallback reads, so it has to follow that move — otherwise an auto-commit
+    // hook checkpoints the launch checkout after every later edit.
+    let mut state = FoldState::new(None);
+    assert_eq!(state.workspace_cwd(), None);
+
+    let call = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-worktree",
+        "title": "Terminal",
+        "kind": "execute",
+        "status": "in_progress",
+        "rawInput": { "command": "worktree hook-cwd" }
+    }))
+    .unwrap();
+    let report = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-worktree",
+        "status": "completed",
+        "rawOutput": "[PASS] WORKTREE_READY\n  path: /repo/worktrees/hook-cwd\n  branch: hook-cwd\n"
+    }))
+    .unwrap();
+    state.fold(call);
+    let completed = state.fold(report);
+
+    assert!(
+        completed.is_some(),
+        "the report's own tool call still completes, so its hooks run too"
+    );
+    assert_eq!(state.workspace_cwd(), Some("/repo/worktrees/hook-cwd"));
+}
+
+#[test]
+fn a_resumed_session_starts_from_the_directory_its_last_turn_ended_in() {
+    // Workspace context is persisted across turns; a resumed turn must not
+    // rediscover the worktree before its hooks are aimed at the right one.
+    let state = FoldState::with_workspace(
+        None,
+        WorkspaceContext {
+            cwd: Some("/repo/worktrees/hook-cwd".to_string()),
+            branch: Some("hook-cwd".to_string()),
+            pull_request: None,
+        },
+        false,
+        None,
+    );
+    assert_eq!(state.workspace_cwd(), Some("/repo/worktrees/hook-cwd"));
+}

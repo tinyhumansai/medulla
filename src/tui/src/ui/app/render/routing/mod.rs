@@ -2,7 +2,7 @@
 //! it, the harnesses (and the credentials they spend), the directories there are
 //! to work in, the template catalog —
 //! plus host onboarding and the default-host strategy. The declared tree itself
-//! is rendered in the Agents rail, not here, and workflows have a tab of their
+//! is rendered in the Sessions rail, not here, and workflows have a tab of their
 //! own — they are work rather than capacity.
 
 use ratatui::layout::Rect;

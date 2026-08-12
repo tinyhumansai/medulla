@@ -18,6 +18,7 @@ use super::fold::FoldState;
 /// matters to the two functions under test here.
 fn options(transport: HarnessTransport, env: &[(&str, &str)]) -> RunTaskOptions {
     RunTaskOptions {
+        origin: super::super::types::RunTaskOrigin::DelegatedTask,
         provider: HarnessProvider::Codex,
         transport,
         prompt: String::new(),

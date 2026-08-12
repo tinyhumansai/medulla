@@ -18,8 +18,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
 use super::types::{
-    tab_pos, AgentPicker, AgentPickerStep, App, HandbackPrompt, Overlay, PromptKind, ResumePicker,
-    RP_TEMPLATES,
+    tab_pos, App, HandbackPrompt, Overlay, PromptKind, ResumePicker, SessionPicker,
+    SessionPickerStep, WorkspaceChoice, RP_TEMPLATES,
 };
 use crate::ui::composer::{Draft, TextPrompt};
 
@@ -39,12 +39,11 @@ fn raise(app: &mut App, overlay: Overlay) {
             app.tab_index = tab_pos("Hosts");
             app.routing_index = RP_TEMPLATES;
         }
-        Overlay::AgentPicker => {
-            app.agent_picker = Some(AgentPicker {
-                purpose: super::types::PickerPurpose::Spawn,
+        Overlay::SessionPicker => {
+            app.session_picker = Some(SessionPicker {
                 choices: Vec::new(),
                 index: 0,
-                step: AgentPickerStep::Harness,
+                step: SessionPickerStep::Harness,
                 cwd: "/".into(),
                 workspace_query: String::new(),
                 workspace_choices: Vec::new(),
@@ -77,7 +76,7 @@ fn raise(app: &mut App, overlay: Overlay) {
 const EVERY_OVERLAY: [Overlay; 6] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
-    Overlay::AgentPicker,
+    Overlay::SessionPicker,
     Overlay::HandbackPrompt,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,
@@ -139,6 +138,72 @@ fn handback_prompt_swallows_clicks_behind_it() {
 }
 
 #[test]
+fn inline_prompt_swallows_clicks_that_would_reach_the_picker_behind_it() {
+    // The favorite-add prompt opens *on top of* the workspace picker (Shift+F).
+    // Keyboard routing gives the prompt precedence over the picker, and the
+    // pointer must not come to disagree: a click on a picker row behind the
+    // prompt would replay Enter and start a harness while the favorite-name
+    // edit is still on screen.
+    let mut app = app();
+    app.session_picker = Some(SessionPicker {
+        choices: Vec::new(),
+        index: 0,
+        step: SessionPickerStep::Workspace,
+        cwd: "/".into(),
+        workspace_query: "x".into(),
+        workspace_choices: vec![WorkspaceChoice {
+            path: "/tmp".into(),
+            source: "folder".into(),
+            label: None,
+        }],
+        workspace_index: 0,
+        workspace_picked: false,
+    });
+    app.prompt = Some(TextPrompt::new(
+        PromptKind::FavoriteWorkspaceAdd("/tmp".into()),
+        "Save favorite for /tmp",
+    ));
+    app.hit_session_picker = Some((
+        ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 18,
+        },
+        vec![(
+            ratatui::layout::Rect {
+                x: 0,
+                y: 5,
+                width: 60,
+                height: 1,
+            },
+            0,
+        )],
+    ));
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 10,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(
+        app.prompt.is_some(),
+        "the click must not dismiss the favorite prompt"
+    );
+    let picker = app.session_picker.as_ref().unwrap();
+    assert!(
+        !picker.workspace_picked,
+        "the click must not be read as choosing a workspace row"
+    );
+    assert_eq!(
+        picker.workspace_index, 0,
+        "the picker selection must be left where it was"
+    );
+}
+
+#[test]
 fn pointer_input_cancels_an_armed_harness_close() {
     let mut app = app();
     app.arm_harness_close("session-a".into());
@@ -163,11 +228,11 @@ fn no_overlay_lets_a_paste_through_to_the_composer_behind_it() {
     // banking pastes to be submitted when it closed.
     //
     // The template popup is on Hosts by construction — it cannot coexist with
-    // the Agents composer, which is the fix — so the tab is set first and only
+    // the Sessions composer, which is the fix — so the tab is set first and only
     // where the overlay permits it.
     for overlay in EVERY_OVERLAY {
         let mut app = app();
-        app.tab_index = tab_pos("Agents");
+        app.tab_index = tab_pos("Sessions");
         raise(&mut app, overlay);
 
         app.on_event(crossterm::event::Event::Paste("stray text".into()));
@@ -189,7 +254,7 @@ fn the_template_popup_needs_the_page_that_can_dismiss_it() {
     raise(&mut app, Overlay::TemplatePopup);
     assert_eq!(app.visible_overlays(), vec![Overlay::TemplatePopup]);
 
-    app.tab_index = tab_pos("Agents");
+    app.tab_index = tab_pos("Sessions");
 
     assert!(
         app.visible_overlays().is_empty(),
@@ -214,7 +279,7 @@ fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
     // The list is iterated to paint, so its order is the stacking order: the
     // hand-back question is asked over the picker that may have opened it.
     let mut app = app();
-    raise(&mut app, Overlay::AgentPicker);
+    raise(&mut app, Overlay::SessionPicker);
     raise(&mut app, Overlay::HandbackPrompt);
     raise(&mut app, Overlay::Decisions);
 
@@ -222,7 +287,7 @@ fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
         app.visible_overlays(),
         vec![
             Overlay::Decisions,
-            Overlay::AgentPicker,
+            Overlay::SessionPicker,
             Overlay::HandbackPrompt
         ]
     );

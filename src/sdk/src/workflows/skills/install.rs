@@ -379,19 +379,26 @@ fn write_managed(
 /// prefix of either. The temp file is a sibling so the rename stays within one
 /// filesystem, where it is atomic.
 ///
-/// The name carries the process id so two Medulla processes writing the same
-/// skill cannot clobber each other's half-written temp file. They cannot
-/// normally race at all — [`RefreshLock`](super::refresh::RefreshLock)
-/// serializes the managed root — but `install` on the user scope takes no lock,
-/// and a leftover temp file from a killed process must not be adopted as the
-/// next writer's buffer.
+/// The name carries a unique token so two writers of the same skill cannot
+/// clobber each other's half-written temp file. A process id alone would not
+/// do it: two threads of one process share it. They cannot normally race at
+/// all — [`RefreshLock`](super::refresh::RefreshLock) serializes the managed
+/// root — but `install` on the user scope takes no lock, and a leftover temp
+/// file from a killed process must not be adopted as the next writer's buffer.
 ///
-/// A failed rename leaves the temp file behind rather than the target damaged,
-/// which is the right way round.
+/// A failed rename removes the temp file rather than leaving it behind, and
+/// the target is untouched — the reader still sees the whole previous file,
+/// and no uniquely named orphan accumulates for a later writer to trip over.
 fn write_atomically(path: &Path, body: &str) -> io::Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    fs::write(&temp, body)?;
+    let temp = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    // A partial write (quota exhausted, I/O error) must not leave its uniquely
+    // named temp file behind either: each retry mints a fresh name, so a run of
+    // failures under a full quota would otherwise accumulate orphans.
+    if let Err(source) = fs::write(&temp, body) {
+        let _ = fs::remove_file(&temp);
+        return Err(source);
+    }
     match fs::rename(&temp, path) {
         Ok(()) => Ok(()),
         Err(source) => {

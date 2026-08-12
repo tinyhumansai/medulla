@@ -307,8 +307,11 @@ async fn run_workflow_inner(
         terminal_engine_error,
     );
 
-    finalizer.disarm();
+    // Written *before* disarming: if this terminal write fails, the guard must
+    // still be armed so its drop reconciles the record to `Interrupted`.
+    // Disarming first would strand the run at `Running` forever.
     context.store.record_run(&record)?;
+    finalizer.disarm();
     remember_failure(&context.store, &record);
     Ok(record)
 }
@@ -486,8 +489,11 @@ pub async fn resume_workflow(
     // pre-gate and post-gate history.
     record.summary = Some(summary::summarize(&record));
 
-    finalizer.disarm();
+    // Written before disarming, for the same reason as `run_workflow`: a
+    // terminal write that fails must leave the drop guard armed to reconcile
+    // the record rather than leaving a resumed run stuck at `Running`.
     context.store.record_run(&record)?;
+    finalizer.disarm();
     remember_failure(&context.store, &record);
     Ok(record)
 }

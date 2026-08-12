@@ -5,6 +5,9 @@
 //! their filename rather than used verbatim: a key is author-supplied and may
 //! contain path separators, and a `StateStore` must never be a way to write
 //! outside its own directory.
+//!
+//! Writes are staged and renamed, never made in place, so a key can never be
+//! left holding a half-written document that no later read can recover from.
 
 use std::path::{Path, PathBuf};
 
@@ -64,8 +67,32 @@ impl StateStore for FileStateStore {
             .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))?;
         let body = serde_json::to_vec(&value)
             .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))?;
-        tokio::fs::write(self.path(key), body)
-            .await
-            .map_err(|err| EngineError::Capability(format!("state: {key}: {err}")))
+        let path = self.path(key);
+        // Staged and renamed rather than written in place. A plain write
+        // truncates and then fills, so a kill in that window — or a second
+        // writer for the same key — leaves a prefix of JSON on disk, and `load`
+        // has no way to read a prefix: the key would be wedged for good. A
+        // rename publishes either the whole previous value or the whole new
+        // one. The temp name carries a unique token so two writers racing on
+        // one key cannot scribble over each other's scratch file, and it sits
+        // beside the target so the rename stays within one filesystem.
+        let tmp = self
+            .dir
+            .join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+        // A failed write must not leave the scratch file behind either: like a
+        // failed rename, it would otherwise accumulate under the namespace
+        // directory, and because every attempt names a fresh UUID, retries
+        // under a full disk would pile up partial `.tmp` files.
+        if let Err(err) = tokio::fs::write(&tmp, body).await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(EngineError::Capability(format!("state: {key}: {err}")));
+        }
+        if let Err(err) = tokio::fs::rename(&tmp, &path).await {
+            // A failed rename must not leave scratch files accumulating in the
+            // namespace directory.
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(EngineError::Capability(format!("state: {key}: {err}")));
+        }
+        Ok(())
     }
 }

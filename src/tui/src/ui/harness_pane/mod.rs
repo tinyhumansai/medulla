@@ -1,4 +1,4 @@
-//! The embedded harness terminal in the orchestrator's Agents tab.
+//! The embedded harness terminal in the orchestrator's Sessions tab.
 //!
 //! An agent lane used to show a transcript we reconstructed from the harness's
 //! JSON stream. That reconstruction only ever existed because the harness was
@@ -54,9 +54,16 @@ impl LocalSessions {
     /// pane stops claiming a screen for work that is over rather than showing a
     /// dead one indefinitely.
     pub fn session_for_task(&self, task_id: &str) -> Option<String> {
+        // Degrade rather than panic on a poisoned lock. This runs on the render
+        // path, every frame: an `expect` here turns one unrelated panic
+        // elsewhere into a draw loop that panics forever, and the terminal is
+        // left in raw mode with nothing on it. The guarded data is a list of
+        // runtime handles that is never mutated after construction, so the
+        // inner value is as good after a panic as before it — the same call the
+        // SDK's `SnapshotCell` makes.
         self.runtimes
             .lock()
-            .expect("local harness runtimes")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .find_map(|runtime| runtime.session_for_task(&self.hub_address, task_id))
     }
@@ -91,14 +98,21 @@ impl LocalSessions {
 
     /// Scroll `session_id` by one wheel notch at pane-relative `(col, row)`.
     ///
-    /// Two paths, chosen by what the child asked for rather than by what we
-    /// would prefer:
+    /// The path is chosen by what the child is *doing right now* rather than by
+    /// what we would prefer:
     ///
+    /// - the harness is gone, so none of the forwarding paths below can reach it
+    ///   — the wheel moves the emulator's own retained lines, which is how the
+    ///   operator read how the session ended;
     /// - the harness enabled mouse reporting (Claude Code and Codex both do), so
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - the harness enables alternate scrolling without mouse reporting (Codex),
+    /// - Codex accepts location-aware crossterm mouse events but does not
+    ///   negotiate mouse reports in current releases. Once its input layer is
+    ///   up, the notch is sent in SGR form so Codex receives the pane-relative
+    ///   pointer location;
+    /// - another harness enables alternate scrolling without mouse reporting,
     ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
     ///   specifies;
     /// - otherwise our emulator's own retained lines move instead. Not as good,
@@ -110,13 +124,40 @@ impl LocalSessions {
     /// own history. A mouse-reporting harness receives one notch and decides
     /// what that notch means itself.
     pub fn scroll(&self, session_id: &str, col: u16, row: u16, up: bool, rows: usize) {
+        // A dead child cannot receive a wheel event, however it configured its
+        // terminal while it lived: the row is retained so the operator can read
+        // how it ended, and a notch must move that — not write cursor keys (or a
+        // report) into a pty nobody is reading, which would also strand the
+        // wheel forever. Every forwarding path below is therefore gated on the
+        // session still running.
+        if !self.is_running(session_id) {
+            self.sessions.scroll_history(session_id, rows, up);
+            return;
+        }
         if let Some((mode, encoding)) = self.sessions.mouse_protocol(session_id) {
             if let Some(bytes) = mouse::wheel(mode, encoding, col, row, up) {
-                // A failed write means the child died; the pane notices on its
-                // next frame, and a lost wheel notch is not worth a message.
+                // A failed write means the child died between the last frame and
+                // this notch; the pane notices on its next draw, and a lost
+                // wheel notch is not worth a message.
                 let _ = self.sessions.write(session_id, &bytes);
                 return;
             }
+        }
+        // Codex handles crossterm mouse events but currently does not emit the
+        // DECSET sequence that would make `mouse_protocol` select the branch
+        // above. Bracketed paste is its input-readiness signal: before then a
+        // report could only garble the first paint. SGR is deliberate because
+        // it carries coordinates; the old arrow-key fallback moved composer
+        // history and discarded where the wheel event happened.
+        let codex = self
+            .sessions
+            .row(session_id)
+            .is_some_and(|row| row.provider == medulla::protocol::HarnessProvider::Codex)
+            && self.sessions.bracketed_paste(session_id) == Some(true);
+        if codex {
+            let bytes = mouse::sgr_wheel(col, row, up);
+            let _ = self.sessions.write(session_id, &bytes);
+            return;
         }
         if self.sessions.alternate_scroll(session_id) == Some(true) {
             let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };

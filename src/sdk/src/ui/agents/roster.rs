@@ -5,7 +5,7 @@
 //! what a *backend* advertises. A host-link worker added at runtime lives in
 //! the orchestrator hub's own roster instead — the very list that resolves a
 //! delegated task's address — so it was reachable, dispatchable, and completely
-//! absent from the Agents tab until a task happened to be running on it.
+//! absent from the TUI until a task happened to be running on it.
 //!
 //! This module projects the [`WorkerInfo`] rows that registry surfaces onto
 //! descriptors and merges them into the snapshot roster, so the Agents and
@@ -43,7 +43,7 @@ fn names_same_peer(descriptor: &AgentDescriptor, worker: &WorkerInfo) -> bool {
     })
 }
 
-/// The descriptor a registry worker shows as in the Agents view.
+/// The descriptor a registry worker shows as in the fleet views.
 ///
 /// Deliberately claims nothing it does not know: `availability` stays empty
 /// (the registry tracks reachability, not liveness) so the lane renders as
@@ -71,7 +71,7 @@ pub fn host_descriptor(worker: &WorkerInfo) -> AgentDescriptor {
         metadata.insert("workspace".into(), Value::String(workspace.to_string()));
     }
     // Falling back to the address means falling back to a 44-character base58
-    // public key, which is the widest thing the Agents rail ever holds and so
+    // public key, which is the widest thing a rail row ever holds and so
     // sizes the entire sidebar. Shortened to `abcd…1234`: the middle of a key
     // distinguishes nothing a human reads, and the ends are what tell two peers
     // apart. A label or handle passes through untouched — `short_if_address`

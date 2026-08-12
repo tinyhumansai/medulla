@@ -74,6 +74,8 @@ mod mcp_tests;
 mod orchestration;
 mod presentation;
 mod status_line;
+#[cfg(test)]
+mod tests;
 
 pub use connections::*;
 pub use document::*;

@@ -18,6 +18,7 @@ fn settled() -> RunRecord {
         input: None,
         output: None,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }];
     record
 }
@@ -114,6 +115,7 @@ fn a_failed_step_is_counted() {
         input: None,
         output: None,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     });
     assert_eq!(
         row(&run_overview(&record), "progress").as_deref(),

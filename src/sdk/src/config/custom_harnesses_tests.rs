@@ -120,16 +120,41 @@ fn invalid_presets_fail_loudly() {
     assert!(error.contains("id must contain"));
     let error =
         CustomHarnessConfig::from_editor_line("id | name | gemini | model | | host").unwrap_err();
-    assert!(error.contains("claude, codex or opencode"));
-    let error = CustomHarnessConfig::from_editor_line("id | name | openhuman | model | | host")
-        .unwrap_err();
-    assert!(error.contains("claude, codex or opencode"));
+    assert!(error.contains("claude, codex, opencode or openhuman"));
     let error = CustomHarnessConfig::from_editor_line("id | name | claude | model").unwrap_err();
     assert!(error.contains("expected:"));
 }
 
 #[test]
-fn persisted_openhuman_preset_is_rejected_during_normalization() {
+fn openhuman_presets_are_accepted_so_the_embedded_core_can_be_given_a_model() {
+    // The refusal predated OpenHuman being dispatchable at all. Now that a
+    // workflow node can name it, the only thing the refusal blocked was naming
+    // the model that turn runs on — which is what a preset is for.
+    let preset = CustomHarnessConfig::from_editor_line(
+        "deepseek-oh | DeepSeek via OpenHuman | openhuman | deepseek/deepseek-v4-pro | | host-4",
+    )
+    .unwrap();
+    assert_eq!(preset.base_harness, HarnessProvider::Openhuman);
+    // Nothing rides down in the environment: there is no child process to hand
+    // one to. The model reaches the turn as `RunTaskOptions::model`.
+    assert!(preset.harness_env().is_empty());
+    assert_eq!(preset.model, "deepseek/deepseek-v4-pro");
+}
+
+#[test]
+fn an_openhuman_preset_needs_no_openrouter_key_to_be_usable() {
+    // The embedded core authenticates its own turns with the operator's
+    // account, so gating the preset on an OpenRouter key would hide a working
+    // preset on every machine that never set one.
+    let preset = CustomHarnessConfig::from_editor_line(
+        "oh | OpenHuman | openhuman | some/model | | this-device",
+    )
+    .unwrap();
+    assert!(preset.key_present(&HashMap::new()));
+}
+
+#[test]
+fn persisted_openhuman_preset_loads_with_its_model() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(
@@ -139,14 +164,16 @@ fn persisted_openhuman_preset_is_rejected_during_normalization() {
 id = "native"
 name = "Native OpenHuman"
 baseHarness = "openhuman"
-model = "unused"
+model = "deepseek/deepseek-v4-pro"
 hostId = "this-device"
 "#,
     )
     .unwrap();
 
-    let error = load_custom_harnesses(&path).unwrap_err();
-    assert!(error.to_string().contains("claude, codex or opencode"));
+    let presets = load_custom_harnesses(&path).unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].base_harness, HarnessProvider::Openhuman);
+    assert_eq!(presets[0].model, "deepseek/deepseek-v4-pro");
 }
 
 #[test]
@@ -212,4 +239,75 @@ hostId = "this-device"
 
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].id, "deepseek");
+}
+
+#[test]
+fn runnability_follows_the_detected_clis_except_for_the_embedded_core() {
+    let claude = CustomHarnessConfig::from_editor_line(
+        "ds | DeepSeek | claude | deepseek/model | | this-device",
+    )
+    .unwrap();
+    assert!(claude.runnable_on(&[HarnessProvider::Claude]));
+    assert!(!claude.runnable_on(&[HarnessProvider::Codex]));
+
+    // The embedded core has no binary to detect, so a host that found no
+    // coding CLI at all still runs it — the same rule `select_provider`
+    // applies to a bare `openhuman` request.
+    let openhuman =
+        CustomHarnessConfig::from_editor_line("oh | OpenHuman | openhuman | some/model | | host")
+            .unwrap();
+    assert!(openhuman.runnable_on(&[]));
+}
+
+#[test]
+fn an_upstream_provider_pin_is_normalized_and_reaches_the_router() {
+    let preset: CustomHarnessConfig = serde_json::from_value(serde_json::json!({
+        "id": "glm",
+        "name": "GLM 5.2 via Claude",
+        "baseHarness": "claude",
+        "model": "z-ai/glm-5.2",
+        "hostId": "this-device",
+        // As an operator might copy them off OpenRouter's dashboard, which
+        // presents slugs capitalized and padded. `streamlake` recurs after
+        // `novita`, so a naive adjacent-only dedup would leave the repeat.
+        "providerOnly": ["  StreamLake ", "Novita", "", "streamlake"],
+    }))
+    .unwrap();
+    let preset = preset.normalize().unwrap();
+
+    assert_eq!(preset.provider_only, vec!["streamlake", "novita"]);
+    // Order is the operator's preference order and must survive.
+    assert_eq!(preset.router().provider_only, vec!["streamlake", "novita"]);
+}
+
+#[test]
+fn an_unpinned_preset_leaves_provider_choice_to_openrouter() {
+    let preset =
+        CustomHarnessConfig::from_editor_line("glm | GLM | claude | z-ai/glm-5.2 | | this-device")
+            .unwrap();
+    assert!(preset.provider_only.is_empty());
+    assert!(preset.router().provider_only.is_empty());
+}
+
+#[test]
+fn a_pin_round_trips_through_a_config_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("medulla.toml");
+    std::fs::write(
+        &path,
+        r#"
+[[customHarnesses]]
+id = "glm"
+name = "GLM 5.2 via Claude"
+baseHarness = "claude"
+model = "z-ai/glm-5.2"
+hostId = "this-device"
+providerOnly = ["streamlake"]
+"#,
+    )
+    .unwrap();
+
+    let presets = super::load_custom_harnesses(&path).unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].provider_only, vec!["streamlake"]);
 }

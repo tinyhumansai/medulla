@@ -4,15 +4,15 @@
 instead of forking `codex exec` for it. One process serves every lane, so a
 fan-out of ten costs one Codex runtime rather than ten.
 
-It is a **flavor** of Codex, not a separate harness. Credentials, `codexOverrides`
+It is a **flavor** of Codex rather than a separate harness. Credentials, `codexOverrides`
 presets, the inference endpoint, attribution and the seat the tokens bill to are
 all resolved from `codex` exactly as they are for a CLI run. The only thing that
 changes is how the process is driven.
 
 ## When to use it
 
-Use it when several tasks run at once and you care how long they take to start —
-which is to say, for workflows. A CLI fork pays the whole Codex startup on every
+Use it when several tasks run at once and you care how long they take to start,
+which in practice means workflows. A CLI fork pays the whole Codex startup on every
 task: process spawn, config load, MCP server handshakes, tool discovery. On a
 graph with ten `agent` nodes, that is ten of everything, and the cost grows with
 the fan-out.
@@ -21,8 +21,8 @@ Use plain `codex` when you want to *watch* a lane work. The app-server reports
 structured thread items rather than the JSONL stream Medulla's mappers were
 written against, and this transport folds only the parts that answer "is it
 working, what did it say, what did it cost". Per-step tool calls, reasoning, file
-edits and command output do not reach the agent rail. That trade is the point:
-you get throughput, you give up the picture.
+edits and command output do not reach the agent rail. The transport trades that
+detail for throughput.
 
 ## Selecting it
 
@@ -39,8 +39,8 @@ model: gpt-5.6-terra
 { "instruction": "run the migration", "harness": "codex-server" }
 ```
 
-For a caller with no frame to state it on — a wrapper, a locally launched
-harness — there is an environment switch, mirroring the ACP one:
+For a caller with no frame to state it on (a wrapper, or a locally launched
+harness) there is an environment switch, mirroring the ACP one:
 
 ```sh
 export MEDULLA_HARNESS_TRANSPORT=app-server
@@ -48,11 +48,11 @@ export MEDULLA_HARNESS_TRANSPORT=app-server
 
 A worker advertises the flavor in its capabilities (`harnessFlavors`) only when
 it has Codex at all. A task frame naming a flavor the selected provider cannot
-run is **refused**, not downgraded: an operator who asked for the shared process
-and silently got a CLI fork has no way to notice.
+run is **refused** rather than downgraded, because an operator who asked for the
+shared process and silently got a CLI fork has no way to notice.
 
 The one exception is local workflow dispatch, which drops the flavor when the
-provider itself fell back — for the same portability reason a graph authored
+provider itself fell back, for the same portability reason a graph authored
 against `codex` still runs on a worker that only has `claude`.
 
 ## How processes are shared
@@ -78,7 +78,8 @@ correctly:
 discrete work and gets its own thread, exactly as a CLI run gets its own process.
 
 A pooled process that dies is discarded and replaced on the next task, rather
-than being reaped in the background: that is the only moment the answer matters.
+than being reaped in the background, because its health only has to be known at
+the moment a task is about to use it.
 
 ## Permissions
 
@@ -95,26 +96,25 @@ directory of a linked worktree sits outside the worktree, so `git commit` cannot
 write its refs, and with the network off `git push` and `gh` fail outright. That
 is why consent maps to full access here as it does for `codex`.
 
-Requests the client cannot answer honestly — dynamic tool calls, MCP
-elicitations, user-input prompts — are refused rather than guessed at: no
+Requests the client cannot answer honestly (dynamic tool calls, MCP
+elicitations, user-input prompts) are refused rather than guessed at, because no
 operator is watching a delegated task.
 
 ## Aborts and stalls
 
-An abort or an idle timeout sends `turn/interrupt` for that thread. It never
-kills the process, because the process is not this task's to kill — other lanes
-are running on it. Killing the child was how the CLI transport ended a run; here
-it would be a bug.
+An abort or an idle timeout sends `turn/interrupt` for that thread. The process
+must stay alive, because other lanes are running on it, so ending a run on a
+shared process is done by interrupting the turn.
 
 ## Limits
 
-- **No follow-up input.** `input` frames are refused for an app-server task, as
-  they are for ACP. The transport has a steering operation; Medulla does not use
-  it yet.
-- **Minimal event detail.** See "When to use it" above.
-- **Codex only.** No other harness ships an app-server. Pairing the transport
-  with another provider is refused at every layer that can see both.
-- **Experimental upstream.** `codex app-server` is marked experimental by the
-  Codex CLI. The client speaks a deliberately small subset — `initialize`,
+- Follow-up input is unavailable. `input` frames are refused for an app-server
+  task, as they are for ACP. The transport has a steering operation; Medulla does
+  not use it yet.
+- Event detail is minimal. See "When to use it" above.
+- Codex is the only provider. No other harness ships an app-server. Pairing the
+  transport with another provider is refused at every layer that can see both.
+- The upstream is experimental. `codex app-server` is marked experimental by the
+  Codex CLI. The client speaks a deliberately small subset (`initialize`,
   `thread/start`, `thread/resume`, `turn/start`, `turn/interrupt`, and a handful
-  of notifications — to keep the surface that can break small.
+  of notifications) to keep the surface that can break small.

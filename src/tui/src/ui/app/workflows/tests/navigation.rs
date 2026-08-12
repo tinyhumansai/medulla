@@ -1,4 +1,4 @@
-//! Jumping from the Agents rail into a workflow run.
+//! Jumping from the Sessions rail into a workflow run.
 //!
 //! The rail lists runs a granted harness reported over the control socket, and
 //! selecting one lands here. The two cases that matter are a run whose record
@@ -51,7 +51,7 @@ fn opening_a_run_with_no_record_yet_still_overlays_it() {
     );
     // No row to select — the record appears when the run settles — but the
     // overlay is what the node preview reads streamed output by, so it is set
-    // regardless. Refusing the jump would leave the operator on the Agents rail
+    // regardless. Refusing the jump would leave the operator on the Sessions rail
     // watching nothing.
     assert_eq!(app.wf.run_index, None);
     assert_eq!(app.wf.overlay.as_deref(), Some("run-live"));

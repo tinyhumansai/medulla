@@ -17,4 +17,3 @@ mod helpers;
 
 mod control;
 mod picker;
-mod spawn;

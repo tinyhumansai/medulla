@@ -6,8 +6,13 @@
 #
 #   mock link forwarder (blind UDP, docs/host-link-protocol.md §5)
 #     → owner driver (long-lived, one per enrolled pair)
-#     → `medulla daemon --providers opencode`
-#       → real `opencode` CLI → mock OpenAI-compatible LLM
+#     → `medulla daemon --providers <harness>`
+#       → the real coding CLI → the mock LLM
+#
+# `$E2E_HARNESS` selects that CLI — `opencode` (the default), `claude` or
+# `codex` — and everything specific to one of them lives in `harness.sh`. The
+# mock LLM answers all three wire dialects, so a scenario written here runs
+# unchanged against any of them.
 #
 # Callers set SCRIPT_DIR + SDK_DIR (this file lives next to run.sh/tests.sh),
 # then call `e2e_init`, `boot_forwarder <name>…`, `boot_llm`, `boot_daemon`, run
@@ -21,7 +26,7 @@
 # payload.
 #
 # All state lands in the shared globals RUN_DIR / SESSION / FORWARDER_ADDR /
-# LLM_PORT / OC_CONFIG / WORKER_ID. Loopback only; deterministic; no real keys.
+# LLM_PORT / HARNESS / WORKER_ID. Loopback only; deterministic; no real keys.
 
 # ── logging + diagnostics ───────────────────────────────────────────────────
 log()  { printf '[e2e] %s\n' "$*" >&2; }
@@ -76,15 +81,16 @@ wait_for_regex() {
   return 1
 }
 
+# Per-harness knowledge (binary, config, spawn env, TUI shape). Sourced after
+# the logging helpers because it reports failures through them.
+# shellcheck source=harness.sh
+source "$SCRIPT_DIR/harness.sh"
+
 # ── binary resolution ───────────────────────────────────────────────────────
 resolve_binaries() {
-  OPENCODE_BIN="${OPENCODE_BIN:-$(command -v opencode || true)}"
-  if [ -z "$OPENCODE_BIN" ] && [ -x "$HOME/.opencode/bin/opencode" ]; then
-    OPENCODE_BIN="$HOME/.opencode/bin/opencode"
-  fi
-  [ -n "$OPENCODE_BIN" ] && [ -x "$OPENCODE_BIN" ] || fail "opencode CLI not found (set OPENCODE_BIN)"
-  OPENCODE_DIR="$(cd "$(dirname "$OPENCODE_BIN")" && pwd)"
-  log "opencode: $OPENCODE_BIN ($("$OPENCODE_BIN" --version 2>/dev/null | head -1))"
+  # Which coding CLI the daemon spawns, and how it is pointed at the mock LLM,
+  # is `harness.sh`'s business — see that file for what each leg proves.
+  resolve_harness
 
   if [ -z "${MEDULLA_BIN:-}" ] || [ -z "${FORWARDER_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ]; then
     log "building medulla + examples (release)…"
@@ -270,8 +276,9 @@ EOF
     || fail "owner driver for '$name' did not start"
 }
 
-# Boot the mock LLM; sets LLM_PORT and writes OC_CONFIG. Any extra args are
-# emitted as `export` lines into the launcher (e.g. MOCK_LLM_MARKER=...).
+# Boot the mock LLM; sets LLM_PORT and writes the selected harness's config
+# (see `write_harness_config`). Any extra args are emitted as `export` lines into
+# the launcher (e.g. MOCK_LLM_MARKER=...).
 boot_llm() {
   local extra_env="$1"
   launch llm <<EOF
@@ -284,8 +291,7 @@ EOF
     || fail "mock LLM did not start"
   LLM_PORT="$(grep -Eo '127\.0\.0\.1:[0-9]+' "$RUN_DIR/llm.log" | head -1 | cut -d: -f2)"
   log "mock LLM: 127.0.0.1:$LLM_PORT"
-  OC_CONFIG="$RUN_DIR/opencode.json"
-  sed "s/MOCK_LLM_PORT/$LLM_PORT/" "$SCRIPT_DIR/opencode.json" > "$OC_CONFIG"
+  write_harness_config
 }
 
 # Boot one medulla daemon under a caller-chosen NAME.
@@ -295,25 +301,22 @@ EOF
 # `boot_forwarder`); it names the tmux window, the log file, and the
 # `WORKER_NAME_<NAME>` global holding the label the daemon advertises. Each
 # daemon gets its own MEDULLA_HOME — which is where its link identity lives, so
-# each is a *distinct enrolled host* — plus its own opencode HOME.
+# each is a *distinct enrolled host* — plus its own harness HOME.
 #
 # The mock LLM and the forwarder are shared: those are the fixtures under test.
 boot_daemon_named() {
   local name="$1" workspace="$2" extra_flags="${3:-}"
   local host_var="HOST_NODE_ID_$name"
   [ -n "${!host_var:-}" ] || fail "daemon '$name' was never enrolled — call boot_forwarder $name"
-  mkdir -p "$RUN_DIR/ochome-$name"
+  harness_seed_home "$RUN_DIR/ochome-$name" "$workspace"
   launch "$name" <<EOF
-export HOME=$(printf %q "$RUN_DIR/ochome-$name")
-export OPENCODE_CONFIG=$(printf %q "$OC_CONFIG")
-export OPENCODE_DISABLE_AUTOUPDATE=1
-export PATH=$(printf %q "$OPENCODE_DIR"):\$PATH
+$(harness_env "$RUN_DIR/ochome-$name")
 export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome-$name")
 export MEDULLA_USER=e2e
 export MEDULLA_LINK_OWNER=$(printf %q "orchestrator-$name")
-exec $(printf %q "$MEDULLA_BIN") daemon --providers opencode --no-pair \
+exec $(printf %q "$MEDULLA_BIN") daemon --providers $(printf %q "$HARNESS") --no-pair \
   --name $(printf %q "worker-$name") \
-  --workspace $(printf %q "$workspace") --poll-ms 500 $extra_flags
+  --workspace $(printf %q "$workspace") --poll-ms 500 $(harness_daemon_flags) $extra_flags
 EOF
   wait_for_regex "$RUN_DIR/$name.log" 'serving providers .* as .* for ' 90 \
     || fail "medulla daemon '$name' did not reach the serving state"
@@ -461,18 +464,20 @@ assert_bidirectional_delivery() {
   log "  datagrams: owner→worker=$to_worker  worker→owner=$to_owner"
 }
 
-# Drive a real interactive opencode TUI in its own tmux pane against the mock
-# LLM, proving tmux controls opencode as well as medulla.
+# Drive the selected harness's real interactive TUI in its own tmux pane against
+# the mock LLM, proving tmux controls the coding CLI as well as medulla.
+#
+# Unlike the task leg, this one points the CLI at the mock itself rather than
+# going through the daemon's preset — a TUI is launched by the operator, not by
+# Medulla, so there is no spawn seam to inject through. See `harness.sh`.
 smoke_leg() {
-  log "smoke leg: driving interactive opencode TUI…"
+  log "smoke leg: driving the interactive $HARNESS TUI…"
+  harness_seed_home "$RUN_DIR/ochome" "$RUN_DIR/work"
   cat > "$RUN_DIR/smoke.cmd" <<EOF
 #!/usr/bin/env bash
-export HOME=$(printf %q "$RUN_DIR/ochome")
-export OPENCODE_CONFIG=$(printf %q "$OC_CONFIG")
-export OPENCODE_DISABLE_AUTOUPDATE=1
-export PATH=$(printf %q "$OPENCODE_DIR"):\$PATH
+$(harness_env "$RUN_DIR/ochome")
 cd $(printf %q "$RUN_DIR/work")
-exec $(printf %q "$OPENCODE_BIN")
+$(harness_tui_launch)
 EOF
   chmod +x "$RUN_DIR/smoke.cmd"
   tmux new-window -t "$SESSION" -n smoke -c "$RUN_DIR/work"
@@ -487,10 +492,10 @@ EOF
       sleep 1
       continue
     fi
-    if printf '%s' "$pane" | grep -q 'Ask anything'; then ready=1; break; fi
+    if printf '%s' "$pane" | grep -Eq "$(harness_tui_ready_regex)"; then ready=1; break; fi
     sleep 1
   done
-  [ "$ready" = "1" ] || fail "smoke leg: opencode editor never became ready"
+  [ "$ready" = "1" ] || fail "smoke leg: the $HARNESS editor never became ready"
 
   tmux send-keys -t "$SESSION:smoke" "reply with the marker for SMOKE-$$"
   sleep 1
@@ -498,7 +503,7 @@ EOF
   local deadline=$(( $(date +%s) + 120 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
     if tmux capture-pane -p -t "$SESSION:smoke" 2>/dev/null | grep -q 'COORDINATION_OK'; then
-      log "smoke leg: opencode TUI rendered COORDINATION_OK"
+      log "smoke leg: the $HARNESS TUI rendered COORDINATION_OK"
       tmux capture-pane -p -t "$SESSION:smoke" 2>/dev/null > "$RUN_DIR/smoke.log" || true
       tmux send-keys -t "$SESSION:smoke" C-c 2>/dev/null || true
       return 0
@@ -506,5 +511,5 @@ EOF
     sleep 2
   done
   tmux capture-pane -p -t "$SESSION:smoke" 2>/dev/null > "$RUN_DIR/smoke.log" || true
-  fail "smoke leg: opencode TUI never rendered COORDINATION_OK"
+  fail "smoke leg: the $HARNESS TUI never rendered COORDINATION_OK"
 }

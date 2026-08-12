@@ -99,6 +99,10 @@ fn spawn_stdio(
         command.env_remove(key);
     }
     command
+        // The waiter task below owns the child. If this process unwinds or the
+        // runtime shuts down before the child exits, dropping that task must
+        // take the harness with it rather than orphaning it.
+        .kill_on_drop(true)
         .current_dir(&config.cwd)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

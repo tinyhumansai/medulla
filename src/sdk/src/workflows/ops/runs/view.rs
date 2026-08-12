@@ -103,8 +103,8 @@ pub fn project(record: &RunRecord, detail: StepDetail) -> Result<Value, Workflow
 }
 
 /// What to call when the elided halves of a step are the thing wanted.
-const FULL_HINT: &str = "step inputs and outputs are elided here; call workflow_run_get with \
-                         { runId, \"steps\": \"full\" } for the whole record";
+const FULL_HINT: &str = "step inputs, outputs and harness transcripts are elided here; call \
+                         workflow_run_get with { runId, \"steps\": \"full\" } for the whole record";
 
 /// One step reduced to what "what happened" needs.
 ///
@@ -125,6 +125,18 @@ fn summarize(step: &RunStep) -> Value {
     }
     if !step.diagnostics.is_empty() {
         summary.insert("diagnostics".to_string(), json!(step.diagnostics));
+    }
+    // The transcript itself is elided — it is the largest field on an agent
+    // step — but its *size* is not, because that is what tells a reader there
+    // is an account of this step to ask for. Omitted entirely when there is
+    // none, so a step with no transcript is not reported as having an empty
+    // one: those mean different things (a non-agent node, versus a harness
+    // that said nothing).
+    if !step.transcript.is_empty() {
+        summary.insert(
+            "transcriptEntries".to_string(),
+            json!(step.transcript.len()),
+        );
     }
     Value::Object(summary)
 }

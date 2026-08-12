@@ -108,11 +108,10 @@ impl LocalSessions {
     ///   the notch is forwarded and *its* scrollback moves — which is the one
     ///   the operator means, because it holds the whole conversation rather than
     ///   the last screenful the emulator happened to retain;
-    /// - Codex does not negotiate mouse reports in current releases. Once its
-    ///   input layer is up (bracketed paste — the readiness signal the pane
-    ///   reads from the emulator) its TUI
-    ///   consumes cursor keys to move through the transcript, so a notch becomes
-    ///   cursor-key input even when it does not advertise alternate scrolling;
+    /// - Codex accepts location-aware crossterm mouse events but does not
+    ///   negotiate mouse reports in current releases. Once its input layer is
+    ///   up, the notch is sent in SGR form so Codex receives the pane-relative
+    ///   pointer location;
     /// - another harness enables alternate scrolling without mouse reporting,
     ///   so the notch becomes cursor-key input as xterm's alternate-scroll mode
     ///   specifies;
@@ -144,15 +143,23 @@ impl LocalSessions {
                 return;
             }
         }
-        // Codex gets cursor keys only once its input layer is up: a codex that
-        // is still painting (or a shell standing in for one) has nothing to
-        // consume them, and sending them would only garble its first paint.
+        // Codex handles crossterm mouse events but currently does not emit the
+        // DECSET sequence that would make `mouse_protocol` select the branch
+        // above. Bracketed paste is its input-readiness signal: before then a
+        // report could only garble the first paint. SGR is deliberate because
+        // it carries coordinates; the old arrow-key fallback moved composer
+        // history and discarded where the wheel event happened.
         let codex = self
             .sessions
             .row(session_id)
             .is_some_and(|row| row.provider == medulla::protocol::HarnessProvider::Codex)
             && self.sessions.bracketed_paste(session_id) == Some(true);
-        if codex || self.sessions.alternate_scroll(session_id) == Some(true) {
+        if codex {
+            let bytes = mouse::sgr_wheel(col, row, up);
+            let _ = self.sessions.write(session_id, &bytes);
+            return;
+        }
+        if self.sessions.alternate_scroll(session_id) == Some(true) {
             let arrow = if up { b"\x1b[A" } else { b"\x1b[B" };
             let mut bytes = Vec::with_capacity(arrow.len() * rows);
             for _ in 0..rows {

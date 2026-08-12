@@ -297,12 +297,13 @@ fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
 }
 
 #[test]
-fn codex_without_mouse_or_alternate_scroll_gets_arrow_scroll_events() {
+fn codex_without_negotiated_mouse_mode_gets_location_aware_wheel_events() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());
-    // Current Codex releases enable bracketed paste and enhanced keyboard input,
-    // but no longer advertise DECSET 1007. The provider still expects wheel
-    // scrolling to reach its transcript as cursor keys.
+    // Current Codex releases enable bracketed paste and handle crossterm mouse
+    // events, but do not ask their terminal to enable mouse reporting. Preserve
+    // the pointer location by sending the SGR event Codex can already decode;
+    // cursor-key fallback would operate prompt history and discard (3,4).
     let id = sessions
         .open(sh(
             "printf '\\033[?2004hready'; sleep 0.3; cat -v; sleep 30",
@@ -320,9 +321,14 @@ fn codex_without_mouse_or_alternate_scroll_gets_arrow_scroll_events() {
 
     harnesses.scroll(&id, 3, 4, true, 3);
 
-    wait_for("Codex to receive translated wheel input", || {
-        text(&harnesses, &id).contains("^[[A^[[A^[[A")
+    wait_for("Codex to receive a location-aware wheel event", || {
+        text(&harnesses, &id).contains("[<64;4;5M")
     });
+    let out = text(&harnesses, &id);
+    assert!(
+        !out.contains("^[[A"),
+        "wheel must not navigate history: {out}"
+    );
     sessions.close(&id);
 }
 

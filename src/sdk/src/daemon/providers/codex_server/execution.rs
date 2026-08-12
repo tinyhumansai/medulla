@@ -88,11 +88,14 @@ async fn run(options: RunTaskOptions) -> Result<RunTaskResult, AppServerError> {
         &connection,
         &mut subscription,
         &thread_id,
+        thread.cwd,
         options.prompt,
         options.model,
         options.timeout_ms,
         options.abort,
         options.on_event,
+        options.workspace_context,
+        options.on_workspace_context,
     )
     .await?;
 
@@ -212,16 +215,23 @@ async fn drive_turn(
     connection: &Connection,
     subscription: &mut ThreadSubscription,
     thread_id: &str,
+    cwd: String,
     prompt: String,
     model: Option<String>,
     timeout_ms: u64,
     abort: super::super::types::Abort,
     on_event: Option<OnEvent>,
+    workspace_context: crate::sessions::WorkspaceContext,
+    on_workspace_context: Option<super::super::types::OnWorkspaceContext>,
 ) -> Result<TurnOutcome, AppServerError> {
     // Shared because the idle watchdog reads the fold's last-activity stamp
     // while the notification branch writes to it, and both live in one
     // `select!`.
-    let fold = Arc::new(Mutex::new(FoldState::new(on_event)));
+    let fold = Arc::new(Mutex::new(FoldState::with_workspace(
+        on_event,
+        workspace_context,
+        on_workspace_context,
+    )));
     let timeout = Duration::from_millis(timeout_ms);
     // Tracked from `turn/started` so an interrupt can name the turn it stops;
     // the protocol requires both ids.
@@ -231,6 +241,11 @@ async fn drive_turn(
         "turn/start",
         json!({
             "threadId": thread_id,
+            // Codex treats cwd as sticky turn state. Send it even after
+            // `thread/resume`: otherwise a retained worktree exists only in
+            // Medulla's metadata while built-in tools default to the original
+            // directory recorded by the thread.
+            "cwd": cwd,
             "input": [{ "type": "text", "text": prompt }],
             "model": model,
         }),

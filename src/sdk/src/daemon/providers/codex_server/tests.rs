@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::codex_app_server::Notification;
 use crate::daemon::mappers::HarnessSemanticEvent;
 use crate::protocol::{HarnessProvider, HarnessTransport};
-use crate::sessions::SessionClass;
+use crate::sessions::{SessionClass, WorkspaceContext};
 
 use super::super::types::{Abort, RunTaskOptions};
 use super::execution::{child_env, uses_app_server, HARNESS_TRANSPORT_ENV};
@@ -286,4 +286,54 @@ fn advances_the_event_ordering_key() {
     assert!(events
         .iter()
         .all(|event| event.record_type.starts_with("app_server:")));
+}
+
+#[test]
+fn completed_worktree_command_updates_the_app_server_workspace() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let event_sink = events.clone();
+    let mut fold = FoldState::with_workspace(
+        Some(Box::new(move |event| {
+            event_sink.lock().unwrap().push(event.clone())
+        })),
+        WorkspaceContext::default(),
+        Some(Box::new(move |context| sink.lock().unwrap().push(context))),
+    );
+    fold.fold(&notification(
+        "item/completed",
+        json!({
+            "item": {
+                "type": "commandExecution",
+                "command": "worktree fix-context --json",
+                "aggregatedOutput": concat!(
+                    "{\"status\":\"ready\",\"repository\":\"/repo\",",
+                    "\"path\":\"/repo/worktrees/fix-context\",",
+                    "\"branch\":\"fix-context\",\"head\":\"abc123456789\",",
+                    "\"headShort\":\"abc1234\",\"created\":true,",
+                    "\"submodules\":{\"state\":\"initialized_recursive\",\"count\":0},",
+                    "\"nextCommand\":\"cd /repo/worktrees/fix-context\"}"
+                ),
+                "exitCode": 0
+            }
+        }),
+    ));
+
+    let contexts = seen.lock().unwrap();
+    assert_eq!(contexts.len(), 1);
+    assert_eq!(
+        contexts[0].cwd.as_deref(),
+        Some("/repo/worktrees/fix-context")
+    );
+    assert_eq!(contexts[0].branch.as_deref(), Some("fix-context"));
+    let events = events.lock().unwrap();
+    let workspace = events
+        .iter()
+        .find(|event| event.event.kind == crate::harness_work::kinds::SESSION_INFO)
+        .expect("the active session is told about the move");
+    assert_eq!(
+        workspace.event.payload["cwd"],
+        "/repo/worktrees/fix-context"
+    );
 }

@@ -2,10 +2,11 @@
 //!
 //! # Scope
 //!
-//! Deliberately minimal: lifecycle status, the assistant's messages, and token
-//! usage. The app-server reports far more than that — per-item reasoning deltas,
-//! command output streams, patch previews — and the CLI transport's mappers turn
-//! the equivalent into the rich agent-rail detail an operator watches.
+//! Deliberately minimal: lifecycle status, the assistant's messages, token
+//! usage, and repository moves that affect where the next turn executes. The
+//! app-server reports far more than that — per-item reasoning deltas, command
+//! output streams, patch previews — and the CLI transport's mappers turn the
+//! equivalent into the rich agent-rail detail an operator watches.
 //!
 //! Reproducing that surface here would mean a second implementation of every
 //! mapper, tracking a wire format that is still marked experimental, for a
@@ -22,10 +23,11 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::codex_app_server::Notification;
-use crate::daemon::mappers::HarnessSemanticEvent;
+use crate::daemon::mappers::{worktree_checkout_from_output, HarnessSemanticEvent};
 use crate::protocol::{HarnessEvent, TokenUsage};
+use crate::sessions::WorkspaceContext;
 
-use super::super::types::OnEvent;
+use super::super::types::{OnEvent, OnWorkspaceContext};
 
 /// What a finished fold reports, without the callback it folded through.
 #[derive(Debug, Clone, Default)]
@@ -58,6 +60,10 @@ pub(super) struct FoldState {
     pub(super) last_activity: Instant,
     /// Per-event status callback.
     on_event: Option<OnEvent>,
+    /// Repository position retained across turns of this thread.
+    workspace_context: WorkspaceContext,
+    /// Persists a newly detected worktree for the next resumed turn.
+    on_workspace_context: Option<OnWorkspaceContext>,
     /// Line counter standing in for the CLI transport's transcript offsets.
     ///
     /// There is no transcript here, but `HarnessSemanticEvent::line` is the
@@ -68,7 +74,17 @@ pub(super) struct FoldState {
 
 impl FoldState {
     /// A fold ready for one turn.
+    #[cfg(test)]
     pub(super) fn new(on_event: Option<OnEvent>) -> Self {
+        Self::with_workspace(on_event, WorkspaceContext::default(), None)
+    }
+
+    /// A fold seeded with repository position retained by a resumed thread.
+    pub(super) fn with_workspace(
+        on_event: Option<OnEvent>,
+        workspace_context: WorkspaceContext,
+        on_workspace_context: Option<OnWorkspaceContext>,
+    ) -> Self {
         Self {
             reply: String::new(),
             items: 0,
@@ -76,6 +92,8 @@ impl FoldState {
             error: None,
             last_activity: Instant::now(),
             on_event,
+            workspace_context,
+            on_workspace_context,
             line: 0,
         }
     }
@@ -108,6 +126,7 @@ impl FoldState {
                         self.emit("item/completed", "agent_message", json!({ "text": text }));
                     }
                 }
+                self.capture_worktree(item);
                 false
             }
             "thread/tokenUsage/updated" => {
@@ -186,6 +205,41 @@ impl FoldState {
         };
         if let Some(on_event) = self.on_event.as_mut() {
             on_event(&event);
+        }
+    }
+
+    /// Persist a stable worktree report carried by a completed command item.
+    fn capture_worktree(&mut self, item: Option<&Value>) {
+        let Some(item) = item
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("commandExecution"))
+        else {
+            return;
+        };
+        let output = item
+            .get("aggregatedOutput")
+            .or_else(|| item.get("aggregated_output"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let Some((cwd, branch)) = worktree_checkout_from_output(output) else {
+            return;
+        };
+        if self.workspace_context.cwd.as_deref() != Some(&cwd)
+            || self.workspace_context.branch.as_deref() != Some(&branch)
+        {
+            self.workspace_context.pull_request = None;
+        }
+        self.workspace_context.cwd = Some(cwd);
+        self.workspace_context.branch = Some(branch);
+        self.emit(
+            "item/completed:workspace",
+            crate::harness_work::kinds::SESSION_INFO,
+            json!({
+                "cwd": self.workspace_context.cwd,
+                "branch": self.workspace_context.branch,
+            }),
+        );
+        if let Some(callback) = self.on_workspace_context.as_ref() {
+            callback(self.workspace_context.clone());
         }
     }
 }

@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::protocol::HarnessProvider;
+use crate::sessions::WorkspaceContext;
 
 use super::detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
@@ -133,6 +134,39 @@ fn build_run_args_per_provider() {
             false
         ),
         vec!["run", "--agent", "plan", "--format", "json", "do"]
+    );
+}
+
+#[test]
+fn a_retained_worktree_becomes_the_resumed_runs_working_directory() {
+    let launch = tempfile::tempdir().unwrap();
+    let worktree = tempfile::tempdir().unwrap();
+    let context = WorkspaceContext {
+        cwd: Some(worktree.path().to_string_lossy().into_owned()),
+        branch: Some("feature".into()),
+        pull_request: None,
+    };
+
+    assert_eq!(
+        super::execute::effective_cwd(launch.path().to_str().unwrap(), &context),
+        worktree.path().to_string_lossy(),
+    );
+}
+
+#[test]
+fn a_removed_retained_worktree_falls_back_to_the_configured_workspace() {
+    let launch = tempfile::tempdir().unwrap();
+    let removed = tempfile::tempdir().unwrap();
+    let context = WorkspaceContext {
+        cwd: Some(removed.path().to_string_lossy().into_owned()),
+        branch: Some("gone".into()),
+        pull_request: None,
+    };
+    drop(removed);
+
+    assert_eq!(
+        super::execute::effective_cwd(launch.path().to_str().unwrap(), &context),
+        launch.path().to_string_lossy(),
     );
 }
 

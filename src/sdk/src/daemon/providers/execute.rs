@@ -56,6 +56,12 @@ pub fn with_auth_hint(message: &str) -> String {
 /// Run one delegated task headlessly, retrying transient opencode SQLite-lock
 /// exits with jittered exponential backoff.
 pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskResult, String> {
+    // A resumed conversation may have created and moved into a linked worktree
+    // during an earlier turn. The mapper persists that move separately from the
+    // daemon's configured launch checkout; make it the runtime cwd before any
+    // transport consumes the options, or Codex's next turn and all of its
+    // defaulted tool calls silently snap back to where the daemon started.
+    options.cwd = effective_cwd(&options.cwd, &options.workspace_context);
     // This has to precede every transport choice below. ACP and the pooled
     // app-server return before the CLI spawn seam, but each child is still an
     // external harness and must never inherit the embedded core's credential
@@ -147,6 +153,24 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
             }
         }
     }
+}
+
+/// Resolve the directory a resumed run should actually execute in.
+///
+/// A retained workspace is authoritative only while it still names a directory.
+/// Worktrees can be removed between turns, in which case the configured launch
+/// checkout is the only viable fallback; passing the stale path to
+/// `Command::current_dir` would prevent the harness from starting at all.
+pub(super) fn effective_cwd(
+    configured: &str,
+    workspace_context: &crate::sessions::WorkspaceContext,
+) -> String {
+    workspace_context
+        .cwd
+        .as_deref()
+        .filter(|cwd| std::path::Path::new(cwd).is_dir())
+        .unwrap_or(configured)
+        .to_string()
 }
 
 /// A cheap uniform-ish `[0,1)` sample (no `rand` dep): folds the wall clock.

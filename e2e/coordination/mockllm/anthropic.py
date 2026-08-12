@@ -8,9 +8,14 @@ streams, and it reads the documented event sequence:
     message_start → content_block_start → content_block_delta…
                   → content_block_stop → message_delta → message_stop
 
-A text-only reply is enough to end the turn: Claude Code declares its tools on
-every request, but a response carrying no `tool_use` block simply finishes.
+A text-only reply is enough to end an ordinary turn. A prompt containing the
+state-probe marker instead gets a real `Bash` tool-use block, so the terminal
+suite can drive Claude from working into a permission wait without touching a
+live model.
 """
+
+import os
+import time
 
 from .config import MODEL_ID, collect_text
 
@@ -23,6 +28,8 @@ COUNT_TOKENS_PATHS = ("/v1/messages/count_tokens", "/messages/count_tokens")
 LOG_KIND = "messages"
 
 _MESSAGE_ID = "msg_mock"
+_TOOL_USE_ID = "toolu_state_probe"
+STATE_PROBE_MARKER = "MEDULLA_STATE_PROBE"
 
 
 def extract_prompt(body):
@@ -54,6 +61,30 @@ def log_payload(path, body, reply):
     }
 
 
+def requests_state_probe(body):
+    """Whether this is the probe's initial request rather than its tool result."""
+    messages = body.get("messages") or []
+    user_text = "\n".join(
+        collect_text(message.get("content"))
+        for message in messages
+        if message.get("role") == "user"
+    )
+    has_marker = any(
+        message.get("role") == "user"
+        and STATE_PROBE_MARKER in collect_text(message.get("content"))
+        for message in messages
+    )
+    has_result = any(
+        isinstance(block, dict) and block.get("type") == "tool_result"
+        for message in messages
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+    )
+    # Claude issues a concurrent title-generation request containing the task
+    # text. It is metadata, not the agent turn, and must remain text-only.
+    is_title_request = "Write the title in the predominant language" in user_text
+    return has_marker and not has_result and not is_title_request
+
+
 def _message(reply, stop_reason):
     return {
         "id": _MESSAGE_ID,
@@ -70,6 +101,23 @@ def _message(reply, stop_reason):
 def unary(reply):
     """The non-streaming `message` body, for a client that asked for one."""
     return _message(reply, "end_turn")
+
+
+def tool_unary():
+    """A unary Bash request for clients that do not stream."""
+    message = _message("", "tool_use")
+    message["content"] = [
+        {
+            "type": "tool_use",
+            "id": _TOOL_USE_ID,
+            "name": "Bash",
+            "input": {
+                "command": "touch claude-state-probe.txt",
+                "description": "Create the deterministic state-probe file",
+            },
+        }
+    ]
+    return message
 
 
 def count_tokens(body):
@@ -108,6 +156,48 @@ def stream(reply):
         {
             "type": "message_delta",
             "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": 1},
+        },
+    )
+    yield "message_stop", {"type": "message_stop"}
+
+
+def tool_stream():
+    """An Anthropic SSE tool request that makes Claude ask for Bash permission."""
+    delay_ms = int(os.environ.get("MOCK_LLM_TOOL_DELAY_MS", "0") or "0")
+    if delay_ms > 0:
+        time.sleep(delay_ms / 1000)
+    yield "message_start", {"type": "message_start", "message": _message("", None)}
+    yield (
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": _TOOL_USE_ID,
+                "name": "Bash",
+                "input": {},
+            },
+        },
+    )
+    yield (
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": '{"command":"touch claude-state-probe.txt","description":"Create the deterministic state-probe file"}',
+            },
+        },
+    )
+    yield "content_block_stop", {"type": "content_block_stop", "index": 0}
+    yield (
+        "message_delta",
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use", "stop_sequence": None},
             "usage": {"output_tokens": 1},
         },
     )

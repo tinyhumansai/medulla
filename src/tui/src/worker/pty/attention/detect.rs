@@ -439,6 +439,22 @@ pub fn is_working(screen: &str) -> bool {
     has_live_working_marker(screen) || has_live_progress_line(screen)
 }
 
+/// Whether the live tail has returned to an ordinary input composer.
+///
+/// This is the explicit idle signal that balances [`is_working`]. Lifecycle
+/// hooks and terminal paints are asynchronous: after `Stop`, a new spinner can
+/// appear before `UserPromptSubmit` arrives, and after the composer returns the
+/// previous mid-turn hook can still be last in the log. A live screen wins at
+/// either edge; hooks fill the otherwise opaque middle of the turn.
+pub fn is_idle(screen: &str) -> bool {
+    screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(PROGRESS_TAIL_LINES)
+        .any(is_composer)
+}
+
 /// Whether a known working footer remains in the live bottom-of-screen region.
 ///
 /// A completed turn can leave its old interrupt hint in scrollback. An ordinary
@@ -538,7 +554,7 @@ fn active_selected_option_index(lines: &[&str]) -> Option<usize> {
 }
 
 /// Whether `line` is an idle input composer rather than a numbered option.
-fn is_composer(line: &str) -> bool {
+pub(super) fn is_composer(line: &str) -> bool {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
     trimmed
         .chars()
@@ -654,6 +670,15 @@ fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
 /// screen shows no question we can recognise — which is the common case, and
 /// deliberately not the same as "the harness is busy".
 pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    // Claude 2.1 leaves its tool line saying `Waiting…` above the permission
+    // menu. That word resembles active progress, so this narrow structural
+    // confirmation must outrank the generic working veto below it.
+    if provider == HarnessProvider::Claude && super::claude::has_permission_menu(screen) {
+        return Some((
+            AttentionKind::Approval,
+            "claude is asking permission".to_string(),
+        ));
+    }
     // A harness that is plainly mid-turn wants nothing: retained prompts and
     // error text must not outlive the active footer as a stale attention cue.
     if is_working(screen) {

@@ -58,16 +58,17 @@ ANSWER_TIMEOUT_S=120
 main() {
   RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/medulla-e2e-XXXXXX")"
   e2e_init
-  # Three enrolled pairs: the headless daemon the other suites use, the wrapper
-  # session (a distinct link endpoint of its own), and the daemon that paints the
-  # operator screen — which cannot share a MEDULLA_HOME with the first.
-  boot_forwarder daemon wrapper screen
-  boot_llm ""
+  # Four enrolled pairs: the headless daemon the other suites use, the wrapper
+  # session (a distinct link endpoint of its own), and two operator screens.
+  # Screens cannot share MEDULLA_HOME with each other or the headless daemon.
+  boot_forwarder daemon wrapper screen state
+  boot_llm "export MOCK_LLM_TOOL_DELAY_MS=5000"
   boot_daemon
 
   scenario_wrapper_transparency
   scenario_wrapper_bridging
   scenario_operator_screen
+  scenario_claude_session_states
 
   summarize
 }
@@ -159,21 +160,29 @@ prompt_wrapper() {
 # of the scenario, and reads its readiness from what the pane painted rather than
 # from a log line it will never write.
 boot_screen_daemon() {
-  local work="$RUN_DIR/work-screen"
+  local name="${1:-screen}" permission_mode="${2:-bypass}" daemon_flags
+  local work="$RUN_DIR/work-$name"
+  if [ "$permission_mode" = prompt ]; then
+    # Peer-task daemons bypass permissions by default; this explicit negative
+    # flag is what makes the watched state probe stop on Claude's real dialog.
+    daemon_flags="$(harness_daemon_routing_flags) --no-skip-permissions"
+  else
+    daemon_flags="$(harness_daemon_flags)"
+  fi
   mkdir -p "$work"
-  harness_seed_home "$RUN_DIR/ochome-screen" "$work"
-  cat > "$RUN_DIR/screen.cmd" <<EOF
+  harness_seed_home "$RUN_DIR/ochome-$name" "$work"
+  cat > "$RUN_DIR/$name.cmd" <<EOF
 #!/usr/bin/env bash
-$(harness_env "$RUN_DIR/ochome-screen")
-export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome-screen")
+$(harness_env "$RUN_DIR/ochome-$name")
+export MEDULLA_HOME=$(printf %q "$RUN_DIR/mhome-$name")
 export MEDULLA_USER=e2e
-export MEDULLA_LINK_OWNER=$(printf %q "orchestrator-screen")
+export MEDULLA_LINK_OWNER=$(printf %q "orchestrator-$name")
 exec $(printf %q "$MEDULLA_BIN") daemon --tui --providers $(printf %q "$HARNESS") --no-pair \\
-  --name worker-screen --workspace $(printf %q "$work") --poll-ms 500 $(harness_daemon_flags)
+  --name $(printf %q "worker-$name") --workspace $(printf %q "$work") --poll-ms 500 $daemon_flags
 EOF
-  chmod +x "$RUN_DIR/screen.cmd"
-  tmux new-window -t "$SESSION" -n screen -c "$work"
-  tmux send-keys -t "$SESSION:screen" "bash $(printf %q "$RUN_DIR/screen.cmd")" C-m
+  chmod +x "$RUN_DIR/$name.cmd"
+  tmux new-window -t "$SESSION" -n "$name" -c "$work"
+  tmux send-keys -t "$SESSION:$name" "bash $(printf %q "$RUN_DIR/$name.cmd")" C-m
 
   # A first-run operator screen asks two questions before it becomes a screen:
   # how the worker should run tasks, and which coding agent powers it. Both are
@@ -183,22 +192,22 @@ EOF
   # mode where a dispatched task becomes a live session in a pane — the thing
   # worth asserting about a screen. OpenCode falls back to headless.
   if harness_screen_interactive; then
-    select_menu screen 'Interactive'
+    select_menu "$name" 'Interactive'
   else
-    select_menu screen 'Headless'
+    select_menu "$name" 'Headless'
   fi
-  select_menu screen "$(harness_screen_label)"
+  select_menu "$name" "$(harness_screen_label)"
 
   # The screen proper announces the worker it is running as and which agent
   # powers it. That line is also the confirmation that the menus above were
   # answered the way this scenario intended.
   local deadline=$(( $(date +%s) + READY_TIMEOUT_S )) pane
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    pane="$(tmux capture-pane -p -t "$SESSION:screen" 2>/dev/null || true)"
+    pane="$(tmux capture-pane -p -t "$SESSION:$name" 2>/dev/null || true)"
     # The embedded session opens a harness of its own, so the same hook-trust
     # question can appear here as in a wrapper pane.
     if printf '%s' "$pane" | grep -Eq 'Hooks need review|hooks are new or changed'; then
-      select_menu screen 'Trust all'
+      select_menu "$name" 'Trust all'
       continue
     fi
     if printf '%s' "$pane" | grep -Eq "WORKER .*(interactive|headless) on $HARNESS"; then
@@ -207,7 +216,7 @@ EOF
     fi
     sleep 1
   done
-  tmux capture-pane -p -t "$SESSION:screen" > "$RUN_DIR/screen.pane" 2>/dev/null || true
+  tmux capture-pane -p -t "$SESSION:$name" > "$RUN_DIR/$name.pane" 2>/dev/null || true
   fail "\`medulla daemon --tui\` never reached its worker screen"
 }
 
@@ -279,6 +288,23 @@ select_menu() {
   done
   tmux capture-pane -p -t "$SESSION:$window" > "$RUN_DIR/$window.pane" 2>/dev/null || true
   fail "the operator screen never offered a '$label' option"
+}
+
+# Wait on the daemon screen's narrow agent rail, excluding the terminal pane so
+# Claude's own spinner or prompt cannot accidentally satisfy a Medulla-state
+# assertion.
+wait_for_rail() {
+  local window="$1" pattern="$2" timeout="${3:-$READY_TIMEOUT_S}"
+  local deadline=$(( $(date +%s) + timeout ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if tmux capture-pane -p -t "$SESSION:$window" 2>/dev/null \
+      | awk '{ print substr($0, 1, 34) }' | grep -Eq "$pattern"; then
+      return 0
+    fi
+    sleep 1
+  done
+  tmux capture-pane -p -t "$SESSION:$window" > "$RUN_DIR/$window.pane" 2>/dev/null || true
+  return 1
 }
 
 # ── 1. the wrapper is invisible in the terminal it wraps ────────────────────
@@ -388,6 +414,38 @@ PY
     log "  the screen showed the task and its answer in a live session pane"
   fi
   ok "operator screen serves"
+}
+
+# ── 4. Claude lifecycle reports drive working and attention state ──────────
+#
+# The mock returns a real Anthropic `tool_use` block for the probe prompt. That
+# makes the actual Claude CLI submit a dispatched turn and wait for Bash
+# permission. Capturing the worker screen at both edges proves Medulla follows
+# the harness lifecycle rather than a hand-authored terminal fixture.
+scenario_claude_session_states() {
+  scenario "Claude session moves from working to attention"
+  if [ "$HARNESS" != claude ]; then
+    skip "Claude lifecycle state capture (Claude-only)"
+    return 0
+  fi
+
+  boot_screen_daemon state prompt
+  local task='MEDULLA_STATE_PROBE: request the Bash tool now'
+  start_owner state_task --to "$(worker_id state)" \
+    --task "$task" --task-id "state-$$" --timeout-ms 180000
+
+  wait_for_rail state '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]' "$ANSWER_TIMEOUT_S" \
+    || fail "Claude's dispatched turn never painted Medulla's working spinner"
+  tmux capture-pane -p -t "$SESSION:state" > "$RUN_DIR/state-working.pane"
+
+  wait_for_rail state '⚠' "$ANSWER_TIMEOUT_S" \
+    || fail "Claude's Bash request never painted Medulla's attention glyph"
+  tmux capture-pane -p -t "$SESSION:state" > "$RUN_DIR/state-attention.pane"
+
+  # The worker screen is intentionally watch-only; cleanup terminates the
+  # deliberately blocked fixture immediately after the suite reports success.
+  log "  captured state-working.pane and state-attention.pane"
+  ok "Claude lifecycle state capture"
 }
 
 summarize() {

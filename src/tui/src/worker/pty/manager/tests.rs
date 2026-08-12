@@ -5,14 +5,58 @@ use std::sync::Arc;
 
 use portable_pty::{Child, ChildKiller, ExitStatus};
 
+use super::attention::working_state;
 use super::open::LaunchGuard;
 use super::session::consumed_bell_count;
+
+use medulla::harness_hooks::{HookEvent, HookEventLog, HookReport};
 
 #[test]
 fn a_stale_bell_sample_cannot_move_the_watermark_backwards() {
     // Release sampled one bell, then an in-flight classifier stored the second
     // before release reacquired the sessions lock.
     assert_eq!(consumed_bell_count(2, 1), 2);
+}
+
+#[test]
+fn lifecycle_reports_fill_the_working_state_between_terminal_paints() {
+    let log = HookEventLog::new();
+    log.record(HookReport::new("grant-1", HookEvent::UserPromptSubmit));
+
+    assert!(working_state(
+        "model request pending",
+        Some("grant-1"),
+        Some(&log)
+    ));
+    assert!(
+        !working_state("model request pending", Some("another"), Some(&log)),
+        "reports remain scoped to their own session"
+    );
+}
+
+#[test]
+fn a_live_screen_wins_while_hook_delivery_catches_up() {
+    let active = HookEventLog::new();
+    active.record(HookReport::new("grant-1", HookEvent::PostToolUse));
+    assert!(
+        !working_state(
+            "answer complete\n❯ Write a message",
+            Some("grant-1"),
+            Some(&active)
+        ),
+        "the restored composer ends work before Stop is filed"
+    );
+
+    let stopped = HookEventLog::new();
+    stopped.record(HookReport::new("grant-1", HookEvent::Stop));
+    assert!(
+        working_state(
+            "✽ Considering… (7s · ↓ 193 tokens)",
+            Some("grant-1"),
+            Some(&stopped),
+        ),
+        "a fresh spinner starts work before UserPromptSubmit is filed"
+    );
 }
 
 /// A stand-in child that records whether it was asked to die, since the real

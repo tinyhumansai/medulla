@@ -107,6 +107,17 @@ class Handler(BaseHTTPRequestHandler):
         transport that silently fell back to the other one would still pass
         every assertion about the reply.
         """
+        if dialect is anthropic and anthropic.requests_state_probe(body):
+            reply = "[tool_use Bash: state probe]"
+            payload = dialect.log_payload(self.path, body, reply)
+            payload["user_agent"] = self.headers.get("User-Agent", "")
+            log_request(dialect.LOG_KIND, payload)
+            if body.get("stream"):
+                self._send_stream(dialect.tool_stream())
+            else:
+                self._send_json(dialect.tool_unary())
+            return
+
         reply = reply_text(dialect.extract_prompt(body))
         payload = dialect.log_payload(self.path, body, reply)
         payload["user_agent"] = self.headers.get("User-Agent", "")

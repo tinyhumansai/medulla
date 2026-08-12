@@ -61,6 +61,7 @@
 //! blast radius of a wrong guess is one row of chrome. That is what lets the
 //! structural fallback be as liberal as it is.
 
+mod claude;
 mod detect;
 mod hook;
 mod session;
@@ -69,8 +70,8 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use detect::{bell_cue, detect, is_working};
-pub use hook::hook_attention;
+pub use detect::{bell_cue, detect, is_idle, is_working};
+pub use hook::{hook_attention, hook_working};
 pub use session::{lifecycle_cue, row_cue};
 pub use types::{AttentionKind, HarnessAttention};
 

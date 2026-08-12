@@ -68,3 +68,27 @@ pub fn hook_attention(
         format!("{} is waiting for you", provider.as_str()),
     ))
 }
+
+/// Whether the most recent lifecycle report says a turn is active.
+///
+/// `Some(true)` covers every point inside a turn, from prompt submission through
+/// tools, subagents, and compaction. `Some(false)` covers an idle, waiting, or
+/// ended session. `None` means this session has not reported enough lifecycle
+/// information, so the caller should fall back to the terminal screen.
+///
+/// The hook is the stable half of working-state detection for Claude Code. Its
+/// progress wording and spinner glyphs change frequently, while these event
+/// names are the API contract used to run hooks in the first place.
+pub fn hook_working(grant: Option<&str>, log: &HookEventLog) -> Option<bool> {
+    let event = log.last_event(grant?)?;
+    Some(matches!(
+        event,
+        HookEvent::UserPromptSubmit
+            | HookEvent::PreToolUse
+            | HookEvent::PostToolUse
+            | HookEvent::SubagentStart
+            | HookEvent::SubagentStop
+            | HookEvent::PreCompact
+            | HookEvent::PostCompact
+    ))
+}

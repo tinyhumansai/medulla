@@ -109,11 +109,13 @@ impl FoldState {
     /// A fold backed by a deterministic in-process worktree registry.
     #[cfg(test)]
     pub(super) fn with_registered_worktrees(
+        on_event: Option<OnEvent>,
         workspace_context: WorkspaceContext,
         on_workspace_context: Option<OnWorkspaceContext>,
         worktrees: Vec<(PathBuf, String)>,
     ) -> Self {
-        let mut fold = Self::with_workspace_at(None, workspace_context, on_workspace_context, None);
+        let mut fold =
+            Self::with_workspace_at(on_event, workspace_context, on_workspace_context, None);
         fold.worktree_registry = WorktreeRegistry::Static(worktrees);
         fold
     }

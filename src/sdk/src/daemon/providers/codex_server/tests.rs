@@ -84,15 +84,30 @@ fn worktree_notification(path: &str, branch: &str, exit_code: i64) -> Notificati
 }
 
 /// A fold whose workspace callback records accepted reports.
-fn workspace_fold(worktrees: Vec<(PathBuf, String)>) -> (FoldState, Arc<Mutex<Vec<WorkspaceContext>>>) {
+fn workspace_fold(
+    worktrees: Vec<(PathBuf, String)>,
+) -> (
+    FoldState,
+    Arc<Mutex<Vec<WorkspaceContext>>>,
+    Arc<Mutex<Vec<HarnessSemanticEvent>>>,
+) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let event_sink = events.clone();
+    let worktrees = worktrees
+        .into_iter()
+        .map(|(path, branch)| (std::fs::canonicalize(path).unwrap(), branch))
+        .collect();
     let fold = FoldState::with_registered_worktrees(
+        Some(Box::new(move |event| {
+            event_sink.lock().unwrap().push(event.clone())
+        })),
         WorkspaceContext::default(),
         Some(Box::new(move |context| sink.lock().unwrap().push(context))),
         worktrees,
     );
-    (fold, seen)
+    (fold, seen, events)
 }
 
 #[test]
@@ -324,13 +339,8 @@ fn completed_worktree_command_updates_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktrees/fix-context");
     std::fs::create_dir_all(&worktree).unwrap();
-    let registered = std::fs::canonicalize(&worktree).unwrap();
-    let (mut fold, seen) = workspace_fold(vec![(registered, "fix-context".to_string())]);
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let event_sink = events.clone();
-    fold.on_event = Some(Box::new(move |event| {
-        event_sink.lock().unwrap().push(event.clone())
-    }));
+    let (mut fold, seen, events) =
+        workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
     fold.fold(&worktree_notification(
         worktree.to_str().unwrap(),
         "fix-context",
@@ -354,7 +364,8 @@ fn forged_worktree_report_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
+    let (mut fold, seen, _) =
+        workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
     fold.fold(&notification(
         "item/completed",
         json!({
@@ -377,7 +388,8 @@ fn failed_worktree_command_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
+    let (mut fold, seen, _) =
+        workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
 
     fold.fold(&worktree_notification(
         worktree.to_str().unwrap(),
@@ -395,7 +407,7 @@ fn unregistered_worktree_does_not_update_the_app_server_workspace() {
     let unregistered = dir.path().join("unregistered");
     std::fs::create_dir_all(&registered).unwrap();
     std::fs::create_dir_all(&unregistered).unwrap();
-    let (mut fold, seen) = workspace_fold(vec![(registered, "fix-context".to_string())]);
+    let (mut fold, seen, _) = workspace_fold(vec![(registered, "fix-context".to_string())]);
 
     fold.fold(&worktree_notification(
         unregistered.to_str().unwrap(),
@@ -411,7 +423,8 @@ fn mismatched_worktree_branch_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "other-branch".to_string())]);
+    let (mut fold, seen, _) =
+        workspace_fold(vec![(worktree.clone(), "other-branch".to_string())]);
 
     fold.fold(&worktree_notification(
         worktree.to_str().unwrap(),

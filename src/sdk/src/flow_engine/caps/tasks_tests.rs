@@ -98,7 +98,7 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
             { "id": "start", "kind": "trigger", "name": "start",
               "config": { "trigger_kind": "manual" } },
             { "id": "shape", "kind": "transform", "name": "shape",
-              "config": { "expression": "=21 + 21" } }
+              "config": { "set": { "answer": "=21 + 21" } } }
         ],
         "edges": [{ "from_node": "start", "to_node": "shape" }]
     });

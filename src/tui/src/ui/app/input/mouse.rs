@@ -45,11 +45,20 @@ fn pointer_report(
 impl App {
     /// Handle scroll and left-click mouse events for the active tab.
     pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
-        if self.kill_armed.take().is_some() {
+        let kill_cancelled = self.kill_armed.take().is_some();
+        if kill_cancelled {
             self.set_status("Session kill cancelled");
         }
-        if self.harness_close_armed.take().is_some() {
+        let harness_close_cancelled = self.harness_close_armed.take().is_some();
+        if harness_close_cancelled {
             self.set_status("Harness close cancelled");
+        }
+        // The cancellation click is the modal's answer, not a second click on
+        // the content it covered. Returning here also prevents a captured
+        // harness pointer gesture from receiving a stray release after a
+        // destructive confirmation is dismissed.
+        if kill_cancelled || harness_close_cancelled {
+            return None;
         }
         // Ahead of every other rule, including the modal one below: a button
         // that went down in a harness has to come back up in it. The grab is
@@ -105,6 +114,8 @@ impl App {
         // replace the session named by an already-visible hand-back prompt.
         if self.resume_picker.is_some()
             || self.session_picker.is_some()
+            || self.kill_armed.is_some()
+            || self.harness_close_armed.is_some()
             || self.handback_prompt.is_some()
         {
             return None;

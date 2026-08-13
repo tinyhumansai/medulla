@@ -139,9 +139,17 @@ impl App {
                 self.close_pane_session_prompt();
                 SessionsKey::Handled(None)
             }
+            // `K` means end the work on the selected row. Local harnesses are
+            // not necessarily backed by a dispatched task, so routing this
+            // only through `kill_target` made the advertised kill key a no-op
+            // for sessions the operator started in the app. Dispatched tasks
+            // still use the task-termination protocol; the local process is
+            // closed only when there is no task to send that request to.
             KeyCode::Char('K') => {
                 if let Some(target) = self.kill_target() {
                     self.arm_kill(target);
+                } else if self.pane_session.is_some() {
+                    self.close_pane_session_prompt();
                 } else {
                     self.set_status("Select a running session first");
                 }

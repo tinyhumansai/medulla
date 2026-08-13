@@ -626,6 +626,46 @@ pub fn node_summary(node: &Node) -> String {
             .and_then(|value| value.as_array())
             .map(|inputs| format!("{} inputs", inputs.len()))
             .unwrap_or_default(),
+        // What is being started, and the thing that identifies it — a tool's
+        // slug says far more than the bare word "tool".
+        NodeKind::Spawn => match (text("target"), text("slug")) {
+            (Some(target), Some(slug)) => format!("{target} · {slug}"),
+            (Some(target), None) => target,
+            (None, _) => String::new(),
+        },
+        // The release policy is the whole of what distinguishes a gate from a
+        // barrier, and `n` is meaningless without it.
+        NodeKind::Gate => release_summary(node),
+        // How wide it goes: an explicit lane count when the author capped it,
+        // otherwise the path whose length decides at run time.
+        NodeKind::Scatter => match (
+            node.config.get("lanes").and_then(serde_json::Value::as_u64),
+            text("path"),
+        ) {
+            (Some(lanes), Some(path)) => format!("{path} · {lanes} lanes"),
+            (Some(lanes), None) => format!("{lanes} lanes"),
+            (None, Some(path)) => path,
+            (None, None) => String::new(),
+        },
+        NodeKind::Gather => release_summary(node),
+    }
+}
+
+/// The release policy of a `gate` or `gather`, as one line.
+///
+/// Shared because the two kinds read the same `release`/`n` pair and an operator
+/// scanning a canvas is asking the same question of both: what has to arrive
+/// before this proceeds. `all` is the engine's default, so a node that names no
+/// policy still says so rather than showing a blank.
+fn release_summary(node: &Node) -> String {
+    let release = node
+        .config
+        .get("release")
+        .and_then(|value| value.as_str())
+        .unwrap_or("all");
+    match node.config.get("n").and_then(serde_json::Value::as_u64) {
+        Some(n) => format!("{release} · n={n}"),
+        None => release.to_string(),
     }
 }
 

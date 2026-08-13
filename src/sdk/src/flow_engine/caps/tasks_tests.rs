@@ -117,7 +117,7 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
     let result = collected(settle(&runner, &ticket).await);
     assert_eq!(
         result
-            .pointer("/nodes/shape/items/0/json")
+            .pointer("/nodes/shape/items/0/json/answer")
             .and_then(Value::as_i64),
         Some(42),
         "the child's transform should have run, got {result}"

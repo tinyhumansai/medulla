@@ -151,24 +151,10 @@ fn build_capabilities_inner(
         state_namespace: state_namespace.to_string(),
         run_id: run_id.to_string(),
         evidence,
-        // One limiter and one id sequence for the whole run, minted here rather
-        // than inside `build` so every bundle this assembly produces — the run's
-        // own and each spawned task's — shares them. Two counters each starting
-        // at zero would hand the same task id to the first dispatch each makes
-        // along a shared route, and two semaphores would make the run's real
-        // ceiling twice what the operator configured.
-        slots: Arc::new(tokio::sync::Semaphore::new(
-            settings_max_parallel_agents(&settings),
-        )),
-        sequence: Arc::new(AtomicU64::new(0)),
+        slots,
+        sequence,
     }
     .build()
-}
-
-/// The `max_parallel_agents` bound, never zero — a semaphore with no permits
-/// would deadlock the first dispatch rather than serialising it.
-fn settings_max_parallel_agents(settings: &CapabilitySettings) -> usize {
-    settings.max_parallel_agents.max(1)
 }
 
 /// Everything one run's capability bundle is assembled from.

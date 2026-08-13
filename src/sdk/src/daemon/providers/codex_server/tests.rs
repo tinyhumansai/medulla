@@ -15,6 +15,13 @@ use super::super::types::{Abort, RunTaskOptions};
 use super::execution::{child_env, uses_app_server, HARNESS_TRANSPORT_ENV};
 use super::fold::FoldState;
 
+/// Test fold plus its recorded workspace callbacks and semantic events.
+type WorkspaceRecording = (
+    FoldState,
+    Arc<Mutex<Vec<WorkspaceContext>>>,
+    Arc<Mutex<Vec<HarnessSemanticEvent>>>,
+);
+
 /// Run options carrying a transport and an environment, and nothing else that
 /// matters to the two functions under test here.
 fn options(transport: HarnessTransport, env: &[(&str, &str)]) -> RunTaskOptions {
@@ -84,13 +91,7 @@ fn worktree_notification(path: &str, branch: &str, exit_code: i64) -> Notificati
 }
 
 /// A fold whose workspace callback records accepted reports.
-fn workspace_fold(
-    worktrees: Vec<(PathBuf, String)>,
-) -> (
-    FoldState,
-    Arc<Mutex<Vec<WorkspaceContext>>>,
-    Arc<Mutex<Vec<HarnessSemanticEvent>>>,
-) {
+fn workspace_fold(worktrees: Vec<(PathBuf, String)>) -> WorkspaceRecording {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     let events = Arc::new(Mutex::new(Vec::new()));

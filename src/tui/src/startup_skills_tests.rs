@@ -139,5 +139,28 @@ fn scratch_medulla_home_never_changes_the_real_harness_home() {
     assert_eq!(report.notice, None);
     assert!(report.warnings.is_empty());
     assert!(!home.join(".codex/config.toml").exists());
+    assert!(!home.join(".claude/skills").exists());
+    assert!(!home.join(".agents").exists());
+}
+
+#[test]
+fn dev_medulla_home_never_changes_the_real_harness_home() {
+    let fixture = tempfile::tempdir().unwrap();
+    let home = fixture.path().join("home");
+    let cwd = fixture.path().join("project");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    fs::create_dir_all(&cwd).unwrap();
+    let env = HashMap::from([
+        ("HOME".to_string(), home.display().to_string()),
+        ("MEDULLA_DEV".to_string(), "true".to_string()),
+    ]);
+
+    let report = reconcile(&env, &cwd);
+
+    assert_eq!(report.notice, None);
+    assert!(report.warnings.is_empty());
+    assert!(!home.join(".codex/config.toml").exists());
+    assert!(!home.join(".claude/skills").exists());
     assert!(!home.join(".agents").exists());
 }

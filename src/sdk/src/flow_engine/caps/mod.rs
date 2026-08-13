@@ -131,7 +131,71 @@ fn build_capabilities_inner(
     run_id: &str,
     evidence: Option<Arc<AgentEvidence>>,
 ) -> Capabilities {
-    let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
+    Assembly {
+        settings,
+        dispatch: services.dispatch,
+        resolver: services.resolver,
+        http_credentials: services.http_credentials,
+        node_progress: services.node_progress,
+        state_namespace: state_namespace.to_string(),
+        run_id: run_id.to_string(),
+        evidence,
+        // One limiter and one id sequence for the whole run, minted here rather
+        // than inside `build` so every bundle this assembly produces — the run's
+        // own and each spawned task's — shares them. Two counters each starting
+        // at zero would hand the same task id to the first dispatch each makes
+        // along a shared route, and two semaphores would make the run's real
+        // ceiling twice what the operator configured.
+        slots: Arc::new(tokio::sync::Semaphore::new(
+            settings_max_parallel_agents(&settings),
+        )),
+        sequence: Arc::new(AtomicU64::new(0)),
+    }
+    .build()
+}
+
+/// The `max_parallel_agents` bound, never zero — a semaphore with no permits
+/// would deadlock the first dispatch rather than serialising it.
+fn settings_max_parallel_agents(settings: &CapabilitySettings) -> usize {
+    settings.max_parallel_agents.max(1)
+}
+
+/// Everything one run's capability bundle is assembled from.
+///
+/// A struct rather than a function's locals because the bundle has to be
+/// buildable more than once: a `spawn` node's task runner rebuilds it for each
+/// task it starts, since a bundle cannot hold the runner that holds the bundle
+/// without leaking the pair. Cloning one is cheap — every field is an `Arc`, a
+/// short string, or a small map.
+#[derive(Clone)]
+struct Assembly {
+    /// The operator's limits and defaults for this run.
+    settings: Arc<CapabilitySettings>,
+    /// Where `agent` nodes send their work.
+    dispatch: Arc<dyn HarnessDispatch>,
+    /// How `sub_workflow` nodes find their child graph.
+    resolver: Arc<dyn WorkflowResolver>,
+    /// HTTP credentials, keyed by the name a `connection_ref` uses.
+    http_credentials: HashMap<String, HttpCredential>,
+    /// Where a dispatched harness's live progress goes, if anyone is watching.
+    node_progress: Option<NodeProgressSink>,
+    /// Scopes the state store, so two workflows never collide on a key.
+    state_namespace: String,
+    /// Tags every dispatched task; the id an abort matches.
+    run_id: String,
+    /// Captures resolved agent prompts for run history, when recording.
+    evidence: Option<Arc<AgentEvidence>>,
+    /// The run-wide ceiling on harness tasks in flight.
+    slots: Arc<tokio::sync::Semaphore>,
+    /// The run-wide dispatch id sequence.
+    sequence: Arc<AtomicU64>,
+}
+
+impl Assembly {
+    /// Assemble one capability bundle.
+    fn build(&self) -> Capabilities {
+        let settings = self.settings.clone();
+        let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
         // The same bound `medulla:shell` uses, so an author who moves a
         // script between the two does not silently change its deadline.
         Arc::new(ProcessCodeRunner::new(settings.script_timeout()))

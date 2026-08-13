@@ -358,20 +358,14 @@ fn completed_worktree_command_updates_the_app_server_workspace() {
 
     let contexts = seen.lock().unwrap();
     assert_eq!(contexts.len(), 1);
-    assert_eq!(
-        contexts[0].cwd.as_deref(),
-        Some(worktree.to_str().unwrap())
-    );
+    assert_eq!(contexts[0].cwd.as_deref(), Some(worktree.to_str().unwrap()));
     assert_eq!(contexts[0].branch.as_deref(), Some("fix-context"));
     let events = events.lock().unwrap();
     let workspace = events
         .iter()
         .find(|event| event.event.kind == crate::harness_work::kinds::SESSION_INFO)
         .expect("the active session is told about the move");
-    assert_eq!(
-        workspace.event.payload["cwd"],
-        worktree.to_str().unwrap()
-    );
+    assert_eq!(workspace.event.payload["cwd"], worktree.to_str().unwrap());
 }
 
 #[test]

@@ -310,7 +310,10 @@ fn registered_worktrees(output: &str) -> Vec<(PathBuf, String)> {
             let branch = entry
                 .lines()
                 .find_map(|line| line.strip_prefix("branch refs/heads/"))?;
-            Some((std::fs::canonicalize(Path::new(path)).ok()?, branch.to_string()))
+            Some((
+                std::fs::canonicalize(Path::new(path)).ok()?,
+                branch.to_string(),
+            ))
         })
         .collect()
 }

@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tinyflows::caps::{Capabilities, TaskRunner, TaskSpec, TaskState};
 
-use super::tasks::{MedullaTaskRunner, TaskCapabilities};
+use super::{MedullaTaskRunner, TaskCapabilities};
 
 /// Capabilities that touch nothing, with the deadline the test wants.
 ///

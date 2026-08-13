@@ -235,7 +235,7 @@ async fn a_scatter_runs_the_lane_body_once_per_lane_on_a_real_harness() {
         }),
     );
 
-    let prompts = prompts_from_running(home.path(), "fan-out").await;
+    let prompts = prompts_from_running(home.path(), "fan-out", "scatter-1").await;
     assert_eq!(
         prompts.len(),
         3,
@@ -284,7 +284,7 @@ async fn a_spawned_child_workflow_dispatches_its_agent_node_to_a_harness() {
         }),
     );
 
-    let prompts = prompts_from_running(home.path(), "spawn-and-gate").await;
+    let prompts = prompts_from_running(home.path(), "spawn-and-gate", "spawn-1").await;
     assert!(
         prompts.iter().any(|p| p.contains("the spawned prompt")),
         "the spawned child's agent node should have reached a harness; got {prompts:?}"

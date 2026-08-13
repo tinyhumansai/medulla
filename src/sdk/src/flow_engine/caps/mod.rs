@@ -193,8 +193,8 @@ impl Assembly {
     fn build(&self) -> Capabilities {
         let settings = self.settings.clone();
         let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
-        // The same bound `medulla:shell` uses, so an author who moves a
-        // script between the two does not silently change its deadline.
+            // The same bound `medulla:shell` uses, so an author who moves a
+            // script between the two does not silently change its deadline.
             Arc::new(ProcessCodeRunner::new(settings.script_timeout()))
         } else {
             Arc::new(DeniedCodeRunner)

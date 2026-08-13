@@ -98,7 +98,7 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
             { "id": "start", "kind": "trigger", "name": "start",
               "config": { "trigger_kind": "manual" } },
             { "id": "shape", "kind": "transform", "name": "shape",
-              "config": { "expression": "={ \"ok\": true }" } }
+              "config": { "expression": "=21 + 21" } }
         ],
         "edges": [{ "from_node": "start", "to_node": "shape" }]
     });
@@ -111,10 +111,16 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
         .await
         .expect("start");
 
+    // The child's own run state, not the graph document that was handed over:
+    // the transform only has a value here because the child was compiled and
+    // executed rather than echoed back.
     let result = collected(settle(&runner, &ticket).await);
-    assert!(
-        result.get("shape").is_some(),
-        "the child's own node output should be what settles, got {result}"
+    assert_eq!(
+        result
+            .pointer("/nodes/shape/items/0/json")
+            .and_then(Value::as_i64),
+        Some(42),
+        "the child's transform should have run, got {result}"
     );
 }
 

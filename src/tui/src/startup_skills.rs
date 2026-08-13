@@ -164,7 +164,7 @@ fn reconcile_with(
     if targets.contains(&SkillTarget::Claude) {
         match ensure_claude_registration(claude_program, exe) {
             Ok(changed) => registered |= changed,
-            Err(error) => report.warnings.push(error),
+            Err(error) => report.warnings.push(format!("{error}")),
         }
     }
 

@@ -175,13 +175,18 @@ impl Inbox {
 
 /// Run installed workflow `id` on a fresh worker and return the prompts its
 /// harness sessions were asked to run.
-async fn prompts_from_running(home: &std::path::Path, id: &str) -> Vec<String> {
+///
+/// `task_id` must differ per test: the worker's in-flight registry is
+/// process-global, and the test binary runs its cases concurrently in one
+/// process, so a shared id makes the second frame bounce with "already
+/// running".
+async fn prompts_from_running(home: &std::path::Path, id: &str, task_id: &str) -> Vec<String> {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home, recording_executor(prompts.clone()));
     let mut inbox = Inbox::default();
 
     let fingerprint = installed_fingerprint(home, id);
-    peer.send("host", &frame("p1", id, &fingerprint))
+    peer.send("host", &frame(task_id, id, &fingerprint))
         .await
         .unwrap();
 

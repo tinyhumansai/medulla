@@ -251,6 +251,10 @@ nobody.
 A skill without the MCP server attached is inert, so `--with-mcp` registers
 `medulla mcp` with the same harnesses the skills went to. That registration is a
 config-file merge we perform ourselves, never a `claude mcp add` subprocess.
+This describes the `medulla skills` command specifically. Interactive app
+startup also reconciles the user scope; because Claude exposes no stable
+user-registry file, that separate app-side path uses Claude's supported
+`claude mcp add` command while Codex still uses this module's preserving merge.
 
 Shelling out makes the result depend on which CLI version happens to be on
 `PATH`, cannot be tested offline, and cannot honour `--dry-run` — a dry run that

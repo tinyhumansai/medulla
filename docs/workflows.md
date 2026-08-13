@@ -416,6 +416,22 @@ every other server and key. Claude at user scope and the generic target have no
 file we can safely write, so the command prints the exact `claude mcp add` line
 for you to run instead of reporting a success Claude would never read.
 
+The interactive Medulla app reconciles the user scope automatically on startup.
+For every installed Claude or Codex harness it synchronizes the workflow skills,
+prunes skills for workflows that are gone, and ensures an MCP registration
+exists. Codex's TOML is merged directly and points at the running Medulla
+binary. Claude's user registry is owned by its CLI, so startup calls
+`claude mcp add` and preserves an existing entry as operator-owned state.
+Failures are logged and shown as a startup warning rather than preventing the
+app from opening.
+
+This registers a STDIO server; it does not leave a free-standing MCP daemon
+running. Claude and Codex own that process and start it when a new client session
+loads its MCP configuration. Existing sessions keep the tool inventory they
+started with and must be restarted. `--mock`, `MEDULLA_HOME`, and `MEDULLA_DEV`
+launches skip user-scope reconciliation so a scratch catalog cannot leak into
+the operator's real harness configuration.
+
 ### What the model then does
 
 The skill's frontmatter description is the workflow's own description plus an

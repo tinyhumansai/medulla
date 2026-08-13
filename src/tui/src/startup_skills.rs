@@ -13,6 +13,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use anyhow::{bail, Context};
+
 use medulla::workflows::skills::{
     self, FileAction, InstallOptions, RegistrationOptions, SkillScope, SkillTarget,
 };

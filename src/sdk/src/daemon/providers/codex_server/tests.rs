@@ -348,7 +348,7 @@ fn completed_worktree_command_updates_the_app_server_workspace() {
                     "\"path\":\"{}\",",
                     "\"branch\":\"fix-context\",\"head\":\"abc123456789\",",
                     "\"headShort\":\"abc1234\",\"created\":true,",
-                    "\"submodules\":{\"state\":\"initialized_recursive\",\"count\":0},",
+                    "\"submodules\":{{\"state\":\"initialized_recursive\",\"count\":0}},",
                     "\"nextCommand\":\"cd {}\"}}"
                 ), repository.display(), worktree.display(), worktree.display()),
                 "exitCode": 0

@@ -231,7 +231,7 @@ async fn drive_turn(
         on_event,
         workspace_context,
         on_workspace_context,
-        Some(cwd.into()),
+        Some(cwd.clone().into()),
     )));
     let timeout = Duration::from_millis(timeout_ms);
     // Tracked from `turn/started` so an interrupt can name the turn it stops;

@@ -178,7 +178,11 @@ fn reconcile_with(
 }
 
 /// Add Medulla to Claude's CLI-owned user registry when it is absent.
-fn ensure_claude_registration(claude: &Path, medulla: &Path) -> Result<bool, String> {
+///
+/// Returns `Ok(false)` when the entry is already present — Claude owns this
+/// registry and gives `mcp add` no update/idempotent flag, and its explicit
+/// already-present refusal is exactly the state we want.
+fn ensure_claude_registration(claude: &Path, medulla: &Path) -> anyhow::Result<bool> {
     let mut child = Command::new(claude)
         .args([
             "mcp",
@@ -196,9 +200,7 @@ fn ensure_claude_registration(claude: &Path, medulla: &Path) -> Result<bool, Str
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| {
-            format!("workflow integration: could not run Claude's MCP registrar: {error}")
-        })?;
+        .context("workflow integration: could not run Claude's MCP registrar")?;
     let deadline = Instant::now() + CLAUDE_REGISTRATION_TIMEOUT;
     let status = loop {
         match child.try_wait() {
@@ -209,17 +211,12 @@ fn ensure_claude_registration(claude: &Path, medulla: &Path) -> Result<bool, Str
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(
-                    "workflow integration: Claude's MCP registrar timed out after 10 seconds"
-                        .to_string(),
-                );
+                bail!("workflow integration: Claude's MCP registrar timed out after 10 seconds");
             }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "workflow integration: could not wait for Claude's MCP registrar: {error}"
-                ));
+                bail!("workflow integration: could not wait for Claude's MCP registrar: {error}");
             }
         }
     };
@@ -239,11 +236,14 @@ fn ensure_claude_registration(claude: &Path, medulla: &Path) -> Result<bool, Str
     if detail.contains("MCP server medulla already exists") {
         return Ok(false);
     }
-    Err(if detail.is_empty() {
-        "workflow integration: Claude rejected the Medulla MCP registration".to_string()
-    } else {
-        format!("workflow integration: Claude rejected the Medulla MCP registration: {detail}")
-    })
+    bail!(
+        "workflow integration: Claude rejected the Medulla MCP registration{}",
+        if detail.is_empty() {
+            String::new()
+        } else {
+            format!(": {detail}")
+        }
+    )
 }
 
 #[cfg(test)]

@@ -321,7 +321,7 @@ fn advances_the_event_ordering_key() {
 
 #[test]
 fn completed_worktree_command_updates_the_app_server_workspace() {
-    let dir = crate::tests::support::fake_provider::TempDir::new();
+    let dir = tempfile::tempdir().unwrap();
     let repository = dir.path().join("repo");
     std::fs::create_dir_all(&repository).unwrap();
     let worktree = registered_worktree(&repository);
@@ -376,7 +376,7 @@ fn completed_worktree_command_updates_the_app_server_workspace() {
 
 #[test]
 fn forged_worktree_report_does_not_update_the_app_server_workspace() {
-    let dir = crate::tests::support::fake_provider::TempDir::new();
+    let dir = tempfile::tempdir().unwrap();
     let repository = dir.path().join("repo");
     std::fs::create_dir_all(&repository).unwrap();
     let worktree = registered_worktree(&repository);

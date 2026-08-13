@@ -198,58 +198,53 @@ impl Assembly {
         let code: Arc<dyn tinyflows::caps::CodeRunner> = if settings.allow_code {
         // The same bound `medulla:shell` uses, so an author who moves a
         // script between the two does not silently change its deadline.
-        Arc::new(ProcessCodeRunner::new(settings.script_timeout()))
-    } else {
-        Arc::new(DeniedCodeRunner)
-    };
+            Arc::new(ProcessCodeRunner::new(settings.script_timeout()))
+        } else {
+            Arc::new(DeniedCodeRunner)
+        };
 
-    // One limiter for the whole run. The agent runner and the LLM provider both
-    // dispatch to the same worker pool, so giving each its own semaphore would
-    // make the run's real ceiling twice what the operator configured.
-    let slots = Arc::new(tokio::sync::Semaphore::new(
-        settings.max_parallel_agents.max(1),
-    ));
-
-    // One task-id sequence for the whole run, for the same reason as the
-    // limiter: both runners mint `wf:{run}:{route}#{sequence}`, so two counters
-    // each starting at zero would hand the same id to the first dispatch each
-    // makes along a shared route.
-    let sequence = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
-    let progress = services.node_progress.clone();
-    let llm: Arc<dyn tinyflows::caps::LlmProvider> = match &evidence {
-        Some(evidence) => Arc::new(
-            HarnessLlm::recording(
-                services.dispatch.clone(),
-                settings.clone(),
-                run_id,
-                evidence.clone(),
-            )
-            .with_limiter(slots.clone())
-            .with_sequence(sequence.clone())
-            .streaming_to(progress.clone()),
-        ),
-        None => Arc::new(
-            HarnessLlm::new(services.dispatch.clone(), settings.clone(), run_id)
+        let slots = self.slots.clone();
+        let sequence = self.sequence.clone();
+        let run_id = self.run_id.as_str();
+        let progress = self.node_progress.clone();
+        let llm: Arc<dyn tinyflows::caps::LlmProvider> = match &self.evidence {
+            Some(evidence) => Arc::new(
+                HarnessLlm::recording(
+                    self.dispatch.clone(),
+                    settings.clone(),
+                    run_id,
+                    evidence.clone(),
+                )
                 .with_limiter(slots.clone())
                 .with_sequence(sequence.clone())
                 .streaming_to(progress.clone()),
-        ),
-    };
-    let agent: Arc<dyn tinyflows::caps::AgentRunner> = match evidence {
-        Some(evidence) => Arc::new(
-            HarnessAgentRunner::recording(services.dispatch, settings.clone(), run_id, evidence)
+            ),
+            None => Arc::new(
+                HarnessLlm::new(self.dispatch.clone(), settings.clone(), run_id)
+                    .with_limiter(slots.clone())
+                    .with_sequence(sequence.clone())
+                    .streaming_to(progress.clone()),
+            ),
+        };
+        let agent: Arc<dyn tinyflows::caps::AgentRunner> = match &self.evidence {
+            Some(evidence) => Arc::new(
+                HarnessAgentRunner::recording(
+                    self.dispatch.clone(),
+                    settings.clone(),
+                    run_id,
+                    evidence.clone(),
+                )
                 .with_limiter(slots)
                 .with_sequence(sequence)
                 .streaming_to(progress),
-        ),
-        None => Arc::new(
-            HarnessAgentRunner::new(services.dispatch, settings.clone(), run_id)
-                .with_limiter(slots)
-                .with_sequence(sequence)
-                .streaming_to(progress),
-        ),
-    };
+            ),
+            None => Arc::new(
+                HarnessAgentRunner::new(self.dispatch.clone(), settings.clone(), run_id)
+                    .with_limiter(slots)
+                    .with_sequence(sequence)
+                    .streaming_to(progress),
+            ),
+        };
 
     // A `shell` node is offered exactly when a `code` node is: both run an
     // author's script with this daemon's privileges, so a host that refused one

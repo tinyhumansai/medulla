@@ -283,7 +283,7 @@ impl Assembly {
             // capabilities, which is what makes `spawn`/`gate` fan-out real here
             // rather than a shape the graph can express and the host cannot
             // honour.
-            tasks: Some(Arc::new(tinyflows::caps::TokioTaskRunner::new())),
+            tasks: Some(Arc::new(MedullaTaskRunner::new(Arc::new(self.clone())))),
         }
     }
 }

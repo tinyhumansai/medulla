@@ -66,8 +66,8 @@ pub(super) struct FoldState {
     workspace_context: WorkspaceContext,
     /// Persists a newly detected worktree for the next resumed turn.
     on_workspace_context: Option<OnWorkspaceContext>,
-    /// Checkout from which Git may enumerate the repository's worktrees.
-    repository_cwd: Option<PathBuf>,
+    /// Source used to enumerate the repository's registered worktrees.
+    worktree_registry: WorktreeRegistry,
     /// Line counter standing in for the CLI transport's transcript offsets.
     ///
     /// There is no transcript here, but `HarnessSemanticEvent::line` is the
@@ -99,9 +99,23 @@ impl FoldState {
             on_event,
             workspace_context,
             on_workspace_context,
-            repository_cwd,
+            worktree_registry: repository_cwd
+                .map(WorktreeRegistry::Git)
+                .unwrap_or(WorktreeRegistry::Disabled),
             line: 0,
         }
+    }
+
+    /// A fold backed by a deterministic in-process worktree registry.
+    #[cfg(test)]
+    pub(super) fn with_registered_worktrees(
+        workspace_context: WorkspaceContext,
+        on_workspace_context: Option<OnWorkspaceContext>,
+        worktrees: Vec<(PathBuf, String)>,
+    ) -> Self {
+        let mut fold = Self::with_workspace_at(None, workspace_context, on_workspace_context, None);
+        fold.worktree_registry = WorktreeRegistry::Static(worktrees);
+        fold
     }
 
     /// Fold one notification, emitting whatever events it implies.
@@ -258,27 +272,43 @@ impl FoldState {
     /// Accept only a report for a successful helper invocation that Git says is
     /// an existing worktree of this repository on the reported branch.
     fn is_registered_worktree(&self, cwd: &str, branch: &str) -> bool {
-        let Some(repository_cwd) = self.repository_cwd.as_deref() else {
-            return false;
-        };
         let Ok(cwd) = std::fs::canonicalize(cwd) else {
             return false;
         };
-        let Ok(output) = Command::new("git")
-            .args(["-C"])
-            .arg(repository_cwd)
-            .args(["worktree", "list", "--porcelain"])
-            .output()
-        else {
-            return false;
+        let worktrees = match &self.worktree_registry {
+            WorktreeRegistry::Disabled => return false,
+            WorktreeRegistry::Git(repository_cwd) => {
+                let Ok(output) = Command::new("git")
+                    .args(["-C"])
+                    .arg(repository_cwd)
+                    .args(["worktree", "list", "--porcelain"])
+                    .output()
+                else {
+                    return false;
+                };
+                if !output.status.success() {
+                    return false;
+                }
+                registered_worktrees(&String::from_utf8_lossy(&output.stdout))
+            }
+            #[cfg(test)]
+            WorktreeRegistry::Static(worktrees) => worktrees.clone(),
         };
-        if !output.status.success() {
-            return false;
-        }
-        registered_worktrees(&String::from_utf8_lossy(&output.stdout))
+        worktrees
             .into_iter()
             .any(|(path, registered_branch)| path == cwd && registered_branch == branch)
     }
+}
+
+/// Where worktree membership is read from.
+enum WorktreeRegistry {
+    /// No repository was configured, so no report may update the workspace.
+    Disabled,
+    /// Ask Git for the live registry rooted at this checkout.
+    Git(PathBuf),
+    /// Deterministic registry used by unit tests.
+    #[cfg(test)]
+    Static(Vec<(PathBuf, String)>),
 }
 
 /// A command item may affect retained cwd only when the worktree helper itself

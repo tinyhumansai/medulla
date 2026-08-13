@@ -1,8 +1,7 @@
 //! Unit tests for transport selection and the notification fold.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
@@ -67,32 +66,33 @@ fn recording_fold() -> (FoldState, Arc<Mutex<Vec<HarnessSemanticEvent>>>) {
     (fold, seen)
 }
 
-/// Create a repository and a registered linked worktree for report validation.
-fn registered_worktree(root: &Path) -> PathBuf {
-    git(root, &["init"]);
-    git(root, &["config", "user.email", "test@example.com"]);
-    git(root, &["config", "user.name", "Test"]);
-    std::fs::write(root.join("README"), "test\n").unwrap();
-    git(root, &["add", "README"]);
-    git(root, &["commit", "-m", "initial"]);
-    let worktree = root.join("worktrees/fix-context");
-    git(
-        root,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            "fix-context",
-            worktree.to_str().unwrap(),
-        ],
-    );
-    worktree
+/// A completed worktree helper item carrying the supplied checkout report.
+fn worktree_notification(path: &str, branch: &str, exit_code: i64) -> Notification {
+    notification(
+        "item/completed",
+        json!({
+            "item": {
+                "type": "commandExecution",
+                "command": "worktree fix-context --json",
+                "aggregatedOutput": format!(
+                    "{{\"status\":\"ready\",\"repository\":\"/repo\",\"path\":\"{path}\",\"branch\":\"{branch}\",\"head\":\"abc\",\"headShort\":\"abc\",\"created\":true,\"submodules\":{{\"state\":\"initialized_recursive\",\"count\":0}},\"nextCommand\":\"cd {path}\"}}"
+                ),
+                "exitCode": exit_code
+            }
+        }),
+    )
 }
 
-/// Run a Git setup command and make failures identify the invocation.
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git").arg("-C").arg(root).args(args).status();
-    assert!(status.is_ok_and(|status| status.success()), "git {args:?}");
+/// A fold whose workspace callback records accepted reports.
+fn workspace_fold(worktrees: Vec<(PathBuf, String)>) -> (FoldState, Arc<Mutex<Vec<WorkspaceContext>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    let fold = FoldState::with_registered_worktrees(
+        WorkspaceContext::default(),
+        Some(Box::new(move |context| sink.lock().unwrap().push(context))),
+        worktrees,
+    );
+    (fold, seen)
 }
 
 #[test]
@@ -322,38 +322,19 @@ fn advances_the_event_ordering_key() {
 #[test]
 fn completed_worktree_command_updates_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = dir.path().join("repo");
-    std::fs::create_dir_all(&repository).unwrap();
-    let worktree = registered_worktree(&repository);
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
+    let worktree = dir.path().join("worktrees/fix-context");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let registered = std::fs::canonicalize(&worktree).unwrap();
+    let (mut fold, seen) = workspace_fold(vec![(registered, "fix-context".to_string())]);
     let events = Arc::new(Mutex::new(Vec::new()));
     let event_sink = events.clone();
-    let mut fold = FoldState::with_workspace_at(
-        Some(Box::new(move |event| {
-            event_sink.lock().unwrap().push(event.clone())
-        })),
-        WorkspaceContext::default(),
-        Some(Box::new(move |context| sink.lock().unwrap().push(context))),
-        Some(repository.clone()),
-    );
-    fold.fold(&notification(
-        "item/completed",
-        json!({
-            "item": {
-                "type": "commandExecution",
-                "command": "worktree fix-context --json",
-                "aggregatedOutput": format!(concat!(
-                    "{{\"status\":\"ready\",\"repository\":\"{}\",",
-                    "\"path\":\"{}\",",
-                    "\"branch\":\"fix-context\",\"head\":\"abc123456789\",",
-                    "\"headShort\":\"abc1234\",\"created\":true,",
-                    "\"submodules\":{{\"state\":\"initialized_recursive\",\"count\":0}},",
-                    "\"nextCommand\":\"cd {}\"}}"
-                ), repository.display(), worktree.display(), worktree.display()),
-                "exitCode": 0
-            }
-        }),
+    fold.on_event = Some(Box::new(move |event| {
+        event_sink.lock().unwrap().push(event.clone())
+    }));
+    fold.fold(&worktree_notification(
+        worktree.to_str().unwrap(),
+        "fix-context",
+        0,
     ));
 
     let contexts = seen.lock().unwrap();
@@ -371,17 +352,9 @@ fn completed_worktree_command_updates_the_app_server_workspace() {
 #[test]
 fn forged_worktree_report_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
-    let repository = dir.path().join("repo");
-    std::fs::create_dir_all(&repository).unwrap();
-    let worktree = registered_worktree(&repository);
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    let mut fold = FoldState::with_workspace_at(
-        None,
-        WorkspaceContext::default(),
-        Some(Box::new(move |context| sink.lock().unwrap().push(context))),
-        Some(repository),
-    );
+    let worktree = dir.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
     fold.fold(&notification(
         "item/completed",
         json!({
@@ -396,5 +369,55 @@ fn forged_worktree_report_does_not_update_the_app_server_workspace() {
             }
         }),
     ));
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn failed_worktree_command_does_not_update_the_app_server_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = dir.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
+
+    fold.fold(&worktree_notification(
+        worktree.to_str().unwrap(),
+        "fix-context",
+        1,
+    ));
+
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unregistered_worktree_does_not_update_the_app_server_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let registered = dir.path().join("registered");
+    let unregistered = dir.path().join("unregistered");
+    std::fs::create_dir_all(&registered).unwrap();
+    std::fs::create_dir_all(&unregistered).unwrap();
+    let (mut fold, seen) = workspace_fold(vec![(registered, "fix-context".to_string())]);
+
+    fold.fold(&worktree_notification(
+        unregistered.to_str().unwrap(),
+        "fix-context",
+        0,
+    ));
+
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn mismatched_worktree_branch_does_not_update_the_app_server_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let worktree = dir.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let (mut fold, seen) = workspace_fold(vec![(worktree.clone(), "other-branch".to_string())]);
+
+    fold.fold(&worktree_notification(
+        worktree.to_str().unwrap(),
+        "fix-context",
+        0,
+    ));
+
     assert!(seen.lock().unwrap().is_empty());
 }

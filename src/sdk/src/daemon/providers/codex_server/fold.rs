@@ -80,16 +80,7 @@ impl FoldState {
     /// A fold ready for one turn.
     #[cfg(test)]
     pub(super) fn new(on_event: Option<OnEvent>) -> Self {
-        Self::with_workspace(on_event, WorkspaceContext::default(), None)
-    }
-
-    /// A fold seeded with repository position retained by a resumed thread.
-    pub(super) fn with_workspace(
-        on_event: Option<OnEvent>,
-        workspace_context: WorkspaceContext,
-        on_workspace_context: Option<OnWorkspaceContext>,
-    ) -> Self {
-        Self::with_workspace_at(on_event, workspace_context, on_workspace_context, None)
+        Self::with_workspace_at(on_event, WorkspaceContext::default(), None, None)
     }
 
     /// A fold seeded with workspace state and its configured checkout.

@@ -246,35 +246,60 @@ impl Assembly {
             ),
         };
 
-    // A `shell` node is offered exactly when a `code` node is: both run an
-    // author's script with this daemon's privileges, so a host that refused one
-    // and allowed the other would be drawing a line that does not exist.
-    // `None` rather than a refusing runner, because the engine's own answer for
-    // an absent capability already says the node cannot run here.
-    let shell: Option<Arc<dyn tinyflows::caps::ShellRunner>> = settings.allow_code.then(|| {
-        Arc::new(ProcessShellRunner::new(
-            ScriptPolicy::new(&settings.workspace),
-            settings.script_timeout(),
-        )) as Arc<dyn tinyflows::caps::ShellRunner>
-    });
+        // A `shell` node is offered exactly when a `code` node is: both run an
+        // author's script with this daemon's privileges, so a host that refused
+        // one and allowed the other would be drawing a line that does not
+        // exist. `None` rather than a refusing runner, because the engine's own
+        // answer for an absent capability already says the node cannot run here.
+        let shell: Option<Arc<dyn tinyflows::caps::ShellRunner>> = settings.allow_code.then(|| {
+            Arc::new(ProcessShellRunner::new(
+                ScriptPolicy::new(&settings.workspace),
+                settings.script_timeout(),
+            )) as Arc<dyn tinyflows::caps::ShellRunner>
+        });
 
-    Capabilities {
-        llm,
-        agent: Some(agent),
-        shell,
-        tools: Arc::new(MedullaToolInvoker::new(settings.clone())),
-        http: Arc::new(AllowlistHttpClient::new(
-            HostAllowlist::new(settings.http_allowlist.clone()),
-            services.http_credentials,
-        )),
-        code,
-        state: Arc::new(FileStateStore::new(&settings.state_dir, state_namespace)),
-        resolver: services.resolver,
-        // `None` until the host exposes a memory store: the engine then fails a
-        // `memory` node with a capability error, which is the honest answer.
-        // Standing one up on the state store would answer `recall` with an empty
-        // set — indistinguishable from "the user never said that".
-        memory: None,
+        Capabilities {
+            llm,
+            agent: Some(agent),
+            shell,
+            tools: Arc::new(MedullaToolInvoker::new(settings.clone())),
+            http: Arc::new(AllowlistHttpClient::new(
+                HostAllowlist::new(settings.http_allowlist.clone()),
+                self.http_credentials.clone(),
+            )),
+            code,
+            state: Arc::new(FileStateStore::new(
+                &settings.state_dir,
+                &self.state_namespace,
+            )),
+            resolver: self.resolver.clone(),
+            // `None` until the host exposes a memory store: the engine then
+            // fails a `memory` node with a capability error, which is the honest
+            // answer. Standing one up on the state store would answer `recall`
+            // with an empty set — indistinguishable from "the user never said
+            // that".
+            memory: None,
+            // The engine's default runner schedules on tokio but owns no
+            // capabilities, so it echoes a spawn's spec back instead of
+            // performing it — a `spawn` would look like it ran and produce
+            // nothing usable. This one performs the work against this run's own
+            // capabilities, which is what makes `spawn`/`gate` fan-out real here
+            // rather than a shape the graph can express and the host cannot
+            // honour.
+            tasks: Some(Arc::new(MedullaTaskRunner::new(Arc::new(self.clone())))),
+        }
+    }
+}
+
+impl TaskCapabilities for Assembly {
+    fn capabilities(&self) -> Capabilities {
+        self.build()
+    }
+
+    fn timeout(&self) -> Duration {
+        // The same bound the run itself gets. A spawned task is work the run
+        // asked for, so it has no business outliving the run's own deadline.
+        Duration::from_secs(self.settings.run_timeout_secs)
     }
 }
 

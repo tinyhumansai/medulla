@@ -100,7 +100,7 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
             { "id": "shape", "kind": "transform", "name": "shape",
               "config": { "expression": "={ \"ok\": true }" } }
         ],
-        "edges": [{ "from": "start", "to": "shape" }]
+        "edges": [{ "from_node": "start", "to_node": "shape" }]
     });
 
     let ticket = runner
@@ -153,7 +153,7 @@ async fn a_task_that_overruns_its_deadline_settles_as_failed() {
               "config": { "trigger_kind": "manual" } },
             { "id": "wait", "kind": "agent", "name": "wait", "config": { "prompt": "hello" } }
         ],
-        "edges": [{ "from": "start", "to": "wait" }]
+        "edges": [{ "from_node": "start", "to_node": "wait" }]
     });
     let ticket = runner
         .start(TaskSpec::Workflow {

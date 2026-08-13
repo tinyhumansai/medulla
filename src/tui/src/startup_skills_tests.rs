@@ -2,13 +2,16 @@
 
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(unix)]
 use serde_json::json;
 
 use crate::startup_skills::{reconcile, reconcile_for_test};
 
 /// A small valid workflow document, sufficient for the generated skill pass.
+#[cfg(unix)]
 fn workflow() -> String {
     json!({
         "id": "startup-check",

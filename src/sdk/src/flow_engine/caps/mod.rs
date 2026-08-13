@@ -315,6 +315,12 @@ pub fn build_dry_run_capabilities(resolver: Arc<dyn WorkflowResolver>) -> Capabi
     caps.agent = Some(Arc::new(mocks::SchemaAwareMockAgentRunner));
     caps.tools = Arc::new(tools::PreflightToolInvoker::new(caps.tools.clone()));
     caps.resolver = resolver;
+    // Deliberately no task runner, which makes a `spawn` node run its work
+    // inline against these same stand-ins. That is what a dry run is for: the
+    // engine's default runner would settle the ticket with an echo of the spec,
+    // so a child graph that does not compile, or an argument that resolved to
+    // null, would sail through the very check meant to catch it.
+    caps.tasks = None;
     caps
 }
 

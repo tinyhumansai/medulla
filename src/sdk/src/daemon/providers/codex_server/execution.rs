@@ -232,6 +232,10 @@ async fn drive_turn(
         workspace_context,
         on_workspace_context,
     )));
+        on_event,
+        workspace_context,
+        on_workspace_context,
+    )));
     let timeout = Duration::from_millis(timeout_ms);
     // Tracked from `turn/started` so an interrupt can name the turn it stops;
     // the protocol requires both ids.

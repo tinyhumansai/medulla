@@ -18,6 +18,8 @@
 //! notification counts as activity, including the ones that produce no event, or
 //! a long silent command would look like a dead process.
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -64,6 +66,8 @@ pub(super) struct FoldState {
     workspace_context: WorkspaceContext,
     /// Persists a newly detected worktree for the next resumed turn.
     on_workspace_context: Option<OnWorkspaceContext>,
+    /// Checkout from which Git may enumerate the repository's worktrees.
+    repository_cwd: Option<PathBuf>,
     /// Line counter standing in for the CLI transport's transcript offsets.
     ///
     /// There is no transcript here, but `HarnessSemanticEvent::line` is the
@@ -85,6 +89,16 @@ impl FoldState {
         workspace_context: WorkspaceContext,
         on_workspace_context: Option<OnWorkspaceContext>,
     ) -> Self {
+        Self::with_workspace_at(on_event, workspace_context, on_workspace_context, None)
+    }
+
+    /// A fold seeded with workspace state and its configured checkout.
+    pub(super) fn with_workspace_at(
+        on_event: Option<OnEvent>,
+        workspace_context: WorkspaceContext,
+        on_workspace_context: Option<OnWorkspaceContext>,
+        repository_cwd: Option<PathBuf>,
+    ) -> Self {
         Self {
             reply: String::new(),
             items: 0,
@@ -94,6 +108,7 @@ impl FoldState {
             on_event,
             workspace_context,
             on_workspace_context,
+            repository_cwd,
             line: 0,
         }
     }
@@ -215,6 +230,9 @@ impl FoldState {
         else {
             return;
         };
+        if !successful_worktree_command(item) {
+            return;
+        }
         let output = item
             .get("aggregatedOutput")
             .or_else(|| item.get("aggregated_output"))
@@ -223,6 +241,9 @@ impl FoldState {
         let Some((cwd, branch)) = worktree_checkout_from_output(output) else {
             return;
         };
+        if !self.is_registered_worktree(&cwd, &branch) {
+            return;
+        }
         if self.workspace_context.cwd.as_deref() != Some(&cwd)
             || self.workspace_context.branch.as_deref() != Some(&branch)
         {
@@ -242,6 +263,56 @@ impl FoldState {
             callback(self.workspace_context.clone());
         }
     }
+
+    /// Accept only a report for a successful helper invocation that Git says is
+    /// an existing worktree of this repository on the reported branch.
+    fn is_registered_worktree(&self, cwd: &str, branch: &str) -> bool {
+        let Some(repository_cwd) = self.repository_cwd.as_deref() else {
+            return false;
+        };
+        let Ok(cwd) = std::fs::canonicalize(cwd) else {
+            return false;
+        };
+        let Ok(output) = Command::new("git")
+            .args(["-C"])
+            .arg(repository_cwd)
+            .args(["worktree", "list", "--porcelain"])
+            .output()
+        else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        registered_worktrees(&String::from_utf8_lossy(&output.stdout))
+            .into_iter()
+            .any(|(path, registered_branch)| path == cwd && registered_branch == branch)
+    }
+}
+
+/// A command item may affect retained cwd only when the worktree helper itself
+/// completed successfully. Generic shell output is untrusted text.
+fn successful_worktree_command(item: &Value) -> bool {
+    item.get("exitCode").and_then(Value::as_i64) == Some(0)
+        && item
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(|command| command.split_whitespace().next())
+            == Some("worktree")
+}
+
+/// Parse Git's porcelain worktree listing into canonical checkout/branch pairs.
+fn registered_worktrees(output: &str) -> Vec<(PathBuf, String)> {
+    output
+        .split("\n\n")
+        .filter_map(|entry| {
+            let path = entry.strip_prefix("worktree ")?.lines().next()?;
+            let branch = entry
+                .lines()
+                .find_map(|line| line.strip_prefix("branch refs/heads/"))?;
+            Some((std::fs::canonicalize(Path::new(path)).ok()?, branch.to_string()))
+        })
+        .collect()
 }
 
 /// A `status` payload saying the lane is working, with a one-line detail.

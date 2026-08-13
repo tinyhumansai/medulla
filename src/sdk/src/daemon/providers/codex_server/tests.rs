@@ -75,15 +75,27 @@ fn recording_fold() -> (FoldState, Arc<Mutex<Vec<HarnessSemanticEvent>>>) {
 
 /// A completed worktree helper item carrying the supplied checkout report.
 fn worktree_notification(path: &str, branch: &str, exit_code: i64) -> Notification {
+    let report = json!({
+        "status": "ready",
+        "repository": "/repo",
+        "path": path,
+        "branch": branch,
+        "head": "abc",
+        "headShort": "abc",
+        "created": true,
+        "submodules": {
+            "state": "initialized_recursive",
+            "count": 0,
+        },
+        "nextCommand": format!("cd {path}"),
+    });
     notification(
         "item/completed",
         json!({
             "item": {
                 "type": "commandExecution",
                 "command": "worktree fix-context --json",
-                "aggregatedOutput": format!(
-                    "{{\"status\":\"ready\",\"repository\":\"/repo\",\"path\":\"{path}\",\"branch\":\"{branch}\",\"head\":\"abc\",\"headShort\":\"abc\",\"created\":true,\"submodules\":{{\"state\":\"initialized_recursive\",\"count\":0}},\"nextCommand\":\"cd {path}\"}}"
-                ),
+                "aggregatedOutput": report.to_string(),
                 "exitCode": exit_code
             }
         }),

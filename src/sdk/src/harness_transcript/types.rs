@@ -1,7 +1,5 @@
 //! The durable transcript entry and the bounded collector that produces one.
 
-use serde::{Deserialize, Serialize};
-
 /// Entries kept for one node's turn before the collector starts dropping.
 ///
 /// Sized for a turn an operator would actually read back. A node that emits
@@ -28,26 +26,12 @@ const ELISION: &str = " … ";
 
 /// One thing a harness did, in the order it did it.
 ///
-/// Deliberately flat and stringly-typed. The alternative — mirroring
-/// [`HarnessEventKind`](crate::protocol::HarnessEventKind) into the run record
-/// — would make every future event kind a breaking change to a file format that
-/// must stay readable by older builds. A reader that meets an unfamiliar `kind`
-/// still has a timestamp and a line of text to render.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptEntry {
-    /// Epoch milliseconds, as the mapper stamped the event.
-    pub at_ms: i64,
-    /// The harness event kind this was folded from — `agent_message`,
-    /// `tool_call`, `tool_result`, `agent_thinking`, `error`, and so on.
-    ///
-    /// Carried verbatim rather than mapped to a closed set, so a kind added to
-    /// the wire vocabulary later shows up here without a change to this file.
-    pub kind: String,
-    /// The renderable line: the message text, the tool's one-line summary, the
-    /// error message.
-    pub text: String,
-}
+/// The type itself lives in the engine crate now, beside the run record that
+/// stores it: a bounded, flat, stringly-typed line is what every host embedding
+/// the engine needs, not something particular to Medulla. What stays here is the
+/// half that *is* Medulla's — folding this host's harness event stream into
+/// these entries, under the caps below.
+pub use tinyflows::store::TranscriptEntry;
 
 /// Accumulates a bounded transcript from a harness's semantic event stream.
 ///

@@ -95,7 +95,9 @@ fn prompt_queue_is_bounded_before_the_run_finishes() {
 
     let input = serde_json::to_vec(&steps[0].input).unwrap();
     assert!(input.len() <= 64 * 1024 + 256);
-    assert_eq!(steps[0].input.as_ref().unwrap()["_medullaTruncated"], true);
+    assert!(tinyflows::store::is_truncated(
+        steps[0].input.as_ref().expect("an input")
+    ));
 }
 
 #[test]

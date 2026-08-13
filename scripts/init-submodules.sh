@@ -38,6 +38,7 @@ git submodule update --init --depth 1 vendor/openhuman
 # root manifest must stay in lockstep with its `[patch.crates-io]` table;
 # tinybus and tinymemory are unpublished direct paths from OpenHuman's manifest.
 git -C vendor/openhuman submodule update --init --depth 1 \
+  vendor/motosan-ai-oauth \
   vendor/tinyagents \
   vendor/tinybus \
   vendor/tinychannels \
@@ -45,7 +46,15 @@ git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyflows \
   vendor/tinyhumans-sdk \
   vendor/tinyjuice \
-  vendor/tinyplace \
-  vendor/tinymemory
+  vendor/tinymemory \
+  vendor/tinyplace
 
-echo "Submodules initialized (OpenHuman core + its nine required dependencies)."
+# Deliberately NOT recursive. Three of these vendor crates of their own —
+# tinyflows has its own `tinyagents`, tinymemory its own `tinyagents`, `tinybus`
+# and `tinycortex` — and none of those nested copies is ever resolved: the root
+# patch table redirects each name to the copy beside OpenHuman, so the graph
+# holds one of each. Initializing them recursively would clone several hundred
+# megabytes that nothing links, and would put two checkouts of one crate on
+# disk for anyone reading the tree.
+
+echo "Submodules initialized (OpenHuman core + its ten vendored crates)."

@@ -13,7 +13,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::workflows::types::bounded_within;
+use crate::workflows::bounded_within;
 use crate::workflows::{RunRecord, RunStep, WorkflowError};
 
 /// Bytes of one step's output kept by [`StepDetail::Summary`].

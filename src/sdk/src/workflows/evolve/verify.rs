@@ -155,8 +155,8 @@ fn sample_inputs(
 
 /// Whether every blocking candidate finding already existed in the baseline.
 fn has_no_new_blockers(
-    baseline: &crate::workflows::run::diagnose::Diagnosis,
-    candidate: &crate::workflows::run::diagnose::Diagnosis,
+    baseline: &crate::workflows::run::Diagnosis,
+    candidate: &crate::workflows::run::Diagnosis,
 ) -> bool {
     candidate
         .null_bindings

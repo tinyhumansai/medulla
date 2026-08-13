@@ -468,6 +468,8 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::ToolCall => "⚒",
         NodeKind::HttpRequest => "⇅",
         NodeKind::Code => "λ",
+        // A prompt, because that is what the step is: a script handed to a
+        // shell, not a computation the graph carries.
         NodeKind::Shell => "$",
         NodeKind::Condition => "◆",
         NodeKind::Switch => "⑂",
@@ -560,11 +562,10 @@ pub fn node_summary(node: &Node) -> String {
             }
         }
         NodeKind::Code => text("language").unwrap_or_default(),
-        NodeKind::Shell => text("script_path")
-            .or_else(|| {
-                text("source")
-                    .map(|source| source.split('\n').next().unwrap_or(&source).to_string())
-            })
+        // The script itself, when it is inline and short enough to read; the
+        // path otherwise, which is the other thing that says what will run.
+        NodeKind::Shell => text("script")
+            .or_else(|| text("script_path"))
             .unwrap_or_default(),
         NodeKind::Condition => text("expression")
             .or_else(|| text("left"))

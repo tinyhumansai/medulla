@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
-use crate::workflows::types::{
+use crate::workflows::{
     RunRecord, WorkflowNote, WorkflowProposal, WorkflowRecord, WorkflowRevision, WorkflowSummary,
 };
 

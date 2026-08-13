@@ -82,13 +82,12 @@ pub(crate) fn set_defaults_observed(
             if let Some(model) = model {
                 record.defaults.model = Some(model.trim().to_string()).filter(|s| !s.is_empty());
             }
-            record
-                .defaults
-                .preference()
-                .map_err(|message| WorkflowError::Invalid {
+            crate::workflows::defaults_preference(&record.defaults).map_err(|message| {
+                WorkflowError::Invalid {
                     id: id.to_string(),
                     messages: vec![format!("`defaults`: {message}")],
-                })?;
+                }
+            })?;
             Ok(())
         },
         observer,

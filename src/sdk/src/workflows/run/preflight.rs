@@ -107,12 +107,12 @@ pub(super) fn settings_for(
     if workflow.defaults.is_empty() {
         return Ok(host.clone());
     }
-    let preference = workflow
-        .defaults
-        .preference()
-        .map_err(|message| WorkflowError::Invalid {
-            id: workflow.id.clone(),
-            messages: vec![format!("`defaults`: {message}")],
+    let preference =
+        crate::workflows::defaults_preference(&workflow.defaults).map_err(|message| {
+            WorkflowError::Invalid {
+                id: workflow.id.clone(),
+                messages: vec![format!("`defaults`: {message}")],
+            }
         })?;
     let choice =
         crate::flow_engine::HarnessChoice::resolve(&[preference, host.harness_preference()]);

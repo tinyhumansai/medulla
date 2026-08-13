@@ -18,8 +18,7 @@ use crate::protocol::{TaskFrame, TaskFrameKind, WorkflowAdvert, WorkflowInputAdv
 use crate::workflows::bridge::trigger_input;
 use crate::workflows::evolve::{EvolveConfig, EvolveSession, EvolveTrigger};
 use crate::workflows::{
-    run_workflow_versioned, FileWorkflowStore, RunContext, RunStatus, StoreWorkflowResolver,
-    WorkflowStore,
+    run_workflow_versioned, RunContext, RunStatus, StoreWorkflowResolver, WorkflowStore,
 };
 
 use super::super::super::types::{DaemonRuntime, FrameAttachments, CAPACITY_REJECTION_PREFIX};
@@ -72,7 +71,10 @@ impl DaemonRuntime {
     /// resolves it.
     fn workflow_store(&self) -> Arc<dyn WorkflowStore> {
         let cwd = std::path::Path::new(&self.inner.config.workspace);
-        Arc::new(FileWorkflowStore::discover(&self.inner.config.env, cwd))
+        Arc::new(crate::workflows::store::discover(
+            &self.inner.config.env,
+            cwd,
+        ))
     }
 
     /// Run the workflow a `task` frame named, replying with its outcome.

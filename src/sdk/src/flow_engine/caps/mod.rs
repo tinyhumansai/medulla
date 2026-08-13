@@ -8,21 +8,27 @@
 //!
 //! Each capability lives in its own submodule beside this one, named for the
 //! engine trait it satisfies.
+//!
+//! Only the ones that are *about Medulla* are still written here: dispatching a
+//! node to a harness, choosing which harness, and the `medulla:` tool namespace.
+//! The rest — running a script out of process, keying state onto disk, refusing
+//! an outbound URL that resolves into a private range — had no Medulla in them,
+//! and now live in [`tinyflows::caps::host`] where the other hosts can have
+//! them too. They are re-exported below so a call site here still names one
+//! place.
 
 pub mod agent;
-pub mod code;
 pub mod dispatch;
-pub mod http;
-pub mod mocks;
-pub mod script;
-pub mod script_policy;
-pub mod state;
 pub mod tools;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
+use tinyflows::caps::host::{
+    AllowlistHttpClient, DeniedCodeRunner, FileStateStore, HostAllowlist, ProcessCodeRunner,
+    ProcessShellRunner, ScriptPolicy,
+};
 use tinyflows::caps::{Capabilities, WorkflowResolver};
 use tinyflows::engine::{Checkpointer, FileCheckpointer};
 
@@ -31,11 +37,20 @@ use crate::flow_engine::observability::NodeProgressSink;
 use crate::flow_engine::settings::CapabilitySettings;
 
 use self::agent::{HarnessAgentRunner, HarnessLlm};
-use self::code::{DeniedCodeRunner, ProcessCodeRunner};
 use self::dispatch::HarnessDispatch;
-use self::http::{AllowlistHttpClient, HttpCredential};
-use self::state::FileStateStore;
 use self::tools::MedullaToolInvoker;
+
+/// Schema-aware capability stand-ins for dry runs, now owned by the engine
+/// crate.
+pub use tinyflows::caps::host::mocks;
+/// The out-of-process script runner and its calling convention, now owned by
+/// the engine crate.
+pub use tinyflows::caps::host::script;
+/// Which files a script step may read and run in, now owned by the engine
+/// crate.
+pub use tinyflows::caps::host::script_policy;
+/// The HTTP credential a `connection_ref` names.
+pub use tinyflows::caps::host::{http_cred_name, HttpCredential, HTTP_CRED_PREFIX};
 
 /// Everything a run needs from the host, other than its settings.
 ///
@@ -168,21 +183,28 @@ fn build_capabilities_inner(
         ),
     };
 
+    // A `shell` node is offered exactly when a `code` node is: both run an
+    // author's script with this daemon's privileges, so a host that refused one
+    // and allowed the other would be drawing a line that does not exist.
+    // `None` rather than a refusing runner, because the engine's own answer for
+    // an absent capability already says the node cannot run here.
+    let shell: Option<Arc<dyn tinyflows::caps::ShellRunner>> = settings.allow_code.then(|| {
+        Arc::new(ProcessShellRunner::new(
+            ScriptPolicy::new(&settings.workspace),
+            settings.script_timeout(),
+        )) as Arc<dyn tinyflows::caps::ShellRunner>
+    });
+
     Capabilities {
         llm,
         agent: Some(agent),
+        shell,
         tools: Arc::new(MedullaToolInvoker::new(settings.clone())),
         http: Arc::new(AllowlistHttpClient::new(
-            settings.clone(),
+            HostAllowlist::new(settings.http_allowlist.clone()),
             services.http_credentials,
         )),
         code,
-        // TinyFlows owns the shell-node contract, but Medulla has not yet
-        // adapted its path, environment, and interpreter policy to that
-        // capability. Refuse shell nodes explicitly until that boundary exists
-        // rather than running an author-controlled command with the code
-        // runner's looser shape.
-        shell: None,
         state: Arc::new(FileStateStore::new(&settings.state_dir, state_namespace)),
         resolver: services.resolver,
         // `None` until the host exposes a memory store: the engine then fails a

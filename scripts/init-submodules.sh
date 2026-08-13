@@ -34,15 +34,18 @@ cd "$(dirname "$0")/.."
 # The embedded OpenHuman core.
 git submodule update --init --depth 1 vendor/openhuman
 
-# Its vendored crates, which the root patch table redirects Cargo to. This list
-# must stay in lockstep with the `[patch.crates-io]` table in Cargo.toml.
+# Its vendored crates and direct path dependencies. The crates patched by the
+# root manifest must stay in lockstep with its `[patch.crates-io]` table;
+# tinybus and tinymemory are unpublished direct paths from OpenHuman's manifest.
 git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyagents \
+  vendor/tinybus \
   vendor/tinychannels \
   vendor/tinycortex \
   vendor/tinyflows \
   vendor/tinyhumans-sdk \
   vendor/tinyjuice \
-  vendor/tinyplace
+  vendor/tinyplace \
+  vendor/tinymemory
 
-echo "Submodules initialized (OpenHuman core + its seven vendored crates)."
+echo "Submodules initialized (OpenHuman core + its nine required dependencies)."

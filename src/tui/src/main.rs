@@ -28,6 +28,10 @@ mod run;
 mod sign_in;
 #[cfg(test)]
 mod sign_in_tests;
+#[cfg(feature = "workflows")]
+mod startup_skills;
+#[cfg(all(test, feature = "workflows"))]
+mod startup_skills_tests;
 mod terminal;
 mod worker_loop;
 

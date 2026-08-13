@@ -237,6 +237,21 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .attach_file(&log_dir, "orchestrator")
         .map(|path| format!("logging to {}", path.display()));
 
+    // User-launched Claude/Codex sessions read their fixed user skill roots,
+    // unlike sessions spawned by Medulla (which receive scoped skills and MCP
+    // directly). Keep the fixed roots and their MCP registrations in step on
+    // every real app start. Mock runs stay hermetic and never touch the
+    // operator's harness configuration.
+    if !args.mock {
+        let integration = crate::startup_skills::reconcile(&env, &cwd);
+        for warning in integration.warnings {
+            hub_logs.push(warning);
+        }
+        if let Some(notice) = integration.notice {
+            startup_status.get_or_insert(notice);
+        }
+    }
+
     if args.mock {
         // Explicit offline demo: skip the token lookup and the login screen
         // entirely so the TUI is drivable with no backend at all.

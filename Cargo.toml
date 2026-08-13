@@ -45,7 +45,7 @@ tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
 # `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
 # deterministic capability stand-ins in ordinary builds.
-tinyflows = { version = "0.6", features = ["mock"] }
+tinyflows = { version = "0.6", features = ["mock", "host-caps", "store"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -120,9 +120,12 @@ unicode-width = "0.2"
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
 tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
 tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
-# OpenHuman's extracted TinyMemory core names this contract by version.  The
-# vendored OpenHuman manifest patches it, but path dependencies do not inherit
-# their own patch tables, so Medulla must bind it at this workspace root too.
+# `tinymemory-core` names `tinycortex-api` by version requirement while this
+# graph depends on tinycortex by path, so without this the resolver goes to
+# crates.io for it and fails outright — the crate is not published. The
+# vendored OpenHuman manifest patches it too, but path dependencies do not
+# inherit their own patch tables, so Medulla must bind it at this workspace
+# root as well.
 tinycortex-api = { path = "vendor/openhuman/vendor/tinycortex/api" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
 tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
@@ -130,6 +133,11 @@ tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
 # the vendored OpenHuman core still does, and without the redirect Cargo would
 # resolve the published crate instead of the vendored tree.
 tinyplace = { path = "vendor/openhuman/vendor/tinyplace/sdk/rust" }
+# Not a tiny* crate, but patched for the same reason the others are: OpenHuman
+# vendors its own copy and this table is the only one Cargo reads, so an entry
+# missing here silently resolves the published crate instead of the vendored
+# tree.
+motosan-ai-oauth = { path = "vendor/openhuman/vendor/motosan-ai-oauth" }
 # NOT copied from OpenHuman: its whisper-rs-sys git patch. Cargo fetches a git
 # patch source during resolution even when the patched crate is absent from the
 # graph, which would put a network fetch in the critical path of every

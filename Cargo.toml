@@ -14,7 +14,7 @@ members = ["src/link", "src/sdk", "src/tui"]
 exclude = ["vendor", "worktrees"]
 
 [workspace.package]
-version = "0.9.2"
+version = "0.9.4"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/medulla"
@@ -120,6 +120,10 @@ unicode-width = "0.2"
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
 tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
 tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
+# OpenHuman's extracted TinyMemory core names this contract by version.  The
+# vendored OpenHuman manifest patches it, but path dependencies do not inherit
+# their own patch tables, so Medulla must bind it at this workspace root too.
+tinycortex-api = { path = "vendor/openhuman/vendor/tinycortex/api" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
 tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
 # Load-bearing even though no crate in this workspace links tinyplace any more:

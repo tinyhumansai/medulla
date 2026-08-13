@@ -442,6 +442,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::ToolCall => "tool_call",
         NodeKind::HttpRequest => "http_request",
         NodeKind::Code => "code",
+        NodeKind::Shell => "shell",
         NodeKind::Condition => "condition",
         NodeKind::Switch => "switch",
         NodeKind::Merge => "merge",
@@ -467,6 +468,7 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::ToolCall => "⚒",
         NodeKind::HttpRequest => "⇅",
         NodeKind::Code => "λ",
+        NodeKind::Shell => "$",
         NodeKind::Condition => "◆",
         NodeKind::Switch => "⑂",
         NodeKind::Merge => "⊕",
@@ -498,7 +500,11 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         NodeKind::Agent | NodeKind::SubWorkflow => "magenta",
         // Grouped with the reaching-outside kinds: a memory node's result comes
         // from the host's store, not from anything the graph carries.
-        NodeKind::ToolCall | NodeKind::HttpRequest | NodeKind::Code | NodeKind::Memory => "cyan",
+        NodeKind::ToolCall
+        | NodeKind::HttpRequest
+        | NodeKind::Code
+        | NodeKind::Shell
+        | NodeKind::Memory => "cyan",
         // `dedup` reads durable state, but what it *does* to the graph is route:
         // an item either continues or is dropped, so it reads with the control
         // flow rather than with the kinds that reach outside the process.
@@ -554,6 +560,12 @@ pub fn node_summary(node: &Node) -> String {
             }
         }
         NodeKind::Code => text("language").unwrap_or_default(),
+        NodeKind::Shell => text("script_path")
+            .or_else(|| {
+                text("source")
+                    .map(|source| source.split('\n').next().unwrap_or(&source).to_string())
+            })
+            .unwrap_or_default(),
         NodeKind::Condition => text("expression")
             .or_else(|| text("left"))
             .unwrap_or_default(),

@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use super::serve;
 use super::types::{
-    CredentialRegistry, ProxyEndpoint, ProxyHandle, OPENROUTER_ROOT, UPSTREAM_URL_ENV,
+    CredentialRegistry, ProxyEndpoint, ProxyHandle, UpstreamCredential, OPENROUTER_ROOT,
+    UPSTREAM_URL_ENV,
 };
 
 impl ProxyHandle {
@@ -30,11 +31,31 @@ impl ProxyHandle {
     /// Token minting is idempotent per key, so repeated spawns do not grow the
     /// registry or expose distinct credentials for the same upstream secret.
     pub fn endpoint_for_key(&self, upstream_key: &str) -> ProxyEndpoint {
+        self.endpoint_for_credential(upstream_key, &[])
+    }
+
+    /// Find or mint the endpoint forwarding `upstream_key` restricted to
+    /// `provider_only`.
+    ///
+    /// Idempotency is per credential *and* pin: an unpinned run and a run
+    /// pinned to `streamlake` get different tokens even on one OpenRouter key,
+    /// which is what stops one preset's restriction from reaching another
+    /// preset's traffic.
+    pub fn endpoint_for_credential(
+        &self,
+        upstream_key: &str,
+        provider_only: &[String],
+    ) -> ProxyEndpoint {
+        let credential = UpstreamCredential {
+            key: upstream_key.to_string(),
+            provider_only: provider_only.to_vec(),
+        };
+        let identity = credential.identity();
         let mut registry = self
             .registry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(token) = registry.by_key.get(upstream_key) {
+        if let Some(token) = registry.by_identity.get(&identity) {
             return ProxyEndpoint {
                 port: self.port,
                 token: token.clone(),
@@ -44,12 +65,8 @@ impl ProxyHandle {
         // Reuse the login flow's CSPRNG-backed nonce generator instead of
         // introducing a second randomness dependency for loopback tokens.
         let token = format!("mdl-{}", crate::auth::random_state_nonce());
-        registry
-            .by_token
-            .insert(token.clone(), upstream_key.to_string());
-        registry
-            .by_key
-            .insert(upstream_key.to_string(), token.clone());
+        registry.by_token.insert(token.clone(), credential);
+        registry.by_identity.insert(identity, token.clone());
         ProxyEndpoint {
             port: self.port,
             token,

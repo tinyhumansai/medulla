@@ -272,6 +272,27 @@ fn a_node_may_name_its_instruction_prompt_or_instruction() {
 }
 
 #[test]
+fn production_capabilities_refuse_shell_execution_until_its_policy_exists() {
+    let root = tempfile::tempdir().unwrap();
+    let caps = build_capabilities(
+        settings(root.path()),
+        HostServices {
+            node_progress: None,
+            dispatch: RecordingDispatch::replying("unused"),
+            resolver: empty_resolver(root.path()),
+            http_credentials: HashMap::new(),
+        },
+        "workflow:demo",
+        "run-shell-boundary",
+    );
+
+    assert!(
+        caps.shell.is_none(),
+        "shell nodes must remain unavailable until Medulla supplies path, environment, and interpreter policy"
+    );
+}
+
+#[test]
 fn a_json_reply_is_surfaced_structurally_as_well_as_textually() {
     let value = reply_to_value("{\"files\": 3}", "builder");
     assert_eq!(value["json"]["files"], 3);

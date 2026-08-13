@@ -177,6 +177,12 @@ fn build_capabilities_inner(
             services.http_credentials,
         )),
         code,
+        // TinyFlows owns the shell-node contract, but Medulla has not yet
+        // adapted its path, environment, and interpreter policy to that
+        // capability. Refuse shell nodes explicitly until that boundary exists
+        // rather than running an author-controlled command with the code
+        // runner's looser shape.
+        shell: None,
         state: Arc::new(FileStateStore::new(&settings.state_dir, state_namespace)),
         resolver: services.resolver,
         // `None` until the host exposes a memory store: the engine then fails a

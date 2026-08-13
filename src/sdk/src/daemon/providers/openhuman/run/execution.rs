@@ -80,6 +80,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         abort,
         resume_session_id,
         hooks,
+        router,
         on_event,
         on_session,
         ..
@@ -88,6 +89,12 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // The operator's environment override outranks whatever the dispatch
     // resolved; see [`super::super::model`] for the whole precedence order.
     let model = super::super::effective_model(model, &env);
+
+    // A preset's endpoint and key, resolved into the loopback mount the core
+    // should call and the token it should present. `None` for a run with no
+    // OpenRouter-bound router or no key under the named variable, which leaves
+    // the core resolving its own provider bindings exactly as before.
+    let route = super::super::openrouter_route(router.as_ref(), &env, model.as_deref())?;
 
     if abort.is_aborted() {
         return Err("openhuman task aborted before start".to_string());
@@ -122,12 +129,23 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // `cwd` is optional on the core side and roots the turn's file and shell
     // tools in the node's checkout; the origin trust decision rides a
     // task-local instead — see the scope below.
-    let params = json!({
+    let mut params = json!({
         "message": prompt,
         "model_override": model,
         "thread_id": thread_id,
         "cwd": &cwd,
     });
+    // Only when the preset asked for it. The core treats the pair as one
+    // statement and ignores a half of it, so both keys are added together or
+    // neither is — an absent pair is what "run on the account's own inference"
+    // looks like on the wire.
+    if let Some(route) = route {
+        let map = params
+            .as_object_mut()
+            .expect("the params literal above is an object");
+        map.insert("inference_url".into(), json!(route.base_url));
+        map.insert("api_key".into(), json!(route.token));
+    }
 
     // Annotated with the core's own alias rather than inferred: the sender half
     // *is* the contract's `ProgressSink`, and saying so keeps a future change to

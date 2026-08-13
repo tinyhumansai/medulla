@@ -666,6 +666,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // hooks Medulla installs into it. Created before the control plane because
     // that is what writes into it, and shared with the app, which reads it.
     let hook_log = medulla::harness_hooks::HookEventLog::new();
+    // The attention poller reads a `Notification` report off this same log to
+    // blink a claude session that is waiting on the operator — the one cue the
+    // screen scraper cannot always name. Set before any session opens, so the
+    // poller (spawned per session) never reads an unset log.
+    harness_sessions.set_hook_log(hook_log.clone());
 
     // Bound once, here, and held for the whole process: the socket belongs to
     // this process rather than to a login session, and rebinding inside the

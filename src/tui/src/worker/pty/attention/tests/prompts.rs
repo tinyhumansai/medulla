@@ -42,6 +42,27 @@ fn claude_permission_prompt_is_an_approval() {
 }
 
 #[test]
+fn current_claude_permission_prompt_outranks_its_waiting_tool_line() {
+    let screen = "● Bash(touch claude-state-probe.txt)\n\
+                    ⎿  Waiting…\n\
+                  Bash command\n\
+                    touch claude-state-probe.txt\n\
+                  Do you want to proceed?\n\
+                  ❯ 1. Yes\n\
+                    2. Yes, and always allow access to work-state/ from this project\n\
+                    3. No\n\
+                  Esc to cancel";
+
+    assert!(
+        is_working(screen),
+        "the tool status alone resembles progress"
+    );
+    let (kind, what) = detect(HarnessProvider::Claude, screen).expect("a cue");
+    assert_eq!(kind, AttentionKind::Approval);
+    assert_eq!(what, "claude is asking permission");
+}
+
+#[test]
 fn claude_plan_prompt_names_planning() {
     let screen =
         "Would you like to proceed?\n❯ 1. Yes, and auto-accept edits\n  3. No, keep planning";

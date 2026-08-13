@@ -52,13 +52,19 @@ use super::rail_hit::RailHit;
 /// both still builds and their render paths are intact, so restoring either is
 /// putting one line back. Memory is out of the build entirely (its tab said
 /// "coming soon"); Tasks duplicates what the Sessions tab already shows per lane.
+///
+/// `Changes` is gone rather than commented out: a Git diff is a property of one
+/// session — what it changed since it launched — not a view over the whole fleet.
+/// It lives on the Sessions tab as the `d` pane (`PaneView::Diff`), drawn over
+/// the harness terminal for the row under the cursor. The shared diff state and
+/// bindings stay in `app::changes`; only the top-level tab and its `D` shortcut
+/// were removed.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 8] = [
+pub const TABS: [&str; 7] = [
     "Overview",
     "Sessions",
     "Workflows",
     "Subconscious",
-    "Changes",
     "Hosts",
     "Feedback",
     "Settings",
@@ -66,12 +72,16 @@ pub const TABS: [&str; 8] = [
 
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
+///
+/// This is the workflow-enabled list minus `Workflows`: every remaining tab —
+/// the fleet Overview, the Sessions rail with its `d` diff pane, Subconscious
+/// (still drawing its placeholder), Hosts, Feedback, and Settings — renders
+/// without the workflow engine.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 7] = [
+pub const TABS: [&str; 6] = [
     "Overview",
     "Sessions",
     "Subconscious",
-    "Changes",
     "Hosts",
     "Feedback",
     "Settings",

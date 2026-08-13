@@ -25,6 +25,56 @@ const WORKSPACE_TRAILER_LINES: usize = 1;
 const WORKSPACE_ROW_WIDTH: usize = 43;
 
 impl App {
+    /// Draw the confirmation that guards terminating a harness or dispatched task.
+    ///
+    /// The status line repeats the question for compact terminals, but the
+    /// modal keeps the consequence in front of the operator while the content
+    /// behind it still shows the session whose work will be lost.
+    pub(super) fn draw_session_kill_prompt(&mut self, f: &mut Frame, area: Rect) {
+        let Some((title, body)) = self.session_kill_prompt_copy() else {
+            return;
+        };
+        let area = centered(area, 58, 8);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme.accent))
+            .title(Span::styled(
+                title,
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(area);
+        f.render_widget(Clear, area);
+        f.render_widget(block, area);
+        f.render_widget(
+            Paragraph::new(Text::from(vec![
+                TLine::from(body),
+                TLine::from(""),
+                TLine::from("[Y] kill session    [any other key] cancel"),
+            ])),
+            inner,
+        );
+    }
+
+    /// Return the copy for the active destructive session confirmation.
+    fn session_kill_prompt_copy(&self) -> Option<(&'static str, &'static str)> {
+        if self.harness_close_armed.is_some() {
+            Some((
+                "Kill this session?",
+                "Its harness will stop and unsaved work will be lost.",
+            ))
+        } else {
+            self.kill_armed.as_ref().map(|_| {
+                (
+                    "Kill this session?",
+                    "The running task will be terminated and unsaved work will be lost.",
+                )
+            })
+        }
+    }
+
     /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {
         let Some(picker) = &self.session_picker else {

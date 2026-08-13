@@ -233,18 +233,25 @@ harness_transport_env() {
   fi
 }
 
-# The extra `medulla daemon` flags this harness needs.
-#
-# `--config` is what carries the preset. `--dangerously-skip-permissions` is
-# what a fleet host runs with, and both CLI-based harnesses need it: Claude Code
-# would otherwise stop at a permission prompt, and Codex would run inside a
-# sandbox with no writable root and no network.
-harness_daemon_flags() {
+# The routing flags every daemon instance needs for this harness.
+harness_daemon_routing_flags() {
   case "$HARNESS" in
     opencode) printf '' ;;
-    claude | codex)
-      printf -- '--config %q --dangerously-skip-permissions' "$MEDULLA_CONFIG"
-      ;;
+    claude | codex) printf -- '--config %q' "$MEDULLA_CONFIG" ;;
+  esac
+}
+
+# The extra `medulla daemon` flags used by ordinary fleet-style scenarios.
+#
+# `--config` carries the preset. The permission bypass matches a fleet host;
+# the attention-state scenario deliberately uses only the routing flags above
+# so it can observe a real Claude permission request.
+harness_daemon_flags() {
+  local routing
+  routing="$(harness_daemon_routing_flags)"
+  case "$HARNESS" in
+    opencode) printf '%s' "$routing" ;;
+    claude | codex) printf -- '%s --dangerously-skip-permissions' "$routing" ;;
   esac
 }
 

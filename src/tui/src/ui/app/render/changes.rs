@@ -15,11 +15,6 @@ use medulla::ui::git_review::CommentAnchor;
 use super::super::types::App;
 
 impl App {
-    /// Draw the session-start summary/file rail and selected unified patch.
-    pub(super) fn draw_changes(&mut self, frame: &mut Frame, area: Rect) {
-        self.draw_changes_into(frame, area, " Git changes · b baseline ");
-    }
-
     /// The same two panes, drawn over the Sessions harness pane.
     ///
     /// Same state, same bindings, different real estate: `d` on a harness row

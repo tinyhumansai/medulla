@@ -5,7 +5,7 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 use std::sync::Arc;
 
-use super::super::types::{tab_pos, App, PaneView};
+use super::super::types::{tab_pos, App};
 
 /// Build the standard app fixture with the harness pane available.
 fn app() -> App {
@@ -18,20 +18,6 @@ fn app() -> App {
 /// Find a tab by its visible label so the test survives tab reordering.
 fn tab(name: &str) -> usize {
     tab_pos(name)
-}
-
-#[test]
-fn shift_d_on_a_selected_harness_opens_its_changes_tab() {
-    let mut app = app();
-    app.tab_index = tab("Sessions");
-    app.pane_session = Some("selected-harness".to_owned());
-
-    let cmd = app.on_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT));
-
-    assert!(cmd.is_none());
-    assert_eq!(app.tab(), "Changes");
-    assert_eq!(app.pane_view, PaneView::Harness);
-    assert_eq!(app.rail_session.as_deref(), Some("selected-harness"));
 }
 
 #[test]

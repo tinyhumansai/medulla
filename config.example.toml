@@ -116,7 +116,7 @@ tokenEnv = "MEDULLA_TOKEN"
 # [[customHarnesses]]
 # id = "deepseek"
 # name = "DeepSeek via Claude"
-# baseHarness = "claude"              # claude | codex | opencode
+# baseHarness = "claude"              # claude | codex | opencode | openhuman
 # model = "deepseek/deepseek-chat"
 # fastModel = "deepseek/deepseek-chat"
 # hostId = "this-device"               # must match [host].address
@@ -124,6 +124,40 @@ tokenEnv = "MEDULLA_TOKEN"
 # apiKeyEnv = "OPENROUTER_API_KEY"
 # baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
 # contextWindow = 114000                # optional; Claude auto-compaction window
+#
+# providerOnly restricts which of OpenRouter's serving providers may answer.
+# One model is offered by many providers at prices that differ by more than an
+# order of magnitude, and OpenRouter's default weighs price against uptime and
+# throughput rather than pinning one — so an unpinned preset's cost can move
+# without the config changing. Slugs are OpenRouter's own, lowercased; the
+# order is your preference order.
+#
+# This is the only way to state the choice: it travels in the request body, so
+# neither a model-id suffix nor baseUrl can express it. A suffix such as
+# "z-ai/glm-5.2:streamlake" is accepted by OpenRouter and silently ignored.
+#
+# The pin is applied only when the request body is a JSON object within the
+# rewrite limit (32 MiB). A larger body, a non-object body (e.g. streamed file
+# uploads), or one that already names its own "provider.only" is forwarded
+# unchanged — the pin is skipped rather than refusing the request.
+# providerOnly = ["streamlake"]
+
+# baseHarness = "openhuman" runs the turn on the embedded core rather than
+# spawning a CLI, so there is nothing to install. The preset's model, endpoint
+# and key apply to that turn only: Medulla passes the core a per-call route
+# through the same loopback proxy, and the core never persists it, so the
+# account's own OpenHuman inference is left where you set it.
+#
+# A preset that names only a model still works and still needs no OpenRouter
+# key. With nothing exported under apiKeyEnv the turn runs on whatever the
+# account's OpenHuman configuration already resolves.
+# [[customHarnesses]]
+# id = "deepseek-oh"
+# name = "DeepSeek via OpenHuman"
+# baseHarness = "openhuman"
+# model = "deepseek/deepseek-chat"
+# hostId = "this-device"
+# apiKeyEnv = "OPENROUTER_API_KEY"
 
 # ---------------------------------------------------------------------------
 # core — the medulla-serve NDJSON orchestration socket (optional)

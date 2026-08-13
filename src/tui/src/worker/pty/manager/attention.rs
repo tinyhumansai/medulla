@@ -33,7 +33,7 @@ impl PtyManager {
             if !handle.is_running() {
                 return;
             }
-            refresh(&handle, (inner.now)());
+            refresh(&handle, inner.hook_log.get(), (inner.now)());
         });
     }
 
@@ -78,7 +78,11 @@ impl PtyManager {
 }
 
 /// Reclassify one live screen unless it was sampled too recently.
-fn refresh(session: &SessionHandle, now: i64) {
+fn refresh(
+    session: &SessionHandle,
+    hook_log: Option<&medulla::harness_hooks::HookEventLog>,
+    now: i64,
+) {
     let (seen_bells, generation, pending_completion_bells) = {
         let mut state = lock(&session.attention);
         if now.saturating_sub(state.checked_at) < ATTENTION_INTERVAL_MS {
@@ -109,10 +113,24 @@ fn refresh(session: &SessionHandle, now: i64) {
     // the whole sample. The child can emit delayed chimes and the next turn's
     // request before this 200 ms poll runs; any additional bell remains eligible.
     let eligible_bells = unseen_bells.saturating_sub(pending_completion_bells);
-    let working = attention::is_working(&contents);
+    let working = working_state(&contents, session.grant_session(), hook_log);
     let rang = eligible_bells > 0 && !working;
+    // Screen first — a permission menu the scraper can read is more specific
+    // than the generic "waiting" a Notification report names — then the hook,
+    // which is the harness saying so itself and the one cue a reworded prompt
+    // or a full-screen TUI cannot defeat — then the bell, the vaguest cue,
+    // which loses to anything named.
+    let hook = hook_log.and_then(|log| {
+        attention::hook_attention(session.provider(), session.grant_session(), working, log)
+    });
     let cue = attention::detect(session.provider(), &contents)
+        .or(hook)
         .or_else(|| rang.then(|| attention::bell_cue(session.provider())));
+    // Working and waiting are mutually exclusive session states. The screen
+    // detector can recognise a permission menu before Claude's Notification
+    // hook arrives, while the previous active-turn hook is still last in the
+    // log; the concrete cue wins that short race.
+    let working = working && cue.is_none();
 
     let mut state = lock(&session.attention);
     // Release or acknowledgement raced this sample; it owns the newer truth.
@@ -138,4 +156,27 @@ fn refresh(session: &SessionHandle, now: i64) {
             }
         }
     };
+}
+
+/// Resolve working state from the screen's live edges and hook-backed middle.
+///
+/// A visible spinner always starts work and a visible composer always ends it,
+/// even while the corresponding hook subprocess is still catching up. Between
+/// those paints, lifecycle reports supply the state without depending on
+/// Claude's changing progress vocabulary. With no report, this reduces to the
+/// original screen-only behavior.
+pub(super) fn working_state(
+    screen: &str,
+    grant: Option<&str>,
+    hook_log: Option<&medulla::harness_hooks::HookEventLog>,
+) -> bool {
+    if attention::is_working(screen) {
+        return true;
+    }
+    if attention::is_idle(screen) {
+        return false;
+    }
+    hook_log
+        .and_then(|log| attention::hook_working(grant, log))
+        .unwrap_or(false)
 }

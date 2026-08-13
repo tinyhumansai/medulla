@@ -148,6 +148,7 @@ impl App {
                 Overlay::Decisions => self.draw_decisions(f, rows[2]),
                 Overlay::TemplatePopup => self.draw_template_modal(f, rows[2]),
                 Overlay::SessionPicker => self.draw_harness_picker(f, rows[2]),
+                Overlay::SessionKill => self.draw_session_kill_prompt(f, rows[2]),
                 Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
                 Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
                 Overlay::ResumePicker => self.draw_resume(f, rows[3]),
@@ -278,8 +279,6 @@ impl App {
             // Its own line, and a short one: the placeholder binds nothing, and
             // the default hint below advertises the session steering chords.
             "Tab views · Subconscious coming soon"
-        } else if self.tab() == "Changes" {
-            "Tab views · ↑↓ files · j/k line · [ ] hunk · b baseline · c comment · C file · e edit · r refresh"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else if self.tab() == "Sessions" && self.pane_view == PaneView::Diff {
@@ -310,7 +309,6 @@ impl App {
         match self.tab() {
             "Overview" => self.draw_overview(f, area),
             "Sessions" => self.draw_sessions_tab(f, area),
-            "Changes" => self.draw_changes(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
             // Not feature-gated: the tab exists in the slim build too, and a
@@ -355,7 +353,6 @@ fn compact_tab_label(name: &str, compact: bool) -> &str {
         "Sessions" => "Sess",
         "Workflows" => "Flows",
         "Subconscious" => "Sub",
-        "Changes" => "Diff",
         "Feedback" => "Feed",
         "Settings" => "Set",
         _ => name,

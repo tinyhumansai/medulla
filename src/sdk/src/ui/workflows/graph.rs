@@ -491,6 +491,17 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // The one kind whose edges run backwards: the shape is the cycle it
         // draws on the canvas.
         NodeKind::Loop => "↺",
+        // Work that leaves the branch and comes back later: the arrow points
+        // away from the path the graph is still walking.
+        NodeKind::Spawn => "⇗",
+        // The collecting half, pointing back in. Read beside a `spawn` the pair
+        // reads as one round trip.
+        NodeKind::Gate => "⇘",
+        // Fan-out and fan-in of the whole downstream path. Deliberately the
+        // heavier pair of arrows: unlike `split_out`, what widens here is the
+        // pipeline, not the item stream.
+        NodeKind::Scatter => "⇶",
+        NodeKind::Gather => "⇉",
     }
 }
 

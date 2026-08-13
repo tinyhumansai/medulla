@@ -155,7 +155,7 @@ impl WorkflowRunObserver {
 
     /// The engine's own steps, in completion order.
     ///
-    /// What [`crate::workflows::run::diagnose::diagnose`] needs: it reads each
+    /// What [`crate::workflows::run::diagnose`] needs: it reads each
     /// step's `output` to find errors an `on_error` policy swallowed, and the
     /// graph to find nodes that never ran at all.
     pub fn execution_steps(&self) -> Vec<ExecutionStep> {

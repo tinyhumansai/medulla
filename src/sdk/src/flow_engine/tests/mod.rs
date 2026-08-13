@@ -6,17 +6,21 @@
 //! workflow step is a harness session" reduced to something checkable.
 //!
 //! The `medulla:shell` tool's own cases live in the `shell_tests` submodule,
-//! and harness/model selection in `harness_selection_tests`, both split out
-//! once they pushed this file over the 500-line ceiling. State-store,
-//! tool-invoker, and HTTP-capsule cases live in `state_tests`, `tools_tests`,
-//! and `http_tests` for the same reason. The fixtures these modules share —
-//! `settings`, `RecordingDispatch`, `empty_resolver`, `agent_graph` — are
-//! `pub(super)` for that reason.
+//! harness/model selection in `harness_selection_tests`, and tool-invoker cases
+//! in `tools_tests`, each split out once they pushed this file over the
+//! 500-line ceiling. The fixtures these modules share — `settings`,
+//! `RecordingDispatch`, `empty_resolver`, `agent_graph` — are `pub(super)` for
+//! that reason.
+//!
+//! What is *not* here any more: the state store's and the HTTP capsule's own
+//! cases. Both implementations moved to `tinyflows::caps::host`, and their tests
+//! went with them — testing them from here would be this crate asserting on
+//! another crate's internals. `dry_run_tests` keeps the part that is still about
+//! Medulla: that a simulated run starts no harness session.
 
+mod dry_run_tests;
 mod harness_selection_tests;
-mod http_tests;
 mod shell_tests;
-mod state_tests;
 mod tools_tests;
 
 use std::collections::HashMap;
@@ -272,10 +276,16 @@ fn a_node_may_name_its_instruction_prompt_or_instruction() {
 }
 
 #[test]
-fn production_capabilities_refuse_shell_execution_until_its_policy_exists() {
+fn production_capabilities_gate_shell_execution_on_the_same_switch_as_code() {
     let root = tempfile::tempdir().unwrap();
+
+    // `allow_code` on: a `shell` node runs with this host's policy, same as
+    // `build_capabilities_inner`'s comment promises ("offered exactly when a
+    // `code` node is").
+    let mut allowed = settings(root.path());
+    Arc::get_mut(&mut allowed).unwrap().allow_code = true;
     let caps = build_capabilities(
-        settings(root.path()),
+        allowed,
         HostServices {
             node_progress: None,
             dispatch: RecordingDispatch::replying("unused"),
@@ -285,10 +295,28 @@ fn production_capabilities_refuse_shell_execution_until_its_policy_exists() {
         "workflow:demo",
         "run-shell-boundary",
     );
+    assert!(
+        caps.shell.is_some(),
+        "shell nodes must be available once this host's script policy (path, environment, interpreter) is wired up"
+    );
 
+    // `allow_code` off: refused, exactly like `code` nodes are.
+    let mut denied = settings(root.path());
+    Arc::get_mut(&mut denied).unwrap().allow_code = false;
+    let caps = build_capabilities(
+        denied,
+        HostServices {
+            node_progress: None,
+            dispatch: RecordingDispatch::replying("unused"),
+            resolver: empty_resolver(root.path()),
+            http_credentials: HashMap::new(),
+        },
+        "workflow:demo",
+        "run-shell-boundary-denied",
+    );
     assert!(
         caps.shell.is_none(),
-        "shell nodes must remain unavailable until Medulla supplies path, environment, and interpreter policy"
+        "an operator who disabled code execution must not get shell execution through the back door"
     );
 }
 

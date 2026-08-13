@@ -18,7 +18,8 @@ use anyhow::{bail, Context};
 use medulla::workflows::skills::{
     self, FileAction, InstallOptions, RegistrationOptions, SkillScope, SkillTarget,
 };
-use medulla::workflows::{FileWorkflowStore, WorkflowRecord};
+use medulla::workflows::store;
+use medulla::workflows::WorkflowRecord;
 
 /// Long enough for a cold CLI start, bounded so integration never wedges boot.
 const CLAUDE_REGISTRATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -90,7 +91,7 @@ fn reconcile_with(
     }
 
     let mut report = StartupSkillsReport::default();
-    let loaded = FileWorkflowStore::discover(env, cwd).load();
+    let loaded = store::discover(env, cwd).load();
     let workflows: Vec<_> = loaded
         .workflows
         .iter()

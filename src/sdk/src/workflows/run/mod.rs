@@ -25,7 +25,6 @@
 //! the caller to name at least one node the persisted record actually lists as
 //! pending, so a stale or invented resume cannot walk a run past its gate.
 
-pub mod diagnose;
 pub mod dispatches;
 mod preflight;
 mod registry;
@@ -34,11 +33,16 @@ mod summary;
 #[cfg(test)]
 mod tests;
 
-pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
+// Run diagnosis moved to the engine crate with the run record it explains.
+// Aliased as well as re-exported, so `diagnose::Diagnosis` still resolves here.
 pub use dispatches::{in_flight, InFlightDispatch};
 pub(crate) use preflight::clamp_loop_iterations;
 pub use registry::{cancel, is_running, CancelSignal, RunClaim, RunGuard};
 pub use summary::summarize;
+use tinyflows::store::types::diagnosis as diagnose;
+pub use tinyflows::store::types::diagnosis::{
+    capturing, diagnose, CapturingObserver, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding,
+};
 
 use std::sync::Arc;
 use std::time::Duration;

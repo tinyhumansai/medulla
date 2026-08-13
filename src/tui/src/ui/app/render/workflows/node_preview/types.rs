@@ -59,7 +59,7 @@ impl AgentDefaults {
             // A `defaults` block the store would have refused cannot be
             // displayed as a choice, so an unreadable one is shown as no choice
             // at all rather than as the host's.
-            workflow: defaults.preference().unwrap_or_default(),
+            workflow: medulla::workflows::defaults_preference(defaults).unwrap_or_default(),
             host: HarnessPreference {
                 harness: config
                     .default_provider

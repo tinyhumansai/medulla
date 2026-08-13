@@ -29,6 +29,7 @@ fn workflow() -> String {
 }
 
 #[test]
+#[cfg(unix)]
 fn startup_syncs_both_harnesses_and_registers_their_mcp_server() {
     let fixture = tempfile::tempdir().unwrap();
     let home = fixture.path().join("home");

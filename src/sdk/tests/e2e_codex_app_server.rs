@@ -118,15 +118,24 @@ async fn resumed_turn_uses_the_worktree_as_its_runtime_cwd() {
     let (mut options, _) = options(&fake, &home(&dir, "cwd"), "continue", 10_000);
     options.cwd = dir.path().to_string_lossy().into_owned();
     options.workspace_context.cwd = Some(worktree.to_string_lossy().into_owned());
+    options.resume_session_id = Some("thread-retained".to_string());
 
     run_provider_task(options).await.expect("the turn runs");
 
-    let turn = fake
-        .requests()
-        .into_iter()
-        .find(|request| request["method"] == "turn/start")
+    let requests = fake.requests();
+    let resumed = requests
+        .iter()
+        .position(|request| request["method"] == "thread/resume")
+        .expect("thread/resume request");
+    let turn = requests
+        .iter()
+        .position(|request| request["method"] == "turn/start")
         .expect("turn/start request");
-    assert_eq!(turn["params"]["cwd"], worktree.to_string_lossy().as_ref());
+    assert!(resumed < turn, "thread/resume must precede turn/start");
+    assert_eq!(
+        requests[turn]["params"]["cwd"],
+        worktree.to_string_lossy().as_ref()
+    );
 }
 
 /// The whole point: several tasks, one process.

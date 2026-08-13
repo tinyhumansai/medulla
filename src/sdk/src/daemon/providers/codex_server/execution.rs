@@ -227,10 +227,11 @@ async fn drive_turn(
     // Shared because the idle watchdog reads the fold's last-activity stamp
     // while the notification branch writes to it, and both live in one
     // `select!`.
-    let fold = Arc::new(Mutex::new(FoldState::with_workspace(
+    let fold = Arc::new(Mutex::new(FoldState::with_workspace_at(
         on_event,
         workspace_context,
         on_workspace_context,
+        Some(cwd.into()),
     )));
         on_event,
         workspace_context,

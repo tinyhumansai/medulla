@@ -1,5 +1,7 @@
 //! Unit tests for the loopback module's process-spawning helpers.
 
+use std::process::Command;
+
 /// The browser opener must not inherit our stderr. `xdg-open` delegates to GIO,
 /// which prints warnings ("The peer-to-peer connection failed: ... gvfsd ...")
 /// that would otherwise be painted straight onto the TUI's frame. Assert the

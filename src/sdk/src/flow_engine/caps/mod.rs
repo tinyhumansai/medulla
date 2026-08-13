@@ -41,6 +41,7 @@ use crate::flow_engine::settings::CapabilitySettings;
 
 use self::agent::{HarnessAgentRunner, HarnessLlm};
 use self::dispatch::HarnessDispatch;
+use self::tasks::{MedullaTaskRunner, TaskCapabilities};
 use self::tools::MedullaToolInvoker;
 
 /// Schema-aware capability stand-ins for dry runs, now owned by the engine

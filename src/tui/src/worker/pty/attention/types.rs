@@ -11,6 +11,10 @@ use super::*;
 /// never displaces a permission prompt we can actually name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AttentionKind {
+    /// The harness process died, or a write to it failed. Nothing will happen
+    /// in this session again until the operator restarts it, which is what makes
+    /// it the most certain cue there is.
+    Failed,
     /// A startup dialog recognised by [`super::super::dialog`] — trust, the
     /// bypass disclaimer, codex's update prompt. The harness will not take work
     /// until it is answered.
@@ -18,9 +22,25 @@ pub enum AttentionKind {
     /// A permission or approval prompt: the harness wants to run a command,
     /// apply a patch, or leave plan mode, and is holding until told.
     Approval,
+    /// The harness printed a blocking error and stopped — a usage limit, an
+    /// expired credential, an API failure it will not retry past.
+    ///
+    /// Distinct from [`Failed`](Self::Failed): the process is alive and the
+    /// screen is readable, but the turn is over and it did not do the work. The
+    /// operator has to intervene, and nothing on the row would otherwise say so.
+    Error,
     /// A numbered choice is on screen with the cursor resting on an option. What
     /// it is asking is not recognised, but that it is asking is unambiguous.
     Choice,
+    /// A turn the orchestrator dispatched has settled and the session is being
+    /// held open for the operator to read.
+    ///
+    /// The weakest *actionable* cue, and deliberately not raised for an ordinary
+    /// idle composer: a harness sitting at a prompt nobody asked anything of is
+    /// the normal resting state of half the rail, and flagging it would make the
+    /// flag mean nothing. A retained session is different — something finished,
+    /// and it is standing there because a person is expected to look.
+    Completed,
     /// The harness rang the terminal bell. Every harness does this when a turn
     /// ends or a prompt opens, so it is the one cue that needs no vocabulary —
     /// and the vaguest, so it loses to anything else.
@@ -31,11 +51,38 @@ impl AttentionKind {
     /// The display string, used in tests and in the pane title.
     pub fn as_str(self) -> &'static str {
         match self {
+            AttentionKind::Failed => "failed",
             AttentionKind::Dialog => "dialog",
             AttentionKind::Approval => "approval",
+            AttentionKind::Error => "error",
             AttentionKind::Choice => "choice",
+            AttentionKind::Completed => "completed",
             AttentionKind::Bell => "bell",
         }
+    }
+
+    /// Whether this cue reports something that went *wrong*.
+    ///
+    /// Drives colour rather than precedence: a failure and a permission prompt
+    /// both want the operator, and only one of them is bad news. The rail draws
+    /// the first in red and the second in the configured attention colour, so
+    /// the two are told apart before either is read.
+    pub fn is_failure(self) -> bool {
+        matches!(self, AttentionKind::Failed | AttentionKind::Error)
+    }
+
+    /// Whether this cue means the harness is *blocked* on the operator.
+    ///
+    /// What the "N waiting on you" counter and the tab badge are asking. Every
+    /// cue is worth drawing on its own row; only these are worth a number in a
+    /// header, because that number is a claim that something has stopped.
+    ///
+    /// [`Completed`](Self::Completed) is the exception: a finished session is
+    /// worth showing and worth reading, but nothing is held up while it waits,
+    /// and counting it would make the badge tick up on every successful task —
+    /// which is the fastest way to teach an operator to ignore a badge.
+    pub fn blocks(self) -> bool {
+        !matches!(self, AttentionKind::Completed)
     }
 }
 

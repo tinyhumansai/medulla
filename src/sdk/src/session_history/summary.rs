@@ -6,6 +6,7 @@
 //! the cost of scanning many transcripts. Claude and Codex use different record
 //! shapes, so each has its own head reader.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::Value;
@@ -160,6 +161,87 @@ pub(super) fn as_message_content(message: Option<&Value>) -> Option<Value> {
 /// their own placeholder.
 pub(super) fn slug_label(text: &str) -> String {
     slug(text)
+}
+
+/// Read Codex's persisted name for the session rooted at `cwd` — but only when
+/// the folder is unambiguous about which session it belongs to.
+///
+/// The id-keyed [`codex_thread_label`] is the right read once a transcript has
+/// been located, because identity beats recency. This is the fallback for a
+/// session nothing has located yet — one an operator created and typed into
+/// directly, which never enters the transcript executor — where the best
+/// identity on offer is "the Codex rollout in this working directory".
+///
+/// The name is attributed only when exactly one rollout is rooted here. With
+/// several — two sessions sharing a directory, or a stale rollout from a
+/// finished one still newer — the cwd cannot prove which is this session's, and
+/// answering with the newest would put another session's name on this row. The
+/// fallback then declines and the row keeps its terminal-derived name until
+/// identity is found.
+pub fn codex_thread_label_for_cwd(env: &HashMap<String, String>, cwd: &str) -> Option<String> {
+    // `session_files_for_cwd` is cwd-strict (a transcript with no recorded cwd
+    // is not a candidate), so a single hit is a positive attribution, not a
+    // guess.
+    let mut candidates = super::scan::session_files_for_cwd(env, SessionAgentKind::Codex, cwd);
+    if candidates.len() != 1 {
+        return None;
+    }
+    let discovered = candidates.pop().expect("exactly one candidate");
+    codex_thread_label(env, &discovered.id)
+}
+
+/// Read Codex's persisted name for `session_id`, when it has one.
+///
+/// Codex records `/rename` names in `session_index.jsonl` beside its `sessions`
+/// directory rather than updating the terminal title.  Claude has no equivalent
+/// index, so callers use this only for Codex and retain the transcript-prompt
+/// fallback when the index has not caught up yet.
+///
+/// The lookup goes through [`codex_index_map`] so this single-session read and
+/// the batch loader pick the same winning record when the index holds several
+/// entries for an id — the newest, last one — instead of the single read
+/// disagreeing with the recent-session list.
+pub fn codex_thread_label(env: &HashMap<String, String>, session_id: &str) -> Option<String> {
+    codex_index_map(env).get(session_id).cloned()
+}
+
+/// Load the Codex session-index into an id-to-label map.
+///
+/// Callers that need to resolve thread names for many sessions (e.g. the
+/// recent-session list) can load the index once and look up every session
+/// against the same map, rather than re-reading and re-parsing the file
+/// per session.
+///
+/// `session_index.jsonl` is append-only: each `/rename` writes a new record for
+/// the same id, so when several records share an id the last one — the newest
+/// rename — wins. [`codex_thread_label`] routes through this map for the same
+/// guarantee.
+pub fn codex_index_map(env: &HashMap<String, String>) -> HashMap<String, String> {
+    let Some(index_path) = (|| {
+        super::scan::codex_sessions_dir(env)
+            .parent()?
+            .join("session_index.jsonl")
+            .into()
+    })() else {
+        return HashMap::new();
+    };
+    let Ok(contents) = std::fs::read_to_string(index_path) else {
+        return HashMap::new();
+    };
+    contents
+        .lines()
+        .filter_map(|line| {
+            let record: Value = serde_json::from_str(line).ok()?;
+            let object = record.as_object()?;
+            let id = object.get("id").and_then(Value::as_str)?;
+            let label = object
+                .get("thread_name")
+                .and_then(Value::as_str)
+                .map(slug_label)
+                .filter(|l| !l.is_empty())?;
+            Some((id.to_string(), label))
+        })
+        .collect()
 }
 
 /// Read the first [`HEAD_BYTES`] of `path` as UTF-8 (lossy) and split into

@@ -218,12 +218,6 @@ pub fn type_str(app: &mut App, s: &str) {
     }
 }
 
-pub fn submit_line(app: &mut App, s: &str) -> Option<Cmd> {
-    app.tab_index = 1;
-    type_str(app, s);
-    app.on_event(key(KeyCode::Enter))
-}
-
 pub fn render(app: &mut App, w: u16, h: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     terminal.draw(|f| app.draw(f)).unwrap();
@@ -260,7 +254,7 @@ pub fn app_with_selected_task() -> (App, Arc<MockRuntime>) {
         question_id: Some("qid-1".into()),
     });
     app.refresh_snapshot();
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     // Walk the cursor down until a task row is selected (running tasks sort first).
     for _ in 0..12 {
         if app.selected_task_id().is_some() {

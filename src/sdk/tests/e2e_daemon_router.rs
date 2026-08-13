@@ -42,6 +42,7 @@ fn router_options(
 ) -> RunTaskOptions {
     let _ = bin;
     RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),

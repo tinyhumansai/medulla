@@ -31,36 +31,36 @@ use std::time::Duration;
 use medulla::daemon::providers::{RunTaskFn, RunTaskOptions, RunTaskResult};
 use medulla::protocol::HarnessProvider;
 use medulla::session_history::SessionAgentKind;
-use medulla::sessions::{SessionClass, TurnStream};
+use medulla::sessions::SessionClass;
 use medulla::wrapper::tail::SessionTailer;
 
-use super::super::pty::{LaunchSpec, PtyManager, SessionControl, SessionOrigin};
-use super::types::{OpenedSession, PtySessionExecutor, SessionPlan, TurnSpec, WorkspaceContext};
+use super::super::pty::{PtyManager, SessionControl};
+use super::types::{PtySessionExecutor, SessionPlan, TurnSpec, WorkspaceContext};
 
 /// How often the transcript is polled while a turn runs.
 ///
 /// Fast enough that a short turn settles promptly, slow enough that a long one
 /// costs almost nothing. The transcript is a file on local disk, so this is a
 /// stat plus a short read.
-const POLL: Duration = Duration::from_millis(150);
+pub(super) const POLL: Duration = Duration::from_millis(150);
 
 /// How long to keep looking for a session's transcript before giving up.
 ///
 /// A harness writes its first record only once it has started work, which on a
 /// cold start can take a few seconds.
-const LOCATE_BUDGET: Duration = Duration::from_secs(30);
+pub(super) const LOCATE_BUDGET: Duration = Duration::from_secs(30);
 
 /// Silence that settles a turn whose completion record carried no stated reason.
 ///
 /// Only reachable for the ~0.08% of claude records with no `stop_reason`; the
 /// watcher refuses to stall while a tool call is outstanding, so a long build is
 /// never mistaken for a finished turn.
-const STALL_BUDGET_MS: i64 = 120_000;
+pub(super) const STALL_BUDGET_MS: i64 = 120_000;
 
 /// How long to wait for the rest of a terminal message before replying with what
 /// arrived. The blocks of one message are written in a single burst, so this only
 /// has to outlast that write — it is a safety net, not the normal path.
-const SETTLE_GRACE_MS: i64 = 1_500;
+pub(super) const SETTLE_GRACE_MS: i64 = 1_500;
 
 impl PtySessionExecutor {
     /// Build an executor over the TUI's live session manager.
@@ -157,7 +157,17 @@ impl PtySessionExecutor {
         let queue_deadline = tokio::time::Instant::now() + self.queue_budget(options.timeout_ms);
         let queue_abort = options.abort.clone();
         let opened = loop {
-            let plan = self.session_for(&options, class)?;
+            // The half of the decision that blocks runs on the blocking pool,
+            // exactly as the launch below does. Reuse waits out the previous
+            // turn's completion-chime grace with a `std::thread::sleep` of up
+            // to 300ms, and the checkout check canonicalizes both paths; inline,
+            // that parked a tokio worker per dispatch, and a burst of task
+            // frames could park most of the runtime — taking the inbox drain
+            // and every screen sampler down with it, since they share one.
+            let probe = self
+                .probe_session(class, options.conversation.clone(), provider, &options.cwd)
+                .await?;
+            let plan = self.session_for(&options, probe)?;
             match plan {
                 SessionPlan::Reuse(opened) => break opened,
                 SessionPlan::Launch(spec) => break self.launch(*spec).await?,
@@ -361,7 +371,7 @@ impl PtySessionExecutor {
     /// harness still finishing the last one interleaves two prompts into one
     /// composer, which is the failure that produces confidently wrong answers
     /// rather than an error.
-    fn stop_turn(&self, id: &str) {
+    pub(super) fn stop_turn(&self, id: &str) {
         let stopped = self.sessions.stop_if_orchestrator(id);
         retire_stopped_workspace_context(
             &mut self
@@ -372,491 +382,8 @@ impl PtySessionExecutor {
             stopped,
         );
     }
-
-    /// Decide which session serves this task: reuse an idle one, launch, or
-    /// queue behind the person in the checkout.
-    ///
-    /// Synchronous, and returns a plan rather than a session, because neither
-    /// the launch nor the wait may happen here — see
-    /// [`PtySessionExecutor::launch`].
-    ///
-    /// **Candidacy (spec §4.1).** Only *orchestrator-owned* sessions are ever
-    /// candidates. A user-owned session — born that way as an unmanaged spawn,
-    /// or taken at runtime — is not one, so a person working in a session never
-    /// makes a dispatch fail: it is simply not among the things the dispatch can
-    /// pick up. That rule lives in
-    /// [`try_claim`](crate::worker::pty::PtyManager::claim_idle), which is why
-    /// reuse is consulted *first* here now. It used to come second, behind a
-    /// workspace-wide refusal that turned a person at a keyboard into a task
-    /// error — even when the agent had another session sitting idle beside them.
-    fn session_for(
-        &self,
-        options: &RunTaskOptions,
-        class: SessionClass,
-    ) -> Result<SessionPlan, String> {
-        if class == SessionClass::Unbound {
-            // Reuse this peer's session only when it is *idle*. A harness serves
-            // one turn at a time: a fan-out that pastes three prompts into one
-            // composer gets them answered as a single conversation, and all
-            // three tails settle on the same completion — three different
-            // instructions, one answer, delivered three times. A busy session
-            // therefore does not qualify, and the task gets a fresh one.
-            if let Some(row) = self
-                .sessions
-                .claim_idle(&options.conversation, options.provider)
-            {
-                return Ok(SessionPlan::Reuse(OpenedSession {
-                    id: row.id.clone(),
-                    harness_session_id: row.session_id.clone(),
-                    reused: true,
-                    gh_repo_is_set: self.sessions.gh_repo_is_set(&row.id).unwrap_or(false),
-                }));
-            }
-        }
-        // Nothing to reuse, so this dispatch needs a session of its own — and
-        // that is where the *second*, independent rule applies: under
-        // `strategy: checkout` the working tree takes one writer at a time
-        // (see [`checkout_writer`](Self::checkout_writer)), so a fresh harness
-        // cannot simply start beside the one that is there. The work queues
-        // instead — the same exclusivity the blanket refusal used to buy,
-        // without ending the dispatch to get it.
-        //
-        // Note what this is *not*: it is not "the workspace is held". Holds are
-        // on sessions, and rule 1 above has already dealt with those. This is
-        // the strategy's serialization, and under `worktree` it will not apply
-        // at all.
-        if self.checkout_writer(&options.cwd).is_some() {
-            return Ok(SessionPlan::Queue(options.cwd.clone()));
-        }
-        let label = if options.conversation.is_empty() {
-            format!("task:{}", options.provider.as_str())
-        } else {
-            options.conversation.clone()
-        };
-        // Only a *fresh* launch applies the router and model: a reused session
-        // (the `claim_idle` branch above) is a process already running with
-        // whatever it was opened with, and there is no flag that reconfigures a
-        // live harness mid-conversation. Router/model drift across turns of the
-        // same conversation is the same trade the headless executor's own resume
-        // path accepts.
-        let (mut env, mut extra_args) = self.spawn_env(options)?;
-        // Resolved once, from `self.env`, and then both *used* to launch and
-        // *shown* to the trust decision below. Deriving it twice from two
-        // different environments is what let an override live in `self.env`,
-        // select the executable, and still be invisible to `attach_mcp`
-        // reading the per-run child environment.
-        let bin = medulla::protocol::env::provider_bin(options.provider, &self.env);
-        // Medulla's own tools, on the same terms an ACP-dispatched session gets
-        // them. A task frame that asked for a workflow to be run needs the verb
-        // to run it with.
-        let mcp_grant_session = super::super::pty::launch::attach_mcp(
-            options.provider,
-            &bin,
-            &mut env,
-            &mut extra_args,
-            self.log.as_ref(),
-        );
-        // The managed skills that name the workflows those tools can start,
-        // on the same terms the headless executor already hands them over.
-        super::super::pty::launch::attach_skills(
-            options.provider,
-            &env,
-            std::path::Path::new(&options.cwd),
-            &mut extra_args,
-        );
-        Ok(SessionPlan::Launch(Box::new(LaunchSpec {
-            provider: options.provider,
-            preset: None,
-            bin,
-            cwd: options.cwd.clone(),
-            env,
-            extra_args,
-            skip_permissions: options.skip_permissions,
-            label,
-            model: options.model.clone(),
-            session_id: None,
-            // Opened to serve a task frame, so the orchestrator holds it. An
-            // operator can still take it over later; that is what stops the
-            // next frame landing in a composer they are typing in.
-            control: SessionControl::Orchestrator,
-            // …and that later takeover does *not* touch this: the session was
-            // auto-created by a dispatch (§4.1), which is true for the rest of
-            // its life however many times control changes hands. Unnamed on
-            // purpose — the UI labels it from the task it was created for.
-            origin: SessionOrigin::Orchestrator,
-            name: None,
-            mcp_grant_session,
-        })))
-    }
-
-    /// Start a fresh harness on the blocking pool.
-    ///
-    /// [`PtyManager::open`] forks, execs, and may back off while a pty frees up
-    /// — all of it blocking. Calling it inline parked a tokio worker for up to
-    /// half a second per launch, and a burst of task frames could park most of
-    /// the runtime, taking the inbox drain and every screen sampler down with
-    /// it since they share one. So the launch goes to the blocking pool, which
-    /// is what it is for.
-    async fn launch(&self, spec: LaunchSpec) -> Result<OpenedSession, String> {
-        let gh_repo_is_set = spec.env.contains_key("GH_REPO");
-        let sessions = self.sessions.clone();
-        let id = tokio::task::spawn_blocking(move || sessions.open(spec))
-            .await
-            .map_err(|err| format!("pty launch did not complete: {err}"))??;
-        let harness_session_id = self.sessions.row(&id).and_then(|row| row.session_id);
-        Ok(OpenedSession {
-            id,
-            harness_session_id,
-            reused: false,
-            gh_repo_is_set,
-        })
-    }
-
-    /// The environment and extra argv a fresh launch spawns with: this
-    /// task-scoped environment, layered with the `[router]` injection the
-    /// headless executor already applies at its own spawn seam.
-    ///
-    /// Without this, switching the local host to `PtySessionExecutor` silently
-    /// dropped a configured router — the child spawned against its own default
-    /// endpoint instead of the one the operator pointed it at, with no error to
-    /// say so.
-    ///
-    /// # Errors
-    ///
-    /// A configured `apiKeyEnv` whose named variable is unset in this
-    /// executor's environment is a hard error, matching the headless path: a
-    /// silently-empty key would spawn the harness unauthenticated against the
-    /// routed endpoint.
-    fn spawn_env(
-        &self,
-        options: &RunTaskOptions,
-    ) -> Result<(HashMap<String, String>, Vec<String>), String> {
-        let mut env = options.env.clone();
-        // This executor launches the watched harness itself, bypassing the
-        // daemon's transport dispatcher. Keep the embedded core workspace out
-        // of that child for the same credential-store isolation as headless
-        // and alternate transports.
-        medulla::protocol::env::scrub_core_state(&mut env, options.provider);
-        let mut extra_args = options.extra_args.clone();
-        // Commits made in a watched PTY session are just as much Medulla's work
-        // as headless ones, so this path carries the same attribution.
-        let attribution_env = medulla::attribution::attribution_env(options.attribution, &env);
-        env.extend(attribution_env);
-        // Attribution and the operator's configured hooks share Claude Code's
-        // single `--settings` flag, so both are built together — a watched PTY
-        // session runs the same lifecycle policy a headless one does.
-        let (launch_args, hook_notes) = medulla::harness_hooks::launch_args(
-            options.provider,
-            options.attribution,
-            &options.hooks,
-            &env,
-        );
-        extra_args.extend(launch_args);
-        // Routed to the log rather than stderr: this crate draws a full-screen
-        // TUI, where a stray line corrupts the pane. Covers both hooks the
-        // harness cannot run and hooks it will not run until trusted.
-        if let Some(log) = &self.log {
-            for note in &hook_notes {
-                log(note);
-            }
-        }
-        // OpenRouter-bound runs are re-pointed at Medulla's loopback attribution
-        // proxy, and the real key is scrubbed from `env` here, before any of it
-        // reaches the child. A no-op for every other endpoint.
-        let mut router = options.router.clone();
-        medulla::inference_proxy::route_spawn(options.provider, &mut router, &mut env)?;
-        if let Some(router) = &router {
-            let injection = medulla::protocol::env::router_env(options.provider, router);
-            for (key, value) in injection.env {
-                env.insert(key, value);
-            }
-            for (child_var, source_name) in injection.secret_env {
-                // Resolved from `env`, not `options.env`: when the run was routed
-                // through the attribution proxy the name to resolve is the token
-                // the routing just placed there, and the original key has been
-                // scrubbed. Cloned before inserting so the read does not borrow
-                // across the write.
-                let secret = env
-                    .get(&source_name)
-                    .filter(|value| !value.is_empty())
-                    .cloned();
-                match secret {
-                    Some(secret) => {
-                        env.insert(child_var, secret);
-                    }
-                    None => {
-                        return Err(format!(
-                            "router API key env var `{source_name}` is not set; \
-                             export it or remove apiKeyEnv from [router]"
-                        ));
-                    }
-                }
-            }
-            extra_args.extend(injection.args);
-        }
-        // Codex needs more than an endpoint before a routed model will answer:
-        // a provider block, an API-key auth preference, and a catalog entry it
-        // is willing to describe. Read from `env`, which now holds both the
-        // preset's opt-in knobs and the endpoint the routing above wrote.
-        extra_args.extend(
-            medulla::codex_overrides::launch_args(options.provider, options.model.as_deref(), &env)
-                .map_err(|error| error.to_string())?,
-        );
-        Ok((env, extra_args))
-    }
-
-    /// Fold whatever the harness has written since the last poll, and answer
-    /// with the turn's result if that fold completed it.
-    ///
-    /// Shared by the polling loop and by the suspend path, and shared
-    /// deliberately: "read what is already there before doing anything else" has
-    /// to mean the same thing in both, or a turn that finished microseconds
-    /// before an operator took the session would have its answer read by one
-    /// path and dropped by the other.
-    ///
-    /// `last_line_at` is advanced per line rather than per call, because it is
-    /// the idle watchdog's clock and a batch of lines is progress at the time
-    /// each of them was read, not at the time the batch was drained.
-    fn fold_available(
-        &self,
-        id: &str,
-        provider: HarnessProvider,
-        tailer: &mut SessionTailer,
-        stream: &mut TurnStream,
-        on_event: &mut Option<medulla::daemon::providers::OnEvent>,
-        last_line_at: &mut i64,
-    ) -> Option<RunTaskResult> {
-        let poll = tailer.poll();
-        // Codex cannot be told its id, so it is learned from the rollout the
-        // first time the tailer locates one.
-        if let Some(located) = &poll.located {
-            self.sessions
-                .record_session_id(id, located.harness_session_id.clone());
-        }
-        for line in poll.lines {
-            *last_line_at = medulla::clock::now_millis();
-            let fold = stream.observe(&line.text);
-            self.workspace_context
-                .lock()
-                .expect("workspace context lock poisoned")
-                .insert(id.to_string(), stream.workspace_context());
-            // The peer watches its task through these. Dropping them would
-            // leave it with an ack, silence, then a reply — which is what
-            // this executor used to do.
-            if let Some(callback) = on_event.as_mut() {
-                for event in &fold.events {
-                    callback(event);
-                }
-            }
-            if let Some(reply) = fold.reply {
-                return Some(RunTaskResult {
-                    provider,
-                    reply,
-                    events: stream.events(),
-                    usage: stream.usage(),
-                    session_id: self.sessions.row(id).and_then(|row| row.session_id),
-                });
-            }
-        }
-        None
-    }
-
-    /// Poll the transcript until the harness says the turn is over.
-    ///
-    /// `timeout_ms` is the caller's configured idle watchdog (`[host]
-    /// .taskTimeoutMs`, mirroring the headless executor's own `timeout_ms`) —
-    /// the hard ceiling on how long a turn may go without producing a single
-    /// transcript line. It is distinct from, and can override, the two fixed
-    /// budgets below: [`LOCATE_BUDGET`] covers a harness that never starts a
-    /// turn at all, and [`STALL_BUDGET_MS`] is a soft "probably finished"
-    /// signal for a transcript that stops without a stated reason. A caller
-    /// configuring a shorter ceiling than either means it, and is honored
-    /// ahead of them.
-    async fn await_turn(
-        &self,
-        id: &str,
-        spec: TurnSpec,
-        mut tailer: SessionTailer,
-        abort: medulla::daemon::providers::Abort,
-        mut on_event: Option<medulla::daemon::providers::OnEvent>,
-    ) -> Result<RunTaskResult, String> {
-        let TurnSpec {
-            provider,
-            gh_repo_is_set,
-            timeout_ms,
-            instruction,
-        } = spec;
-        let mut stream = TurnStream::new_with_gh_repo_override(provider, gh_repo_is_set);
-        if let Some((cwd, branch, pull_request)) = self
-            .workspace_context
-            .lock()
-            .expect("workspace context lock poisoned")
-            .get(id)
-            .cloned()
-        {
-            stream.set_workspace_context(cwd, branch, pull_request);
-            if let (Some(callback), Some(event)) =
-                (on_event.as_mut(), stream.retained_workspace_event())
-            {
-                callback(&event);
-            }
-        }
-        let mut started = tokio::time::Instant::now();
-        let mut last_line_at = medulla::clock::now_millis();
-
-        loop {
-            // Taking control is an ownership transfer, not merely a display
-            // preference, so it is answered before aborts or transcript output:
-            // from here the executor must not send Ctrl-C, report a stale
-            // completion, or close the PTY underneath the operator.
-            //
-            // What it does instead is **suspend** (spec §5). The turn used to
-            // return an error here, throwing away everything the harness had
-            // produced and telling the orchestrator its task had failed — for
-            // the entirely ordinary event of a person opening the session to
-            // look. Now the fold, its events, its usage and its workspace
-            // context all stay exactly where they are, the session keeps the
-            // work, and the task stays open.
-            if self.sessions.control(id) == Some(SessionControl::User) {
-                // Everything already written belongs to *this* turn — the
-                // takeover cannot retroactively unwrite it. Folded out before
-                // suspending, so a turn that finished in the instant somebody
-                // took the session still reports the answer it had reached.
-                if let Some(result) = self.fold_available(
-                    id,
-                    provider,
-                    &mut tailer,
-                    &mut stream,
-                    &mut on_event,
-                    &mut last_line_at,
-                ) {
-                    return Ok(result);
-                }
-                super::hold::report_held(&mut on_event, provider);
-                self.await_handback(id, provider, &abort).await?;
-                // The lines the operator's own work wrote are theirs, not this
-                // turn's: dropped rather than folded, or the person's last
-                // exchange would settle the task as its answer. What they did is
-                // not lost — it is in the session, which is exactly what the
-                // hand-back turn is told to go and read.
-                let poll = tailer.poll();
-                if let Some(located) = &poll.located {
-                    self.sessions
-                        .record_session_id(id, located.harness_session_id.clone());
-                }
-                super::hold::report_resumed(&mut on_event, provider);
-                super::super::pty::inject_prompt(
-                    &self.sessions,
-                    id,
-                    &super::hold::handback_prompt(&instruction),
-                )
-                .await?;
-                // Both budgets restart with the hand-back turn, which is what
-                // "the watchdog is paused, not lengthened" means on this side:
-                // held time is excluded rather than counted, so a session held
-                // over lunch is not a task that timed out at the desk.
-                started = tokio::time::Instant::now();
-                last_line_at = medulla::clock::now_millis();
-                continue;
-            }
-            if abort.is_aborted() {
-                if abort.is_terminated() {
-                    self.stop_turn(id);
-                } else {
-                    // A requester abort is an interrupt: Ctrl-C reaches the
-                    // harness the same way the operator's would, and the
-                    // reusable session survives it.
-                    let _ = self.sessions.write(id, &[0x03]);
-                }
-                return Err(format!("{} task aborted", provider.as_str()));
-            }
-            if !self
-                .sessions
-                .row(id)
-                .is_some_and(|row| row.state.is_running())
-            {
-                return Err(format!(
-                    "{} session ended before the turn did",
-                    provider.as_str()
-                ));
-            }
-
-            if let Some(result) = self.fold_available(
-                id,
-                provider,
-                &mut tailer,
-                &mut stream,
-                &mut on_event,
-                &mut last_line_at,
-            ) {
-                return Ok(result);
-            }
-
-            if !tailer.is_located() && started.elapsed() > LOCATE_BUDGET {
-                // A harness writes its transcript once it starts a turn, so an
-                // absent one usually means it never started one — most often
-                // because it is still waiting on something on screen that
-                // `blocking_dialog` did not recognise. Say where to look; the
-                // bare "could not find the transcript" sent operators hunting
-                // through `~/.claude/projects` for a file that was never going
-                // to exist.
-                return Err(format!(
-                    "{} never started a turn — check the session in the Sessions tab; \
-                     it may be waiting on a prompt",
-                    provider.as_str()
-                ));
-            }
-            let idle_ms = medulla::clock::now_millis().saturating_sub(last_line_at);
-            // The configured idle ceiling, checked first so a caller-set budget
-            // shorter than the fixed ones below actually takes effect instead of
-            // being silently outlived by them. `timeout_ms == 0` means no
-            // configured ceiling (never observed from `[host]`, whose default is
-            // nonzero, but a defensive floor all the same).
-            if timeout_ms > 0 && idle_ms as u64 >= timeout_ms {
-                // Stop the harness before reporting the failure. A timeout is
-                // only silence on the *transcript* — the child is very much
-                // alive and may still be editing the workspace. Returning
-                // without stopping it tells the peer the task failed while the
-                // work carries on unattributed, and an unbound session would
-                // then be released as idle for the next task to claim, landing
-                // its prompt in a harness that is still mid-turn.
-                self.stop_turn(id);
-                return Err(format!(
-                    "{} task idle for {timeout_ms}ms (no events)",
-                    provider.as_str()
-                ));
-            }
-            // The turn ended, but its message is written one record per content
-            // block and the reply usually lives in the last one. Normally the
-            // records that follow close it immediately; this covers a transcript
-            // that simply stops, so a finished turn is never held for the full
-            // stall budget.
-            if stream.terminal_pending() && idle_ms >= SETTLE_GRACE_MS {
-                if let Some(reply) = stream.settle_pending() {
-                    return Ok(RunTaskResult {
-                        provider,
-                        reply,
-                        events: stream.events(),
-                        usage: stream.usage(),
-                        session_id: self.sessions.row(id).and_then(|row| row.session_id),
-                    });
-                }
-            }
-            if tailer.is_located() && stream.stalled_for(idle_ms, STALL_BUDGET_MS) {
-                return Ok(RunTaskResult {
-                    provider,
-                    reply: stream.settle_stalled(),
-                    events: stream.events(),
-                    usage: stream.usage(),
-                    session_id: self.sessions.row(id).and_then(|row| row.session_id),
-                });
-            }
-            tokio::time::sleep(POLL).await;
-        }
-    }
 }
 
-/// Retain mapper state only while the PTY can serve a later turn.
 pub(super) fn retains_workspace_context(
     class: SessionClass,
     control: Option<SessionControl>,

@@ -118,6 +118,19 @@ pub struct RouterConfig {
     /// `opencode`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub providers: HashMap<String, RouterProviderConfig>,
+    /// Upstream serving providers the route is restricted to, by OpenRouter
+    /// provider slug (`streamlake`, `novita`, …). Empty leaves the choice to
+    /// OpenRouter.
+    ///
+    /// This is *upstream* routing, a different axis from `providers` above:
+    /// that keys on which coding harness is being launched, this on which of
+    /// OpenRouter's serving providers may answer the resulting request. It is
+    /// honored only for OpenRouter-bound routes, where
+    /// [`crate::inference_proxy`] turns it into the request body's `provider.only`
+    /// — an endpoint override alone cannot express it, because the preference
+    /// travels in the body rather than the URL.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_only: Vec<String>,
 }
 
 impl RouterConfig {

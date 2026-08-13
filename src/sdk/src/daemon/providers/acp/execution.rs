@@ -49,6 +49,12 @@ pub(super) async fn medulla_mcp_servers(
         use crate::mcp::attach;
         use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
 
+        // A launch serving a workflow `agent` node gets no Medulla tools on
+        // either transport — see [`crate::harness_tools`]. Ahead of the grant
+        // below so nothing is minted for a session that will not carry it.
+        if crate::harness_tools::withheld(task_env) {
+            return Vec::new();
+        }
         // An operator who turned workflows off should not have harnesses handed
         // tools that would be refused. Resolved through the shared policy so
         // this transport and the CLI one cannot come to disagree about which
@@ -114,6 +120,27 @@ async fn exchange_parent_grant(_socket: PathBuf, _token: String) -> Option<(Path
 /// Environment switch selecting ACP instead of legacy provider JSONL.
 pub const HARNESS_PROTOCOL_ENV: &str = "MEDULLA_HARNESS_PROTOCOL";
 
+/// The directory a locally-run lifecycle hook should see for this tool call:
+/// the checkout the session is working in *now*, or the launch directory when
+/// it never announced a move.
+///
+/// `tracked` is the session's folded workspace directory (see
+/// [`super::fold`]), which is how Medulla learns that a session created a
+/// worktree and continued there. A `PostToolUse` auto-commit hook resolves its
+/// repository from this, so handing it the launch directory after such a move
+/// checkpoints the wrong checkout — the ACP counterpart of what
+/// [`crate::core_host::turn_cwd`] fixes for the embedded core.
+///
+/// A tracked directory that does not exist is ignored rather than passed on:
+/// the report may name a worktree that has since been removed, and spawning
+/// into a missing directory fails the hook instead of merely misplacing it.
+pub(super) fn hook_cwd_for(tracked: Option<&str>, launch: &std::path::Path) -> PathBuf {
+    tracked
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| launch.to_path_buf())
+}
+
 /// Whether this task explicitly requests the ACP transport.
 pub(in crate::daemon::providers) fn uses_acp(options: &RunTaskOptions) -> bool {
     options
@@ -124,7 +151,16 @@ pub(in crate::daemon::providers) fn uses_acp(options: &RunTaskOptions) -> bool {
 
 /// Execute one task through the standard Agent Client Protocol.
 pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, String> {
-    let agent = agent_for(&options);
+    // The operator's hooks, in the form this transport can carry them: for
+    // Claude Code an `_meta` passenger on the session request, and for the rest
+    // a note saying they are not running here. Built before anything is spawned
+    // so the note reaches the log even if the session never opens.
+    let delivery = crate::harness_hooks::acp_delivery(options.provider, &options.hooks);
+    for note in &delivery.notes {
+        tracing::warn!(provider = options.provider.as_str(), "{note}");
+    }
+    let session_meta = delivery.session_meta;
+    let local_post_tool_use = delivery.local_post_tool_use;
     // Read before `options` is picked apart below, and cloned because the
     // session setup runs inside an async move closure.
     #[cfg(feature = "workflows")]
@@ -142,6 +178,20 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // Kept outside the closure, which moves its copy, so the grant can be
     // revoked once the session is over however it ended.
     let revoke_key = session_key.clone();
+    // ACP starts a server which then starts the harness. Seed its environment
+    // before that server launches, so built-in hook commands inherit the
+    // per-session reporting capability just as direct spawn paths do. Keep the
+    // guard alive for the complete ACP run so a late hook cannot lose its
+    // authority while the harness is still running.
+    let mut agent_env = acp_env(&options)?;
+    let _hook_grant = crate::harness_hooks::seed_hook_grant(&session_key, &mut agent_env);
+    // The ACP server process receives `agent_env`; the local PostToolUse
+    // fallback spawns hooks from this same process, so it gets the same
+    // per-session environment — the hook grant and task-specific router /
+    // attribution variables among it — or a hook that reports back finds
+    // nothing to report to.
+    let hook_env = agent_env.clone();
+    let agent = agent_for_with_env(&options, agent_env)?;
     let task_env = options.env.clone();
     let state = Arc::new(Mutex::new(FoldState::with_workspace(
         options.on_event,
@@ -150,6 +200,13 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         options.on_workspace_context,
     )));
     let notification_state = state.clone();
+    let hook_cwd = PathBuf::from(&options.cwd);
+    // The ACP session id is not known until `session/new` (or `session/load`)
+    // answers. Hooks that correlate by session id should see the real id, not
+    // the synthetic grant key minted before the request; the shared cell is
+    // filled in as soon as the id is learned.
+    let hook_session = Arc::new(Mutex::new(session_key.clone()));
+    let connection_hook_session = hook_session.clone();
     let approve = options.skip_permissions;
     let cwd = PathBuf::from(&options.cwd);
     let resume = options.resume_session_id.clone();
@@ -163,7 +220,33 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                notification_state.lock().unwrap().fold(notification.update);
+                // The session's *current* directory, read under the same lock
+                // that just folded the update, so a tool call that moved the
+                // session into a worktree is already reflected when this call's
+                // own hooks run. `hook_cwd` — the launch directory — is the
+                // fallback for a session that never announced a move.
+                let (completed, session_cwd) = {
+                    let mut state = notification_state.lock().unwrap();
+                    let completed = state.fold(notification.update);
+                    let cwd = completed
+                        .is_some()
+                        .then(|| state.workspace_cwd().map(str::to_owned))
+                        .flatten();
+                    (completed, cwd)
+                };
+                if let Some(completed) = completed {
+                    let session_id = hook_session.lock().unwrap().clone();
+                    let cwd = hook_cwd_for(session_cwd.as_deref(), &hook_cwd);
+                    crate::harness_hooks::acp::run_post_tool_use(
+                        &local_post_tool_use,
+                        &cwd,
+                        &hook_env,
+                        &session_id,
+                        &completed.tool_name,
+                        &completed.input,
+                    )
+                    .await;
+                }
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -206,6 +289,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // what it would have done.
                     request.mcp_servers =
                         medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
+                    // A loaded session gets the hooks a new one gets. The ACP
+                    // server rebuilds the underlying harness query from these
+                    // params, so omitting them here would mean a resumed run —
+                    // every retry, every continued workflow step — silently
+                    // stopped checkpointing where the first turn did not.
+                    request.meta = session_meta;
                     connection.send_request(request).block_task().await?;
                     id.into()
                 }
@@ -217,6 +306,11 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                     // agent author a workflow rather than only run one.
                     request.mcp_servers =
                         medulla_mcp_servers(tool_mode.as_deref(), &session_key, &task_env).await;
+                    // Medulla's hooks, for the harnesses whose ACP server takes
+                    // its configuration this way (see
+                    // [`crate::harness_hooks::acp`]). `None` for the rest, which
+                    // leaves the request exactly as it was.
+                    request.meta = session_meta;
                     connection
                         .send_request(request)
                         .block_task()
@@ -225,10 +319,12 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                 }
             };
 
-            // Publish a newly learned ACP id before prompting. Notifications
-            // produced by the prompt may immediately report workspace state;
-            // the daemon must already have a binding for that callback to
-            // update rather than dropping the first turn's context.
+            // Publish the real ACP id to hooks before prompting, then announce
+            // it to the daemon. Notifications produced by the prompt may
+            // immediately report workspace state; the daemon must already have
+            // a binding for that callback to update rather than dropping the
+            // first turn's context.
+            *connection_hook_session.lock().unwrap() = session_id.to_string();
             if let Some(callback) = on_session {
                 callback(session_id.to_string());
             }
@@ -295,19 +391,51 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
 }
 
 /// Construct the ACP server command for a supported harness.
-pub(super) fn agent_for(options: &RunTaskOptions) -> AcpAgent {
+#[cfg(test)]
+pub(super) fn agent_for(options: &RunTaskOptions) -> Result<AcpAgent, String> {
+    // Built once and shared: the model flags below are derived from the same
+    // map the child receives, and `router_env` writing `OPENAI_BASE_URL` into it
+    // is what tells `codex_overrides` the run is routed at all.
+    let env = acp_env(options)?;
+    agent_for_with_env(options, env)
+}
+
+/// Construct an ACP server command using a fully prepared child environment.
+///
+/// The execution path supplies a per-session hook grant in addition to the
+/// ordinary ACP environment. Keeping this helper separate preserves
+/// [`agent_for`] as the pure configuration entry point used by focused tests.
+fn agent_for_with_env(
+    options: &RunTaskOptions,
+    mut env: HashMap<String, String>,
+) -> Result<AcpAgent, String> {
+    // Codex's routed provider block reaches its ACP server through the
+    // environment, not argv — see `codex_acp_overrides_env`. Applied before the
+    // config is built so the overlay below carries it.
+    for (key, value) in codex_acp_overrides_env(options, &env)? {
+        env.insert(key, value);
+    }
     let config = match options.provider {
         HarnessProvider::Claude => {
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
         }
-        HarnessProvider::Codex => {
-            AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/codex-acp@latest"])
+        HarnessProvider::Codex => AcpAgentConfig::new("npx").args(codex_acp_args(options, &env)?),
+        // The provider-binary override is untrusted configuration that lands in
+        // an `env` argv (Unix) or `cmd.exe` line (Windows). A value containing
+        // `=` would be consumed as a variable assignment by `env` even after
+        // its `--` terminator — the name could never be executed, and the next
+        // argument would silently become the command. Reject it at the boundary
+        // instead of hoping the shell misparse is harmless.
+        HarnessProvider::Opencode => {
+            let bin = crate::protocol::env::provider_bin(HarnessProvider::Opencode, &options.env);
+            if bin.contains('=') {
+                return Err(
+                    "provider binary override must not contain `=`: `env` would treat it as a variable assignment"
+                        .to_string(),
+                );
+            }
+            AcpAgentConfig::new(bin).arg("acp")
         }
-        HarnessProvider::Opencode => AcpAgentConfig::new(crate::protocol::env::provider_bin(
-            HarnessProvider::Opencode,
-            &options.env,
-        ))
-        .arg("acp"),
         HarnessProvider::Openhuman => {
             unreachable!("OpenHuman's operator TUI is not an ACP coding provider")
         }
@@ -319,13 +447,68 @@ pub(super) fn agent_for(options: &RunTaskOptions) -> AcpAgent {
     #[cfg(unix)]
     let config = config
         .command_with_env_removals(crate::protocol::env::CORE_STATE_VARS)
-        .envs(acp_env(options));
+        .envs(env);
     #[cfg(windows)]
     let config = config
         .command_with_env_removals(crate::protocol::env::CORE_STATE_VARS)
-        .envs(acp_env(options));
+        .envs(env);
 
-    AcpAgent::new(config)
+    Ok(AcpAgent::new(config))
+}
+
+/// The `codex-acp` argv, including the model and the routed-provider overrides.
+///
+/// The direct spawn seam builds these in two places — `-m <slug>` in
+/// [`crate::daemon::providers::detect::build_resumed_run_args`] and the `-c`
+/// block in [`crate::codex_overrides::launch_args`] — and ACP dispatch used to
+/// build neither. A preset therefore reached Codex as a bare `codex-acp` with
+/// its `model` silently dropped, so Codex ran the operator's own configured
+/// default on the operator's own ChatGPT account: the routed endpoint was in the
+/// environment but nothing selected it, and the preset's model never appeared in
+/// a single upstream request.
+fn codex_acp_args(
+    options: &RunTaskOptions,
+    env: &HashMap<String, String>,
+) -> Result<Vec<String>, String> {
+    let mut args = vec![
+        "-y".to_string(),
+        "@agentclientprotocol/codex-acp@latest".to_string(),
+    ];
+    if let Some(model) = codex_acp_model(options) {
+        args.push("-m".to_string());
+        args.push(model.to_string());
+    }
+    // The routed provider block does NOT ride here. `codex-acp` parses argv only
+    // for its `login` and `cli` subcommands; in server mode it ignores it and
+    // reads `CODEX_CONFIG`/`MODEL_PROVIDER` from the environment instead, which
+    // is what `codex_acp_overrides_env` puts there. `-m` is kept because it is
+    // harmless either way and documents the intent at the spawn.
+    let _ = env;
+    Ok(args)
+}
+
+/// The routed model for a Codex ACP spawn, trimmed and non-empty.
+fn codex_acp_model(options: &RunTaskOptions) -> Option<&str> {
+    options
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+}
+
+/// The routed-provider configuration a Codex ACP spawn needs, in the form its
+/// server actually reads.
+///
+/// A routed run cannot safely fall back to the operator's default account or
+/// endpoint — its catalog governs the provider's supported tool shapes — so a
+/// catalog that cannot be derived is an error before ACP starts, matching the
+/// direct spawn seam.
+fn codex_acp_overrides_env(
+    options: &RunTaskOptions,
+    env: &HashMap<String, String>,
+) -> Result<Vec<(String, String)>, String> {
+    crate::codex_overrides::acp_env(options.provider, codex_acp_model(options), env)
+        .map_err(|error| error.to_string())
 }
 
 /// The environment handed to the ACP agent process.
@@ -340,11 +523,11 @@ pub(super) fn agent_for(options: &RunTaskOptions) -> AcpAgent {
 /// and for OpenRouter that endpoint is the local attribution proxy, which an
 /// unrouted ACP agent would walk straight past.
 ///
-/// A configured `apiKeyEnv` whose variable is unset is *not* fatal here, unlike
-/// the direct spawn seam: the ACP server may hold its own credentials, and this
-/// path has no error frame to surface a refusal through. The endpoint is applied
-/// and the key left to the agent.
-pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
+/// A configured `apiKeyEnv` whose variable is unset is a hard error, matching
+/// direct execution. Continuing would start Codex with routed-provider
+/// overrides but no routed credential, allowing an unrelated inherited key to
+/// be sent to the configured gateway.
+pub(super) fn acp_env(options: &RunTaskOptions) -> Result<HashMap<String, String>, String> {
     let mut env = options.env.clone();
     crate::protocol::env::scrub_core_state(&mut env, options.provider);
     // A fleet capability belongs only to the per-session MCP subprocess. The
@@ -362,12 +545,20 @@ pub(super) fn acp_env(options: &RunTaskOptions) -> HashMap<String, String> {
             env.insert(key, value);
         }
         for (child_var, source_name) in injection.secret_env {
-            if let Some(secret) = options.env.get(&source_name).filter(|v| !v.is_empty()) {
-                env.insert(child_var, secret.clone());
-            }
+            let secret = options
+                .env
+                .get(&source_name)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "router API key env var `{source_name}` is not set; \
+                         export it or remove apiKeyEnv from [router]"
+                    )
+                })?;
+            env.insert(child_var, secret.clone());
         }
     }
-    env
+    Ok(env)
 }
 
 /// Adds a Unix `env -u` shim around an ACP command.
@@ -389,6 +580,11 @@ impl AcpAgentConfigExt for AcpAgentConfig {
             .iter()
             .flat_map(|name| ["-u".to_string(), (*name).to_string()])
             .collect::<Vec<_>>();
+        // The provider-binary override is untrusted configuration: without the
+        // `--` terminator, a command starting with `-` or containing `=` is
+        // eaten by `env` as an option or a variable assignment instead of being
+        // executed.
+        args.push("--".to_string());
         args.push(self.command().to_string_lossy().into_owned());
         args.extend(self.arguments().iter().cloned());
         AcpAgentConfig::new("env").args(args)
@@ -427,14 +623,18 @@ impl AcpAgentConfigExt for AcpAgentConfig {
 /// Quote a command argument for `cmd.exe` without allowing its metacharacters
 /// to turn an operator-configured provider path into another command.
 #[cfg(windows)]
-fn quote_windows_cmd_arg(argument: &str) -> String {
+pub(super) fn quote_windows_cmd_arg(argument: &str) -> String {
     let escaped = argument.replace('^', "^^").replace('%', "%%");
     let escaped = escaped
         .chars()
         .flat_map(|character| match character {
-            '&' | '|' | '<' | '>' | '(' | ')' | '"' => vec!['^', character],
+            '&' | '|' | '<' | '>' | '(' | ')' => vec!['^', character],
             _ => vec![character],
         })
         .collect::<String>();
-    format!("\"{escaped}\"")
+    // `cmd.exe` passes doubled quotes through a double-quoted argument as a
+    // literal quote. A caret would instead be preserved by `npx`'s Windows
+    // wrapper, turning TOML values such as `model_provider="medulla"` into
+    // invalid `^"`-prefixed values when Codex parses its `-c` overrides.
+    format!("\"{}\"", escaped.replace('"', "\"\""))
 }

@@ -1,7 +1,8 @@
-//! Appearance-setting mutations and persistence.
+//! Appearance-setting mutations and persistence, including the Agents-sidebar
+//! grouping and ordering controls.
 //!
-//! Colour roles, local-process indicators, and whole-device indicators live
-//! here. The two
+//! Colour roles, local-process indicators, whole-device indicators, and the
+//! sidebar's grouping and sort preferences live here. The two
 //! harness-row toggles this page used to carry — branch and shortened path —
 //! became placements on the Status line page, which is where the rest of the row
 //! is configured and the only place the effect can be previewed. Leaving them
@@ -12,19 +13,50 @@
 //! that move: see
 //! [`StatusLineConfig::from_appearance`](medulla::config::StatusLineConfig::from_appearance).
 
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_ms_from_seconds, blink_seconds, color_to_string, THEME_ROLES};
 
 use super::types::App;
 
-/// Non-theme rows: session titles, then process and device resource indicators.
-pub(super) const APPEARANCE_OPTION_ROWS: usize = 7;
+/// Non-theme rows: session titles, the process and device resource indicators,
+/// and the two Agents-sidebar layout controls.
+pub(super) const APPEARANCE_OPTION_ROWS: usize = 9;
 
-/// Number of behavior controls shown after the editable theme colors.
-pub(super) const ATTENTION_ROWS: usize = 1;
+/// The option offset of the sidebar grouping row, past the resource indicators.
+pub(super) const SIDEBAR_GROUPING_OPTION: usize = 7;
+
+/// The option offset of the sidebar sort row.
+pub(super) const SIDEBAR_SORT_OPTION: usize = 8;
+
+/// Number of behavior controls shown after the editable theme colors: the blink
+/// toggle and the rate it blinks at.
+pub(super) const ATTENTION_ROWS: usize = 2;
+
+/// The pulse lengths the Appearance editor offers, in seconds.
+///
+/// A short list rather than a free-text field, because the useful range is
+/// narrow and every value in it is a judgement about how insistent a stuck
+/// harness should be. Anything else remains configurable by hand — the config
+/// key takes any number and clamps it — and a hand-set value that is not on this
+/// list steps into it from the nearest end rather than being lost.
+const BLINK_SECONDS: [f64; 6] = [0.3, 0.5, 1.0, 1.5, 2.0, 3.0];
 
 /// Number of selectable rows: theme colors, attention behavior, and options.
 pub(super) const APPEARANCE_ROWS: usize =
     THEME_ROLES.len() + ATTENTION_ROWS + APPEARANCE_OPTION_ROWS;
+
+/// The next value after `current` in `choices`, wrapping in either direction.
+///
+/// A value that is not in `choices` — a config hand-edited to something the
+/// build does not know — starts the cycle from the first entry rather than
+/// refusing to move, so the row is never stuck.
+fn cycled<T: Copy + PartialEq>(choices: &[T], current: T, forward: bool) -> T {
+    let at = choices.iter().position(|choice| *choice == current);
+    match at {
+        Some(at) if forward => choices[(at + 1) % choices.len()],
+        Some(at) => choices[(at + choices.len() - 1) % choices.len()],
+        None => choices[0],
+    }
+}
 
 impl App {
     /// Cycle the selected colour role and persist the theme.
@@ -41,15 +73,41 @@ impl App {
                 "off"
             };
             self.persist_theme_value_now("Attention blink", value.into());
+        } else if index == THEME_ROLES.len() + 1 {
+            self.cycle_blink_rate(forward);
         } else {
             let option = index - THEME_ROLES.len() - ATTENTION_ROWS;
-            if option == 3 {
-                self.toggle_session_titles();
-            } else {
-                let resource = if option < 3 { option } else { option - 1 };
-                self.cycle_resource_display(resource, forward);
+            match option {
+                3 => self.toggle_session_titles(),
+                SIDEBAR_GROUPING_OPTION => self.cycle_sidebar_grouping(forward),
+                SIDEBAR_SORT_OPTION => self.cycle_sidebar_sort(forward),
+                _ => {
+                    let resource = if option < 3 { option } else { option - 1 };
+                    self.cycle_resource_display(resource, forward);
+                }
             }
         }
+    }
+
+    /// Step the attention pulse to the next offered length and persist it.
+    ///
+    /// A hand-configured value that is not one of the offered steps enters the
+    /// list from whichever end the operator moved towards, so a first press
+    /// changes the rate by a predictable amount instead of jumping to whatever
+    /// happens to be nearest.
+    fn cycle_blink_rate(&mut self, forward: bool) {
+        let current = blink_seconds(self.theme.attention_blink_ms);
+        let position = BLINK_SECONDS
+            .iter()
+            .position(|choice| (choice - current).abs() < f64::EPSILON);
+        let next = match position {
+            Some(index) if forward => BLINK_SECONDS[(index + 1) % BLINK_SECONDS.len()],
+            Some(index) => BLINK_SECONDS[(index + BLINK_SECONDS.len() - 1) % BLINK_SECONDS.len()],
+            None if forward => BLINK_SECONDS[0],
+            None => BLINK_SECONDS[BLINK_SECONDS.len() - 1],
+        };
+        self.theme.attention_blink_ms = blink_ms_from_seconds(next);
+        self.persist_theme_value_now("Attention blink rate", format!("{next:.1}s"));
     }
 
     /// Toggle extracted harness titles on orchestrator-managed agent rows.
@@ -58,6 +116,26 @@ impl App {
         appearance.show_session_titles = !appearance.show_session_titles;
         let shown = appearance.show_session_titles;
         self.persist_appearance_now("Session titles", if shown { "on" } else { "off" }.into());
+    }
+
+    /// Cycle and persist what the Agents sidebar sections its agents by.
+    ///
+    /// Takes effect on the next frame without any rebuild: the rail is assembled
+    /// from the loaded config every time it is drawn, so the operator sees the
+    /// arrangement they picked while the settings row is still under the cursor.
+    fn cycle_sidebar_grouping(&mut self, forward: bool) {
+        let current = self.loaded.config.appearance.sidebar_grouping;
+        let next = cycled(&medulla::config::SidebarGrouping::ALL, current, forward);
+        self.loaded.config.appearance.sidebar_grouping = next;
+        self.persist_appearance_now("Sidebar grouping", next.label().into());
+    }
+
+    /// Cycle and persist how the Agents sidebar orders agents and sessions.
+    fn cycle_sidebar_sort(&mut self, forward: bool) {
+        let current = self.loaded.config.appearance.sidebar_sort;
+        let next = cycled(&medulla::config::SidebarSort::ALL, current, forward);
+        self.loaded.config.appearance.sidebar_sort = next;
+        self.persist_appearance_now("Sidebar sort", next.label().into());
     }
 
     /// Cycle and persist one resource indicator, process-scoped or device-wide.
@@ -152,6 +230,16 @@ impl App {
                 section.insert(
                     "showHarnessPath".into(),
                     toml::Value::Boolean(self.loaded.config.appearance.show_harness_path),
+                );
+                section.insert(
+                    "sidebarGrouping".into(),
+                    toml::Value::String(
+                        format!("{:?}", appearance.sidebar_grouping).to_lowercase(),
+                    ),
+                );
+                section.insert(
+                    "sidebarSort".into(),
+                    toml::Value::String(format!("{:?}", appearance.sidebar_sort).to_lowercase()),
                 );
                 match medulla::config::persist_section(path, "appearance", section) {
                     Ok(()) => self.set_status(format!("Appearance · {name} → {value} (saved)")),

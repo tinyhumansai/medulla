@@ -18,7 +18,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use crate::protocol::{
-    encode_task_frame, AgentCapabilities, EncodeFrameInput, TaskFrameKind, WorkerSystemInfo,
+    encode_task_frame, encode_workflow_node_task_frame, AgentCapabilities, EncodeFrameInput,
+    TaskFrameKind, WorkerSystemInfo,
 };
 
 use crate::bridge::BridgeLiveness;
@@ -339,7 +340,20 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_inner(req, status, false, None, None).await
+        self.run_inner(req, status, false, false, None, None).await
+    }
+
+    /// Run one instruction emitted by a workflow `agent` node.
+    ///
+    /// The dedicated entry point, rather than a caller-controlled request
+    /// field, keeps the workflow authority marker owned by the flow-engine
+    /// dispatch adapter.
+    pub async fn run_workflow_node(
+        &self,
+        req: TaskRequest,
+        status: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<TaskOutcome, RunError> {
+        self.run_inner(req, status, false, true, None, None).await
     }
 
     /// Run a dispatch with the screen-control support negotiated specifically
@@ -352,7 +366,7 @@ impl TaskRunner {
         abort: Option<Arc<Notify>>,
         visible_task_id: Option<String>,
     ) -> Result<TaskOutcome, RunError> {
-        self.run_inner(req, status, screen_kill, abort, visible_task_id)
+        self.run_inner(req, status, screen_kill, false, abort, visible_task_id)
             .await
     }
 
@@ -361,6 +375,7 @@ impl TaskRunner {
         req: TaskRequest,
         status: Option<mpsc::UnboundedSender<String>>,
         screen_kill: bool,
+        workflow_node: bool,
         prepared_abort: Option<Arc<Notify>>,
         visible_task_id: Option<String>,
     ) -> Result<TaskOutcome, RunError> {
@@ -411,7 +426,7 @@ impl TaskRunner {
                 },
             );
 
-            let body = encode_task_frame(EncodeFrameInput {
+            let frame = EncodeFrameInput {
                 kind: TaskFrameKind::Task,
                 task_id: req.task_id.clone(),
                 text: req.instruction.clone(),
@@ -428,7 +443,12 @@ impl TaskRunner {
                 workflow_inputs: req.workflow_inputs.clone(),
                 conversation: req.conversation.clone(),
                 fleet_depth: req.fleet_depth,
-            });
+            };
+            let body = if workflow_node {
+                encode_workflow_node_task_frame(frame)
+            } else {
+                encode_task_frame(frame)
+            };
 
             tokio::select! {
                 biased;

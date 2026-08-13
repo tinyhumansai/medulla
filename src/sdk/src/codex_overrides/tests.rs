@@ -64,6 +64,11 @@ fn write_codex_cache(dir: &std::path::Path) {
 }
 
 /// The `-c` pairs as a map, so assertions name a key rather than an index.
+///
+/// Values are un-escaped back to what the override actually holds. The argv
+/// carries TOML basic strings, so `model_catalog_json` — a path — arrives with
+/// its separators doubled on Windows, and an assertion comparing it against the
+/// real path would fail there and only there.
 fn overrides(args: &[String]) -> HashMap<String, String> {
     let mut pairs = HashMap::new();
     let mut rest = args.iter();
@@ -71,9 +76,33 @@ fn overrides(args: &[String]) -> HashMap<String, String> {
         assert_eq!(flag, "-c", "every override is introduced by -c");
         let assignment = rest.next().expect("-c is followed by an assignment");
         let (key, value) = assignment.split_once('=').expect("assignment has a value");
-        pairs.insert(key.to_string(), value.trim_matches('"').to_string());
+        pairs.insert(key.to_string(), unescape_toml_string(value));
     }
     pairs
+}
+
+/// Undo `toml_string`: strip the surrounding quotes and take the character after
+/// each backslash literally.
+///
+/// A left-to-right scan rather than two `replace` passes, which would disagree
+/// with the encoder on a value ending in an escaped backslash.
+fn unescape_toml_string(rendered: &str) -> String {
+    let inner = rendered
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(rendered);
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(escaped) = chars.next() {
+                out.push(escaped);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -348,4 +377,168 @@ fn a_quote_in_a_value_cannot_break_out_of_the_toml_string() {
         "http://127.0.0.1/\"; evil = \"1"
     );
     assert!(parsed.as_table().unwrap().get("evil").is_none());
+}
+
+// ── the ACP rendering of the same overrides ─────────────────────────────────
+
+/// `codex-acp` reads its configuration from the environment, so the overrides
+/// must arrive as a `CODEX_CONFIG` JSON document with the flat `-c` keys nested
+/// back into objects, plus the `MODEL_PROVIDER` that selects the block.
+#[test]
+fn acp_env_nests_the_dotted_override_keys_into_json() {
+    let dir = tempfile::tempdir().unwrap();
+    write_codex_cache(dir.path());
+    let env = routed_env(dir.path());
+
+    let rendered: HashMap<String, String> =
+        acp_env(HarnessProvider::Codex, Some("vendor/model-1"), &env)
+            .unwrap()
+            .into_iter()
+            .collect();
+
+    assert_eq!(
+        rendered.get(MODEL_PROVIDER_ENV).map(String::as_str),
+        Some(PROVIDER_ID)
+    );
+    let config: Value = serde_json::from_str(rendered.get(CONFIG_ENV).unwrap()).unwrap();
+    assert_eq!(config["model_provider"], PROVIDER_ID);
+    assert_eq!(
+        config["model_providers"][PROVIDER_ID]["base_url"],
+        "http://127.0.0.1:7777/openai"
+    );
+    assert_eq!(
+        config["model_providers"][PROVIDER_ID]["env_key"],
+        "OPENAI_API_KEY"
+    );
+    assert_eq!(
+        config["model_providers"][PROVIDER_ID]["wire_api"],
+        "responses"
+    );
+    assert_eq!(config["preferred_auth_method"], "apikey");
+    assert!(config["model_catalog_json"].is_string());
+}
+
+/// ACP has no `-m`, so the model has to be part of the config document or the
+/// session opens on Codex's own default — a model the routed catalog does not
+/// describe and the preset never asked for.
+#[test]
+fn acp_env_selects_the_routed_model_because_argv_cannot() {
+    let dir = tempfile::tempdir().unwrap();
+    write_codex_cache(dir.path());
+    let env = routed_env(dir.path());
+
+    let rendered: HashMap<String, String> =
+        acp_env(HarnessProvider::Codex, Some("vendor/model-1"), &env)
+            .unwrap()
+            .into_iter()
+            .collect();
+    let config: Value = serde_json::from_str(rendered.get(CONFIG_ENV).unwrap()).unwrap();
+
+    assert_eq!(config["model"], "vendor/model-1");
+}
+
+/// The two transports must not disagree about where a routed run points, so
+/// both renderings come from the same override list.
+#[test]
+fn acp_env_and_launch_args_carry_the_same_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    write_codex_cache(dir.path());
+    let env = routed_env(dir.path());
+
+    let args = launch_args(HarnessProvider::Codex, Some("vendor/model-1"), &env).unwrap();
+    // `overrides` here is this file's argv parser, not the shared override list.
+    let from_argv = overrides(&args);
+    let rendered: HashMap<String, String> =
+        acp_env(HarnessProvider::Codex, Some("vendor/model-1"), &env)
+            .unwrap()
+            .into_iter()
+            .collect();
+    let config: Value = serde_json::from_str(rendered.get(CONFIG_ENV).unwrap()).unwrap();
+
+    assert!(!from_argv.is_empty(), "the CLI seam must still carry them");
+    for (key, value) in from_argv {
+        let mut cursor = &config;
+        for segment in key.split('.') {
+            cursor = &cursor[segment];
+        }
+        assert_eq!(
+            cursor,
+            &Value::String(value),
+            "ACP must carry {key} exactly as the CLI seam does"
+        );
+    }
+}
+
+/// An unrouted run gets nothing at all: no endpoint means no provider block, and
+/// setting one would move a run that never asked to be routed off the
+/// operator's own account.
+#[test]
+fn acp_env_is_empty_without_a_routed_endpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    write_codex_cache(dir.path());
+    let mut env = routed_env(dir.path());
+    env.remove("OPENAI_BASE_URL");
+
+    assert!(
+        acp_env(HarnessProvider::Codex, Some("vendor/model-1"), &env)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Neither does a preset that did not opt in, nor another harness entirely.
+#[test]
+fn acp_env_is_empty_without_the_opt_in_or_for_another_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    write_codex_cache(dir.path());
+    let mut opted_out = routed_env(dir.path());
+    opted_out.remove(OVERRIDES_ENV);
+
+    assert!(
+        acp_env(HarnessProvider::Codex, Some("vendor/model-1"), &opted_out)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(acp_env(
+        HarnessProvider::Claude,
+        Some("vendor/model-1"),
+        &routed_env(dir.path())
+    )
+    .unwrap()
+    .is_empty());
+}
+
+/// A value carrying backslashes survives the argv round trip unchanged.
+///
+/// The regression this pins was Windows-only and therefore invisible here: the
+/// catalog path is the one override whose value contains separators, so
+/// `-c model_catalog_json="C:\…"` renders them doubled and a comparison against
+/// the real path failed on Windows alone. Asserting the round trip with an
+/// explicit backslashed value makes that a failure on every platform.
+#[test]
+fn a_backslashed_value_survives_the_argv_round_trip() {
+    let windows_path = r"C:\Users\dev\.medulla\codex-catalogs\model-a1b2.json";
+
+    let rendered = format!("model_catalog_json={}", toml_string(windows_path));
+    let parsed = overrides(&["-c".to_string(), rendered]);
+
+    assert_eq!(
+        parsed.get("model_catalog_json").map(String::as_str),
+        Some(windows_path)
+    );
+}
+
+/// The same for a value holding both an escaped quote and a trailing backslash,
+/// where a two-pass `replace` decoder disagrees with the encoder.
+#[test]
+fn escaped_quotes_and_trailing_backslashes_round_trip() {
+    for value in [r#"a "quoted" segment"#, r"ends with a backslash\", r"\\"] {
+        let rendered = format!("k={}", toml_string(value));
+        let parsed = overrides(&["-c".to_string(), rendered]);
+        assert_eq!(
+            parsed.get("k").map(String::as_str),
+            Some(value),
+            "round trip lost {value:?}"
+        );
+    }
 }

@@ -2,10 +2,11 @@
 //!
 //! # Scope
 //!
-//! Deliberately minimal: lifecycle status, the assistant's messages, and token
-//! usage. The app-server reports far more than that — per-item reasoning deltas,
-//! command output streams, patch previews — and the CLI transport's mappers turn
-//! the equivalent into the rich agent-rail detail an operator watches.
+//! Deliberately minimal: lifecycle status, the assistant's messages, token
+//! usage, and repository moves that affect where the next turn executes. The
+//! app-server reports far more than that — per-item reasoning deltas, command
+//! output streams, patch previews — and the CLI transport's mappers turn the
+//! equivalent into the rich agent-rail detail an operator watches.
 //!
 //! Reproducing that surface here would mean a second implementation of every
 //! mapper, tracking a wire format that is still marked experimental, for a
@@ -17,15 +18,18 @@
 //! notification counts as activity, including the ones that produce no event, or
 //! a long silent command would look like a dead process.
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 use serde_json::{json, Value};
 
 use crate::codex_app_server::Notification;
-use crate::daemon::mappers::HarnessSemanticEvent;
+use crate::daemon::mappers::{worktree_checkout_from_output, HarnessSemanticEvent};
 use crate::protocol::{HarnessEvent, TokenUsage};
+use crate::sessions::WorkspaceContext;
 
-use super::super::types::OnEvent;
+use super::super::types::{OnEvent, OnWorkspaceContext};
 
 /// What a finished fold reports, without the callback it folded through.
 #[derive(Debug, Clone, Default)]
@@ -58,6 +62,12 @@ pub(super) struct FoldState {
     pub(super) last_activity: Instant,
     /// Per-event status callback.
     on_event: Option<OnEvent>,
+    /// Repository position retained across turns of this thread.
+    workspace_context: WorkspaceContext,
+    /// Persists a newly detected worktree for the next resumed turn.
+    on_workspace_context: Option<OnWorkspaceContext>,
+    /// Source used to enumerate the repository's registered worktrees.
+    worktree_registry: WorktreeRegistry,
     /// Line counter standing in for the CLI transport's transcript offsets.
     ///
     /// There is no transcript here, but `HarnessSemanticEvent::line` is the
@@ -68,7 +78,18 @@ pub(super) struct FoldState {
 
 impl FoldState {
     /// A fold ready for one turn.
+    #[cfg(test)]
     pub(super) fn new(on_event: Option<OnEvent>) -> Self {
+        Self::with_workspace_at(on_event, WorkspaceContext::default(), None, None)
+    }
+
+    /// A fold seeded with workspace state and its configured checkout.
+    pub(super) fn with_workspace_at(
+        on_event: Option<OnEvent>,
+        workspace_context: WorkspaceContext,
+        on_workspace_context: Option<OnWorkspaceContext>,
+        repository_cwd: Option<PathBuf>,
+    ) -> Self {
         Self {
             reply: String::new(),
             items: 0,
@@ -76,8 +97,27 @@ impl FoldState {
             error: None,
             last_activity: Instant::now(),
             on_event,
+            workspace_context,
+            on_workspace_context,
+            worktree_registry: repository_cwd
+                .map(WorktreeRegistry::Git)
+                .unwrap_or(WorktreeRegistry::Disabled),
             line: 0,
         }
+    }
+
+    /// A fold backed by a deterministic in-process worktree registry.
+    #[cfg(test)]
+    pub(super) fn with_registered_worktrees(
+        on_event: Option<OnEvent>,
+        workspace_context: WorkspaceContext,
+        on_workspace_context: Option<OnWorkspaceContext>,
+        worktrees: Vec<(PathBuf, String)>,
+    ) -> Self {
+        let mut fold =
+            Self::with_workspace_at(on_event, workspace_context, on_workspace_context, None);
+        fold.worktree_registry = WorktreeRegistry::Static(worktrees);
+        fold
     }
 
     /// Fold one notification, emitting whatever events it implies.
@@ -108,6 +148,7 @@ impl FoldState {
                         self.emit("item/completed", "agent_message", json!({ "text": text }));
                     }
                 }
+                self.capture_worktree(item);
                 false
             }
             "thread/tokenUsage/updated" => {
@@ -188,6 +229,116 @@ impl FoldState {
             on_event(&event);
         }
     }
+
+    /// Persist a stable worktree report carried by a completed command item.
+    fn capture_worktree(&mut self, item: Option<&Value>) {
+        let Some(item) = item
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("commandExecution"))
+        else {
+            return;
+        };
+        if !successful_worktree_command(item) {
+            return;
+        }
+        let output = item
+            .get("aggregatedOutput")
+            .or_else(|| item.get("aggregated_output"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let Some((cwd, branch)) = worktree_checkout_from_output(output) else {
+            return;
+        };
+        if !self.is_registered_worktree(&cwd, &branch) {
+            return;
+        }
+        if self.workspace_context.cwd.as_deref() != Some(&cwd)
+            || self.workspace_context.branch.as_deref() != Some(&branch)
+        {
+            self.workspace_context.pull_request = None;
+        }
+        self.workspace_context.cwd = Some(cwd);
+        self.workspace_context.branch = Some(branch);
+        self.emit(
+            "item/completed:workspace",
+            crate::harness_work::kinds::SESSION_INFO,
+            json!({
+                "cwd": self.workspace_context.cwd,
+                "branch": self.workspace_context.branch,
+            }),
+        );
+        if let Some(callback) = self.on_workspace_context.as_ref() {
+            callback(self.workspace_context.clone());
+        }
+    }
+
+    /// Accept only a report for a successful helper invocation that Git says is
+    /// an existing worktree of this repository on the reported branch.
+    fn is_registered_worktree(&self, cwd: &str, branch: &str) -> bool {
+        let Ok(cwd) = std::fs::canonicalize(cwd) else {
+            return false;
+        };
+        let worktrees = match &self.worktree_registry {
+            WorktreeRegistry::Disabled => return false,
+            WorktreeRegistry::Git(repository_cwd) => {
+                let Ok(output) = Command::new("git")
+                    .args(["-C"])
+                    .arg(repository_cwd)
+                    .args(["worktree", "list", "--porcelain"])
+                    .output()
+                else {
+                    return false;
+                };
+                if !output.status.success() {
+                    return false;
+                }
+                registered_worktrees(&String::from_utf8_lossy(&output.stdout))
+            }
+            #[cfg(test)]
+            WorktreeRegistry::Static(worktrees) => worktrees.clone(),
+        };
+        worktrees
+            .into_iter()
+            .any(|(path, registered_branch)| path == cwd && registered_branch == branch)
+    }
+}
+
+/// Where worktree membership is read from.
+enum WorktreeRegistry {
+    /// No repository was configured, so no report may update the workspace.
+    Disabled,
+    /// Ask Git for the live registry rooted at this checkout.
+    Git(PathBuf),
+    /// Deterministic registry used by unit tests.
+    #[cfg(test)]
+    Static(Vec<(PathBuf, String)>),
+}
+
+/// A command item may affect retained cwd only when the worktree helper itself
+/// completed successfully. Generic shell output is untrusted text.
+fn successful_worktree_command(item: &Value) -> bool {
+    item.get("exitCode").and_then(Value::as_i64) == Some(0)
+        && item
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(|command| command.split_whitespace().next())
+            == Some("worktree")
+}
+
+/// Parse Git's porcelain worktree listing into canonical checkout/branch pairs.
+fn registered_worktrees(output: &str) -> Vec<(PathBuf, String)> {
+    output
+        .split("\n\n")
+        .filter_map(|entry| {
+            let path = entry.strip_prefix("worktree ")?.lines().next()?;
+            let branch = entry
+                .lines()
+                .find_map(|line| line.strip_prefix("branch refs/heads/"))?;
+            Some((
+                std::fs::canonicalize(Path::new(path)).ok()?,
+                branch.to_string(),
+            ))
+        })
+        .collect()
 }
 
 /// A `status` payload saying the lane is working, with a one-line detail.

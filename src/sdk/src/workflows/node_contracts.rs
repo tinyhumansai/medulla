@@ -87,6 +87,12 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              anywhere else — relative only, no `..`, and re-checked after symlinks are followed. \
              A host with no configured workspace refuses both, and `args.script` is the way in."
                 .to_string(),
+            "The workspace itself is chosen per run, by `workflow_run`'s `workspace` parameter, \
+             and every step reads it from `$MEDULLA_WORKSPACE`. Do not declare an input for the \
+             checkout a workflow works on: a step's `cwd` cannot leave the workspace, so a path \
+             passed that way can only ever name somewhere already inside it. Write the workflow \
+             as if it were standing in the repository, and let the caller say which one."
+                .to_string(),
             "`language: shell` requires a unix host: there is no portable POSIX shell on \
              Windows, and this host refuses rather than emulating one, so a `shell` step run \
              there fails outright. `javascript` and `python` need no such shell and work on any \

@@ -360,6 +360,7 @@ fn agent_run_detail_shows_the_resolved_prompt_and_plain_reply() {
                 }
             ])),
             diagnostics: Vec::new(),
+            transcript: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,
@@ -398,6 +399,7 @@ fn older_agent_run_labels_missing_evidence_as_output() {
             input: None,
             output: None,
             diagnostics: Vec::new(),
+            transcript: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,

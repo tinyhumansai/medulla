@@ -8,8 +8,8 @@ description: >-
 
 An orchestrator's roster tells it who it can delegate to. It says nothing about
 what a directory actually is. Handed five repositories and a fleet of harnesses,
-a model with no other information will guess, and it will guess plausibly and
-wrongly.
+a model with no other information will guess, and a wrong guess reads exactly
+like a right one.
 
 `AGENTS.md` and `CLAUDE.md` do not solve this. They are written for a coding
 agent working inside a repository, so they are long, prose-heavy, and carry no
@@ -112,7 +112,7 @@ orchestrator actually reads on every cycle, so it is worth a pass by hand.
 
 Writing the file is only half of it. `workspace add` also **registers** the
 directory in your config, which is what makes the orchestrator aware of it at
-all — an unregistered profile is never read. Re-running the command is safe: an
+all. An unregistered profile is never read. Re-running the command is safe: an
 already-registered directory is refreshed, not duplicated, and a `MEDULLA.md`
 that already exists is kept rather than overwritten.
 
@@ -121,8 +121,8 @@ medulla workspace list        # what the orchestrator knows about
 medulla workspace remove .    # stop placing work here (files untouched)
 ```
 
-`medulla init` writes the `MEDULLA.md` alone, without registering — useful for
-drafting a profile in a directory that should not yet take work.
+`medulla init` writes the `MEDULLA.md` alone, without registering, which is
+useful for drafting a profile in a directory that should not yet take work.
 
 The `--force` flag redrafts an existing profile. Without it, authored work is
 never discarded: `workspace add` keeps the file and registers anyway, and `init`

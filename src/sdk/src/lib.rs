@@ -20,6 +20,8 @@ pub mod daemon;
 pub mod flow_engine;
 pub mod harness_contract;
 pub mod harness_hooks;
+pub mod harness_tools;
+pub mod harness_transcript;
 pub mod harness_work;
 pub mod history_upload;
 pub mod home;

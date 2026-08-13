@@ -29,6 +29,19 @@ use crate::flow_engine::settings::CapabilitySettings;
 /// The `connection_ref` prefix naming an HTTP credential.
 pub const HTTP_CRED_PREFIX: &str = "http_cred:";
 
+/// How long a workflow HTTP request waits for a TCP/TLS connection.
+///
+/// A black-holed peer must fail the node, not hang it forever. Mirrors the
+/// SDK client defaults (`src/sdk/src/client/mod.rs`) so outbound workflow
+/// HTTP is held to the same liveness budget as the rest of the product.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a workflow HTTP request tolerates a silent socket mid-response.
+///
+/// An idle timeout, not a whole-request one: a peer that keeps sending bytes
+/// (a streamed response) must not be cut off schedule.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// A credential the host injects into an outbound request.
 #[derive(Debug, Clone)]
 pub struct HttpCredential {
@@ -110,13 +123,21 @@ impl AllowlistHttpClient {
             // can make the second request itself, where it is checked again.
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
                 .build()
                 .unwrap_or_default(),
         }
     }
 
-    /// Check the URL against both guards, returning the parsed URL.
-    fn permit(&self, request: &Value) -> Result<reqwest::Url> {
+    /// Check the URL against both guards, returning the parsed URL and the
+    /// vetted addresses the request may connect to.
+    ///
+    /// The address list is returned rather than discarded because vetting a
+    /// name and then letting the transport resolve it a second time is a
+    /// rebinding window: a short-TTL answer can be private by the time the
+    /// connection is made. The caller pins the transport to exactly these.
+    fn permit(&self, request: &Value) -> Result<(reqwest::Url, Vec<std::net::SocketAddr>)> {
         let raw = request
             .get("url")
             .and_then(Value::as_str)
@@ -150,8 +171,34 @@ impl AllowlistHttpClient {
         let port = url
             .port_or_known_default()
             .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
-        refuse_private_resolution(host, port)?;
-        Ok(url)
+        let vetted = vet_resolution(host, port)?;
+        Ok((url, vetted))
+    }
+
+    /// A client that can only connect to `addrs` when it resolves `host`.
+    ///
+    /// Built per request rather than shared, because the override is a builder
+    /// option and the host is not known until one arrives. That costs a client
+    /// construction per call and gives up connection pooling; the alternative
+    /// is letting the transport perform its own lookup, which is precisely the
+    /// second resolution this exists to remove.
+    ///
+    /// An IP-literal host needs no override — there is no name to resolve, and
+    /// the literal has already been judged by `is_private_host`.
+    fn pinned(&self, host: &str, addrs: &[std::net::SocketAddr]) -> Result<reqwest::Client> {
+        let bare = host.trim_matches(['[', ']']);
+        if addrs.is_empty() || bare.parse::<std::net::IpAddr>().is_ok() {
+            return Ok(self.client.clone());
+        }
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(bare, addrs)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT)
+            .build()
+            .map_err(|err| {
+                EngineError::Capability(format!("http_request: cannot build client: {err}"))
+            })
     }
 }
 
@@ -194,9 +241,17 @@ fn is_private_v4(addr: &std::net::Ipv4Addr) -> bool {
 /// mode of not resolving is an authored workflow reaching internal services,
 /// and that is worse than a lookup.
 ///
+/// The vetted addresses are *returned*, not just judged: the caller pins the
+/// transport to them, so the answer checked here is the answer connected to. A
+/// second, independent lookup by the transport would reopen the rebinding gap
+/// this closes — a name whose record flips to `169.254.169.254` between the two
+/// resolutions passes the guard and reaches metadata anyway.
+///
 /// A name that cannot be resolved at all is refused rather than allowed: the
-/// request would fail anyway, and failing here says why.
-fn refuse_private_resolution(host: &str, port: u16) -> Result<()> {
+/// request would fail anyway, and failing here says why. So is one that
+/// resolves to nothing, which would otherwise pin the transport to an empty
+/// set and let it fall back to its own lookup.
+pub(crate) fn vet_resolution(host: &str, port: u16) -> Result<Vec<std::net::SocketAddr>> {
     use std::net::ToSocketAddrs;
 
     let resolved: Vec<std::net::SocketAddr> = (host, port)
@@ -212,13 +267,18 @@ fn refuse_private_resolution(host: &str, port: u16) -> Result<()> {
             private.ip()
         )));
     }
-    Ok(())
+    if resolved.is_empty() {
+        return Err(EngineError::Capability(format!(
+            "http_request: cannot resolve '{host}': it has no addresses"
+        )));
+    }
+    Ok(resolved)
 }
 
 /// Whether a host *names* loopback, a link-local address, or an RFC 1918 range.
 ///
 /// The cheap textual guard, applied before any lookup. The authoritative check
-/// is `refuse_private_resolution`, which catches the names this cannot.
+/// is `vet_resolution`, which catches the names this cannot.
 pub fn is_private_host(host: &str) -> bool {
     let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
     if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".internal") {
@@ -233,8 +293,12 @@ pub fn is_private_host(host: &str) -> bool {
 #[async_trait]
 impl HttpClient for AllowlistHttpClient {
     async fn request(&self, request: Value, conn: Option<&str>) -> Result<Value> {
-        let url = self.permit(&request)?;
+        let (url, vetted) = self.permit(&request)?;
         let summary = redacted_summary(&request);
+        // Pinned to the addresses just vetted, so the connection cannot go
+        // anywhere a second DNS answer might point.
+        let host = url.host_str().unwrap_or_default().to_string();
+        let client = self.pinned(&host, &vetted)?;
 
         // Resolve the credential before building the request, so an unknown name
         // fails before anything leaves the process.
@@ -257,7 +321,7 @@ impl HttpClient for AllowlistHttpClient {
         let method = reqwest::Method::from_bytes(method.as_bytes())
             .map_err(|err| EngineError::Capability(format!("http_request: {err}")))?;
 
-        let mut builder = self.client.request(method, url);
+        let mut builder = client.request(method, url);
         if let Some(headers) = request.get("headers").and_then(Value::as_object) {
             for (name, value) in headers {
                 if let Some(value) = value.as_str() {

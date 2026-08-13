@@ -86,6 +86,7 @@ fn run_records_use_camel_case_on_the_wire() {
             input: Some(json!("inspect this")),
             output: None,
             diagnostics: Vec::new(),
+            transcript: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,

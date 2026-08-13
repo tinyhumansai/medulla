@@ -109,48 +109,6 @@ fn link_observation_merges_into_snapshot() {
     assert!(out.contains("merged-host"), "merged identity should render");
 }
 
-// --- chat transcript folding: error + wrapped multi-line turns --------------
-
-#[test]
-fn chat_renders_error_and_wrapped_turns() {
-    let (mut app, rt) = empty_app();
-    let long = "word ".repeat(40);
-    rt.script_event(TuiEvent::User { body: long.clone() });
-    rt.script_event(TuiEvent::Assistant { body: long });
-    rt.script_event(TuiEvent::Error {
-        source: "cycle".into(),
-        message: "it broke".into(),
-    });
-    app.refresh_snapshot();
-    tab(&mut app, "Agents");
-    // Render narrow to force wrapping across multiple rows.
-    let out = render(&mut app, 60, 24);
-    assert!(out.contains("cycle: it broke"), "error line renders");
-    assert!(out.contains("word"), "wrapped body renders");
-}
-
-// --- chat thinking spinner --------------------------------------------------
-
-#[test]
-fn chat_shows_thinking_spinner_with_and_without_calls() {
-    let (mut app, rt) = empty_app();
-    rt.set_running(true);
-    app.refresh_snapshot();
-    tab(&mut app, "Agents");
-    // No inference in flight → "working…".
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("working"), "idle-stream spinner: {out:.0}");
-
-    rt.script_event(TuiEvent::InferenceStart {
-        tier: "reasoning".into(),
-        op: "step".into(),
-        model: Some("m".into()),
-    });
-    app.refresh_snapshot();
-    let out = render(&mut app, 120, 40);
-    assert!(out.contains("model call"), "in-flight spinner detail");
-}
-
 // --- thread badges & fork indentation ---------------------------------------
 
 // --- Trace tab renders the JSON detail row ----------------------------------

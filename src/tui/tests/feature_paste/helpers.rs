@@ -22,7 +22,7 @@ pub fn loaded() -> LoadedConfig {
 /// An app on the Agents tab, where the chat composer lives.
 pub fn agents_app() -> App {
     let mut app = App::new(Arc::new(MockRuntime::empty()), loaded());
-    app.tab_index = tab_index("Agents");
+    app.tab_index = tab_index("Sessions");
     app
 }
 
@@ -30,7 +30,7 @@ pub fn agents_app() -> App {
 /// orchestrator onto a row that draws no composer.
 pub fn demo_agents_app() -> App {
     let mut app = App::new(Arc::new(MockRuntime::demo()), loaded());
-    app.tab_index = tab_index("Agents");
+    app.tab_index = tab_index("Sessions");
     app.refresh_snapshot();
     app
 }
@@ -45,12 +45,6 @@ pub fn key(code: KeyCode) -> Event {
 
 pub fn key_press(app: &mut App, code: KeyCode) {
     let _ = app.on_event(key(code));
-}
-
-pub fn type_str(app: &mut App, text: &str) {
-    for ch in text.chars() {
-        let _ = app.on_event(key(KeyCode::Char(ch)));
-    }
 }
 
 pub fn paste(app: &mut App, text: &str) -> Option<Cmd> {

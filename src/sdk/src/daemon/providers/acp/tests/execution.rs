@@ -152,6 +152,7 @@ fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
 /// A `RunTaskOptions` carrying `attribution`, with everything else inert.
 fn attribution_options(attribution: bool) -> RunTaskOptions {
     RunTaskOptions {
+        origin: crate::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: crate::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: String::new(),
@@ -183,7 +184,7 @@ fn attribution_options(attribution: bool) -> RunTaskOptions {
 #[cfg(unix)]
 #[test]
 fn agent_env_carries_attribution() {
-    let env = super::super::execution::acp_env(&attribution_options(true));
+    let env = super::super::execution::acp_env(&attribution_options(true)).unwrap();
     assert!(
         env.contains_key("MEDULLA_ATTRIBUTION"),
         "ACP agent env must carry the attribution trailer"
@@ -198,7 +199,7 @@ fn agent_env_carries_attribution() {
 /// Turning attribution off leaves the ACP env untouched.
 #[test]
 fn agent_env_omits_attribution_when_off() {
-    let env = super::super::execution::acp_env(&attribution_options(false));
+    let env = super::super::execution::acp_env(&attribution_options(false)).unwrap();
     assert!(!env.contains_key("MEDULLA_ATTRIBUTION"));
     assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
 }
@@ -215,7 +216,7 @@ fn agent_env_strips_inherited_fleet_capabilities() {
         "another-session-token".to_string(),
     );
 
-    let env = super::super::execution::acp_env(&options);
+    let env = super::super::execution::acp_env(&options).unwrap();
 
     assert!(!env.contains_key(crate::control_socket::MCP_SOCKET_ENV));
     assert!(!env.contains_key(crate::control_socket::MCP_GRANT_ENV));
@@ -229,7 +230,7 @@ fn agent_env_strips_the_embedded_core_workspace() {
         "/live-core-workspace".to_string(),
     );
 
-    let env = super::super::execution::acp_env(&options);
+    let env = super::super::execution::acp_env(&options).unwrap();
 
     assert!(!env.contains_key("OPENHUMAN_WORKSPACE"));
 }
@@ -240,7 +241,7 @@ fn agent_env_strips_the_embedded_core_workspace() {
 #[cfg(unix)]
 #[test]
 fn agent_command_removes_the_embedded_core_workspace() {
-    let agent = super::super::execution::agent_for(&attribution_options(false));
+    let agent = super::super::execution::agent_for(&attribution_options(false)).unwrap();
     let config = agent.config();
 
     assert_eq!(config.command().to_string_lossy(), "env");
@@ -249,9 +250,280 @@ fn agent_command_removes_the_embedded_core_workspace() {
         [
             "-u",
             "OPENHUMAN_WORKSPACE",
+            "--",
             "npx",
             "-y",
             "@agentclientprotocol/claude-agent-acp@latest"
         ]
+    );
+}
+
+/// The provider-binary override is untrusted configuration, so `env` must be
+/// told where its own options stop: a binary named `-x` or `A=B` would
+/// otherwise be swallowed as an option or an assignment and never executed.
+#[cfg(unix)]
+#[test]
+fn agent_command_terminates_env_options_before_the_binary() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options
+        .env
+        .insert("MEDULLA_OPENCODE_BIN".to_string(), "-x".to_string());
+
+    let agent = super::super::execution::agent_for(&options).unwrap();
+    let config = agent.config();
+
+    let arguments = config.arguments();
+    let terminator = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .expect("env argv carries a `--` terminator");
+    assert!(
+        arguments[terminator + 1..].iter().any(|a| a == "-x"),
+        "the overridden binary must sit after the terminator: {arguments:?}"
+    );
+}
+
+/// `--` stops `env`'s *option* parsing but not its `NAME=VALUE` assignment
+/// scanning: an `=`-containing override could never be executed and would
+/// silently shift the command onto the next argument. The boundary refuses it.
+#[test]
+fn agent_rejects_assignment_like_provider_bin() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options
+        .env
+        .insert("MEDULLA_OPENCODE_BIN".to_string(), "A=B".to_string());
+
+    let error = super::super::execution::agent_for(&options).unwrap_err();
+    assert!(
+        error.contains('='),
+        "the rejection must name the assignment hazard: {error}"
+    );
+}
+
+/// A routed Codex preset reaching ACP dispatch must carry its model and its
+/// provider overrides **in the environment**.
+///
+/// Two regressions in one, and both were silent. First ACP built a bare
+/// `codex-acp`, so the preset's model was dropped and `codex_overrides` never
+/// ran at all. Then the overrides were put on the argv — which `codex-acp`
+/// parses only for its `login` and `cli` subcommands and ignores completely in
+/// server mode, where it reads `CODEX_CONFIG` and `MODEL_PROVIDER` from the
+/// environment instead. Either way Codex served the operator's own default model
+/// from their own account while the routed endpoint sat unused beside it: the
+/// run looked healthy and not one request reached the configured provider.
+///
+/// Hence the assertion is on `environment()`, not on argv. An argv-only check is
+/// exactly what let the second regression through.
+#[cfg(unix)]
+#[test]
+fn codex_acp_command_carries_the_routed_model_and_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_home = dir.path().join("codex");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    // Routed runs derive a provider-safe catalog from Codex's local template.
+    // Seed the smallest usable template so this argv regression stays offline
+    // and independent of the developer or CI runner's Codex home.
+    std::fs::write(
+        codex_home.join("models_cache.json"),
+        r#"{"models":[{"slug":"gpt-5.4","priority":1,"context_window":200000}]}"#,
+    )
+    .unwrap();
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Codex;
+    options.model = Some("deepseek/deepseek-v4-flash-0731".to_string());
+    options.env.insert(
+        crate::codex_overrides::OVERRIDES_ENV.to_string(),
+        "1".to_string(),
+    );
+    options.env.insert(
+        "OPENAI_BASE_URL".to_string(),
+        "http://127.0.0.1:36277/openai".to_string(),
+    );
+    options.env.insert(
+        "CODEX_HOME".to_string(),
+        codex_home.to_string_lossy().into_owned(),
+    );
+    options.env.insert(
+        "MEDULLA_HOME".to_string(),
+        dir.path().join("medulla").to_string_lossy().into_owned(),
+    );
+
+    let agent = super::super::execution::agent_for(&options).unwrap();
+    let args: Vec<String> = agent
+        .config()
+        .arguments()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    let model_at = args
+        .iter()
+        .position(|argument| argument == "-m")
+        .expect("routed Codex ACP argv must select the preset's model");
+    assert_eq!(
+        args.get(model_at + 1).map(String::as_str),
+        Some("deepseek/deepseek-v4-flash-0731")
+    );
+
+    let environment = agent.config().environment();
+    assert_eq!(
+        environment
+            .get(crate::codex_overrides::MODEL_PROVIDER_ENV)
+            .map(String::as_str),
+        Some("medulla"),
+        "codex-acp selects its provider from MODEL_PROVIDER: {environment:?}"
+    );
+    let config: serde_json::Value = serde_json::from_str(
+        environment
+            .get(crate::codex_overrides::CONFIG_ENV)
+            .expect("routed Codex ACP must carry CODEX_CONFIG"),
+    )
+    .expect("CODEX_CONFIG must be a JSON document");
+    assert_eq!(config["model"], "deepseek/deepseek-v4-flash-0731");
+    assert_eq!(config["model_provider"], "medulla");
+    assert_eq!(
+        config["model_providers"]["medulla"]["base_url"], "http://127.0.0.1:36277/openai",
+        "the routed endpoint is the whole point of the block"
+    );
+    assert_eq!(
+        config["model_providers"]["medulla"]["env_key"], "OPENAI_API_KEY",
+        "the key is resolved by name from the environment, never inlined"
+    );
+    assert_eq!(
+        config["preferred_auth_method"], "apikey",
+        "without this a signed-in ChatGPT account outranks the routed key"
+    );
+    assert!(
+        config["model_catalog_json"].is_string(),
+        "the derived catalog governs the tool shapes sent to the provider: {config}"
+    );
+}
+
+/// An unrouted Codex ACP run is left exactly as it was: no endpoint means no
+/// provider block, and overriding `model_provider` would move a run that never
+/// asked to be routed off the operator's own account.
+#[cfg(unix)]
+#[test]
+fn codex_acp_command_stays_unrouted_without_an_endpoint() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Codex;
+
+    let agent = super::super::execution::agent_for(&options).unwrap();
+    let args: Vec<String> = agent
+        .config()
+        .arguments()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert!(
+        !args.iter().any(|argument| argument == "-m"),
+        "no model was configured, so none may be selected: {args:?}"
+    );
+    let environment = agent.config().environment();
+    assert!(
+        !environment.contains_key(crate::codex_overrides::CONFIG_ENV)
+            && !environment.contains_key(crate::codex_overrides::MODEL_PROVIDER_ENV),
+        "an unrouted run must keep Codex's own provider: {environment:?}"
+    );
+}
+
+/// A routed ACP run must fail before launching when its derived catalog cannot
+/// be built; starting without it silently selects the wrong account or emits
+/// unsupported tool shapes at the routed provider.
+#[test]
+fn routed_codex_acp_rejects_missing_override_catalog() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Codex;
+    options.model = Some("deepseek/deepseek-v4-flash-0731".to_string());
+    options.env.insert(
+        crate::codex_overrides::OVERRIDES_ENV.to_string(),
+        "1".to_string(),
+    );
+    options.env.insert(
+        "OPENAI_BASE_URL".to_string(),
+        "http://127.0.0.1:36277/openai".to_string(),
+    );
+    options.env.insert(
+        "CODEX_HOME".to_string(),
+        dir.path().join("codex").to_string_lossy().into_owned(),
+    );
+
+    let error = super::super::execution::agent_for(&options).unwrap_err();
+
+    assert!(error.contains("models_cache.json"), "{error}");
+}
+
+/// ACP must reject a routed provider whose configured key source is absent,
+/// before its provider overrides can select that endpoint.
+#[test]
+fn routed_acp_rejects_missing_router_api_key() {
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Codex;
+    options.router = Some(crate::config::RouterConfig {
+        base_url: Some("https://gateway.example/v1".to_string()),
+        api_key_env: Some("MISSING_ROUTER_KEY".to_string()),
+        ..Default::default()
+    });
+
+    let error = super::super::execution::agent_for(&options).unwrap_err();
+
+    assert_eq!(
+        error,
+        "router API key env var `MISSING_ROUTER_KEY` is not set; export it or remove apiKeyEnv from [router]"
+    );
+}
+
+/// Windows command wrapping must preserve the TOML quotes in Codex's `-c`
+/// arguments; Codex parses the text after `=` as TOML rather than a shell word.
+#[cfg(windows)]
+#[test]
+fn windows_cmd_quoting_preserves_embedded_toml_quotes() {
+    assert_eq!(
+        super::super::execution::quote_windows_cmd_arg("model_provider=\"medulla\""),
+        "\"model_provider=\"\"medulla\"\"\""
+    );
+}
+
+#[test]
+fn a_local_hook_runs_in_the_worktree_the_session_moved_to() {
+    // The Codex ACP PostToolUse fallback spawns hooks from Medulla's own
+    // process, so the directory is Medulla's to choose. Choosing the launch one
+    // after the session moved is how an auto-commit hook checkpointed the wrong
+    // repository.
+    let launch = tempfile::tempdir().expect("temp dir");
+    let worktree = tempfile::tempdir().expect("temp dir");
+    let tracked = worktree.path().to_string_lossy().into_owned();
+
+    assert_eq!(
+        super::super::execution::hook_cwd_for(Some(&tracked), launch.path()),
+        worktree.path(),
+    );
+}
+
+#[test]
+fn a_session_that_never_moved_keeps_its_launch_directory() {
+    let launch = tempfile::tempdir().expect("temp dir");
+    assert_eq!(
+        super::super::execution::hook_cwd_for(None, launch.path()),
+        launch.path(),
+    );
+}
+
+#[test]
+fn a_worktree_that_has_since_been_removed_is_not_spawned_into() {
+    // Spawning into a missing directory fails the hook outright; the launch
+    // directory at least runs it.
+    let launch = tempfile::tempdir().expect("temp dir");
+    let removed = tempfile::tempdir().expect("temp dir");
+    let tracked = removed.path().to_string_lossy().into_owned();
+    drop(removed);
+
+    assert_eq!(
+        super::super::execution::hook_cwd_for(Some(&tracked), launch.path()),
+        launch.path(),
     );
 }

@@ -40,7 +40,7 @@ pub use agent_declarations::{
     agent_declaration, agent_declarations_for_host, declare_agent, declared_agent_ids,
     load_agent_declarations, remove_agent_declaration, undeclare_agent, upsert_agent_declaration,
 };
-pub use appearance::{AppearanceConfig, ResourceDisplay};
+pub use appearance::{AppearanceConfig, ResourceDisplay, SidebarGrouping, SidebarSort};
 pub use core_socket::{validate_core_socket, CoreSocketError, CoreSocketSource};
 pub use custom_harnesses::{
     load_custom_harnesses, load_layered_custom_harnesses, CustomHarnessConfig,
@@ -57,11 +57,12 @@ pub use persist::{
 };
 pub use types::{
     wire_value, AttributionConfig, BackendConfig, BudgetConfig, ControlStyle, CoreConfig,
-    EvolveSettings, FieldPlacement, FieldVisibility, FleetConfig, HarnessNameStyle, HarnessSection,
-    HookDefaultsConfig, HostSection, HubSection, HubWorkerConfig, LinkConfig, LoadedConfig,
-    McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig, PathStyle, Peer,
-    ProviderBudgetConfig, RouterConfig, RouterProviderConfig, StatusLineConfig, ThemeConfig,
-    TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig, DEFAULT_CONTEXT_WINDOW_TOKENS,
+    EvolveSettings, FavoriteWorkspace, FieldPlacement, FieldVisibility, FleetConfig,
+    HarnessNameStyle, HarnessSection, HookDefaultsConfig, HostSection, HubSection, HubWorkerConfig,
+    LinkConfig, LoadedConfig, McpSection, MedullaConfig, OnboardingConfig, OpencodeConfig,
+    PathStyle, Peer, ProviderBudgetConfig, RouterConfig, RouterProviderConfig, StatusLineConfig,
+    ThemeConfig, TuiConfig, UpdateConfig, WorkflowConfig, WorkflowsConfig,
+    DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 pub use urls::{
     default_backend_base_url, display_host, is_staging, resolve_backend_base_url,

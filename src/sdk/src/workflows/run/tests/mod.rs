@@ -3,5 +3,6 @@
 mod agent_evidence;
 mod approval;
 mod cases;
+mod preflight;
 
 use cases::*;

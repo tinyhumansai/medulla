@@ -39,7 +39,7 @@ impl App {
     /// 5. any remaining modal, before anything per-tab — one can be raised over
     ///    a tab the operator has since moved to;
     /// 6. the Workflows copilot, when it is the focused pane;
-    /// 7. the Agents composer, when one is actually on screen, with `\r\n` and
+    /// 7. the Sessions composer, when one is actually on screen, with `\r\n` and
     ///    bare `\r` normalised to `\n`.
     ///
     /// Anything else drops the payload, and does so from an explicit arm: a
@@ -78,7 +78,7 @@ impl App {
         // The session picker is two overlays in one: a harness-type list with no
         // field, then a visible path box. Routed as one call so the distinction
         // stays with the picker rather than being re-derived here.
-        if self.agent_picker.is_some() {
+        if self.session_picker.is_some() {
             self.paste_into_harness_workspace(text);
             return;
         }
@@ -102,40 +102,17 @@ impl App {
         // for their focus and hold no field a payload could be seen in, so a
         // paste made on either is dropped rather than banked into the copilot
         // one pane over.
+        // Every other tab is a list or a board with no text field of its own —
+        // the Sessions tab included, since the orchestrator's composer went with
+        // the orchestrator — so a paste made on one is dropped rather than
+        // banked into a draft nobody can see.
         #[cfg(feature = "workflows")]
-        if self.tab() == "Workflows" {
-            if self.wf.focus == WorkflowFocus::Copilot {
-                self.wf.draft = insert_at(
-                    &self.wf.draft.text,
-                    self.wf.draft.cursor,
-                    &normalize_paste(text),
-                );
-            }
-            return;
+        if self.tab() == "Workflows" && self.wf.focus == WorkflowFocus::Copilot {
+            self.wf.draft = insert_at(
+                &self.wf.draft.text,
+                self.wf.draft.cursor,
+                &normalize_paste(text),
+            );
         }
-        // Every remaining tab is a list or a board with no text field of its
-        // own, so a paste made on one is dropped rather than banked into the
-        // Agents composer it is not looking at.
-        if self.tab() != "Agents" {
-            return;
-        }
-        // The composer belongs to the orchestrator lane and nowhere else, so a
-        // paste made with the cursor on a worker or an unattached harness row
-        // has nowhere visible to land. Refused with a reason rather than
-        // retained: text held in a draft nobody can see is text the operator
-        // submits by accident on their next trip back to the orchestrator.
-        if !self.agents_composer_shown() {
-            self.set_status("Select the orchestrator lane to paste an instruction");
-            return;
-        }
-        // Pasting is typing, so the keyboard follows it in — exactly as a
-        // printable key does from the rail. Leaving focus behind made the next
-        // Enter step back into the composer instead of sending what was just
-        // pasted, and the arrows keep walking lanes over text nobody can edit.
-        self.focus_agents_composer();
-        self.draft = insert_at(&self.draft.text, self.draft.cursor, &normalize_paste(text));
-        // Narrowing the command peek invalidates where its cursor pointed,
-        // exactly as typing a character does.
-        self.command_index = 0;
     }
 }

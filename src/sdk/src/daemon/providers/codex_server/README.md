@@ -15,7 +15,7 @@ Selected by naming the `codex-server` harness, which reaches here as `HarnessTra
 
 ## What this reports
 
-Deliberately minimal: lifecycle status, the assistant's messages, and token usage. The app-server reports far more — per-item reasoning deltas, command output streams, patch previews — and the CLI transport's mappers turn the equivalent into the rich agent-rail detail an operator watches.
+Deliberately minimal: lifecycle status, the assistant's messages, token usage, and stable worktree reports that determine where a resumed turn executes. The app-server reports far more — per-item reasoning deltas, command output streams, patch previews — and the CLI transport's mappers turn the equivalent into the rich agent-rail detail an operator watches.
 
 Reproducing that surface here would mean a second implementation of every mapper, tracking a wire format still marked experimental, for a transport chosen when throughput is what matters. So a `codex-server` lane reports that it is working, what it finally said, and what it cost — and an operator who wants to watch a lane work runs it on `codex`.
 

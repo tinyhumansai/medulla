@@ -1,7 +1,7 @@
 //! The reusable chat surface: a transcript over a composer.
 //!
 //! Two surfaces in this app are the same gesture — the orchestrator on the
-//! Agents tab and the copilot on the Workflows tab. Both are "read what happened,
+//! Sessions tab and the copilot on the Workflows tab. Both are "read what happened,
 //! then say what you want next", and before this module they were two
 //! implementations of it that had already drifted: the copilot's input collapsed
 //! a multi-line draft onto one row, drew no caret unless focused, and had no
@@ -18,7 +18,6 @@
 //! ([`super::app::render::chat_lines`]); the copilot renders role-tagged turns.
 
 pub(crate) mod composer;
-pub(crate) mod tool_call;
 pub(crate) mod transcript;
 
 pub(crate) mod types;

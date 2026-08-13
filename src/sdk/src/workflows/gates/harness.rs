@@ -1,4 +1,4 @@
-//! The gate over an `agent` node's choice of harness and model.
+//! The gate over an `agent` node's choice of *harness*.
 //!
 //! Both failures this catches are silent at run time in the worst way. A
 //! misspelled harness would otherwise fail the node minutes into a run, after
@@ -10,6 +10,16 @@
 //! dispatch path: by the time a node dispatches, the engine has already resolved
 //! its config, so an expression is indistinguishable from a name typed by hand.
 //! Authoring time is the only place the difference is still visible.
+//!
+//! `model` is deliberately *not* checked, though it sits beside `harness` in
+//! the same config. The two are not the same kind of decision: `harness` names
+//! a binary and the credentials it runs with, while `model` is a string handed
+//! to a harness already chosen, so an expression there cannot redirect a step
+//! to a different program or a different account. Model names are also not
+//! harness names, so the value checks below — which end in
+//! [`HarnessSelector::parse`] — would reject every legitimate one. A workflow
+//! picking its model from upstream output is ordinary authoring, and
+//! `a_legitimate_harness_choice_passes` in the sibling tests pins that.
 
 use tinyflows::model::{NodeKind, WorkflowGraph};
 
@@ -20,7 +30,10 @@ use crate::flow_engine::HarnessSelector;
 /// the one way past this gate.
 const HARNESS_KEYS: [&str; 2] = ["harness", "provider"];
 
-/// Every failure in `graph`'s harness and model selection.
+/// Every failure in `graph`'s harness selection.
+///
+/// Covers the `harness` and `provider` keys on every `agent` node. `model` is
+/// out of scope by design — see the module doc.
 pub fn failures(graph: &WorkflowGraph) -> Vec<String> {
     let mut failures = Vec::new();
     for node in &graph.nodes {

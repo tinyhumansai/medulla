@@ -85,7 +85,7 @@ impl HarnessDispatch for TaskRunnerDispatch {
         // No status channel: a workflow's progress is reported per *node* by the
         // run observer, and forwarding a harness's token-level chatter here as
         // well would double-report the same work.
-        self.runner.run(request, None).await
+        self.runner.run_workflow_node(request, None).await
     }
 
     async fn dispatch_with_status(
@@ -93,7 +93,7 @@ impl HarnessDispatch for TaskRunnerDispatch {
         request: TaskRequest,
         status: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<TaskOutcome, RunError> {
-        self.runner.run(request, status).await
+        self.runner.run_workflow_node(request, status).await
     }
 
     fn abort_in_flight(&self) {

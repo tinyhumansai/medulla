@@ -5,8 +5,8 @@
 #   owner driver (a real medulla-link endpoint)
 #     → mock link forwarder (blind UDP; docs/host-link-protocol.md §5)
 #       → `medulla daemon` (real binary, the host end of the same link)
-#         → the REAL `opencode` CLI (spawned by the daemon as its provider)
-#           → mock OpenAI-compatible LLM → `COORDINATION_OK <echo>`
+#         → the REAL coding CLI (spawned by the daemon as its provider)
+#           → mock LLM → `COORDINATION_OK <echo>`
 #     ← the reply frame flows back over the link, printed as JSON, exit 0.
 #
 # The forwarder is the only mocked transport piece, and it is blind by
@@ -14,10 +14,16 @@
 # forwarder key and copies the ChaCha20-Poly1305 payload verbatim. Every byte of
 # payload encryption is the real `medulla-link` crate on both ends.
 #
-# tmux is a hard requirement: both `medulla daemon` and `opencode` run under tmux
-# control. Every process gets its own tmux window; a second "smoke" window drives
-# an interactive `opencode` TUI directly against the same mock LLM so tmux proves
-# it controls opencode as well as medulla.
+# Which CLI that is comes from `$E2E_HARNESS` — `opencode` (the default),
+# `claude` or `codex`. The claude and codex legs reach the mock through a Medulla
+# *custom harness preset*, which is the same routing path a real OpenRouter
+# preset takes, so the only fake in the chain is the model behind the endpoint.
+# See `harness.sh`.
+#
+# tmux is a hard requirement: both `medulla daemon` and the coding CLI run under
+# tmux control. Every process gets its own tmux window; a second "smoke" window
+# drives the CLI's interactive TUI directly against the same mock LLM so tmux
+# proves it controls the harness as well as medulla.
 #
 # All traffic is loopback. No real provider keys. Deterministic.
 #
@@ -27,9 +33,11 @@
 # `tests.sh`, which shares the boot/teardown helpers in `lib.sh`.
 #
 # Shared-boot helpers + all env knobs are documented in lib.sh; overrides:
-#   MEDULLA_BIN / FORWARDER_BIN / OWNER_BIN / OPENCODE_BIN  prebuilt binaries
+#   MEDULLA_BIN / FORWARDER_BIN / OWNER_BIN            prebuilt binaries
+#   OPENCODE_BIN / CLAUDE_BIN / CODEX_BIN              prebuilt coding CLIs
+#   E2E_HARNESS=opencode|claude|codex  which CLI to drive (default: opencode)
 #   E2E_KEEP=1     keep the run dir + tmux session on exit (debugging)
-#   E2E_SMOKE=0    skip the interactive opencode TUI smoke leg
+#   E2E_SMOKE=0    skip the interactive TUI smoke leg
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,33 +85,35 @@ assert "COORDINATION_OK" in text, f"reply missing COORDINATION_OK: {text!r}"
 print(f"[e2e]   (a) reply OK: {text[:80]!r}", file=sys.stderr)
 PY
 
-  # (b) mock LLM log has >=1 chat request whose messages include the task text.
+  # (b) mock LLM log has >=1 completion request, on the wire dialect this
+  # harness is supposed to speak, whose messages include the task text.
   [ -f "$RUN_DIR/llm.jsonl" ] || fail "mock LLM wrote no request log"
-  "$PYTHON_BIN" - "$RUN_DIR/llm.jsonl" "$OWNER_TASK" <<'PY' || fail "mock LLM assertion failed"
+  "$PYTHON_BIN" - "$RUN_DIR/llm.jsonl" "$OWNER_TASK" "$(harness_llm_kind)" \
+    <<'PY' || fail "mock LLM assertion failed"
 import json, sys
-path, needle = sys.argv[1], sys.argv[2]
+path, needle, kind = sys.argv[1], sys.argv[2], sys.argv[3]
 chats = hit = 0
 for line in open(path):
     line = line.strip()
     if not line:
         continue
     rec = json.loads(line)
-    if rec.get("kind") != "chat":
+    if rec.get("kind") != kind:
         continue
     chats += 1
     blob = json.dumps(rec.get("payload", {}).get("messages") or [])
     if needle in blob:
         hit += 1
-assert chats >= 1, "no chat requests reached the mock LLM"
-assert hit >= 1, f"task text never appeared in an LLM chat request ({chats} chats)"
-print(f"[e2e]   (b) LLM saw the task in {hit}/{chats} chat request(s)", file=sys.stderr)
+assert chats >= 1, f"no {kind} requests reached the mock LLM"
+assert hit >= 1, f"task text never appeared in an LLM {kind} request ({chats} seen)"
+print(f"[e2e]   (b) LLM saw the task in {hit}/{chats} {kind} request(s)", file=sys.stderr)
 PY
 
   # (c) the forwarder moved state-carrying datagrams in BOTH directions.
   assert_bidirectional_delivery "$RUN_DIR/owner.json"
   log "  (c) bidirectional delivery across the forwarder confirmed"
 
-  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via real opencode, LLM saw the task, bidirectional link delivery confirmed.\n' >&2
+  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via the real %s CLI, LLM saw the task, bidirectional link delivery confirmed.\n' "$HARNESS" >&2
 }
 
 main "$@"

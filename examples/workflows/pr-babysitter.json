@@ -15,12 +15,6 @@
       "description": "owner/name to target. Empty means the checkout's own remote."
     },
     {
-      "name": "cwd",
-      "type": "string",
-      "default": ".",
-      "description": "Checkout to run gh and the fixing harness in, relative to the workspace."
-    },
-    {
       "name": "feedback_command",
       "type": "string",
       "default": "",
@@ -55,7 +49,6 @@
         "slug": "medulla:shell",
         "args": {
           "language": "bash",
-          "cwd": "=inputs.cwd",
           "env": {
             "PR": "=inputs.pr",
             "REPO": "=inputs.repo",
@@ -97,7 +90,7 @@
       "kind": "agent",
       "name": "Fix and push",
       "config": {
-        "prompt": "=\"Work in the checkout at \" + .inputs.cwd + \", which is the one the pull request was read from — an agent step starts at the workspace root, not there.\\n\\nPull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nMerge state: \" + ((.nodes.assess.item.pr.mergeStateStatus // \"UNKNOWN\") | tostring) + (if .nodes.assess.item.conflicted then \" — this branch conflicts with its base; merge the base in and resolve every conflict by understanding what both sides changed, never by taking one side wholesale.\" else \"\" end) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
+        "prompt": "=\"Work in this checkout, which is the one the pull request was read from.\\n\\nPull request \" + (.nodes.assess.item.pr.url // (\"#\" + (.nodes.assess.item.pr.number | tostring))) + \" on branch \" + (.nodes.assess.item.pr.headRefName // \"?\") + \" is not ready.\\n\\nFailing checks:\\n\" + (.nodes.assess.item.failing | tostring) + \"\\n\\nReview feedback:\\n\" + (.nodes.assess.item.feedback | tostring) + \"\\n\\nMerge state: \" + ((.nodes.assess.item.pr.mergeStateStatus // \"UNKNOWN\") | tostring) + (if .nodes.assess.item.conflicted then \" — this branch conflicts with its base; merge the base in and resolve every conflict by understanding what both sides changed, never by taking one side wholesale.\" else \"\" end) + \"\\n\\nThis is round \" + (.nodes.watch.iteration | tostring) + \" of 8. Check out that branch, fix every failure at its root, and push. Never skip hooks, never disable or weaken a test, and never force a check green. Reply to and resolve each review thread you address, and say plainly which ones you are declining and why.\""
       }
     },
     {
@@ -119,7 +112,6 @@
         "slug": "medulla:shell",
         "args": {
           "language": "bash",
-          "cwd": "=inputs.cwd",
           "env": {
             "PENDING": "=.nodes.assess.item.pending | tostring"
           },

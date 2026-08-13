@@ -17,6 +17,7 @@ fn guard() -> std::sync::MutexGuard<'static, ()> {
 fn clear() {
     std::env::remove_var(OPENHUMAN_WORKSPACE_ENV);
     std::env::remove_var(OPENHUMAN_ACTION_DIR_ENV);
+    std::env::remove_var(OPENHUMAN_MEDULLA_BASE_URL_ENV);
     std::env::remove_var(OPENHUMAN_BACKEND_URL_ENV);
 }
 
@@ -149,6 +150,76 @@ fn action_dir_keeps_an_explicit_override() {
     )]);
     let bound = bind_action_dir(&env, Some(Path::new("/repos/work")));
     assert_eq!(bound, Some(PathBuf::from("/explicit")));
+    clear();
+}
+
+#[test]
+fn bind_from_config_sets_everything_a_lazy_boot_needs() {
+    // The lazy boot path (`shared`) has no caller of its own to bind for it, so
+    // a host that loaded its layered config calls this instead. It must
+    // reproduce the TUI's startup bindings: workspace from MEDULLA_HOME, action
+    // dir from the first configured workspace root, and both backend URLs from
+    // `backend.baseUrl`.
+    let _g = guard();
+    clear();
+    let mut config = crate::config::TuiConfig::default();
+    config.backend.base_url = "https://staging-api.tinyhumans.ai/".to_string();
+    config.workflow.workspaces = vec!["/repos/work".to_string()];
+    bind_from_config(&HashMap::new(), &config, Path::new("/tmp/scratch-home"));
+    assert_eq!(
+        std::env::var(OPENHUMAN_WORKSPACE_ENV).unwrap(),
+        workspace_dir(Path::new("/tmp/scratch-home")).to_string_lossy()
+    );
+    assert_eq!(
+        std::env::var(OPENHUMAN_ACTION_DIR_ENV).unwrap(),
+        "/repos/work"
+    );
+    assert_eq!(
+        std::env::var(OPENHUMAN_MEDULLA_BASE_URL_ENV).unwrap(),
+        "https://staging-api.tinyhumans.ai"
+    );
+    assert_eq!(
+        std::env::var(OPENHUMAN_BACKEND_URL_ENV).unwrap(),
+        "https://staging-api.tinyhumans.ai"
+    );
+    clear();
+}
+
+#[test]
+fn bind_from_config_leaves_the_operator_s_own_bindings_alone() {
+    // Non-overriding like the individual bindings: someone who already aimed
+    // the core at an existing OpenHuman install or a self-hosted backend keeps
+    // those, whatever the config says. The override lives in the caller's env
+    // map, so the *derived* bindings are written to the process env while the
+    // overridden ones are left untouched.
+    let _g = guard();
+    clear();
+    let mut config = crate::config::TuiConfig::default();
+    config.backend.base_url = "https://api.tinyhumans.ai".to_string();
+    config.workflow.workspaces = vec!["/repos/work".to_string()];
+    let env = HashMap::from([
+        (
+            OPENHUMAN_WORKSPACE_ENV.to_string(),
+            "/opt/openhuman/ws".to_string(),
+        ),
+        (
+            OPENHUMAN_BACKEND_URL_ENV.to_string(),
+            "https://self.hosted".to_string(),
+        ),
+    ]);
+    bind_from_config(&env, &config, Path::new("/tmp/scratch-home"));
+    assert!(
+        std::env::var(OPENHUMAN_WORKSPACE_ENV).is_err(),
+        "the operator's workspace override must not be re-derived"
+    );
+    assert_eq!(
+        std::env::var(OPENHUMAN_ACTION_DIR_ENV).unwrap(),
+        "/repos/work"
+    );
+    assert!(
+        std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err(),
+        "the operator's backend override must not be re-derived"
+    );
     clear();
 }
 

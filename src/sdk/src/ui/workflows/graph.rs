@@ -525,12 +525,20 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         // `dedup` reads durable state, but what it *does* to the graph is route:
         // an item either continues or is dropped, so it reads with the control
         // flow rather than with the kinds that reach outside the process.
+        // `spawn`/`gate` and `scatter`/`gather` read with the control flow for
+        // the same reason: what each does to the graph is decide where and how
+        // wide execution goes next. That the work itself may reach outside the
+        // process is the business of the nodes they start, not of these.
         NodeKind::Condition
         | NodeKind::Switch
         | NodeKind::Merge
         | NodeKind::SplitOut
         | NodeKind::Dedup
-        | NodeKind::Loop => "yellow",
+        | NodeKind::Loop
+        | NodeKind::Spawn
+        | NodeKind::Gate
+        | NodeKind::Scatter
+        | NodeKind::Gather => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }

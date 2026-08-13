@@ -51,6 +51,7 @@ fn raise(app: &mut App, overlay: Overlay) {
                 workspace_picked: false,
             })
         }
+        Overlay::SessionKill => app.arm_harness_close("s".into()),
         Overlay::HandbackPrompt => {
             app.handback_prompt = Some(HandbackPrompt {
                 session: "s".into(),
@@ -73,10 +74,11 @@ fn raise(app: &mut App, overlay: Overlay) {
 }
 
 /// Every variant, so a new one cannot be added without appearing here.
-const EVERY_OVERLAY: [Overlay; 6] = [
+const EVERY_OVERLAY: [Overlay; 7] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
     Overlay::SessionPicker,
+    Overlay::SessionKill,
     Overlay::HandbackPrompt,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,

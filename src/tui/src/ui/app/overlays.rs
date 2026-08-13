@@ -32,6 +32,10 @@ impl App {
             (Overlay::Decisions, self.decision_open),
             (Overlay::TemplatePopup, self.template_popup_open()),
             (Overlay::SessionPicker, self.session_picker.is_some()),
+            (
+                Overlay::SessionKill,
+                self.kill_armed.is_some() || self.harness_close_armed.is_some(),
+            ),
             (Overlay::HandbackPrompt, self.handback_prompt.is_some()),
             (Overlay::InlinePrompt, self.prompt.is_some()),
             (

@@ -245,6 +245,60 @@ fn closing_one_of_two_taken_sessions_keeps_the_shared_workspace_held() {
     sessions.shutdown();
 }
 
+// Unix-only because the fixture stands a real child up on a real pseudo-terminal.
+#[cfg(unix)]
+#[test]
+fn uppercase_k_kills_a_local_session_that_has_no_dispatched_task() {
+    // An operator-started harness has no task record, so it cannot be sent
+    // through the remote task-kill protocol. `K` must still end the local
+    // process after its destructive confirmation.
+    let sessions = crate::worker::pty::PtyManager::new();
+    let mut app = app();
+    app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
+    let choice = crate::ui::harness_pane::HarnessChoice::native(HarnessProvider::Codex);
+    app.spawn_session(choice, "/");
+    let id = sessions
+        .rows()
+        .into_iter()
+        .next()
+        .expect("a session was opened")
+        .id;
+    app.pane_session = Some(id.clone());
+
+    let action = app.on_sessions_rail_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+    assert!(matches!(action, super::keys::SessionsKey::Handled(None)));
+    assert_eq!(app.harness_close_armed.as_deref(), Some(id.as_str()));
+
+    app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(
+        !sessions
+            .row(&id)
+            .expect("the closed row is retained")
+            .state
+            .is_running(),
+        "confirmation should kill the local harness"
+    );
+}
+
+#[test]
+fn local_session_kill_confirmation_is_drawn_as_a_modal() {
+    let mut app = app();
+    app.arm_harness_close("session-a".into());
+    let backend = TestBackend::new(100, 32);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+
+    terminal.draw(|frame| app.draw(frame)).expect("draw modal");
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(rendered.contains("Kill this session?"), "{rendered}");
+    assert!(rendered.contains("[Y] kill session"), "{rendered}");
+}
+
 // Unix-only because the fixture stands a real child up on a real pseudo-terminal
 // via `/bin/sh`. The note plumbing itself is platform-independent.
 #[cfg(unix)]

@@ -105,6 +105,8 @@ impl App {
         // replace the session named by an already-visible hand-back prompt.
         if self.resume_picker.is_some()
             || self.session_picker.is_some()
+            || self.kill_armed.is_some()
+            || self.harness_close_armed.is_some()
             || self.handback_prompt.is_some()
         {
             return None;

@@ -367,6 +367,7 @@ fn every_kind_has_a_wire_name_a_glyph_and_a_colour() {
         NodeKind::ToolCall,
         NodeKind::HttpRequest,
         NodeKind::Code,
+        NodeKind::Shell,
         NodeKind::Condition,
         NodeKind::Switch,
         NodeKind::Merge,
@@ -401,6 +402,14 @@ fn a_summary_names_what_identifies_the_node_for_its_kind() {
         (
             node("a", NodeKind::Agent, json!({"prompt":"first line\nsecond"})),
             "first line",
+        ),
+        (
+            node(
+                "s",
+                NodeKind::Shell,
+                json!({"source":"echo first\necho second"}),
+            ),
+            "echo first",
         ),
         (
             node("c", NodeKind::Condition, json!({"expression":"=.ok"})),

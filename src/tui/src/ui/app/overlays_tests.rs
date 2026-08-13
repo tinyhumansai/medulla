@@ -222,6 +222,28 @@ fn pointer_input_cancels_an_armed_harness_close() {
 }
 
 #[test]
+fn cancelling_a_session_kill_with_the_mouse_does_not_click_through_the_modal() {
+    let mut app = app();
+    app.arm_harness_close("session-a".into());
+    app.hit_tabs_row = 1;
+    app.hit_tabs = vec![(0, 4), (5, 10)];
+    let original_tab = app.tab_index;
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 6,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(app.harness_close_armed.is_none());
+    assert_eq!(
+        app.tab_index, original_tab,
+        "the cancellation click is consumed"
+    );
+}
+
+#[test]
 fn no_overlay_lets_a_paste_through_to_the_composer_behind_it() {
     // The whole point of deriving `overlay_owns_keys` from this list. Asserted
     // per overlay rather than once, because the failure mode is always a single

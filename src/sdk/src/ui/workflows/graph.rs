@@ -453,6 +453,10 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Memory => "memory",
         NodeKind::Dedup => "dedup",
         NodeKind::Loop => "loop",
+        NodeKind::Spawn => "spawn",
+        NodeKind::Gate => "gate",
+        NodeKind::Scatter => "scatter",
+        NodeKind::Gather => "gather",
     }
 }
 

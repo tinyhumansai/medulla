@@ -364,8 +364,7 @@ fn forged_worktree_report_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen, _) =
-        workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
+    let (mut fold, seen, _) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
     fold.fold(&notification(
         "item/completed",
         json!({
@@ -388,8 +387,7 @@ fn failed_worktree_command_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen, _) =
-        workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
+    let (mut fold, seen, _) = workspace_fold(vec![(worktree.clone(), "fix-context".to_string())]);
 
     fold.fold(&worktree_notification(
         worktree.to_str().unwrap(),
@@ -423,8 +421,7 @@ fn mismatched_worktree_branch_does_not_update_the_app_server_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let worktree = dir.path().join("worktree");
     std::fs::create_dir_all(&worktree).unwrap();
-    let (mut fold, seen, _) =
-        workspace_fold(vec![(worktree.clone(), "other-branch".to_string())]);
+    let (mut fold, seen, _) = workspace_fold(vec![(worktree.clone(), "other-branch".to_string())]);
 
     fold.fold(&worktree_notification(
         worktree.to_str().unwrap(),

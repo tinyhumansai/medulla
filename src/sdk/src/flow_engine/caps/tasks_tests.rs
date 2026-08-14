@@ -46,6 +46,39 @@ fn runner() -> MedullaTaskRunner {
     }))
 }
 
+/// A [`ToolInvoker`] that never returns, so a task built against it can only
+/// ever settle by hitting its deadline — never by finishing first. Standing in
+/// for any tool call slow enough to matter, without depending on real time
+/// passing anywhere but the deadline check itself.
+struct HangingToolInvoker;
+
+#[async_trait]
+impl ToolInvoker for HangingToolInvoker {
+    async fn invoke(&self, _slug: &str, _args: Value, _conn: Option<&str>) -> EngineResult<Value> {
+        std::future::pending().await
+    }
+}
+
+/// Capabilities whose tool calls hang forever, so a task started against them
+/// settles only when [`MedullaTaskRunner`] enforces its deadline.
+struct HangingTaskCaps {
+    /// The deadline handed to each task.
+    timeout: Duration,
+}
+
+impl TaskCapabilities for HangingTaskCaps {
+    fn capabilities(&self) -> Capabilities {
+        let mut caps = tinyflows::caps::mock::mock_capabilities();
+        caps.tasks = None;
+        caps.tools = Arc::new(HangingToolInvoker);
+        caps
+    }
+
+    fn timeout(&self) -> Duration {
+        self.timeout
+    }
+}
+
 /// Poll the way a `gate` does — once per activation — until the task settles.
 async fn settle(runner: &MedullaTaskRunner, ticket: &str) -> TaskState {
     for _ in 0..512 {

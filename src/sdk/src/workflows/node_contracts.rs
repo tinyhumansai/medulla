@@ -212,8 +212,15 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
                 .to_string(),
             "`target: \"workflow\"` takes the child graph inline under `config.workflow`; there \
              is no `workflow_id` here, unlike `sub_workflow`. A spawned child cannot pause for \
-             approval — nothing can address a resume to it — so it returns with the approval \
-             still pending instead of waiting. Keep `requires_approval` out of a spawned graph."
+             approval — nothing can address a resume to it — so a `requires_approval` gate it \
+             hits fails the ticket instead of parking it; the gate collecting it sees \
+             `{failed: true, error}`, not a silent partial success. Keep `requires_approval` \
+             out of a spawned graph."
+                .to_string(),
+            "This describes a production run. `workflow_dry_run` omits the task runner entirely \
+             and executes `spawn` inline against the same schema-aware stand-ins every other \
+             node validates against — so a dry run is synchronous and cannot be used to check \
+             that a `spawn`/`gate` pair actually overlaps in time."
                 .to_string(),
         ],
         "gate" => vec![

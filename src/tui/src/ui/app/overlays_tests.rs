@@ -363,3 +363,72 @@ fn a_handback_note_wider_than_the_modal_wraps_instead_of_vanishing() {
         "wrapping must grow the modal, not push its answer hint off the bottom"
     );
 }
+
+#[test]
+fn a_click_answers_the_question_even_after_the_note_has_wrapped() {
+    // The wrapped note pushes the answer hint down a row. The hit boxes are
+    // recorded during the draw, so they have to follow it — a click aimed at
+    // the unwrapped row would land on the note's continuation and answer
+    // nothing, which is worse than the clipping this replaced: the controls are
+    // visible and simply do not respond.
+    //
+    // So the click is aimed where "[Y] hand back" is actually PAINTED, found by
+    // reading the rendered buffer back. Clicking the recorded box instead would
+    // pass whether or not the box agrees with the screen, which is the only
+    // thing worth testing here.
+    let mut app = app();
+    raise(&mut app, Overlay::HandbackPrompt);
+    if let Some(prompt) = app.handback_prompt.as_mut() {
+        prompt.note.text = "x".repeat(180);
+    }
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+
+    let buffer = terminal.backend().buffer().clone();
+    let painted = (0..buffer.area.height)
+        .find_map(|y| {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            row.find("[Y] hand back").map(|x| (x as u16, y))
+        })
+        .expect("the answer hint should be painted somewhere");
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: painted.0,
+        row: painted.1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(
+        app.handback_prompt.is_none(),
+        "clicking the visible answer must resolve the question once the note wraps"
+    );
+}
+
+#[test]
+fn a_modal_too_tall_for_the_terminal_records_no_offscreen_answers() {
+    // `centered` clamps to the terminal, so a long note on a short screen
+    // clips the hint instead of drawing it. Recording boxes for a row that was
+    // never painted would answer the question for a click that landed on the
+    // pane behind the modal.
+    let mut app = app();
+    raise(&mut app, Overlay::HandbackPrompt);
+    if let Some(prompt) = app.handback_prompt.as_mut() {
+        prompt.note.text = "y".repeat(600);
+    }
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 10)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+
+    for (rect, _) in &app.hit_handback {
+        assert!(
+            rect.y < 10,
+            "a hit box must never sit below the terminal it was drawn in"
+        );
+    }
+}

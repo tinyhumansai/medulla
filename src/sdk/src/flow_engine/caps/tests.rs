@@ -79,6 +79,14 @@ fn a_spawned_task_s_deadline_shrinks_toward_the_run_s_own_rather_than_resetting(
     );
 }
 
+/// A run's own bundle is the root of any `spawn` nesting under it, not itself
+/// nested — `TaskCapabilities::capabilities` is what advances this for a
+/// spawned task's own bundle, never the assembly a run starts with.
+#[test]
+fn a_fresh_assembly_starts_at_depth_zero() {
+    assert_eq!(assembly(600).depth(), 0);
+}
+
 /// A misconfigured `run_timeout_secs: 0` reaching the assembly directly (rather
 /// than through `CapabilitySettings::from_config`, which already floors it)
 /// must not hand every spawned task an already-expired deadline — that fails

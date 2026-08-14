@@ -240,6 +240,13 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              simpler and reads more plainly on the canvas."
                 .to_string(),
         ],
+        "void" => vec![
+            "Nothing is drained or cancelled when a run ends, so `spawn` -> `void` on this host \
+             leaves a live harness session running until it finishes on its own or the run's \
+             deadline cuts it off. Voiding a ticket says you do not want the *result*; it does \
+             not stop the work or free the worker slot early."
+                .to_string(),
+        ],
         "gather" => vec![
             "`on_lane_error: \"collect\"` (the default) is usually right on this host: a lane \
              whose harness session failed becomes an item carrying the error, so the graph can \

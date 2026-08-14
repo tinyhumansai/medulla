@@ -10,7 +10,7 @@ use crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as TLine, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::super::types::{App, SessionPickerStep};
@@ -317,7 +317,18 @@ impl App {
         let Some(prompt) = &self.handback_prompt else {
             return;
         };
-        let area = centered(area, 72, 12);
+        // The note is the one line here that grows without bound, so the box
+        // grows with it. A fixed 12 rows clipped everything past the first row
+        // of a draft — the keystrokes still landed, so an operator was typing
+        // a handover note they could not read back or edit.
+        const MODAL_WIDTH: u16 = 72;
+        const BASE_HEIGHT: u16 = 12;
+        let note_cols = NOTE_LABEL.chars().count() + prompt.note.text.chars().count() + 1;
+        let note_rows = note_cols
+            .div_ceil(usize::from(MODAL_WIDTH.saturating_sub(2)).max(1))
+            .max(1);
+        let grown = BASE_HEIGHT.saturating_add(u16::try_from(note_rows - 1).unwrap_or(u16::MAX));
+        let area = centered(area, MODAL_WIDTH, grown);
         let title = if prompt.is_takeover {
             "Take control of this session"
         } else {
@@ -371,7 +382,7 @@ impl App {
         // operator can tell at a glance whether `y` will answer or type.
         let note = if prompt.editing_note {
             TLine::from(vec![
-                Span::styled("Note: ", Style::default().fg(self.theme.accent)),
+                Span::styled(NOTE_LABEL, Style::default().fg(self.theme.accent)),
                 Span::raw(prompt.note.text.clone()),
                 Span::styled("█", Style::default().fg(self.theme.accent)),
             ])
@@ -381,7 +392,7 @@ impl App {
                 Style::default().fg(self.theme.dim_border),
             ))
         } else {
-            TLine::from(format!("Note: {}", prompt.note.text))
+            TLine::from(format!("{NOTE_LABEL}{}", prompt.note.text))
         };
         let editing_note = prompt.editing_note;
         let hint = if editing_note {
@@ -420,7 +431,10 @@ impl App {
             TLine::from(""),
             hint,
         ];
-        f.render_widget(Paragraph::new(Text::from(lines)), inner);
+        f.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+            inner,
+        );
     }
 }
 
@@ -453,6 +467,10 @@ pub(super) fn harness_choice_window(
         .min(total.saturating_sub(capacity));
     start..start + capacity
 }
+
+/// The note line's label. Shared with the height math above so the two cannot
+/// disagree about how many columns the draft has left.
+const NOTE_LABEL: &str = "Note: ";
 
 /// A `width` × `height` box centered in `area`, clamped to fit.
 ///

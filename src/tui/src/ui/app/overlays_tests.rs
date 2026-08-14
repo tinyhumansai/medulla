@@ -316,3 +316,50 @@ fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
         ]
     );
 }
+
+#[test]
+fn a_handback_note_wider_than_the_modal_wraps_instead_of_vanishing() {
+    // Reported: typing a note into the leave-a-session prompt, everything past
+    // the visible width disappeared. The keystrokes still landed — the draft
+    // grew — but the operator could not read back or edit what they wrote,
+    // which is the one moment they actually have the context to write it.
+    //
+    // The note is one `TLine` holding the whole draft, so nothing folds it
+    // unless the `Paragraph` is told to wrap; ratatui clips an over-long line
+    // by default. The modal also grows a row per wrapped line, or wrapping just
+    // pushes the answer hint out of a fixed 12-row box instead.
+    let mut app = app();
+    raise(&mut app, Overlay::HandbackPrompt);
+    let note = "continue the migration: the socketioxide bump is done, next is \
+                the whisper README pass, then rerun the e2e suite";
+    if let Some(prompt) = app.handback_prompt.as_mut() {
+        prompt.editing_note = true;
+        prompt.note.text = note.to_string();
+    }
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+    terminal.draw(|f| app.draw(f)).expect("draw");
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+
+    assert!(
+        screen.contains("continue the migration"),
+        "the start of the note should be visible"
+    );
+    // The tail lands on a later row rather than being clipped away.
+    assert!(
+        screen.contains("rerun the e2e suite"),
+        "the end of a wrapped note should be on screen"
+    );
+    // And the hint the wrapped rows could have displaced is still drawn.
+    assert!(
+        screen.contains("Type your note"),
+        "wrapping must grow the modal, not push its answer hint off the bottom"
+    );
+}

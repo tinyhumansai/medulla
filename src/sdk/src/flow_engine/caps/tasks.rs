@@ -185,6 +185,24 @@ impl TaskRunner for MedullaTaskRunner {
             ));
         }
 
+        // Only a nested graph can nest further, so only `TaskSpec::Workflow`
+        // is checked here. `tinyflows::engine::run` (which `perform` calls for
+        // this shape) carries no depth of its own — unlike `sub_workflow`,
+        // which is bounded by `run_sub_workflow`'s `pub(crate)` depth argument
+        // that this host cannot reach from outside the crate — so without this
+        // check a `spawn`/`gate` cycle across two graphs that keep re-spawning
+        // each other would nest without end.
+        if matches!(spec, TaskSpec::Workflow { .. }) {
+            let depth = self.caps.depth();
+            let max_depth = self.caps.max_depth();
+            if depth >= max_depth {
+                return Err(EngineError::Capability(format!(
+                    "spawn would nest a child workflow past the configured limit of \
+                     {max_depth} (already at depth {depth})"
+                )));
+            }
+        }
+
         let ticket = self.issue_ticket();
         let state = Arc::new(Mutex::new(TaskState::Pending));
         self.tasks

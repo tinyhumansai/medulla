@@ -5743,7 +5743,3 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
-
-[[patch.unused]]
-name = "tinyjuice"
-version = "0.2.1"

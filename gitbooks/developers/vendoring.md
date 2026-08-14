@@ -31,9 +31,11 @@ A git dependency on OpenHuman would not help. Cargo updates git-dependency
 submodules recursively with no opt-out, which makes the CEF clone mandatory. The
 submodule plus an explicit init list is the only way to avoid it.
 
-The script initializes `vendor/openhuman` and then seven of its own vendored
-crates: `tinyagents`, `tinychannels`, `tinycortex`, `tinyflows`,
-`tinyhumans-sdk`, `tinyjuice`, and `tinyplace`.
+The script initializes `vendor/openhuman` and then several of its own vendored
+crates: `tinyagents`, `tinybus`, `tinychannels`, `tinycortex`, `tinyflows`,
+`tinyhumans-sdk`, `tinymemory`, and `tinyplace`. `vendor/motosan-ai-oauth` is
+not a submodule — OpenHuman vendors it as a plain tracked directory, so it
+comes along with the `vendor/openhuman` checkout itself.
 
 ## How each dependency is declared
 

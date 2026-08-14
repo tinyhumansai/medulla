@@ -345,3 +345,6 @@ pub fn build_dry_run_capabilities(resolver: Arc<dyn WorkflowResolver>) -> Capabi
 pub fn open_checkpointer(settings: &CapabilitySettings) -> Arc<dyn Checkpointer<Value>> {
     Arc::new(FileCheckpointer::<Value>::new(&settings.checkpoint_dir))
 }
+
+#[cfg(test)]
+mod tests;

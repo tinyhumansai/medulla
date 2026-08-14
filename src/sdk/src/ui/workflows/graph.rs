@@ -543,7 +543,8 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::Spawn
         | NodeKind::Gate
         | NodeKind::Scatter
-        | NodeKind::Gather => "yellow",
+        | NodeKind::Gather
+        | NodeKind::Void => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }

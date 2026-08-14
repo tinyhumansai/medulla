@@ -2534,7 +2534,6 @@ dependencies = [
  "rand 0.10.2",
  "regex",
  "reqwest 0.12.28",
- "ring",
  "rusqlite",
  "rustls",
  "schemars 1.2.2",
@@ -2553,7 +2552,6 @@ dependencies = [
  "tinycortex",
  "tinycortex-api",
  "tinyhumans-sdk",
- "tinyjuice",
  "tinymemory",
  "tinymemory-api",
  "tinymemory-core",
@@ -4239,7 +4237,7 @@ dependencies = [
  "tinyagents",
  "tinycortex-api",
  "tokio",
- "toml 0.8.23",
+ "toml 1.1.4+spec-1.1.0",
  "tracing",
  "uuid",
  "walkdir",
@@ -4261,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "tinyflows"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "fs2",
@@ -4294,25 +4292,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "tinyjuice"
-version = "0.2.1"
-dependencies = [
- "async-trait",
- "dirs 6.0.0",
- "hex",
- "log",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "thiserror 2.0.19",
- "tokio",
- "unicode-segmentation",
- "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -5764,3 +5743,7 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "tinyjuice"
+version = "0.2.1"

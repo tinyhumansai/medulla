@@ -194,6 +194,11 @@ struct Assembly {
     slots: Arc<tokio::sync::Semaphore>,
     /// The run-wide dispatch id sequence.
     sequence: Arc<AtomicU64>,
+    /// When this run must be finished. Fixed at the run's start and carried
+    /// unchanged through every `Assembly::clone`, so a task spawned near the
+    /// end of the run gets what is left of the deadline rather than a fresh
+    /// copy of it.
+    deadline: Instant,
 }
 
 impl Assembly {

@@ -503,6 +503,10 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // pipeline, not the item stream.
         NodeKind::Scatter => "⇶",
         NodeKind::Gather => "⇉",
+        // A stop, not an arrow: the whole point of the kind is that nothing
+        // leaves it, and an operator scanning the canvas should be able to tell
+        // a deliberate sink from a branch someone forgot to wire.
+        NodeKind::Void => "∅",
     }
 }
 

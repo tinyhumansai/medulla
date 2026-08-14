@@ -42,6 +42,11 @@ use crate::flow_engine::execute::{compile, run_detached};
 pub trait TaskCapabilities: Send + Sync {
     /// A bundle for one spawned task, complete with its own task runner so a
     /// child graph's `spawn` nodes overlap the same way this one's did.
+    ///
+    /// Implementations that support nested `spawn`/`gate` fan-out build this
+    /// bundle's own task runner one [`depth`](Self::depth) deeper than `self`,
+    /// so [`MedullaTaskRunner::start`] can refuse a `TaskSpec::Workflow` once
+    /// nesting reaches [`max_depth`](Self::max_depth).
     fn capabilities(&self) -> Capabilities;
 
     /// The deadline a single spawned task runs under.
@@ -50,6 +55,26 @@ pub trait TaskCapabilities: Send + Sync {
     /// in the run will ever notice it wedged. Without a bound of its own it
     /// would sit in the process until the daemon restarted.
     fn timeout(&self) -> Duration;
+
+    /// How many `spawn`-started child graphs already sit between the run's own
+    /// trigger and the graph this bundle belongs to. Zero for the run itself.
+    ///
+    /// Only `TaskSpec::Workflow` — a nested graph — advances this; a spawned
+    /// tool call or HTTP request does not itself nest, so it does not count.
+    fn depth(&self) -> u64 {
+        0
+    }
+
+    /// The ceiling [`depth`](Self::depth) may reach before a further
+    /// `TaskSpec::Workflow` is refused rather than left to nest without bound.
+    ///
+    /// Defaults to [`MAX_SUB_WORKFLOW_DEPTH`], the same default the engine's
+    /// own `sub_workflow` node enforces — `spawn`'s workflow shape is a second
+    /// way to reach the same recursive-nesting hazard, so it gets the same
+    /// bound.
+    fn max_depth(&self) -> u64 {
+        MAX_SUB_WORKFLOW_DEPTH
+    }
 }
 
 /// A [`TaskRunner`] that actually performs the work a `spawn` node describes.

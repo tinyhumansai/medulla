@@ -275,6 +275,78 @@ async fn a_settled_task_s_abort_handle_is_released() {
     panic!("settled task {ticket} left its abort handle behind");
 }
 
+/// Capabilities at a caller-chosen nesting depth, so a test can put a task
+/// right at the ceiling without actually nesting that many real child graphs.
+struct DepthLimitedTaskCaps {
+    /// How deep this bundle already is.
+    depth: u64,
+    /// The ceiling `depth` may reach before a further `TaskSpec::Workflow` is
+    /// refused.
+    max_depth: u64,
+}
+
+impl TaskCapabilities for DepthLimitedTaskCaps {
+    fn capabilities(&self) -> Capabilities {
+        let mut caps = tinyflows::caps::mock::mock_capabilities();
+        caps.tasks = None;
+        caps
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+
+    fn depth(&self) -> u64 {
+        self.depth
+    }
+
+    fn max_depth(&self) -> u64 {
+        self.max_depth
+    }
+}
+
+/// The whole point of bounding depth: a `spawn` that would nest a child
+/// workflow past the configured ceiling must be refused up front, not started
+/// and left to recurse until something else gives out.
+#[tokio::test]
+async fn spawning_a_child_workflow_at_the_depth_ceiling_is_refused() {
+    let runner = MedullaTaskRunner::new(Arc::new(DepthLimitedTaskCaps {
+        depth: 2,
+        max_depth: 2,
+    }));
+
+    let err = runner
+        .start(TaskSpec::Workflow {
+            graph: json!({ "id": "child", "name": "child", "nodes": [], "edges": [] }),
+            input: Value::Null,
+        })
+        .await
+        .expect_err("spawning a workflow at the depth ceiling must be refused");
+
+    assert!(
+        err.to_string().contains("depth"),
+        "the refusal should explain why: {err}"
+    );
+}
+
+/// A tool call or HTTP request does not itself nest a graph, so the same depth
+/// that refuses a workflow must not block one.
+#[tokio::test]
+async fn spawning_a_tool_call_at_the_depth_ceiling_still_starts() {
+    let runner = MedullaTaskRunner::new(Arc::new(DepthLimitedTaskCaps {
+        depth: 2,
+        max_depth: 2,
+    }));
+
+    runner
+        .start(TaskSpec::Tool {
+            slug: "demo.echo".to_string(),
+            args: json!({}),
+        })
+        .await
+        .expect("a tool call does not nest a graph and must not be depth-limited");
+}
+
 /// A gate may see the same ticket on several activations before it releases, so
 /// reading a result must not consume it.
 #[tokio::test]

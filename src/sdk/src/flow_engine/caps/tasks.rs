@@ -118,6 +118,23 @@ async fn perform(spec: TaskSpec, caps: &Capabilities) -> Result<Value> {
             let outcome = run_detached(&compiled, input, caps)
                 .await
                 .map_err(EngineError::Capability)?;
+            // A detached child has no thread id, so nobody can approve it and
+            // nobody can resume it. Parking is therefore terminal, and the
+            // partial state it comes back with is not the answer a `gate`
+            // asked for: without this check it would settle as `Done` with
+            // that partial output, and the parent graph would carry on as
+            // though the child had actually finished.
+            if !outcome.pending_approvals.is_empty() {
+                return Err(EngineError::Capability(format!(
+                    "spawned workflow parked awaiting approval at {} and cannot be resumed",
+                    outcome.pending_approvals.join(", ")
+                )));
+            }
+            if outcome.cancelled {
+                return Err(EngineError::Capability(
+                    "spawned workflow was cancelled".to_string(),
+                ));
+            }
             Ok(outcome.output)
         }
     }

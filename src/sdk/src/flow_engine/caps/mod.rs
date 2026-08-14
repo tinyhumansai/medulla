@@ -307,9 +307,11 @@ impl TaskCapabilities for Assembly {
     }
 
     fn timeout(&self) -> Duration {
-        // The same bound the run itself gets. A spawned task is work the run
-        // asked for, so it has no business outliving the run's own deadline.
-        Duration::from_secs(self.settings.run_timeout_secs)
+        // What is left of the run's deadline, not a fresh copy of it. A task
+        // started near the end of the run would otherwise run on for a whole
+        // new `run_timeout_secs` window past it, and nothing else winds down a
+        // detached task when the run itself finishes.
+        self.deadline.saturating_duration_since(Instant::now())
     }
 }
 

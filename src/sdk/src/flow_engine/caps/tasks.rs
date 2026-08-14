@@ -56,11 +56,16 @@ pub trait TaskCapabilities: Send + Sync {
     /// would sit in the process until the daemon restarted.
     fn timeout(&self) -> Duration;
 
-    /// How many `spawn`-started child graphs already sit between the run's own
-    /// trigger and the graph this bundle belongs to. Zero for the run itself.
+    /// How many levels of `spawn` this bundle is already nested under. Zero
+    /// for the run itself; a bundle built for a spawned task's own execution
+    /// (whatever `TaskSpec` it runs) is one deeper than the bundle that
+    /// started it.
     ///
-    /// Only `TaskSpec::Workflow` — a nested graph — advances this; a spawned
-    /// tool call or HTTP request does not itself nest, so it does not count.
+    /// Only a `TaskSpec::Workflow` ever reads this back — a spawned tool call
+    /// or HTTP request does not run a graph of its own, so nothing downstream
+    /// of it ever asks — but every spawned task's bundle is counted the same
+    /// way regardless of its shape, so the depth a workflow eventually sees is
+    /// never short by however many non-workflow tasks preceded it in the chain.
     fn depth(&self) -> u64 {
         0
     }

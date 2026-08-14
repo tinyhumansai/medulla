@@ -281,6 +281,18 @@ impl App {
         const SEPARATOR: &str = " · ";
         self.hit_handback.clear();
         let y = inner.y + row;
+        // A terminal too short for the grown modal clips the hint rather than
+        // drawing it. Recording boxes for a row that was never painted would
+        // answer the question for a click that landed on the pane behind.
+        if y >= inner.bottom() {
+            return TLine::from(
+                segments
+                    .iter()
+                    .map(|(label, _)| *label)
+                    .collect::<Vec<_>>()
+                    .join(SEPARATOR),
+            );
+        }
         let mut x = inner.x;
         let mut spans = Vec::with_capacity(segments.len() * 2);
         for (index, (label, key)) in segments.iter().enumerate() {
@@ -317,7 +329,93 @@ impl App {
         let Some(prompt) = &self.handback_prompt else {
             return;
         };
-        let area = centered(area, 72, 12);
+        // The note is the one line here that grows without bound, so the box
+        // grows with it. A fixed 12 rows clipped everything past the first row
+        // of a draft — the keystrokes still landed, so an operator was typing
+        // a handover note they could not read back or edit.
+        //
+        // Every body row is wrapped HERE, by the same helper that renders it,
+        // so the hint's row is COUNTED rather than predicted. Dividing the
+        // note's columns by the modal width got the count wrong the moment
+        // ratatui word-wrapped: it broke after "Note: ", giving the label a row
+        // of its own, so the hint sat below the hit boxes recorded for it and a
+        // click answered nothing. Wrapping every line — not just the note —
+        // keeps that true on a terminal narrow enough to wrap the prose too.
+        const MODAL_WIDTH: u16 = 72;
+        const BASE_HEIGHT: u16 = 12;
+        /// Row of the answer hint when every body line fits on one row.
+        const HINT_ROW: u16 = 6;
+        // Measured against the width the modal will ACTUALLY get: `centered`
+        // clamps to the terminal, so on a narrow one the text wraps into more
+        // rows than 72 columns would suggest.
+        let width = MODAL_WIDTH.min(area.width);
+        let cols = usize::from(width.saturating_sub(2)).max(1);
+        let dim = Style::default().fg(self.theme.dim_border);
+        let accent = Style::default().fg(self.theme.accent);
+        // Read out before `handback_answers` borrows `self` mutably.
+        let is_takeover = prompt.is_takeover;
+        let took_control = prompt.took_control;
+        let editing_note = prompt.editing_note;
+        let note_text = prompt.note.text.clone();
+
+        // Empty for the takeover variant, which is fixed-size and answers at
+        // its own row.
+        let mut body: Vec<TLine<'static>> = Vec::new();
+        if !is_takeover {
+            // An operator who typed /takecontrol made a decision; one who simply
+            // focused in may not know they are holding anything. The sentence
+            // says which of the two happened rather than implying the second.
+            let how = if took_control {
+                "You took this session when you focused in."
+            } else {
+                "You asked for this session."
+            };
+            body.extend(wrapped(how, cols, None));
+            body.extend(wrapped(
+                "While you hold it, the orchestrator will not dispatch into it.",
+                cols,
+                None,
+            ));
+            body.push(TLine::from(""));
+            // Said plainly, because it leaves the machine: the operator should
+            // know what they are sending before they send it.
+            body.extend(wrapped(
+                "Handing back sends the orchestrator this pane's recent output.",
+                cols,
+                Some(dim),
+            ));
+            if note_text.is_empty() && !editing_note {
+                body.extend(wrapped(
+                    "Note: (none — press E to say what you were doing)",
+                    cols,
+                    Some(dim),
+                ));
+            } else {
+                // The caret shows only while the note is being edited, so the
+                // operator can tell at a glance whether `y` answers or types.
+                let caret = if editing_note { "\u{2588}" } else { "" };
+                let rows =
+                    medulla::ui::util::wrap(&format!("{NOTE_LABEL}{note_text}{caret}"), cols);
+                for (index, row) in rows.into_iter().enumerate() {
+                    // The label keeps its accent, on whichever row it landed on.
+                    if index == 0 {
+                        let rest = row.strip_prefix(NOTE_LABEL).unwrap_or(&row).to_string();
+                        body.push(TLine::from(vec![
+                            Span::styled(NOTE_LABEL, accent),
+                            Span::raw(rest),
+                        ]));
+                    } else {
+                        body.push(TLine::from(row));
+                    }
+                }
+            }
+            body.push(TLine::from(""));
+        }
+        // The hit boxes are recorded against this, so a click follows the
+        // visible controls down instead of answering from a fixed row 6.
+        let hint_row = u16::try_from(body.len()).unwrap_or(HINT_ROW);
+        let extra = hint_row.saturating_sub(HINT_ROW);
+        let area = centered(area, width, BASE_HEIGHT.saturating_add(extra));
         let title = if prompt.is_takeover {
             "Take control of this session"
         } else {
@@ -359,35 +457,10 @@ impl App {
             return;
         }
 
-        // An operator who typed /takecontrol made a decision; one who simply
-        // focused in may not know they are holding anything. The sentence says
-        // which of the two happened rather than implying the second.
-        let how = if prompt.took_control {
-            "You took this session when you focused in."
-        } else {
-            "You asked for this session."
-        };
-        // The note line shows a caret only while it is being edited, so the
-        // operator can tell at a glance whether `y` will answer or type.
-        let note = if prompt.editing_note {
-            TLine::from(vec![
-                Span::styled("Note: ", Style::default().fg(self.theme.accent)),
-                Span::raw(prompt.note.text.clone()),
-                Span::styled("█", Style::default().fg(self.theme.accent)),
-            ])
-        } else if prompt.note.text.is_empty() {
-            TLine::from(Span::styled(
-                "Note: (none — press E to say what you were doing)",
-                Style::default().fg(self.theme.dim_border),
-            ))
-        } else {
-            TLine::from(format!("Note: {}", prompt.note.text))
-        };
-        let editing_note = prompt.editing_note;
         let hint = if editing_note {
             self.handback_answers(
                 inner,
-                6,
+                hint_row,
                 &[
                     ("Type your note", None),
                     ("[Enter] hand back", Some(KeyCode::Enter)),
@@ -397,7 +470,7 @@ impl App {
         } else {
             self.handback_answers(
                 inner,
-                6,
+                hint_row,
                 &[
                     ("[Y] hand back", Some(KeyCode::Char('y'))),
                     ("[E] add a note", Some(KeyCode::Char('e'))),
@@ -406,20 +479,10 @@ impl App {
                 ],
             )
         };
-        let lines = vec![
-            TLine::from(how),
-            TLine::from("While you hold it, the orchestrator will not dispatch into it."),
-            TLine::from(""),
-            // Said plainly, because it leaves the machine: the operator should
-            // know what they are sending before they send it.
-            TLine::from(Span::styled(
-                "Handing back sends the orchestrator this pane's recent output.",
-                Style::default().fg(self.theme.dim_border),
-            )),
-            note,
-            TLine::from(""),
-            hint,
-        ];
+        let mut lines = body;
+        lines.push(hint);
+        // No `Wrap`: every line is already wrapped to `cols`, and letting the
+        // widget wrap a second time is what moved the hint off its recorded row.
         f.render_widget(Paragraph::new(Text::from(lines)), inner);
     }
 }
@@ -454,6 +517,10 @@ pub(super) fn harness_choice_window(
     start..start + capacity
 }
 
+/// The note line's label. Shared with the height math above so the two cannot
+/// disagree about how many columns the draft has left.
+const NOTE_LABEL: &str = "Note: ";
+
 /// A `width` × `height` box centered in `area`, clamped to fit.
 ///
 /// Both overlays are small and fixed-size: a percentage would make the
@@ -467,4 +534,18 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         width,
         height,
     }
+}
+
+/// Wrap `text` to `cols` columns, one [`TLine`] per row.
+///
+/// Callers need the row COUNT as well as the rows, which `Paragraph`'s own
+/// wrapping cannot give them: it wraps after the layout is already decided.
+fn wrapped(text: &str, cols: usize, style: Option<Style>) -> Vec<TLine<'static>> {
+    medulla::ui::util::wrap(text, cols)
+        .into_iter()
+        .map(|row| match style {
+            Some(style) => TLine::from(Span::styled(row, style)),
+            None => TLine::from(row),
+        })
+        .collect()
 }

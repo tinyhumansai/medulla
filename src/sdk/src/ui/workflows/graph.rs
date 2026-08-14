@@ -654,6 +654,10 @@ pub fn node_summary(node: &Node) -> String {
             (None, None) => String::new(),
         },
         NodeKind::Gather => release_summary(node),
+        // A void node has no config worth a second line — it is the absence of
+        // an onward edge, said out loud — but a blank would read as an
+        // unlabelled node rather than a deliberate one.
+        NodeKind::Void => "discarded".to_string(),
     }
 }
 

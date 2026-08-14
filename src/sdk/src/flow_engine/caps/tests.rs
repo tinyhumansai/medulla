@@ -52,6 +52,7 @@ fn assembly(run_timeout_secs: u64) -> Assembly {
         slots: Arc::new(tokio::sync::Semaphore::new(1)),
         sequence: Arc::new(AtomicU64::new(0)),
         deadline: Instant::now() + Duration::from_secs(run_timeout_secs.max(1)),
+        depth: 0,
     }
 }
 

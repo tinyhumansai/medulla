@@ -219,32 +219,26 @@ async fn a_child_graph_that_does_not_compile_settles_as_failed() {
 
 /// A wedged task must not sit in the process forever. Nothing else in the run
 /// will notice it: the branch that spawned it carried on, and a gate that gave
-/// up polling simply stops asking.
+/// up polling simply stops asking. The tool call never returns, so the only way
+/// this settles at all is the deadline firing — proving the failure path
+/// actually ran rather than a fast task incidentally landing on `Done`.
 #[tokio::test]
 async fn a_task_that_overruns_its_deadline_settles_as_failed() {
-    let runner = MedullaTaskRunner::new(Arc::new(MockTaskCaps {
+    let runner = MedullaTaskRunner::new(Arc::new(HangingTaskCaps {
         timeout: Duration::from_millis(1),
     }));
-    let graph = json!({
-        "id": "slow", "name": "slow",
-        "nodes": [
-            { "id": "start", "kind": "trigger", "name": "start",
-              "config": { "trigger_kind": "manual" } },
-            { "id": "wait", "kind": "agent", "name": "wait", "config": { "prompt": "hello" } }
-        ],
-        "edges": [{ "from_node": "start", "to_node": "wait" }]
-    });
     let ticket = runner
-        .start(TaskSpec::Workflow {
-            graph,
-            input: Value::Null,
+        .start(TaskSpec::Tool {
+            slug: "demo.echo".to_string(),
+            args: json!({}),
         })
         .await
         .expect("start");
 
-    // Either it beat the 1ms deadline or it did not; both settle, and the
-    // assertion that matters is that it settled at all rather than hanging.
-    assert!(settle(&runner, &ticket).await.is_settled());
+    assert!(
+        matches!(settle(&runner, &ticket).await, TaskState::Failed(message) if message.contains("deadline")),
+        "a task that never returns must settle as failed once its deadline passes"
+    );
 }
 
 /// A gate may see the same ticket on several activations before it releases, so

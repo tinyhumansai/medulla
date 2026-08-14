@@ -60,7 +60,13 @@ pub struct MedullaTaskRunner {
     /// consumed by the first poll.
     tasks: Mutex<HashMap<String, Arc<Mutex<TaskState>>>>,
     /// Abort handles, so a cancel reaches work that is still running.
-    handles: Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    ///
+    /// `Arc`-wrapped, unlike `tasks`, because the spawned task itself removes
+    /// its own entry once it settles — an abort handle for finished work has no
+    /// further use, and leaving it would grow this table for the life of the
+    /// run on a wide `scatter` fan-out. `tasks` keeps every settled result on
+    /// purpose, for repeated polling; only the handle is disposable.
+    handles: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>,
     /// Ticket counter. Ids need to be unique within this runner and nothing
     /// more, so a counter beats a clock or a random source.
     next_id: Mutex<u64>,

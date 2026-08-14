@@ -202,6 +202,12 @@ struct Assembly {
     /// end of the run gets what is left of the deadline rather than a fresh
     /// copy of it.
     deadline: Instant,
+    /// How many `spawn`-started child graphs already sit between the run's
+    /// trigger and the graph this assembly's bundle belongs to. Zero for the
+    /// run itself; [`TaskCapabilities::capabilities`] increments it by one for
+    /// the bundle it hands to a spawned `TaskSpec::Workflow`, so nesting is
+    /// bounded rather than recursing without end.
+    depth: u64,
 }
 
 impl Assembly {

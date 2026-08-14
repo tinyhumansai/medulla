@@ -141,6 +141,13 @@ fn build_capabilities_inner(
         settings.max_parallel_agents.max(1),
     ));
     let sequence = Arc::new(AtomicU64::new(0));
+    // Fixed once, here, rather than recomputed by `timeout()` on every
+    // `Assembly::clone`: a spawned task must get what is left of *this run's*
+    // deadline, not a fresh `run_timeout_secs` window measured from whenever it
+    // happened to start. `.max(1)` guards the same misconfiguration
+    // `CapabilitySettings::from_config` already normalizes away — a `0` here
+    // would otherwise hand every spawned task an already-expired deadline.
+    let deadline = Instant::now() + Duration::from_secs(settings.run_timeout_secs.max(1));
 
     Assembly {
         settings,
@@ -153,6 +160,7 @@ fn build_capabilities_inner(
         evidence,
         slots,
         sequence,
+        deadline,
     }
     .build()
 }

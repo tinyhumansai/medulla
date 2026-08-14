@@ -457,6 +457,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Gate => "gate",
         NodeKind::Scatter => "scatter",
         NodeKind::Gather => "gather",
+        NodeKind::Void => "void",
     }
 }
 

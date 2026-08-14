@@ -161,6 +161,9 @@ fn build_capabilities_inner(
         slots,
         sequence,
         deadline,
+        // The run's own trigger, not a `spawn`-started child — nothing has
+        // nested yet.
+        depth: 0,
     }
     .build()
 }

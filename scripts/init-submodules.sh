@@ -61,4 +61,4 @@ git -C vendor/openhuman submodule update --init --depth 1 \
 # megabytes that nothing links, and would put two checkouts of one crate on
 # disk for anyone reading the tree.
 
-echo "Submodules initialized (OpenHuman core + its ten vendored crates)."
+echo "Submodules initialized (OpenHuman core + its eight vendored crates)."

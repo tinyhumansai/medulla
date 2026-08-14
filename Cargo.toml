@@ -128,7 +128,11 @@ tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
 # root as well.
 tinycortex-api = { path = "vendor/openhuman/vendor/tinycortex/api" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
-tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
+# tinyjuice is deliberately absent: the vendored core dropped it from its own
+# dependency graph, so a redirect here matches nothing and Cargo warns on every
+# build that the patch went unused. The submodule is still checked out — it is
+# reachable from another vendored manifest — which is why this is worth a note
+# rather than looking like an oversight.
 # Load-bearing even though no crate in this workspace links tinyplace any more:
 # the vendored OpenHuman core still does, and without the redirect Cargo would
 # resolve the published crate instead of the vendored tree.

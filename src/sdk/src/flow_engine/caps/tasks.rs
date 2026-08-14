@@ -169,6 +169,8 @@ impl TaskRunner for MedullaTaskRunner {
         let caps = self.caps.clone();
         let deadline = caps.timeout();
         let label = ticket.clone();
+        let handles = self.handles.clone();
+        let done = ticket.clone();
         let handle = tokio::spawn(async move {
             *state.lock().expect("task state poisoned") = TaskState::Running;
             // Built inside the task, not before it: assembling a bundle opens a
@@ -189,6 +191,11 @@ impl TaskRunner for MedullaTaskRunner {
                 )),
             };
             *state.lock().expect("task state poisoned") = settled;
+            // The abort handle has no use once the task has settled — there is
+            // nothing left to abort — and leaving it grows this table for the
+            // life of the run. `tasks` keeps the result itself for `cancel` and
+            // repeated polling to find; only this entry is disposable.
+            handles.lock().expect("handle table poisoned").remove(&done);
         });
         self.handles
             .lock()

@@ -48,7 +48,7 @@ else vendored reaches the build through it.
 | `openhuman` | path dependency on `vendor/openhuman`, `default-features = false`, never patched (it has no registry coordinate) |
 | `tinyhumans-sdk` | path dependency on `vendor/openhuman/vendor/tinyhumans-sdk`, for the same reason |
 | `medulla-link` | path dependency on `src/link`; it is ours and is not vendored |
-| `tinyagents`, `tinychannels`, `tinycortex`, `tinyflows`, `tinyjuice`, `tinyplace` | registry coordinates redirected by `[patch.crates-io]` to `vendor/openhuman/vendor/*` |
+| `tinyagents`, `tinybus`, `tinychannels`, `tinycortex`, `tinycortex-api`, `tinyflows`, `tinymemory`, `tinyplace`, `motosan-ai-oauth` | registry coordinates redirected by `[patch.crates-io]` to `vendor/openhuman/vendor/*` |
 
 Declare each vendored crate exactly one way: either as a direct path dependency
 or as a registry coordinate redirected by the patch table, and never both for the

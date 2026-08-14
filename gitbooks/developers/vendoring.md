@@ -31,9 +31,11 @@ A git dependency on OpenHuman would not help. Cargo updates git-dependency
 submodules recursively with no opt-out, which makes the CEF clone mandatory. The
 submodule plus an explicit init list is the only way to avoid it.
 
-The script initializes `vendor/openhuman` and then seven of its own vendored
-crates: `tinyagents`, `tinychannels`, `tinycortex`, `tinyflows`,
-`tinyhumans-sdk`, `tinyjuice`, and `tinyplace`.
+The script initializes `vendor/openhuman` and then several of its own vendored
+crates: `tinyagents`, `tinybus`, `tinychannels`, `tinycortex`, `tinyflows`,
+`tinyhumans-sdk`, `tinymemory`, and `tinyplace`. `vendor/motosan-ai-oauth` is
+not a submodule — OpenHuman vendors it as a plain tracked directory, so it
+comes along with the `vendor/openhuman` checkout itself.
 
 ## How each dependency is declared
 
@@ -46,7 +48,7 @@ else vendored reaches the build through it.
 | `openhuman` | path dependency on `vendor/openhuman`, `default-features = false`, never patched (it has no registry coordinate) |
 | `tinyhumans-sdk` | path dependency on `vendor/openhuman/vendor/tinyhumans-sdk`, for the same reason |
 | `medulla-link` | path dependency on `src/link`; it is ours and is not vendored |
-| `tinyagents`, `tinychannels`, `tinycortex`, `tinyflows`, `tinyjuice`, `tinyplace` | registry coordinates redirected by `[patch.crates-io]` to `vendor/openhuman/vendor/*` |
+| `tinyagents`, `tinybus`, `tinychannels`, `tinycortex`, `tinycortex-api`, `tinyflows`, `tinymemory`, `tinyplace`, `motosan-ai-oauth` | registry coordinates redirected by `[patch.crates-io]` to `vendor/openhuman/vendor/*` |
 
 Declare each vendored crate exactly one way: either as a direct path dependency
 or as a registry coordinate redirected by the patch table, and never both for the

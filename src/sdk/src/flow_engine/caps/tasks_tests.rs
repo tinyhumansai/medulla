@@ -124,6 +124,44 @@ async fn a_spawned_workflow_settles_with_the_child_run_s_output() {
     );
 }
 
+/// A spawned child that parks on an approval gate has nobody to approve it — a
+/// detached child has no thread id, so it can never be resumed. It must settle
+/// as `Failed` rather than `Done` with the partial output it had reached, or a
+/// `gate` releasing on it would look like the child actually finished.
+#[tokio::test]
+async fn a_spawned_child_that_parks_on_an_approval_settles_as_failed() {
+    let runner = runner();
+    let graph = json!({
+        "id": "gated-child",
+        "name": "gated-child",
+        "nodes": [
+            { "id": "start", "kind": "trigger", "name": "start",
+              "config": { "trigger_kind": "manual" } },
+            { "id": "review", "kind": "agent", "name": "Review",
+              "config": { "prompt": "review it", "requires_approval": true } }
+        ],
+        "edges": [{ "from_node": "start", "to_node": "review" }]
+    });
+
+    let ticket = runner
+        .start(TaskSpec::Workflow {
+            graph,
+            input: Value::Null,
+        })
+        .await
+        .expect("start");
+
+    match settle(&runner, &ticket).await {
+        TaskState::Failed(message) => assert!(
+            message.contains("awaiting approval"),
+            "the failure should name why the child could not finish: {message}"
+        ),
+        other => panic!(
+            "a parked child has nobody to approve it and must settle as failed, got {other:?}"
+        ),
+    }
+}
+
 /// An invalid child graph must settle as `Failed` rather than take the spawning
 /// run down: the `spawn` node has already returned, so the only place left to
 /// report it is the gate that collects the ticket.

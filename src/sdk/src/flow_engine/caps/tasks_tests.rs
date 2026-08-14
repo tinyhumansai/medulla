@@ -241,6 +241,40 @@ async fn a_task_that_overruns_its_deadline_settles_as_failed() {
     );
 }
 
+/// A settled task's abort handle has no further use — there is nothing left to
+/// abort — and must not accumulate: a wide `scatter` would otherwise retain one
+/// `AbortHandle` per task for the life of the run, though every one of them has
+/// already finished.
+#[tokio::test]
+async fn a_settled_task_s_abort_handle_is_released() {
+    let runner = runner();
+    let ticket = runner
+        .start(TaskSpec::Tool {
+            slug: "demo.echo".to_string(),
+            args: json!({}),
+        })
+        .await
+        .expect("start");
+    settle(&runner, &ticket).await;
+
+    // The task removes its own handle right after writing its settled state,
+    // with no `.await` in between, but from this test's task it still takes an
+    // instant to become visible — poll for it rather than asserting straight
+    // after `settle` returns.
+    for _ in 0..512 {
+        if !runner
+            .handles
+            .lock()
+            .expect("handle table poisoned")
+            .contains_key(&ticket)
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("settled task {ticket} left its abort handle behind");
+}
+
 /// A gate may see the same ticket on several activations before it releases, so
 /// reading a result must not consume it.
 #[tokio::test]

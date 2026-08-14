@@ -312,7 +312,15 @@ impl Assembly {
 
 impl TaskCapabilities for Assembly {
     fn capabilities(&self) -> Capabilities {
-        self.build()
+        // One level deeper than `self`: this bundle is for the spawned task's
+        // own execution, not for `self`'s own graph. Building it via a cloned,
+        // incremented `Assembly` — rather than just calling `self.build()` —
+        // is what makes a chain of nested `spawn`s eventually hit
+        // `max_depth()` in `MedullaTaskRunner::start` instead of recursing
+        // without end.
+        let mut child = self.clone();
+        child.depth += 1;
+        child.build()
     }
 
     fn timeout(&self) -> Duration {
@@ -321,6 +329,10 @@ impl TaskCapabilities for Assembly {
         // new `run_timeout_secs` window past it, and nothing else winds down a
         // detached task when the run itself finishes.
         self.deadline.saturating_duration_since(Instant::now())
+    }
+
+    fn depth(&self) -> u64 {
+        self.depth
     }
 }
 

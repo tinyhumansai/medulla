@@ -84,7 +84,7 @@ impl MedullaTaskRunner {
         Self {
             caps,
             tasks: Mutex::new(HashMap::new()),
-            handles: Mutex::new(HashMap::new()),
+            handles: Arc::new(Mutex::new(HashMap::new())),
             next_id: Mutex::new(0),
         }
     }

@@ -126,6 +126,7 @@ fn claude_user_prompt_and_tool_use_and_result() {
 fn claude_only_marks_the_final_assistant_round_as_turn_end() {
     let tool_use = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:15.404Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"true"}}]}}"#;
     let end_turn = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}"#;
+    let stop_sequence = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"halted"}]}}"#;
 
     let tool_events = map_all("claude", &[tool_use]);
     assert_eq!(tool_events.len(), 1);
@@ -137,6 +138,11 @@ fn claude_only_marks_the_final_assistant_round_as_turn_end() {
     assert_eq!(kind_of(&final_events[1]), "lifecycle");
     assert_eq!(final_events[1].event.payload["phase"], "turn_end");
     assert_eq!(final_events[1].record_type, "assistant:end_turn");
+
+    let stopped_events = map_all("claude", &[stop_sequence]);
+    assert_eq!(stopped_events.len(), 2);
+    assert_eq!(kind_of(&stopped_events[1]), "lifecycle");
+    assert_eq!(stopped_events[1].event.payload["phase"], "turn_end");
 }
 
 #[test]

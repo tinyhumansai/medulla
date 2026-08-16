@@ -104,9 +104,11 @@ pub(super) fn claude_events_from_line(
             })
             .collect::<Vec<_>>();
         // Claude can make several assistant API calls within one operator turn.
-        // Only `end_turn` settles that turn; `tool_use` must stay active while
-        // the tool runs and Claude prepares the next assistant response.
-        if message.get("stop_reason").and_then(Value::as_str) == Some("end_turn") {
+        // `tool_use` is the sole continuation reason; any other stated reason
+        // settles the turn. An absent reason remains inconclusive and is handled
+        // by the session's existing silence backstop.
+        let stop_reason = message.get("stop_reason").and_then(Value::as_str);
+        if stop_reason.is_some_and(|reason| reason != "tool_use") {
             events.push(semantic(
                 line,
                 ts,

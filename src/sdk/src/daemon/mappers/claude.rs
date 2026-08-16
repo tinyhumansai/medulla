@@ -89,7 +89,7 @@ pub(super) fn claude_events_from_line(
     }
 
     if record_type == Some("assistant") && source_role == Some("assistant") {
-        return as_array(message.get("content"))
+        let mut events = as_array(message.get("content"))
             .iter()
             .flat_map(|block| {
                 claude_assistant_block(
@@ -102,7 +102,21 @@ pub(super) fn claude_events_from_line(
                     gh_repo_is_set,
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // Claude can make several assistant API calls within one operator turn.
+        // Only `end_turn` settles that turn; `tool_use` must stay active while
+        // the tool runs and Claude prepares the next assistant response.
+        if message.get("stop_reason").and_then(Value::as_str) == Some("end_turn") {
+            events.push(semantic(
+                line,
+                ts,
+                "assistant:end_turn",
+                "lifecycle",
+                "agent",
+                serde_json::json!({ "phase": "turn_end" }),
+            ));
+        }
+        return events;
     }
 
     Vec::new()
@@ -259,29 +273,17 @@ fn claude_assistant_block(
     }
 }
 
-/// Fold Claude's `system` records into session metadata or lifecycle events.
+/// Fold Claude's `system` init banner into a `session_info` event.
 ///
-/// The interactive transcript's `turn_duration` record is Claude's durable
-/// signal that a response has finished. Mapping it avoids leaving Medulla's
-/// derived status active until the generic silence timeout expires.
+/// Only the init subtype describes the session; other system records (warnings,
+/// compaction notices) carry no session facts and are left alone.
 fn claude_system(
     record: &serde_json::Map<String, Value>,
     line: i64,
     ts: i64,
 ) -> Vec<HarnessSemanticEvent> {
-    match record.get("subtype").and_then(Value::as_str) {
-        Some("turn_duration") => {
-            return vec![semantic(
-                line,
-                ts,
-                "system:turn_duration",
-                "lifecycle",
-                "agent",
-                serde_json::json!({ "phase": "turn_end" }),
-            )];
-        }
-        Some("init") => {}
-        _ => return Vec::new(),
+    if record.get("subtype").and_then(Value::as_str) != Some("init") {
+        return Vec::new();
     }
     let text = |key: &str| record.get(key).and_then(Value::as_str).map(str::to_string);
     let list = |key: &str| {

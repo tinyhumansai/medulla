@@ -123,15 +123,20 @@ fn claude_user_prompt_and_tool_use_and_result() {
 }
 
 #[test]
-fn claude_turn_duration_marks_the_interactive_turn_idle() {
-    let turn_duration = r#"{"type":"system","subtype":"turn_duration","durationMs":49,"messageCount":6,"timestamp":"2026-08-16T07:49:19.229Z"}"#;
+fn claude_only_marks_the_final_assistant_round_as_turn_end() {
+    let tool_use = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:15.404Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"true"}}]}}"#;
+    let end_turn = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}"#;
 
-    let events = map_all("claude", &[turn_duration]);
+    let tool_events = map_all("claude", &[tool_use]);
+    assert_eq!(tool_events.len(), 1);
+    assert_eq!(kind_of(&tool_events[0]), "tool_call");
 
-    assert_eq!(events.len(), 1);
-    assert_eq!(kind_of(&events[0]), "lifecycle");
-    assert_eq!(events[0].event.payload["phase"], "turn_end");
-    assert_eq!(events[0].record_type, "system:turn_duration");
+    let final_events = map_all("claude", &[end_turn]);
+    assert_eq!(final_events.len(), 2);
+    assert_eq!(kind_of(&final_events[0]), "agent_message");
+    assert_eq!(kind_of(&final_events[1]), "lifecycle");
+    assert_eq!(final_events[1].event.payload["phase"], "turn_end");
+    assert_eq!(final_events[1].record_type, "assistant:end_turn");
 }
 
 #[test]

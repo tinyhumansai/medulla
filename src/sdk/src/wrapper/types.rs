@@ -68,7 +68,10 @@ pub(super) struct WrapperTimings {
     pub(super) tail_poll_ms: u64,
     /// How often the inbox is drained for inbound owner input, in milliseconds.
     pub(super) receive_poll_ms: u64,
-    /// Minimum spacing between status envelopes (heartbeat throttle), in ms.
+    /// Interval for unchanged status heartbeats, in milliseconds.
+    ///
+    /// Real state changes publish immediately and are not throttled by this
+    /// interval.
     pub(super) status_throttle_ms: i64,
     /// Idle span after which the session is considered idle, in milliseconds.
     pub(super) status_idle_ms: i64,

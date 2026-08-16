@@ -151,17 +151,16 @@ impl Bridge {
             timestamp_ms: Some(semantic.timestamp_ms),
             event: semantic.event.decoded(),
         };
-        let step = reduce_status(&self.status, &event);
-        self.status = step.next;
-        if let Some(payload) = step.emit {
+        if let Some(payload) = advance_status_state(&mut self.status, &event) {
             self.publish_status(payload).await;
         }
     }
 
     /// Advance the status machine on a timer tick (heartbeat / idle transition).
     pub(super) async fn tick_status(&mut self) {
-        let heartbeat = now_ms().saturating_sub(self.last_status_ms) >= self.status_throttle_ms;
-        let step = tick_status(&self.status, now_ms(), self.status_idle_ms, heartbeat);
+        let now = now_ms();
+        let heartbeat = heartbeat_due(self.last_status_ms, now, self.status_throttle_ms);
+        let step = tick_status(&self.status, now, self.status_idle_ms, heartbeat);
         self.status = step.next;
         if let Some(payload) = step.emit {
             self.publish_status(payload).await;
@@ -187,6 +186,22 @@ impl Bridge {
             .synthetic_envelope(event, "wrapper:status", now);
         self.publish(&envelope).await;
     }
+}
+
+/// Apply one semantic event without publication policy; state changes are
+/// returned immediately so heartbeat timing cannot suppress them.
+fn advance_status_state(
+    status: &mut SessionStatusState,
+    event: &SemanticEvent,
+) -> Option<crate::protocol::StatusPayload> {
+    let step = reduce_status(status, event);
+    *status = step.next;
+    step.emit
+}
+
+/// Whether an unchanged-status heartbeat is due at `now_ms`.
+fn heartbeat_due(last_status_ms: i64, now_ms: i64, interval_ms: i64) -> bool {
+    now_ms.saturating_sub(last_status_ms) >= interval_ms
 }
 
 /// Build the bridge, or `None` (passthrough) when it is disabled/unconfigured.

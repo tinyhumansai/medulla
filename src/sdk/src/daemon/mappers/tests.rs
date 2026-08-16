@@ -123,6 +123,18 @@ fn claude_user_prompt_and_tool_use_and_result() {
 }
 
 #[test]
+fn claude_turn_duration_marks_the_interactive_turn_idle() {
+    let turn_duration = r#"{"type":"system","subtype":"turn_duration","durationMs":49,"messageCount":6,"timestamp":"2026-08-16T07:49:19.229Z"}"#;
+
+    let events = map_all("claude", &[turn_duration]);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(kind_of(&events[0]), "lifecycle");
+    assert_eq!(events[0].event.payload["phase"], "turn_end");
+    assert_eq!(events[0].record_type, "system:turn_duration");
+}
+
+#[test]
 fn codex_dedupes_double_recorded_agent_message() {
     let event_msg = r#"{"type":"event_msg","timestamp":"2026-07-05T00:00:00.000Z","payload":{"type":"agent_message","message":"final answer"}}"#;
     let response_item = r#"{"type":"response_item","timestamp":"2026-07-05T00:00:00.500Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}}"#;

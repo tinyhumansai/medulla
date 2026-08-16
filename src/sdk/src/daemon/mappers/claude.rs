@@ -259,17 +259,29 @@ fn claude_assistant_block(
     }
 }
 
-/// Fold Claude's `system` init banner into a `session_info` event.
+/// Fold Claude's `system` records into session metadata or lifecycle events.
 ///
-/// Only the init subtype describes the session; other system records (warnings,
-/// compaction notices) carry no session facts and are left alone.
+/// The interactive transcript's `turn_duration` record is Claude's durable
+/// signal that a response has finished. Mapping it avoids leaving Medulla's
+/// derived status active until the generic silence timeout expires.
 fn claude_system(
     record: &serde_json::Map<String, Value>,
     line: i64,
     ts: i64,
 ) -> Vec<HarnessSemanticEvent> {
-    if record.get("subtype").and_then(Value::as_str) != Some("init") {
-        return Vec::new();
+    match record.get("subtype").and_then(Value::as_str) {
+        Some("turn_duration") => {
+            return vec![semantic(
+                line,
+                ts,
+                "system:turn_duration",
+                "lifecycle",
+                "agent",
+                serde_json::json!({ "phase": "turn_end" }),
+            )];
+        }
+        Some("init") => {}
+        _ => return Vec::new(),
     }
     let text = |key: &str| record.get(key).and_then(Value::as_str).map(str::to_string);
     let list = |key: &str| {

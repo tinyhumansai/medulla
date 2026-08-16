@@ -154,7 +154,7 @@ impl Bridge {
         let step = reduce_status(&self.status, &event);
         self.status = step.next;
         if let Some(payload) = step.emit {
-            self.maybe_publish_status(payload).await;
+            self.publish_status(payload).await;
         }
     }
 
@@ -164,16 +164,17 @@ impl Bridge {
         let step = tick_status(&self.status, now_ms(), self.status_idle_ms, heartbeat);
         self.status = step.next;
         if let Some(payload) = step.emit {
-            self.maybe_publish_status(payload).await;
+            self.publish_status(payload).await;
         }
     }
 
-    /// Publish a status envelope unless the throttle window is still open.
-    async fn maybe_publish_status(&mut self, payload: crate::protocol::StatusPayload) {
+    /// Publish a status envelope emitted by the change-gated status machine.
+    ///
+    /// Heartbeat rate limiting happens before this method in [`tick_status`].
+    /// Applying it here would also suppress real state changes, including the
+    /// first `working` event after the timer's initial `idle` heartbeat.
+    async fn publish_status(&mut self, payload: crate::protocol::StatusPayload) {
         let now = now_ms();
-        if now.saturating_sub(self.last_status_ms) < self.status_throttle_ms {
-            return;
-        }
         self.last_status_ms = now;
         let event = HarnessEvent {
             kind: "status".to_string(),

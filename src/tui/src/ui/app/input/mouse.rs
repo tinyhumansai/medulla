@@ -58,29 +58,6 @@ impl App {
         if self.deliver_pointer_grab(&m) {
             return None;
         }
-        // The hand-back question's answers are click targets. It is the one
-        // overlay a click can raise, so it is the one an operator arrives at
-        // with their hand already on the mouse — being made to reach for the
-        // keyboard to answer a question the pointer just asked is the friction
-        // that makes the modal feel broken.
-        if self.handback_prompt.is_some() {
-            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
-                if let Some(key) = self
-                    .hit_handback
-                    .iter()
-                    .find(|(rect, _)| rect.contains((m.column, m.row).into()))
-                    .map(|(_, key)| *key)
-                {
-                    self.handle_handback_key(key);
-                    // Returned from here rather than falling through: answering
-                    // can close the question, and the swallow below would then
-                    // see no modal and let the very same click carry on into
-                    // the rail underneath it.
-                    return None;
-                }
-            }
-            // Everything else the question is over is still swallowed, below.
-        }
         // The picker's rows are click targets too, and its list takes the wheel.
         // Same reasoning as the question above: it is opened from a rail row the
         // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive
@@ -90,14 +67,7 @@ impl App {
             return None;
         }
         // A modal swallows the mouse, the same way it swallows the keyboard.
-        // Pickers and the hand-back question are modal: a click that navigated
-        // the rail behind one would leave an overlay describing a row nobody
-        // was pointing at. In particular, do not let a second session click
-        // replace the session named by an already-visible hand-back prompt.
-        if self.resume_picker.is_some()
-            || self.agent_picker.is_some()
-            || self.handback_prompt.is_some()
-        {
+        if self.resume_picker.is_some() || self.agent_picker.is_some() {
             return None;
         }
         // An attached harness is a terminal, and a terminal owns the pointer
@@ -135,13 +105,6 @@ impl App {
                     let on_own_rail_row =
                         self.rail_session_at(m.column, m.row).as_deref() == Some(session.as_str());
                     if !inside_attached_pane && !on_own_rail_row {
-                        // A click that navigates away releases the same keyboard
-                        // focus as Ctrl-]. Settle the configured hand-back policy
-                        // before changing the selected tab or rail row; otherwise
-                        // an Ask prompt would refer to a pane already hidden.
-                        if !self.begin_session_release(&session) {
-                            return None;
-                        }
                         self.release_session();
                     }
                 }
@@ -624,17 +587,8 @@ impl App {
                                     self.pane_session = Some(session.to_string());
                                     return None;
                                 }
-                                // Point the prompt at the row that was clicked,
-                                // not at whatever the last render left behind.
-                                // `pane_session` is written during the
-                                // draw, and no draw happens between the cursor
-                                // move above and this call — so without this the
-                                // prompt would offer to hand over the previously
-                                // visible harness, and confirming it would
-                                // transfer control of one the operator never
-                                // pointed at.
                                 self.pane_session = Some(session.to_string());
-                                self.open_session_enter_prompt();
+                                self.attach_to_pane_session();
                                 // Drop whatever task the previous row was
                                 // watching, exactly as the fall-through below
                                 // does for every other row. This branch returns
@@ -656,18 +610,12 @@ impl App {
             // changes rows is a navigation, not an attach to whatever the last
             // frame showed.
             //
-            // Routed through the same entry point Enter uses rather than
-            // attaching outright, because the pointer and the keyboard must not
-            // disagree about who ends up holding a session. Clicking straight
-            // into an orchestrator-held pane used to take it silently — the very
-            // thing the Enter question exists to prevent, reachable by the
-            // gesture an operator is most likely to make first.
             if let Some((rect, session)) = self.hit_session.clone() {
                 if rect.contains((x, y).into())
                     && self.pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.open_session_enter_prompt();
+                    self.attach_to_pane_session();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {

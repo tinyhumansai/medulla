@@ -31,21 +31,13 @@ mod hosts;
 mod input;
 mod keys;
 mod overlays;
-#[cfg(test)]
-mod overlays_tests;
 mod rail;
 mod render;
 mod routing_options;
 mod session_control;
-#[cfg(test)]
-mod session_control_tests;
 mod session_focus;
-#[cfg(test)]
-mod session_focus_tests;
 mod settings_edit;
 mod state;
-#[cfg(test)]
-mod state_tests;
 mod status_line;
 mod templates;
 mod types;

@@ -32,12 +32,12 @@ pub(in crate::ui::app) enum AgentsKey {
 impl App {
     /// Whether a composer is actually drawn for the row under the cursor.
     ///
-    /// It belongs to the orchestrator lane and nowhere else, and a harness takes
-    /// the whole right column when one is on it. Both conditions are the ones
+    /// It is available whenever the selected row is not a live harness. Both
+    /// conditions are the ones
     /// [`agents_panes`](crate::ui::app::render) lays out from, so the keyboard
     /// and the screen cannot disagree about whether there is somewhere to type.
     pub fn agents_composer_shown(&self) -> bool {
-        self.on_orchestrator_lane() && self.pane_session.is_none()
+        self.pane_session.is_none()
     }
 
     /// Whether the Agents rail currently holds the keyboard.
@@ -238,28 +238,14 @@ impl App {
             // it), which is exactly why the cursor moves rather than the focus
             // alone.
             KeyCode::Char(c) if !ctrl && !alt => {
-                let mut cmd = None;
-                if !self.on_orchestrator_lane() {
-                    let Some(index) = self.orchestrator_row_index() else {
-                        self.set_status("No conversation to type into yet");
-                        return AgentsKey::Handled(None);
-                    };
-                    self.set_rail_cursor(index);
-                    self.agent_scroll = 0;
-                    self.chat_scroll = 0;
-                    // Leaving a task row drops its screen stream, exactly as
-                    // arrowing off it does. Read after the move, since the
-                    // target is derived from the cursor.
-                    cmd = self.retarget_watch();
-                }
                 self.focus_agents_composer();
                 self.draft = insert_at(&self.draft.text, self.draft.cursor, &c.to_string());
                 self.command_index = 0;
-                AgentsKey::Handled(cmd)
+                AgentsKey::Handled(None)
             }
             // Backspace is typing too — it edits the draft it belongs to, and
             // only where that draft is on screen.
-            KeyCode::Backspace if self.on_orchestrator_lane() => {
+            KeyCode::Backspace if self.agents_composer_shown() => {
                 self.focus_agents_composer();
                 AgentsKey::Unhandled
             }

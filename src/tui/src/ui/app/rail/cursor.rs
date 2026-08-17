@@ -86,6 +86,7 @@ impl App {
     }
 
     /// Moves the cursor to `index` and remembers the selected row by identity.
+    #[allow(dead_code)] // Test-only cursor setup helper.
     pub(in crate::ui::app) fn set_rail_cursor(&mut self, index: usize) {
         let lanes = self.lanes();
         let rows = self.rail_rows_in(&lanes);

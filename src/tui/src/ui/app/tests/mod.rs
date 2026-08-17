@@ -226,7 +226,6 @@ fn enter_on_a_harness_asks_before_taking_it() {
     assert!(cmd.is_none());
     assert!(a.agents_rail_focused());
     assert!(a.status().contains("not hosting"), "{}", a.status());
-    assert!(a.handback_prompt.is_none());
     assert_eq!(a.attached_session(), None);
 }
 
@@ -319,7 +318,6 @@ fn enter_applies_the_open_diff_baseline_picker() {
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(a.changes.picking_baseline);
-    assert!(a.handback_prompt.is_none());
     assert_eq!(a.attached_session(), None);
     assert!(
         a.status().contains("No session Git repository"),

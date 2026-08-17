@@ -46,28 +46,17 @@ impl App {
             TLine::from("Ctrl-N new thread · Ctrl-↑↓ switch threads · Ctrl-C quit"),
             TLine::from(" "),
             TLine::from(Span::styled("Sessions", bold)),
-            TLine::from(format!(
-                "{FOCUS_CHORD_LABEL} type into the selected session (and take it from the orchestrator)"
-            )),
+            TLine::from(format!("{FOCUS_CHORD_LABEL} type into the selected local session")),
             TLine::from(
                 "Agents rail: Enter on + New agent declares one (harness type × workspace dir)",
             ),
             TLine::from(
                 "Ctrl-T opens a session of the selected agent · elsewhere it starts a loose session",
             ),
-            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
-            TLine::from(
-                "Click a line of the orchestrator's \"sessions started\" block to open that session",
-            ),
-            TLine::from("Ctrl-O returns to the orchestrator (and, once there, releases the mouse)"),
             TLine::from(format!(
                 "From an empty composer Esc focuses the rail · from a session {FOCUS_CHORD_LABEL} releases to it"
             )),
             TLine::from("On the rail ↑↓ select a running session · K then y kills it"),
-            TLine::from(Span::styled(
-                "While you hold a session the orchestrator will not dispatch into it",
-                dim,
-            )),
             TLine::from(" "),
             TLine::from(Span::styled("Changes", bold)),
             TLine::from("Tab / Shift-Tab to the Changes view to inspect the Git diff since session start"),

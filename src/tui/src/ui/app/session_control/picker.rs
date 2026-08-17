@@ -77,14 +77,7 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Agents");
                 self.select_session_row(&id);
-                // "unmanaged" and not a friendlier synonym: it is the word the
-                // rail badge uses for the same session, and a status line that
-                // renamed the state would leave the operator matching two
-                // vocabularies for one fact.
-                let mut status = format!(
-                    "Started {} · unmanaged, the orchestrator will not use it",
-                    choice.display_name(),
-                );
+                let mut status = format!("Started {} · local session", choice.display_name());
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }

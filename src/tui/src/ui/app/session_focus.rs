@@ -126,28 +126,7 @@ impl App {
         // one, so leaving focus on the composer would drive a caret that is not
         // drawn.
         self.focus_agents_rail();
-        self.set_status(format!(
-            "{} · {} · ^O returns to the orchestrator",
-            agent, session_task_id
-        ));
+        self.set_status(format!("{} · {}", agent, session_task_id));
         true
-    }
-
-    /// Return to the orchestrator's conversation — the `Ctrl-O` half of §A7.
-    ///
-    /// Puts the cursor on the orchestrator's own lane row and hands the keyboard
-    /// to the composer, because that lane *is* the text box: arriving on it with
-    /// focus still on the rail would mean pressing one more key before typing.
-    pub(in crate::ui::app) fn focus_orchestrator(&mut self) {
-        let Some(index) = self.orchestrator_row_index() else {
-            self.set_status("No conversation to return to yet");
-            return;
-        };
-        self.tab_index = super::types::tab_pos("Agents");
-        self.set_rail_cursor(index);
-        self.agent_scroll = 0;
-        self.chat_scroll = 0;
-        self.focus_agents_composer();
-        self.set_status("Back to the orchestrator");
     }
 }

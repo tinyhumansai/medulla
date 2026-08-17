@@ -456,8 +456,6 @@ impl App {
             SlashCommand::StartSession { provider, path } => {
                 self.start_session_command(provider.as_deref(), path.as_deref());
             }
-            SlashCommand::TakeControl => self.take_session_control(),
-            SlashCommand::HandOff { note } => self.hand_session_back(note),
             SlashCommand::Abort => {
                 self.runtime.abort();
                 self.set_status("Abort requested");

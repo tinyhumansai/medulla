@@ -68,15 +68,6 @@ impl App {
             return None;
         }
 
-        // The hand-back question outranks even the attached harness, and has to:
-        // it is asked *while still attached*, because releasing the keyboard
-        // before it is answered would hide the pane the question is about. So
-        // for the few keystrokes it is open, the chrome takes the keyboard back.
-        if self.handback_prompt.is_some() {
-            self.handle_handback_key(k.code);
-            return None;
-        }
-
         // An attached harness owns the keyboard outright — ahead of the
         // overlays and the quit chord both. Anything less is not a terminal:
         // the operator would be typing into Claude Code with a handful of keys
@@ -162,21 +153,6 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
-                // On the Agents tab, *away from the orchestrator*, this is the
-                // way back to the conversation after clicking through to a
-                // session (§A7): the rail cursor returns to the orchestrator and
-                // the composer takes the keyboard.
-                //
-                // Scoped to "not already there" rather than to the tab, because
-                // the chord's other job — releasing the mouse for native
-                // drag-select — is wanted most while reading that very
-                // transcript. So it returns you first and toggles the mouse once
-                // you have arrived, and `/mouse` reaches the toggle from
-                // anywhere either way.
-                KeyCode::Char('o') if tab == "Agents" && !self.on_orchestrator_lane() => {
-                    self.focus_orchestrator();
-                    return None;
-                }
                 KeyCode::Char('o') => {
                     self.toggle_mouse();
                     return None;
@@ -214,12 +190,6 @@ impl App {
                         Some(agent_id) => self.open_new_session(&agent_id),
                         None => self.open_session_picker(),
                     }
-                    return None;
-                }
-                // Grab or give: one chord for both directions, because the rail
-                // row and the pane title both say which way it will go.
-                KeyCode::Char('g') => {
-                    self.toggle_session_control();
                     return None;
                 }
                 // Walk the open threads. The bare arrows belong to the composer,

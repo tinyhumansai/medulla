@@ -24,7 +24,7 @@ use crate::ui::harness_pane::{
 use crate::worker::pty::launch::bracket_paste;
 use crate::worker::pty::SessionControl;
 
-use super::super::types::{App, PaneView, TakeOrigin};
+use super::super::types::{App, PaneView};
 
 impl App {
     /// Put the harness's own terminal back in the pane.
@@ -64,24 +64,11 @@ impl App {
     pub(super) fn handle_harness_key(&mut self, key: KeyEvent) -> bool {
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             if is_focus_chord(key) {
-                // Releasing the keyboard is also the moment to settle who holds
-                // the harness. `begin_session_release` answers `false` when it
-                // opened a prompt about that, and the keyboard must stay put
-                // until it is answered — moving it out from under the question
-                // would leave the operator answering about a pane they can no
-                // longer see the state of.
-                if self.begin_session_release(&session) {
-                    self.release_session();
-                    // The keyboard has to land somewhere it can be seen. The
-                    // cursor is on a harness row, which draws no composer, so
-                    // the rail is the only half of the tab that can answer a
-                    // keystroke — leaving focus on the composer is what made
-                    // every key after a release look like a dead terminal.
-                    self.focus_agents_rail();
-                    self.set_status(format!(
-                        "Released the session · {FOCUS_CHORD_LABEL} to type again"
-                    ));
-                }
+                self.release_session();
+                self.focus_agents_rail();
+                self.set_status(format!(
+                    "Released the session · {FOCUS_CHORD_LABEL} to type again"
+                ));
                 return true;
             }
             self.type_into_harness(&session, key);
@@ -108,16 +95,13 @@ impl App {
             && self.pane_view == PaneView::Harness
             && self.pane_session.is_some()
             && self.agents_rail_focused();
-        // Enter asks first. It is a navigation key, and walking the rail onto a
-        // managed harness must not silently take it away from the orchestrator;
-        // the chord below is the deliberate spelling and still attaches outright.
         if enter_on_harness {
             // Typing into a harness means looking at it. If the pane was showing
             // the session's diff instead, the terminal comes back first —
             // keystrokes landing in a screen that is not on the screen is the
             // one failure the whole focus model exists to prevent.
             self.show_harness_pane();
-            self.open_session_enter_prompt();
+            self.attach_to_pane_session();
             // Consumed either way: Enter reaches this branch only when the
             // visible pane resolved to a harness, so it must not submit a
             // hidden composer or return focus to one.
@@ -151,7 +135,7 @@ impl App {
         self.attach_to_session(&session);
     }
 
-    /// Attach to one named session, taking it from the orchestrator if it has it.
+    /// Attach to one named operator-owned session.
     ///
     /// Split from [`attach_to_pane_session`](Self::attach_to_pane_session) so
     /// callers that already know which session they mean — the takeover question
@@ -166,38 +150,14 @@ impl App {
             self.set_status("That session has exited — its last screen is all that is left");
             return;
         }
-        // Focusing in *is* taking over. Keyboard ownership without control is
-        // the trap this whole feature exists to close: the orchestrator's next
-        // task frame would be pasted into the composer the operator is typing
-        // in, and a harness serves one turn at a time, so the two prompts come
-        // back as one confidently wrong answer rather than as an error.
-        //
-        // Recorded as a *take* only when the orchestrator actually had it. A
-        // session that was already the operator's is not being taken from
-        // anyone, and marking it as taken is what made releasing every
-        // self-started session ask to give it away.
-        let took = self
+        let control = self
             .local_sessions
             .as_ref()
-            .and_then(|harnesses| harnesses.control(session))
-            == Some(SessionControl::Orchestrator);
-        if took {
-            if let Some(harnesses) = self.local_sessions.clone() {
-                harnesses.set_control(session, SessionControl::User);
-            }
-            self.sessions_taken
-                .entry(session.to_string())
-                // Kept, not overwritten: an operator who took this session with
-                // `/takecontrol`, kept it on release, and has now focused back
-                // in made one decision, and the question should still say so.
-                .or_insert(TakeOrigin::Focus);
+            .and_then(|harnesses| harnesses.control(session));
+        if control == Some(SessionControl::Orchestrator) {
+            self.set_status("Task sessions are view-only while they are running");
+            return;
         }
-        // Nothing is recorded when `took` is false, and nothing has to be
-        // cleared: the record is keyed by session, so an attachment that took
-        // nothing cannot be answered for by an earlier one that did. That
-        // cross-talk is what a single flag had — a `true` left by an earlier
-        // attachment survived into the next one, and a write failure then read
-        // it and handed back a session the operator had been holding all along.
         // Attaching answers whatever the harness was blinking about: the
         // operator is now looking at the screen that was asking. A named prompt
         // that is still up returns on the next refresh, so nothing is lost by
@@ -262,15 +222,6 @@ impl App {
             return;
         };
         if let Err(err) = harnesses.write(session, bytes) {
-            // The child died between the last frame and this keystroke. Give
-            // the session back on the way out: a session taken from the
-            // orchestrator and then left dead under user control is a slot
-            // nothing can ever reclaim, and there is nobody left to answer a
-            // hand-back prompt about it. A session the operator started
-            // themselves is left alone — it was never dispatch's to get back.
-            if self.sessions_taken.remove(session).is_some() {
-                harnesses.set_control(session, SessionControl::Orchestrator);
-            }
             self.release_session();
             self.set_status(format!("Session stopped listening ({err})"));
             return;

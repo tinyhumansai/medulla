@@ -16,8 +16,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, HandbackPolicy, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT,
-    SP_FEEDBACK, SP_USAGE, TABS,
+    App, Cmd, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT, SP_FEEDBACK, SP_USAGE,
+    TABS,
 };
 
 impl App {
@@ -47,7 +47,6 @@ impl App {
             })
             .unwrap_or(0);
         // Read before `loaded` is moved into the struct below.
-        let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
         let harness_skip_permissions = loaded.config.harness.skip_permissions;
         let status_line_promotion_pending = loaded.config.status_line.is_none();
         App {
@@ -163,14 +162,9 @@ impl App {
             pane_remote_session: None,
             rail_session: None,
             agent_picker: None,
-            handback_prompt: None,
             pointer_grab: None,
-            hit_handback: Vec::new(),
             hit_agent_picker: None,
             help_scroll: 0,
-            handback_policy,
-            sessions_taken: std::collections::HashMap::new(),
-            orchestrator_claimed: std::collections::HashSet::new(),
             pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
@@ -566,6 +560,10 @@ impl App {
         // nothing about delegated tasks — so a busy agent renders idle unless
         // the activity the hub observed locally is folded in.
         merge_host_activity(&mut lanes, &self.runtime.worker_activity());
+        // The embedded UI is an operator's session and fleet surface. Its
+        // control-plane conversation is intentionally not rendered here: task
+        // lanes and local terminals provide the actionable state.
+        lanes.retain(|lane| lane.role != AgentRole::Orchestrator);
         lanes
     }
 
@@ -664,29 +662,6 @@ impl App {
             Some(_) => false,
             None => true,
         }
-    }
-
-    /// The rail index of the orchestrator's own lane row, when the rail has one.
-    ///
-    /// The inverse of [`on_orchestrator_lane`](Self::on_orchestrator_lane): that
-    /// asks whether the cursor is already there, this says where "there" is so
-    /// the cursor can be put on it. Only a `Lane` row ever matches — a task
-    /// sublane under the orchestrator is not the conversation, and the action
-    /// and harness rows are not lanes at all.
-    ///
-    /// `None` before the first fold has produced any lane row, which is the one
-    /// state with no conversation to move to.
-    pub(in crate::ui::app) fn orchestrator_row_index(&self) -> Option<usize> {
-        let lanes = self.lanes();
-        self.rail_rows().iter().position(|row| match row {
-            super::rail::RailRow::Lane(AgentRow::Lane { lane_index }) => lanes
-                .get(*lane_index)
-                .map(|lane| lane.role == AgentRole::Orchestrator)
-                // Matches the same fallback `on_orchestrator_lane` makes: with
-                // no lanes folded yet, the sole lane row is the orchestrator's.
-                .unwrap_or(true),
-            _ => false,
-        })
     }
 
     /// Scroll whichever transcript the Agents cursor is reading.

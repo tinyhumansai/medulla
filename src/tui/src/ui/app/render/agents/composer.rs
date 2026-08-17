@@ -16,8 +16,6 @@ use ratatui::text::{Line as TLine, Span, Text};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::ui::agents::AgentRole;
-
 use super::super::super::types::App;
 use super::types::Selection;
 
@@ -54,9 +52,8 @@ impl App {
             Some(task) => format!("answering {}", task.task_id),
             None => selection
                 .lane()
-                .filter(|l| l.role != AgentRole::Orchestrator)
-                .map(|l| format!("{} · Enter still instructs the orchestrator", l.label))
-                .unwrap_or_else(|| "orchestrator".into()),
+                .map(|l| format!("{} · start a new task", l.label))
+                .unwrap_or_else(|| "new task".into()),
         };
         let rows = Layout::default()
             .direction(Direction::Vertical)

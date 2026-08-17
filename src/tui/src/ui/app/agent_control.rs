@@ -197,7 +197,7 @@ impl App {
         &mut self,
         agent_id: &str,
         name: &str,
-        managed: bool,
+        _managed: bool,
     ) {
         let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions to open");
@@ -223,17 +223,7 @@ impl App {
                 self.tab_index = tab_pos("Agents");
                 self.select_session_row(&id);
                 let label = name.unwrap_or_else(|| choice.display_name().to_string());
-                if managed {
-                    self.hand_back_session(&id, None);
-                }
-                self.set_status(format!(
-                    "Opened {label} under {agent_id} · {}",
-                    if managed {
-                        "managed, the orchestrator may dispatch into it"
-                    } else {
-                        "yours, the orchestrator will not dispatch into it"
-                    }
-                ));
+                self.set_status(format!("Opened {label} under {agent_id}"));
             }
             Err(error) => self.set_status(format!("Could not open a session: {error}")),
         }

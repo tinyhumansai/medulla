@@ -60,13 +60,6 @@ impl App {
             self.set_status("Session kill cancelled");
             return;
         }
-        // The hand-back question is asked while still attached, so it outranks
-        // even the harness. It swallows a paste on the question itself and takes
-        // one into the note once `E` has made that a text input.
-        if self.handback_prompt.is_some() {
-            self.paste_into_handback_note(text);
-            return;
-        }
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             self.paste_into_harness(&session, text);
             return;
@@ -119,13 +112,8 @@ impl App {
         if self.tab() != "Agents" {
             return;
         }
-        // The composer belongs to the orchestrator lane and nowhere else, so a
-        // paste made with the cursor on a worker or an unattached harness row
-        // has nowhere visible to land. Refused with a reason rather than
-        // retained: text held in a draft nobody can see is text the operator
-        // submits by accident on their next trip back to the orchestrator.
         if !self.agents_composer_shown() {
-            self.set_status("Select the orchestrator lane to paste an instruction");
+            self.set_status("Select a non-running session row to paste an instruction");
             return;
         }
         // Pasting is typing, so the keyboard follows it in — exactly as a

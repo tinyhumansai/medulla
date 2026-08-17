@@ -251,12 +251,9 @@ impl App {
         // want the width; there is also nothing to type at, since the run is
         // executing in another process entirely.
         let embedded = selection.session.is_some() || selection.workflow_run.is_some();
-        // The composer belongs to the orchestrator lane and nowhere else. That
-        // lane *is* the conversation — typing into it is how work starts. Every
-        // other row is something already running somewhere: an agent, a task, a
-        // harness. Offering a text box under those rows implies they can be
-        // talked to the same way, which is a promise the rail cannot keep.
-        let show_composer = selection.on_orchestrator && !embedded;
+        // Starting work remains available alongside the fleet; only a live
+        // terminal or workflow run takes the entire column.
+        let show_composer = !embedded;
         let right = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

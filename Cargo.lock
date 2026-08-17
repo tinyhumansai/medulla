@@ -2221,7 +2221,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "medulla"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-link"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "chacha20poly1305",
  "fs2",
@@ -2274,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-tui"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

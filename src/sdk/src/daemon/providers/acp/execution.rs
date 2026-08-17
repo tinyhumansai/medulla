@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, Error as AcpError, InitializeRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification,
+    NewSessionRequest, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionNotification,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
@@ -168,10 +169,21 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, _cx| {
+                // Selection is by KIND, never by position: option order is the
+                // agent's presentation choice, not protocol contract, and a
+                // harness that lists a reject option first turns positional
+                // "auto-approve" into auto-DENY — observed in the field as a
+                // correct `gh` call dying instantly at the permission prompt.
                 let outcome = if approve {
                     request
                         .options
-                        .first()
+                        .iter()
+                        .find(|option| matches!(option.kind, PermissionOptionKind::AllowOnce))
+                        .or_else(|| {
+                            request.options.iter().find(|option| {
+                                matches!(option.kind, PermissionOptionKind::AllowAlways)
+                            })
+                        })
                         .map(|option| {
                             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
                                 option.option_id.clone(),

@@ -18,6 +18,40 @@ use super::super::types::{AgentPickerStep, App};
 const HARNESS_TRAILER_LINES: usize = 3;
 
 impl App {
+    /// Draw the destructive confirmation for deleting the selected workflow.
+    #[cfg(feature = "workflows")]
+    pub(super) fn draw_workflow_delete_prompt(&mut self, f: &mut Frame, area: Rect) {
+        let Some((_, name)) = &self.workflow_delete_armed else {
+            return;
+        };
+        let area = centered(area, 62, 9);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme.accent))
+            .title(Span::styled(
+                "Delete workflow",
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(area);
+        f.render_widget(Clear, area);
+        f.render_widget(block, area);
+        f.render_widget(
+            Paragraph::new(Text::from(vec![
+                TLine::from(format!("Delete \"{name}\" permanently?")),
+                TLine::from(Span::styled(
+                    "Its definition and local workflow history will be removed.",
+                    Style::default().fg(self.theme.dim_border),
+                )),
+                TLine::from(""),
+                TLine::from("[Delete] remove workflow    [Esc] cancel"),
+            ])),
+            inner,
+        );
+    }
+
     /// Draw the "start a session" picker.
     pub(super) fn draw_harness_picker(&mut self, f: &mut Frame, area: Rect) {
         let Some(picker) = &self.agent_picker else {

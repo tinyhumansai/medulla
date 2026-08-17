@@ -87,6 +87,10 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Delete => {
+                self.confirm_delete_selected_workflow();
+                WorkflowsKey::Handled(None)
+            }
             KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
             // `f` for "fix". Only meaningful with the cursor on a run, which is
             // where the operator is when they can see one failed.
@@ -162,6 +166,10 @@ impl App {
             }
             KeyCode::Char('d') => WorkflowsKey::Handled(self.dry_run_selected_workflow()),
             KeyCode::Char('x') => WorkflowsKey::Handled(self.run_selected_workflow()),
+            KeyCode::Delete => {
+                self.confirm_delete_selected_workflow();
+                WorkflowsKey::Handled(None)
+            }
             KeyCode::Char('u') => WorkflowsKey::Handled(self.undo_selected_workflow()),
             KeyCode::Char('f') => WorkflowsKey::Handled(self.repair_selected_run()),
             KeyCode::PageUp => {
@@ -255,6 +263,18 @@ impl App {
         }
         let id = self.selected_workflow()?.id.clone();
         Some(Cmd::UndoWorkflow { id })
+    }
+
+    /// Ask before deleting because the workflow definition and its history cannot be restored.
+    fn confirm_delete_selected_workflow(&mut self) {
+        if self.wf.creating {
+            self.set_status("Nothing to delete — this workflow has not been created yet");
+            return;
+        }
+        let Some(workflow) = self.selected_workflow() else {
+            return;
+        };
+        self.arm_workflow_delete(workflow.id.clone(), workflow.name.clone());
     }
 
     /// Run the selected workflow, refusing a disabled one.

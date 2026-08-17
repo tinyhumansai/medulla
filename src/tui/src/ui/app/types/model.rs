@@ -432,6 +432,12 @@ pub enum Cmd {
         /// declares none.
         inputs: serde_json::Map<String, serde_json::Value>,
     },
+    /// Permanently remove an installed workflow after the operator confirms it.
+    #[cfg(feature = "workflows")]
+    DeleteWorkflow {
+        /// The workflow to remove.
+        id: String,
+    },
     /// Ask the copilot to change or explain a workflow.
     ///
     /// Off-thread for the same reason a run is: the turn starts a real agent
@@ -558,6 +564,8 @@ pub(in crate::ui::app) enum Overlay {
     AgentPicker,
     /// The question asked when the operator lets go of a session.
     HandbackPrompt,
+    /// The confirmation shown before permanently deleting a workflow.
+    WorkflowDelete,
     /// The shared single-line prompt (Workers add/edit, Agents answer).
     InlinePrompt,
     /// The saved-chat resume picker.
@@ -946,6 +954,9 @@ pub struct App {
     pub(in crate::ui::app) watching: Option<(String, String)>,
     /// The watched `(worker, task)` awaiting destructive-action confirmation.
     pub(in crate::ui::app) kill_armed: Option<(String, String)>,
+    /// The workflow awaiting a destructive-action confirmation.
+    #[cfg(feature = "workflows")]
+    pub(in crate::ui::app) workflow_delete_armed: Option<(String, String)>,
     /// Which half of the Agents tab the keyboard is driving.
     pub(in crate::ui::app) agents_focus: AgentsFocus,
     pub(in crate::ui::app) agent_scroll: usize,

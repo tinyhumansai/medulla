@@ -61,6 +61,7 @@ fn raise(app: &mut App, overlay: Overlay) {
                 is_takeover: false,
             })
         }
+        Overlay::WorkflowDelete => app.workflow_delete_armed = Some(("id".into(), "name".into())),
         Overlay::InlinePrompt => {
             app.prompt = Some(TextPrompt::new(PromptKind::HostAdd, "Add a host"))
         }
@@ -74,11 +75,12 @@ fn raise(app: &mut App, overlay: Overlay) {
 }
 
 /// Every variant, so a new one cannot be added without appearing here.
-const EVERY_OVERLAY: [Overlay; 6] = [
+const EVERY_OVERLAY: [Overlay; 7] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
     Overlay::AgentPicker,
     Overlay::HandbackPrompt,
+    Overlay::WorkflowDelete,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,
 ];

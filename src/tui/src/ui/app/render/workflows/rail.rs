@@ -68,7 +68,7 @@ impl App {
                 .collect();
 
         let hint = if focused {
-            "↑↓ nav · ⏎ open · 1-9 jump"
+            "↑↓ nav · ⏎ open · Del delete · 1-9 jump"
         } else {
             "Esc list · c copilot"
         };

@@ -51,6 +51,11 @@ impl App {
         if self.harness_close_armed.take().is_some() {
             self.set_status("Harness close cancelled");
         }
+        #[cfg(feature = "workflows")]
+        if self.workflow_delete_armed.take().is_some() {
+            self.set_status("Workflow deletion cancelled");
+            return None;
+        }
         // Ahead of every other rule, including the modal one below: a button
         // that went down in a harness has to come back up in it. The grab is
         // the whole gesture, so it outranks whatever the pointer has since

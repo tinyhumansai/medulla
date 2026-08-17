@@ -253,6 +253,8 @@ pub(super) fn run_cmd(
             )
         }
         #[cfg(feature = "workflows")]
+        Cmd::DeleteWorkflow { id } => workflows::spawn_delete(id, msg_tx),
+        #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id, inputs } => workflows::spawn_dry_run(id, inputs, msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::UndoWorkflow { id } => workflows::spawn_undo(id, msg_tx),

@@ -71,6 +71,8 @@ impl App {
             subtask_pages: std::collections::HashMap::new(),
             watching: None,
             kill_armed: None,
+            #[cfg(feature = "workflows")]
+            workflow_delete_armed: None,
             agents_focus: super::types::AgentsFocus::default(),
             agent_scroll: 0,
             chat_scroll: 0,
@@ -466,6 +468,10 @@ impl App {
         // A destructive confirmation is valid only while its question remains
         // visible. Any asynchronous status replacement cancels it.
         self.kill_armed = None;
+        #[cfg(feature = "workflows")]
+        {
+            self.workflow_delete_armed = None;
+        }
         // The harness close question is the same kind of promise: it is only
         // answerable while the sentence asking it is the one on screen.
         self.harness_close_armed = None;
@@ -477,6 +483,13 @@ impl App {
     pub(super) fn arm_kill(&mut self, target: (String, String)) {
         self.set_status("Kill this session? y confirm · any other key cancels");
         self.kill_armed = Some(target);
+    }
+
+    /// Show the workflow deletion confirmation and retain the exact record it names.
+    #[cfg(feature = "workflows")]
+    pub(super) fn arm_workflow_delete(&mut self, id: String, name: String) {
+        self.set_status(format!("Delete {name}? Choose Delete or Esc"));
+        self.workflow_delete_armed = Some((id, name));
     }
 
     /// Show and arm the "close this harness" confirmation for `session`.

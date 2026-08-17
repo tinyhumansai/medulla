@@ -512,6 +512,30 @@ pub(super) fn spawn_undo(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender
     });
 }
 
+/// Remove a workflow and refresh the catalogue after the operator confirmed it.
+pub(super) fn spawn_delete(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>) {
+    let tx = msg_tx.clone();
+    tokio::spawn(async move {
+        let delete_id = id.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let env: HashMap<String, String> = std::env::vars().collect();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            medulla::workflows::discover_store(&env, &cwd).delete(&delete_id)
+        })
+        .await
+        .unwrap_or_else(|err| Err(medulla::workflows::WorkflowError::Engine(err.to_string())));
+        let deleted = result.is_ok();
+        let status = match result {
+            Ok(()) => format!("Deleted workflow {id}"),
+            Err(err) => format!("Could not delete workflow {id}: {err}"),
+        };
+        let _ = tx.send(AppMsg::Status(status));
+        if deleted {
+            let _ = tx.send(AppMsg::WorkflowsChanged);
+        }
+    });
+}
+
 /// Spawn a dry run of the workflow `id`, reporting the outcome on the status
 /// line.
 ///

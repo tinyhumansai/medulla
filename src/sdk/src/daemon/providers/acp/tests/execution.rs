@@ -1,6 +1,8 @@
 //! ACP execution, session, grant, and environment regressions.
 
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 use crate::daemon::providers::{Abort, RunTaskOptions};
@@ -9,8 +11,6 @@ use crate::protocol::HarnessProvider;
 #[cfg(unix)]
 #[tokio::test]
 async fn a_new_acp_session_is_reported_before_the_task_completes() {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = tempfile::tempdir().unwrap();
     let agent = dir.path().join("fake-opencode");
     std::fs::write(
@@ -51,6 +51,115 @@ done
 
     assert_eq!(reported.lock().unwrap().as_slice(), ["acp-session-1"]);
     assert_eq!(result.session_id.as_deref(), Some("acp-session-1"));
+}
+
+/// Spawns a fake ACP agent (as opencode) whose one `session/request_permission`
+/// call offers exactly `options_json` (a JSON array of `PermissionOption`,
+/// e.g. `[{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]`),
+/// then reports back the client's answer as `picked=<optionId>` — or
+/// `picked=cancelled` when the response carries no `optionId`, which is the
+/// wire shape of `RequestPermissionOutcome::Cancelled`. Returns the run's
+/// reply text, so a scenario test reads the real selection off the wire
+/// instead of re-stating the selection rule under test.
+#[cfg(unix)]
+async fn permission_reply_for(options_json: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("fake-opencode");
+    std::fs::write(
+        &agent,
+        format!(
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":1}}}}\n' "$id" ;;
+    *'"method":"session/new"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"sessionId":"acp-session-1"}}}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf '{{"jsonrpc":"2.0","id":9001,"method":"session/request_permission","params":{{"sessionId":"acp-session-1","toolCall":{{"toolCallId":"call-1"}},"options":{options}}}}}\n'
+      IFS= read -r answer
+      picked=$(printf '%s\n' "$answer" | sed -n 's/.*"optionId":"\([^"]*\)".*/\1/p')
+      if [ -z "$picked" ]; then picked="cancelled"; fi
+      printf '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"acp-session-1","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"picked=%s"}}}}}}}}\n' "$picked"
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"stopReason":"end_turn"}}}}\n' "$id" ;;
+  esac
+done
+"#,
+            options = options_json
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options.cwd = dir.path().to_string_lossy().into_owned();
+    options.skip_permissions = true;
+    options.timeout_ms = 10_000;
+    options.env.insert(
+        "TINYPLACE_OPENCODE_BIN".to_string(),
+        agent.to_string_lossy().into_owned(),
+    );
+
+    super::super::execution::run_acp_task(options)
+        .await
+        .unwrap()
+        .reply
+}
+
+/// Auto-approve must answer a permission request by **kind**, never by
+/// position. Option order is the agent's presentation choice, so a harness
+/// that lists its reject option first turned positional auto-approve into
+/// auto-DENY — observed in the field as a correct read-only command dying
+/// instantly at the prompt.
+#[cfg(unix)]
+#[tokio::test]
+async fn auto_approve_picks_the_allow_option_a_harness_lists_last() {
+    // Reject first, allow last — the order that broke positional selection.
+    let reply = permission_reply_for(
+        r#"[{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"allow-once","name":"Allow","kind":"allow_once"}]"#,
+    )
+    .await;
+
+    assert!(
+        reply.contains("picked=allow-once"),
+        "auto-approve must select AllowOnce wherever the harness lists it, got: {reply}"
+    );
+}
+
+/// When a harness offers no `AllowOnce`, auto-approve falls back to
+/// `AllowAlways` rather than cancelling outright — the same answer an
+/// operator who chose to skip prompts would give.
+#[cfg(unix)]
+#[tokio::test]
+async fn auto_approve_falls_back_to_allow_always_without_allow_once() {
+    let reply = permission_reply_for(
+        r#"[{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"allow-always","name":"Always Allow","kind":"allow_always"}]"#,
+    )
+    .await;
+
+    assert!(
+        reply.contains("picked=allow-always"),
+        "auto-approve must fall back to AllowAlways when no AllowOnce is offered, got: {reply}"
+    );
+}
+
+/// When a harness offers only reject options, auto-approve must cancel
+/// rather than select one of them — approving nothing is the only answer
+/// that does not act against the operator's intent.
+#[cfg(unix)]
+#[tokio::test]
+async fn auto_approve_cancels_when_only_reject_options_are_offered() {
+    let reply = permission_reply_for(
+        r#"[{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always Reject","kind":"reject_always"}]"#,
+    )
+    .await;
+
+    assert!(
+        reply.contains("picked=cancelled"),
+        "auto-approve must cancel rather than select a reject option, got: {reply}"
+    );
 }
 
 #[cfg(all(feature = "workflows", unix))]

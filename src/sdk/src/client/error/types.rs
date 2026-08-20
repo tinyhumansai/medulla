@@ -31,6 +31,9 @@ pub enum ClientError {
     /// A recoverable failure while reading the SSE stream.
     #[error("sse stream error: {0}")]
     Sse(String),
+    /// A Socket.IO connection, acknowledgement, or payload failure.
+    #[error("socket transport error: {0}")]
+    Socket(String),
 }
 /// Convenience result alias.
 pub type Result<T> = std::result::Result<T, ClientError>;

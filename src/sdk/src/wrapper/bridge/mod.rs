@@ -151,29 +151,29 @@ impl Bridge {
             timestamp_ms: Some(semantic.timestamp_ms),
             event: semantic.event.decoded(),
         };
-        let step = reduce_status(&self.status, &event);
-        self.status = step.next;
-        if let Some(payload) = step.emit {
-            self.maybe_publish_status(payload).await;
+        if let Some(payload) = advance_status_state(&mut self.status, &event) {
+            self.publish_status(payload).await;
         }
     }
 
     /// Advance the status machine on a timer tick (heartbeat / idle transition).
     pub(super) async fn tick_status(&mut self) {
-        let heartbeat = now_ms().saturating_sub(self.last_status_ms) >= self.status_throttle_ms;
-        let step = tick_status(&self.status, now_ms(), self.status_idle_ms, heartbeat);
+        let now = now_ms();
+        let heartbeat = heartbeat_due(self.last_status_ms, now, self.status_throttle_ms);
+        let step = tick_status(&self.status, now, self.status_idle_ms, heartbeat);
         self.status = step.next;
         if let Some(payload) = step.emit {
-            self.maybe_publish_status(payload).await;
+            self.publish_status(payload).await;
         }
     }
 
-    /// Publish a status envelope unless the throttle window is still open.
-    async fn maybe_publish_status(&mut self, payload: crate::protocol::StatusPayload) {
+    /// Publish a status envelope emitted by the change-gated status machine.
+    ///
+    /// Heartbeat rate limiting happens before this method in [`tick_status`].
+    /// Applying it here would also suppress real state changes, including the
+    /// first `working` event after the timer's initial `idle` heartbeat.
+    async fn publish_status(&mut self, payload: crate::protocol::StatusPayload) {
         let now = now_ms();
-        if now.saturating_sub(self.last_status_ms) < self.status_throttle_ms {
-            return;
-        }
         self.last_status_ms = now;
         let event = HarnessEvent {
             kind: "status".to_string(),
@@ -186,6 +186,22 @@ impl Bridge {
             .synthetic_envelope(event, "wrapper:status", now);
         self.publish(&envelope).await;
     }
+}
+
+/// Apply one semantic event without publication policy; state changes are
+/// returned immediately so heartbeat timing cannot suppress them.
+fn advance_status_state(
+    status: &mut SessionStatusState,
+    event: &SemanticEvent,
+) -> Option<crate::protocol::StatusPayload> {
+    let step = reduce_status(status, event);
+    *status = step.next;
+    step.emit
+}
+
+/// Whether an unchanged-status heartbeat is due at `now_ms`.
+fn heartbeat_due(last_status_ms: i64, now_ms: i64, interval_ms: i64) -> bool {
+    now_ms.saturating_sub(last_status_ms) >= interval_ms
 }
 
 /// Build the bridge, or `None` (passthrough) when it is disabled/unconfigured.

@@ -1,8 +1,8 @@
 //! Data model for headless provider runs: the callback aliases, the cooperative
 //! [`Abort`] handle, and the input/output records ([`RunTaskOptions`],
-//! [`RunTaskResult`]) plus the injectable executor alias [`RunTaskFn`]. The
-//! detection and execution logic lives in the sibling `detect`/`execute`
-//! modules.
+//! [`RunTaskResult`]) plus the injectable executor alias [`RunTaskFn`] and the
+//! bounded-reader outcome enum [`LineRead`]. The detection and execution logic
+//! lives in the sibling `detect`/`execute` modules.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -93,6 +93,12 @@ impl Abort {
 pub struct RunTaskOptions {
     /// The coding-agent CLI to spawn.
     pub provider: HarnessProvider,
+    /// The dispatch path that requested this run.
+    ///
+    /// Providers normally treat this as observability context. The embedded
+    /// OpenHuman adapter uses it as a security boundary: only an authored
+    /// workflow node may receive unattended automation trust.
+    pub origin: RunTaskOrigin,
     /// The flavor of `provider` this run uses.
     ///
     /// [`Cli`](HarnessTransport::Cli) — the default — forks the provider's
@@ -183,6 +189,21 @@ pub struct RunTaskOptions {
     pub on_workspace_context: Option<OnWorkspaceContext>,
 }
 
+/// The Medulla entry point that dispatched a provider task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTaskOrigin {
+    /// A node in an operator-authored workflow graph.
+    Workflow,
+    /// An authenticated peer's discrete delegated task.
+    DelegatedTask,
+    /// A conversational message from an authenticated peer.
+    Conversation,
+    /// An interactive local session turn.
+    Interactive,
+    /// Medulla's own provider-capability probe.
+    CapabilityProbe,
+}
+
 /// The outcome of a headless run.
 #[derive(Debug, Clone)]
 pub struct RunTaskResult {
@@ -233,4 +254,21 @@ pub(super) struct RunSpec {
     pub(super) attribution: bool,
     pub(super) hooks: crate::harness_hooks::HooksConfig,
     pub(super) on_workspace_context: Option<OnWorkspaceContext>,
+}
+
+/// What one bounded line read produced.
+///
+/// The `execute` module's bounded reader returns this to say whether a record
+/// was kept whole, dropped as oversized, or the stream ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LineRead {
+    /// A complete line at or under the cap, appended to the caller's buffer.
+    Line,
+    /// The line exceeded the cap. With a retained tail the trailing bytes of the
+    /// record are in the caller's buffer; otherwise nothing was buffered and the
+    /// rest of the line was discarded, so the next read starts on the following
+    /// record.
+    Oversized,
+    /// The stream ended with nothing buffered.
+    Eof,
 }

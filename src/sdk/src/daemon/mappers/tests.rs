@@ -123,6 +123,34 @@ fn claude_user_prompt_and_tool_use_and_result() {
 }
 
 #[test]
+fn claude_only_marks_the_final_assistant_round_as_turn_end() {
+    let tool_use = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:15.404Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"true"}}]}}"#;
+    let end_turn = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}"#;
+    let stop_sequence = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"halted"}]}}"#;
+    let incomplete = r#"{"type":"assistant","timestamp":"2026-08-16T08:37:24.506Z","message":{"role":"assistant","content":[{"type":"text","text":"still streaming"}]}}"#;
+
+    let tool_events = map_all("claude", &[tool_use]);
+    assert_eq!(tool_events.len(), 1);
+    assert_eq!(kind_of(&tool_events[0]), "tool_call");
+
+    let final_events = map_all("claude", &[end_turn]);
+    assert_eq!(final_events.len(), 2);
+    assert_eq!(kind_of(&final_events[0]), "agent_message");
+    assert_eq!(kind_of(&final_events[1]), "lifecycle");
+    assert_eq!(final_events[1].event.payload["phase"], "turn_end");
+    assert_eq!(final_events[1].record_type, "assistant:end_turn");
+
+    let stopped_events = map_all("claude", &[stop_sequence]);
+    assert_eq!(stopped_events.len(), 2);
+    assert_eq!(kind_of(&stopped_events[1]), "lifecycle");
+    assert_eq!(stopped_events[1].event.payload["phase"], "turn_end");
+
+    let incomplete_events = map_all("claude", &[incomplete]);
+    assert_eq!(incomplete_events.len(), 1);
+    assert_eq!(kind_of(&incomplete_events[0]), "agent_message");
+}
+
+#[test]
 fn codex_dedupes_double_recorded_agent_message() {
     let event_msg = r#"{"type":"event_msg","timestamp":"2026-07-05T00:00:00.000Z","payload":{"type":"agent_message","message":"final answer"}}"#;
     let response_item = r#"{"type":"response_item","timestamp":"2026-07-05T00:00:00.500Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}}"#;

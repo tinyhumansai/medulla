@@ -193,7 +193,10 @@ fn builtin_names_offer_the_shared_codex_flavor() {
     let names = HarnessSelector::builtin_names();
     assert!(names.contains(&"codex"), "{names:?}");
     assert!(names.contains(&"codex-server"), "{names:?}");
-    assert!(!names.contains(&"openhuman"), "{names:?}");
+    // Listed since the embedded core became dispatchable: this list is what an
+    // author is shown when they are told what they may write, and a harness
+    // they can name but are never offered is one they will not discover.
+    assert!(names.contains(&"openhuman"), "{names:?}");
 }
 
 #[test]

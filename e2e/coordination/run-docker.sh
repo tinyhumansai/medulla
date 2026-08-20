@@ -5,9 +5,10 @@
 #   bash e2e/coordination/run-docker.sh
 #
 # Env passthrough:
+#   E2E_HARNESS   which coding CLI to drive: opencode (default) | claude | codex
 #   E2E_KEEP=1    keep the container after exit (inspect with docker logs) and,
 #                 inside the container, keep run.sh's run dir + tmux session
-#   E2E_SMOKE=0   skip the interactive opencode TUI smoke leg
+#   E2E_SMOKE=0   skip the interactive TUI smoke leg
 #   IMAGE=<tag>   override image tag (default: medulla-e2e)
 #   NO_CACHE=1    build with --no-cache
 #   SKIP_BUILD=1  skip `docker build` and run the existing $IMAGE (CI builds the
@@ -50,6 +51,7 @@ fi
 # tmux needs a writable /tmp and enough shared memory; defaults are fine.
 run_args+=(-e "E2E_KEEP=${E2E_KEEP:-0}")
 [ -n "${E2E_SMOKE:-}" ] && run_args+=(-e "E2E_SMOKE=$E2E_SMOKE")
+[ -n "${E2E_HARNESS:-}" ] && run_args+=(-e "E2E_HARNESS=$E2E_HARNESS")
 run_args+=("$IMAGE")
 
 rc=0

@@ -12,11 +12,8 @@
 #[path = "feature_app_more/helpers.rs"]
 mod helpers;
 
-#[path = "feature_app_more/commands.rs"]
-mod commands;
-
-#[path = "feature_app_more/agents.rs"]
-mod agents;
+#[path = "feature_app_more/sessions.rs"]
+mod sessions;
 
 #[path = "feature_app_more/views.rs"]
 mod views;

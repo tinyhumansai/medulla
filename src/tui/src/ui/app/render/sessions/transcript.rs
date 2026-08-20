@@ -1,0 +1,315 @@
+//! The pane beside the rail: a session's terminal, diff or run when the cursor
+//! names one, its task transcript when it is a dispatch, and a description of
+//! the row itself when it is neither.
+//!
+//! Above whichever it is sits the header — the harness task board, the seat
+//! budget, where the lane runs, and the compact meters for that machine and
+//! this lane's context window. The header is built first because it decides how
+//! many rows are left for the body to scroll through.
+
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line as TLine, Span, Text};
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+
+use crate::ui::agents::{lane_lines, task_lines, Line as StyledLine};
+use crate::ui::harness::{budget_note, task_board_lines};
+use crate::ui::meters;
+use medulla::harness_contract::AgentBudgetMetadata;
+
+use super::super::super::types::{App, PaneView};
+use super::super::styled_to_tline;
+use super::summary;
+use super::types::Selection;
+
+impl App {
+    /// Draw the transcript or declaration for whatever the cursor is on.
+    pub(super) fn draw_sessions_pane(&mut self, f: &mut Frame, area: Rect, selection: &Selection) {
+        // A screen supersedes the transcript. The transcript says what a worker
+        // reported; the screen shows what it is actually doing — including the
+        // states it never reports at all, like a harness stopped on a permission
+        // dialog, which writes no transcript records and so reads as "thinking"
+        // until the task times out.
+        //
+        // Local first: a harness running on this device is *here*, read straight
+        // out of its emulator every frame and typeable. A remote worker's screen
+        // is the same picture arrived over the wire, sampled and diffed, and
+        // read-only. When both somehow name the selection, the live one wins.
+        //
+        // Resolved in `sessions_selection`, not here: it decides the layout as
+        // well as the contents, so the split has already been made for it.
+        if let Some(session_id) = selection.session.clone() {
+            // …unless the operator has swapped the pane onto one of the session's
+            // other views. They replace the screen rather than sit beside it: the
+            // pane is already the whole right column, and a diff squeezed into
+            // half of it is a diff nobody can read.
+            match self.pane_view {
+                PaneView::Harness => self.draw_local_harness(f, area, &session_id),
+                PaneView::Diff => self.draw_harness_diff(f, area),
+            }
+            return;
+        }
+        // A run supersedes both. The cursor is on the run, not on the session
+        // that started it, and the session's terminal is one row up.
+        if let Some(run) = selection.workflow_run.clone() {
+            self.draw_sessions_workflow_run(f, area, &run);
+            return;
+        }
+        if let Some(screen) = self.selected_screen(selection) {
+            self.draw_worker_screen(f, area, &screen);
+            return;
+        }
+        let lane = selection.lane();
+        let pane_width = ((area.width as usize).saturating_sub(4)).max(24);
+        // Resolved for the laneless rows — a host header, the action row —
+        // which have no transcript and must not be given someone else's.
+        // `selection.lane()` is `None` for exactly those, so this is the one
+        // branch that can answer for them.
+        let panel = (selection.task.is_none() && lane.is_none())
+            .then(|| summary::row_panel(self, selection, pane_width));
+        let content_lines: Vec<StyledLine> = if let Some(t) = &selection.task {
+            task_lines(t, pane_width)
+        } else if let Some(panel) = &panel {
+            panel.lines.clone()
+        } else {
+            lane_lines(lane, pane_width)
+        };
+        let title = if let Some(panel) = &panel {
+            panel.title.clone()
+        } else if let Some(t) = &selection.task {
+            format!(
+                "{} › {} · {} turns",
+                lane.map(|l| l.label.as_str()).unwrap_or("task"),
+                t.task_id,
+                t.turns
+            )
+        } else if let Some(l) = lane {
+            format!("{} · {} turns", l.label, l.turns.len())
+        } else {
+            "Transcript".into()
+        };
+        let block = self.panel(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let mut header: Vec<TLine> = Vec::new();
+        // What the selected agent is working on, in one line. The Work panel
+        // beside this shows the whole picture, but it needs columns a narrow
+        // terminal does not have — and the single most useful fact, what the
+        // agent is on right now, fits here either way.
+        if let Some(headline) = self
+            .selected_work(selection)
+            .and_then(crate::ui::work::work_headline)
+        {
+            header.push(TLine::from(Span::styled(
+                format!("work · {headline}"),
+                Style::default().fg(Color::Magenta),
+            )));
+        }
+        // Harness task board: session-wide, shown only when the backend surfaces a
+        // `HarnessStatus`. Degrades to nothing (empty vec) when absent or empty.
+        if let Some(status) = &self.snapshot.harness {
+            for line in task_board_lines(status, pane_width) {
+                header.push(styled_to_tline(&line));
+            }
+        }
+        // Read-only seat budget for the selected lane, when its descriptor carries
+        // a `metadata.budget` stamp. Seat CRUD stays a backend REST concern.
+        if let Some(budget) = lane
+            .and_then(|l| l.descriptor.as_ref())
+            .and_then(|d| AgentBudgetMetadata::from_metadata(&d.metadata))
+        {
+            header.push(TLine::from(Span::styled(
+                format!("seat {}", budget_note(&budget)),
+                Style::default().fg(if budget.exhausted {
+                    Color::Red
+                } else {
+                    Color::Magenta
+                }),
+            )));
+        }
+        // Where this lane runs, and how hard: the placement chip, then compact
+        // meters for the machine's memory and load and for the lane's own
+        // context window. Every reading is omitted rather than zeroed when it
+        // was not reported — a bar at 0% claims a measurement nobody took.
+        {
+            let capacity = self.fleet_capacity();
+            let active_info = self.selected_work(selection).map(|work| &work.info);
+            let descriptor = lane.and_then(|lane| lane.descriptor.as_ref());
+            let placement = descriptor.map(|descriptor| capacity.placement(descriptor));
+            let mut chip_parts = Vec::new();
+            if let (Some(descriptor), Some(placement)) = (descriptor, placement.as_ref()) {
+                // Labelled, not bare: "this device · claude · /Users/me/repo"
+                // reads as three unexplained tokens, and the two an operator
+                // actually needs — which machine, which folder — are exactly the
+                // two that look like everything else. The workspace path is the
+                // agent's probed cwd, so it is the real working directory
+                // rather than a declared intention.
+                // A lane may have no place in the declared chain at all — a
+                // hub-registered worker is announced directly and never appears
+                // in the capacity snapshot until it answers a capability probe.
+                // Falling back to what the descriptor itself carries means the
+                // machine and the working directory show from the first frame
+                // rather than only after the orchestrator happens to probe.
+                let meta = |key: &str| {
+                    descriptor
+                        .metadata
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_string)
+                };
+                let host = placement
+                    .host
+                    .map(|h| h.name.clone())
+                    .or_else(|| Some(descriptor.name.clone()).filter(|n| !n.trim().is_empty()));
+                let workspace = active_info
+                    .and_then(|info| info.cwd.clone())
+                    .or_else(|| placement.workspace.map(|w| w.path.clone()))
+                    .or_else(|| meta("workspace"));
+                chip_parts.extend(
+                    [
+                        host.map(|h| format!("host {h}")),
+                        placement
+                            .harness
+                            .map(|h| h.kind.clone())
+                            .or_else(|| meta("harness")),
+                        workspace.map(|w| format!("dir {w}")),
+                        placement.template.map(|t| {
+                            format!("via {}", t.name.clone().unwrap_or_else(|| t.id.clone()))
+                        }),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+            }
+            // Live session cwd is useful even for transcript-only lanes with
+            // no roster descriptor. Placement is only its fallback; it must
+            // not gate runtime context that the harness already reported.
+            if descriptor.is_none() {
+                chip_parts.extend(
+                    active_info
+                        .and_then(|info| info.cwd.as_ref())
+                        .map(|cwd| format!("dir {cwd}")),
+                );
+            }
+            chip_parts.extend(
+                [
+                    active_info
+                        .and_then(|info| info.branch.as_ref())
+                        .map(|branch| format!("branch {branch}")),
+                    active_info
+                        .and_then(|info| info.pull_request.as_ref())
+                        .map(|pull_request| {
+                            medulla::harness_work::pull_request_label(pull_request)
+                        }),
+                ]
+                .into_iter()
+                .flatten(),
+            );
+            let chip = chip_parts
+                .into_iter()
+                .filter(|part| !part.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            if !chip.is_empty() {
+                header.push(TLine::from(Span::styled(
+                    chip,
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
+            if let Some(placement) = placement.as_ref() {
+                if let Some(resources) = placement.host.and_then(|h| h.resources.as_ref()) {
+                    for line in [
+                        meters::cpu_meter(resources),
+                        meters::memory_meter(resources),
+                        meters::disk_line(resources),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        header.push(styled_to_tline(&line));
+                    }
+                }
+            }
+            if let Some(lane) = lane {
+                let window = self.loaded.config.medulla.context_window() as i64;
+                if let Some(line) = meters::context_meter(&lane.usage, window) {
+                    header.push(styled_to_tline(&line));
+                }
+            }
+        }
+        // Reserve the last row for the status line (scroll notice or spinner),
+        // or a below-fold notice would itself fall below the fold.
+        let capacity = (inner.height as usize)
+            .saturating_sub(header.len() + 1)
+            .max(4);
+        let max_scroll = content_lines.len().saturating_sub(capacity);
+        let eff = self.agent_scroll.min(max_scroll);
+        let end = content_lines.len() - eff;
+        let window = end.saturating_sub(capacity)..end;
+        let view = &content_lines[window.clone()];
+        let mut out = header;
+        if view.is_empty() {
+            out.push(TLine::from(Span::styled(
+                "Nothing to show for this row.",
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        out.extend(view.iter().map(styled_to_tline));
+        if eff > 0 {
+            out.push(TLine::from(Span::styled(
+                format!("↑ {eff} more line(s) below · k to catch up"),
+                Style::default().add_modifier(Modifier::DIM),
+            )));
+        }
+        f.render_widget(Paragraph::new(Text::from(out)), inner);
+    }
+}
+
+impl App {
+    /// The screen held for whatever the cursor is on, if it is being watched.
+    ///
+    /// Only a selected *task* resolves one: streams are addressed by task id,
+    /// which is the requester's own key, so a lane on its own names nothing to
+    /// look up and guessing one of a worker's tasks would show work the
+    /// operator did not point at.
+    pub(super) fn selected_screen(
+        &self,
+        selection: &Selection,
+    ) -> Option<medulla::hub::WatchedScreen> {
+        let task = selection.task.as_ref()?;
+        self.runtime
+            .worker_screens()
+            .into_iter()
+            .find(|held| held.task_id == task.task_id)
+    }
+
+    /// Draw a watched worker's screen into `area`.
+    ///
+    /// No cursor is drawn and no scrollback is offered, matching the worker's
+    /// own pane: this is a window, not a keyboard, and the protocol never
+    /// synchronised history in the first place.
+    fn draw_worker_screen(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        screen: &medulla::hub::WatchedScreen,
+    ) {
+        let age = medulla::clock::now_millis().saturating_sub(screen.updated_at);
+        let block = self.panel(crate::ui::screen::screen_title(
+            &screen.task_id,
+            screen.seq,
+            age,
+        ));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        // Clipped, never rewrapped. The grid is a framebuffer: reflowing it to
+        // a narrower pane would not be the screen the worker is showing.
+        f.render_widget(
+            Paragraph::new(Text::from(crate::ui::screen::grid_lines(&screen.grid))),
+            inner,
+        );
+    }
+}

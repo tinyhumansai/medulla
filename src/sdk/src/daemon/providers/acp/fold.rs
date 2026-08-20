@@ -12,7 +12,7 @@ use crate::protocol::HarnessEvent;
 use crate::sessions::WorkspaceContext;
 
 use super::super::types::{OnEvent, OnWorkspaceContext};
-use super::types::FoldState;
+use super::types::{CompletedToolCall, FoldState};
 
 impl FoldState {
     #[cfg(test)]
@@ -40,8 +40,25 @@ impl FoldState {
         }
     }
 
+    /// The directory this session is currently working in, when the stream has
+    /// announced one that differs from the launch directory.
+    ///
+    /// A harness starts in the daemon's configured checkout and frequently
+    /// continues in a linked worktree it creates mid-session; the `worktree`
+    /// helper's completed report is the first authoritative announcement of that
+    /// move (see [`crate::daemon::mappers`]). Lifecycle hooks that run on
+    /// Medulla's side of the ACP boundary read this rather than the launch
+    /// directory, or a `PostToolUse` auto-commit hook checkpoints the repository
+    /// the session *started* in after every edit made somewhere else.
+    ///
+    /// `None` until such a report is seen, which is also the honest answer for a
+    /// session that never leaves its launch directory.
+    pub(super) fn workspace_cwd(&self) -> Option<&str> {
+        self.workspace_context.cwd.as_deref()
+    }
+
     /// Fold a standard ACP update into Medulla's existing semantic event model.
-    pub(super) fn fold(&mut self, update: SessionUpdate) {
+    pub(super) fn fold(&mut self, update: SessionUpdate) -> Option<CompletedToolCall> {
         self.last_activity = Instant::now();
         let value = serde_json::to_value(&update).unwrap_or(Value::Null);
         let kind = value
@@ -54,6 +71,7 @@ impl FoldState {
         if !matches!(kind, "agent_thought_chunk" | "usage_update") {
             self.thought.clear();
         }
+        let mut completed = None;
         let (event_kind, role, payload) = match kind {
             "agent_message_chunk" => {
                 let text = content_text(value.get("content"));
@@ -74,9 +92,7 @@ impl FoldState {
                 ) =>
             {
                 let payload = self.tool_call_payload(&value);
-                if value.get("rawInput").is_none() {
-                    return;
-                }
+                value.get("rawInput")?;
                 ("tool_call", "agent", payload)
             }
             "tool_call_update" => {
@@ -89,7 +105,13 @@ impl FoldState {
                 if value.get("rawInput").is_some() {
                     let _ = self.tool_call_payload(&value);
                 }
-                self.tool_calls.remove(call_id);
+                completed = self
+                    .tool_calls
+                    .remove(call_id)
+                    .map(|call| CompletedToolCall {
+                        tool_name: call.kind,
+                        input: call.input,
+                    });
                 if value.get("status").and_then(Value::as_str) == Some("completed") {
                     self.fold_workspace_result(call_id, value.get("rawOutput"));
                 } else {
@@ -126,6 +148,7 @@ impl FoldState {
         if let Some(callback) = self.on_event.as_mut() {
             callback(&semantic);
         }
+        completed
     }
 
     pub(super) fn reply(&self) -> String {

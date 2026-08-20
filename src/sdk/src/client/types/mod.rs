@@ -608,12 +608,14 @@ use super::*;
 /// Holds the shared [`tinyhumans_sdk::TinyHumansClient`] every request is
 /// issued through. `base_url`, `jwt`, and `http` are retained alongside it
 /// because the SDK does not expose them back and the SSE stream — which has no
-/// SDK equivalent — has to build its own authenticated URL.
+/// SDK equivalent — has to build its own authenticated URL. `default_headers`
+/// keeps shared product attribution consistent across those two transports.
 #[derive(Clone)]
 pub struct MedullaClient {
     pub(super) base_url: String,
     pub(super) jwt: String,
     pub(super) http: reqwest::Client,
+    pub(super) default_headers: reqwest::header::HeaderMap,
     pub(super) sdk: tinyhumans_sdk::TinyHumansClient,
 }
 

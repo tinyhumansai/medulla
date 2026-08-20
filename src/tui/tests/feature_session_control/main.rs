@@ -10,4 +10,3 @@
 mod helpers;
 
 mod picker;
-mod spawn;

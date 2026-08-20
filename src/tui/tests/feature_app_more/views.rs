@@ -120,7 +120,7 @@ fn context_jk_navigation_and_render() {
 #[test]
 fn mouse_click_selects_agent_and_context_rows() {
     let (mut app, _rt) = demo_app();
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     let _ = render(&mut app, 120, 40);
     // Click somewhere inside the Agents list column.
     let _ = app.on_event(mouse(MouseEventKind::Down(MouseButton::Left), 5, 5));
@@ -219,7 +219,7 @@ fn resume_picker_navigates_and_loads() {
         },
     ]);
     // Render the modal (Chat tab hosts it in the composer slot).
-    tab(&mut app, "Agents");
+    tab(&mut app, "Sessions");
     let out = render(&mut app, 120, 40);
     assert!(out.contains("Resume a chat"), "modal renders");
     // Down to the second row, back up, down again, then Enter loads it.

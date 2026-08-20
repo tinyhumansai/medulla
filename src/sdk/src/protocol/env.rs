@@ -10,7 +10,8 @@
 //! `MEDULLA_*` name wins and the deprecated `TINYPLACE_*` spelling is read
 //! directly behind it, so hosts configured before the rename keep working.
 //!
-//! `<P>` is the uppercased provider (`CODEX` / `CLAUDE` / `OPENCODE`).
+//! `<P>` is the uppercased provider (`CODEX` / `CLAUDE` / `OPENCODE` /
+//! `OPENHUMAN`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,13 +28,16 @@ pub const DEFAULT_STATUS_HEARTBEAT_MS: u64 = 15_000;
 /// Default silence-before-idle interval (ms).
 pub const DEFAULT_STATUS_IDLE_MS: u64 = 30_000;
 
-/// The first non-empty value among `keys`, in order.
+/// The first non-blank value among `keys`, in order.
+///
+/// Trimming for the emptiness check means an accidentally exported whitespace
+/// value does not mask a lower-precedence, usable setting.
 fn first_env<'a>(env: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
         .filter(|key| !key.is_empty())
         .filter_map(|key| env.get(*key))
         .map(String::as_str)
-        .find(|value| !value.is_empty())
+        .find(|value| !value.trim().is_empty())
 }
 
 /// The per-provider keys for `suffix`, highest precedence first:
@@ -125,6 +129,14 @@ pub fn receive_enabled(provider: HarnessProvider, env: &HashMap<String, String>)
 /// Per-provider binary override keys (first non-empty wins), highest precedence
 /// first. Claude also honors the legacy `TINYVERSE_CLAUDE_BIN`; the
 /// `MEDULLA_*` spellings are deprecated but still read.
+///
+/// OpenHuman's bare `OPENHUMAN_BIN` predates the namespaced convention and is
+/// kept behind the conventional pair rather than dropped: it names the
+/// standalone `openhuman-core` binary a bridged wrapper or PTY session spawns,
+/// which is a real process even though the *embedded* provider
+/// ([`crate::daemon::providers::openhuman`]) spawns nothing. It says nothing
+/// about which model an embedded turn runs on — that is
+/// [`model_override`].
 fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
     match provider {
         HarnessProvider::Claude => &[
@@ -134,8 +146,43 @@ fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
         ],
         HarnessProvider::Codex => &["MEDULLA_CODEX_BIN", "TINYPLACE_CODEX_BIN"],
         HarnessProvider::Opencode => &["MEDULLA_OPENCODE_BIN", "TINYPLACE_OPENCODE_BIN"],
-        HarnessProvider::Openhuman => &["OPENHUMAN_BIN"],
+        HarnessProvider::Openhuman => &[
+            "MEDULLA_OPENHUMAN_BIN",
+            "TINYPLACE_OPENHUMAN_BIN",
+            "OPENHUMAN_BIN",
+        ],
     }
+}
+
+/// The model this provider's turn should run on, when the environment names
+/// one. Order: `MEDULLA_<P>_MODEL` > `MEDULLA_HARNESS_MODEL`, with the
+/// deprecated `TINYPLACE_*` spelling of each read directly behind it.
+///
+/// Values are trimmed, and a blank one is treated as unset — an exported but
+/// empty variable is a shell accident, not a request for the empty model.
+///
+/// This is the *host operator's* override, so it deliberately outranks what a
+/// workflow node, a harness preset, or a host default asked for: it is the knob
+/// that answers "run this machine's turns on that model right now" without
+/// editing a config file or a graph. Callers that resolve a model from several
+/// sources should consult this first — see
+/// [`crate::daemon::providers::openhuman::effective_model`], which does exactly
+/// that for the embedded core.
+pub fn model_override(provider: HarnessProvider, env: &HashMap<String, String>) -> Option<String> {
+    let provider_keys = provider_keys(provider, "MODEL");
+    let harness_keys = harness_keys("MODEL");
+    first_env(
+        env,
+        &[
+            &provider_keys[0],
+            &provider_keys[1],
+            &harness_keys[0],
+            &harness_keys[1],
+        ],
+    )
+    .map(str::trim)
+    .filter(|model| !model.is_empty())
+    .map(str::to_string)
 }
 
 fn default_bin(provider: HarnessProvider) -> &'static str {

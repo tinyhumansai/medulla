@@ -197,10 +197,21 @@ impl CapabilitySettings {
     ///
     /// Matches on exact host or a dot-suffix, so `example.com` permits
     /// `api.example.com` but not `notexample.com`.
+    ///
+    /// A blank entry matches nothing. Without that skip the dot-suffix test
+    /// degenerates to `host.ends_with(".")` — one stray empty string in the
+    /// list would quietly turn a deny-by-default allowlist into one that
+    /// permits any host spelled with a trailing dot.
     pub fn http_host_allowed(&self, host: &str) -> bool {
         let host = host.trim().to_ascii_lowercase();
+        if host.is_empty() {
+            return false;
+        }
         self.http_allowlist.iter().any(|allowed| {
             let allowed = allowed.trim().to_ascii_lowercase();
+            if allowed.is_empty() {
+                return false;
+            }
             host == allowed || host.ends_with(&format!(".{allowed}"))
         })
     }
@@ -242,7 +253,14 @@ impl CapabilitySettings {
             Interpreter::default_shell()
         });
         settings.tool_allowlist = config.tool_allowlist.clone();
-        settings.http_allowlist = config.http_allowlist.clone();
+        // Blank entries are dropped on the way in as well as ignored on the way
+        // out, so an allowlist an operator reads back says what it enforces.
+        settings.http_allowlist = config
+            .http_allowlist
+            .iter()
+            .map(|host| host.trim().to_string())
+            .filter(|host| !host.is_empty())
+            .collect();
         // A zero timeout would abandon every run instantly, which reads as the
         // feature being broken rather than as a configuration mistake.
         settings.run_timeout_secs = if config.run_timeout_secs == 0 {

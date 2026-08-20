@@ -65,7 +65,6 @@ impl App {
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             if is_focus_chord(key) {
                 self.release_session();
-                self.focus_agents_rail();
                 self.set_status(format!(
                     "Released the session · {FOCUS_CHORD_LABEL} to type again"
                 ));
@@ -82,7 +81,7 @@ impl App {
         if self.overlay_owns_keys() {
             return false;
         }
-        // `agents_rail_focused`, not the raw focus field. A harness row draws no
+        // `sessions_rail_focused`, not the raw focus field. A harness row draws no
         // composer, so the rail is driving the keyboard whether or not the
         // operator ever pressed Esc to say so — and the field alone is `Composer`
         // for anyone who arrived by `Alt`+`↓` or by clicking. Enter then fell
@@ -94,7 +93,7 @@ impl App {
             && key.modifiers == KeyModifiers::NONE
             && self.pane_view == PaneView::Harness
             && self.pane_session.is_some()
-            && self.agents_rail_focused();
+            && self.sessions_rail_focused();
         if enter_on_harness {
             // Typing into a harness means looking at it. If the pane was showing
             // the session's diff instead, the terminal comes back first —
@@ -114,7 +113,7 @@ impl App {
         false
     }
 
-    /// Attach to the harness the Agents pane resolved on the last draw.
+    /// Attach to the harness the Sessions pane resolved on the last draw.
     ///
     /// Refuses, with a reason, rather than silently doing nothing: an operator
     /// who pressed the chord and saw no change has no way to tell "wrong row"

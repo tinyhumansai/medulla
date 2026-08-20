@@ -8,10 +8,10 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::stream;
-use crate::ui::theme::{color_to_string, THEME_ROLES};
+use crate::ui::theme::{blink_seconds, color_to_string, THEME_ROLES};
 use crate::ui::util::clip;
 
-use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS};
+use super::super::super::appearance::{APPEARANCE_ROWS, ATTENTION_ROWS, SIDEBAR_GROUPING_OPTION};
 use super::super::super::types::App;
 
 impl App {
@@ -100,6 +100,30 @@ impl App {
             ),
             blink_style,
         )));
+        let rate_index = THEME_ROLES.len() + 1;
+        if rate_index == sel {
+            selected_line_index = lines.len();
+        }
+        let rate_style = if rate_index == sel {
+            self.theme.selection()
+        } else {
+            Style::default()
+        };
+        // Shown in seconds because that is the unit the setting is configured
+        // and reasoned about in, and dimmed to "—" while blinking is off: a rate
+        // for an effect that is not running is a number that means nothing.
+        lines.push(TLine::from(Span::styled(
+            format!(
+                "{}    Blink rate        {}",
+                if rate_index == sel { "  ▸ " } else { "    " },
+                if self.theme.attention_blink {
+                    format!("{:.1}s", blink_seconds(self.theme.attention_blink_ms))
+                } else {
+                    "—".to_string()
+                }
+            ),
+            rate_style,
+        )));
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled("Resource indicators", heading)));
         lines.push(TLine::from(Span::styled(
@@ -126,7 +150,7 @@ impl App {
                 3 => {
                     lines.push(TLine::from(""));
                     lines.push(TLine::from(Span::styled(
-                        "  This device · Agents sidebar",
+                        "  This device · Sessions sidebar",
                         description,
                     )));
                     let title_index = THEME_ROLES.len() + ATTENTION_ROWS + 3;
@@ -171,6 +195,49 @@ impl App {
                 ),
                 style,
             )));
+        }
+        lines.push(TLine::from(""));
+        lines.push(TLine::from(Span::styled("Agents sidebar", heading)));
+        lines.push(TLine::from(Span::styled(
+            "  How the sidebar sections its agents, and what order rows come in.",
+            description,
+        )));
+        lines.push(TLine::from(""));
+        for (offset, (label, value, hint)) in [
+            (
+                "Group by",
+                self.loaded.config.appearance.sidebar_grouping.label(),
+                "host · path · harness · none",
+            ),
+            (
+                "Sort by",
+                self.loaded.config.appearance.sidebar_sort.label(),
+                "created · recent · name",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let index = THEME_ROLES.len() + ATTENTION_ROWS + SIDEBAR_GROUPING_OPTION + offset;
+            if index == sel {
+                selected_line_index = lines.len();
+            }
+            let style = if index == sel {
+                self.theme.selection()
+            } else {
+                Style::default()
+            };
+            let marker = if index == sel { "  ▸ " } else { "    " };
+            lines.push(TLine::from(vec![
+                Span::styled(format!("{marker}{label:<20} {value:<10}"), style),
+                // The other rows on this page cycle between two or three states
+                // an operator can guess at; these cycle between four named ones,
+                // and a row reading only "path" gives no clue what else there is.
+                Span::styled(
+                    hint.to_string(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+            ]));
         }
         lines.push(TLine::from(""));
         lines.push(TLine::from(Span::styled(

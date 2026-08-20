@@ -34,6 +34,11 @@ permissions:
   contents: write
 
 jobs:
+  # No e2e gate here any more: the docker/tmux harness suites moved back to CI,
+  # which runs them on every pull request and every push to main. This workflow
+  # always releases from main, so by the time it runs that commit has already
+  # been through all fifteen suite/harness combinations — re-running them here
+  # would gate on a result that is already known.
   tag:
     runs-on: ubuntu-latest
     # Grants access to the environment-scoped GitHub App secrets.

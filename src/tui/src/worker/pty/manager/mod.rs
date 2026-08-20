@@ -18,7 +18,9 @@
 //! Split so no file exceeds the repo's 500-line ceiling: [`open`] launches a
 //! harness on a fresh pty and drains it, [`session`] is the bookkeeping every
 //! other caller reads, [`screen`] is the emulator surface the UI renders,
-//! [`attention`] keeps each row's "this harness wants you" flag current, and
+//! [`attention`] keeps each row's "this harness wants you" flag current,
+//! [`checkout`] does the same for the repository, worktree, and branch it is
+//! working in, [`labels`] for a Codex session's renamed thread, and
 //! [`clipboard`] carries a harness's own copies out to the operator's terminal.
 //!
 //! Both halves of the master run on **blocking threads**, not tokio tasks:
@@ -153,8 +155,22 @@ impl PtyManager {
                 next_id: AtomicU64::new(1),
                 now,
                 clipboard: queue,
+                hook_log: std::sync::OnceLock::new(),
             }),
         }
+    }
+
+    /// Hand the manager the lifecycle-report log the attention poller reads
+    /// `Notification` cues from.
+    ///
+    /// Set once, before the first session opens. The log is the same
+    /// [`HookEventLog`] the control plane records into and the Hooks page reads
+    /// out of; cloning it shares the one buffer. A second call is a no-op — the
+    /// poller has already taken the first — and is ignored so a relogin that
+    /// rebuilds the wiring cannot silently swap the log out from under live
+    /// sessions.
+    pub fn set_hook_log(&self, log: medulla::harness_hooks::HookEventLog) {
+        let _ = self.inner.hook_log.set(log);
     }
 
     fn now(&self) -> i64 {
@@ -197,7 +213,9 @@ impl PtyManager {
 }
 
 mod attention;
+mod checkout;
 mod clipboard;
+mod labels;
 mod open;
 mod screen;
 mod session;

@@ -206,11 +206,13 @@ pub struct SessionRow {
     pub state: PtyState,
     /// The working directory the child runs in.
     pub cwd: String,
-    /// Git branch resolved from the working directory when the session opened.
+    /// Which repository, worktree, and branch the working directory sits in.
     ///
-    /// `None` means the directory is not in a repository or has a detached
-    /// `HEAD`.
-    pub branch: Option<String>,
+    /// Kept current while the session runs rather than captured at launch: an
+    /// agent whose first act is to cut a branch spends the rest of its life on
+    /// one the launch snapshot had never heard of, and several worktrees of one
+    /// repository are otherwise told apart only by a path segment.
+    pub checkout: medulla::ui::checkout::Checkout,
     /// Repository root captured immediately before launch.
     pub launch_root: Option<String>,
     /// Commit checked out in the working directory immediately before launch.
@@ -230,6 +232,10 @@ pub struct SessionRow {
     /// Epoch ms when the session started.
     pub started_at: i64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.
+    ///
+    /// Also the lifecycle-transition time a failure cue is stamped with: reaping
+    /// and a recorded write error both write it here, so a brand-new failure
+    /// does not claim the age of a session that had simply been quiet.
     pub last_output_at: i64,
     /// Why it failed, when it did.
     pub last_error: Option<String>,
@@ -254,6 +260,14 @@ pub struct SessionRow {
     /// it hold the checkout against every task queued behind it. Cleared the
     /// moment the operator does take it.
     pub retained: bool,
+    /// Whether the child was deliberately asked to exit rather than dying on
+    /// its own.
+    ///
+    /// A harness that is killed on request — an operator closing it, a bounded
+    /// turn that never answered — reaps with a signal-derived nonzero status.
+    /// That is the child obeying the request, not a lifecycle failure, and the
+    /// lifecycle cue reads it accordingly.
+    pub closed_by_request: bool,
     /// The name the operator gave it when they started it, if they gave one.
     ///
     /// `None` for a dispatched session; the UI labels those from their task.
@@ -270,6 +284,14 @@ pub struct SessionRow {
     ///
     /// `None` is the ordinary state: working, idle at a composer, or exited.
     pub attention: Option<HarnessAttention>,
+    /// Whether the harness is mid-turn right now, per its own screen.
+    ///
+    /// The other half of what [`attention`](SessionRow::attention) cannot say.
+    /// Together they separate the three things a live session can be doing —
+    /// working, waiting on you, or idle at a composer — which `state` alone
+    /// renders identically. Recomputed as the screen paints; always `false`
+    /// once the child has gone.
+    pub working: bool,
     /// The key this session's fleet grant was minted under, when it was given
     /// one — see [`LaunchSpec::mcp_grant_session`].
     ///

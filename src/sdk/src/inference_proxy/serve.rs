@@ -7,21 +7,26 @@
 //! Streaming is the load-bearing property. A harness's main request is an SSE
 //! token stream, so collecting the response before returning it would convert a
 //! live stream into one long pause and break the interactive experience the TUI
-//! renders. Both bodies are therefore forwarded as streams.
+//! renders. The response body is therefore always forwarded as a stream, and so
+//! is the request body — except for a run that pinned an upstream provider,
+//! whose preference lives inside the JSON request body and so must be buffered
+//! to be applied. See [`super::body`]; the response direction is untouched
+//! either way.
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use http::{HeaderMap, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
-use hyper::body::{Frame, Incoming};
+use hyper::body::{Body as _, Frame, Incoming};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
+use super::body;
 use super::types::{CredentialRegistry, UpstreamShape};
 
 /// The body type both proxied and locally-generated responses use.
@@ -255,6 +260,83 @@ fn is_stripped_response_header(name: &http::HeaderName) -> bool {
     )
 }
 
+/// How a request body reaches upstream: straight through, or buffered so a
+/// provider pin could be merged into it.
+enum ForwardBody {
+    /// Forwarded chunk by chunk, never held whole in this process.
+    Streamed(reqwest::Body),
+    /// Buffered, parsed, and re-serialized with `provider.only` applied.
+    Rewritten(Bytes),
+}
+
+/// Prepare the outgoing body, applying `provider_only` when one is configured.
+///
+/// Unpinned runs keep the streaming forward: a large prompt (or an uploaded
+/// file) should not be held whole in this process on its way through. A pinned
+/// run has to buffer, because the preference lives inside the JSON body — so it
+/// buffers up to [`body::MAX_REWRITE_BYTES`] and streams anything larger
+/// unpinned rather than failing an otherwise valid request.
+async fn forward_body(
+    req: Request<Incoming>,
+    provider_only: &[String],
+) -> Result<ForwardBody, hyper::Error> {
+    if provider_only.is_empty() {
+        return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(
+            req.into_body().into_data_stream(),
+        )));
+    }
+
+    // The declared size is only a fast path: a chunked request's lower bound is
+    // 0 even when it will not stay small, so the loop below counts real bytes
+    // and falls back to an unpinned stream once the limit is reached. Relying
+    // on `size_hint` alone would let a chunked body allocate without bound.
+    if req.body().size_hint().lower() > body::MAX_REWRITE_BYTES as u64 {
+        return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(
+            req.into_body().into_data_stream(),
+        )));
+    }
+
+    // Read one frame at a time, keeping a running byte count. Everything
+    // buffered fits the rewrite limit by construction; when the limit trips the
+    // already-consumed frames are streamed ahead of the unread tail, and the
+    // frame that crossed the limit — pulled out of `tail` but never buffered —
+    // is re-emitted in its place, so falling back to a stream costs the
+    // upstream nothing and loses no byte.
+    let mut tail = Box::pin(req.into_body().into_data_stream());
+    let mut buffered = Vec::new();
+    let mut bytes_seen = 0usize;
+    while let Some(chunk) = tail.next().await {
+        let chunk = chunk?;
+        bytes_seen += chunk.len();
+        if bytes_seen > body::MAX_REWRITE_BYTES {
+            tracing::warn!(
+                "request body exceeds the rewrite limit; forwarding without the provider pin"
+            );
+            let prefix = buffered
+                .into_iter()
+                .map(Ok::<Bytes, hyper::Error>)
+                .chain(std::iter::once(Ok::<Bytes, hyper::Error>(chunk)));
+            let stream = futures::stream::iter(prefix).chain(tail);
+            return Ok(ForwardBody::Streamed(reqwest::Body::wrap_stream(stream)));
+        }
+        buffered.push(chunk);
+    }
+
+    let mut frame_buffer = Vec::with_capacity(bytes_seen);
+    for chunk in &buffered {
+        frame_buffer.extend_from_slice(chunk);
+    }
+    let collected = Bytes::from(frame_buffer);
+    Ok(
+        match body::inject_provider_only(&collected, provider_only) {
+            Some(rewritten) => ForwardBody::Rewritten(rewritten),
+            // Not a JSON object, or already restricted by the caller: forward the
+            // bytes exactly as received rather than inventing a shape for them.
+            None => ForwardBody::Rewritten(collected),
+        },
+    )
+}
+
 /// Serve one request: authenticate, re-head, forward, stream back.
 async fn handle(
     req: Request<Incoming>,
@@ -279,7 +361,7 @@ async fn handle(
         return Ok(text(StatusCode::UNAUTHORIZED, "unrecognized proxy token"));
     };
 
-    let Some(headers) = super::headers::rewrite(req.headers(), &upstream_key) else {
+    let Some(mut headers) = super::headers::rewrite(req.headers(), &upstream_key.key) else {
         return Ok(text(
             StatusCode::INTERNAL_SERVER_ERROR,
             "upstream credential is not a valid header value",
@@ -287,9 +369,19 @@ async fn handle(
     };
     let url = upstream_url(&state.upstream_root, shape, remainder, req.uri().query());
     let method = req.method().clone();
-    // Streamed, not collected: a large prompt (or an uploaded file) should not be
-    // held whole in this process on its way through.
-    let body = reqwest::Body::wrap_stream(req.into_body().into_data_stream());
+    let body = match forward_body(req, &upstream_key.provider_only).await {
+        Ok(ForwardBody::Streamed(body)) => body,
+        Ok(ForwardBody::Rewritten(bytes)) => {
+            // The rewrite changed the length, and a stale `content-length` would
+            // truncate the request upstream.
+            headers.remove(http::header::CONTENT_LENGTH);
+            reqwest::Body::from(bytes)
+        }
+        Err(error) => {
+            tracing::warn!(%error, "attribution proxy could not read the request body");
+            return Ok(text(StatusCode::BAD_REQUEST, "unreadable request body"));
+        }
+    };
 
     let upstream = match state
         .client

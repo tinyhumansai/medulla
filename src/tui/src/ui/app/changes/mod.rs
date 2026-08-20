@@ -1,4 +1,8 @@
-//! Session-scoped Git inspection and review comments for the Changes tab.
+//! Session-scoped Git inspection and review comments for the harness diff pane.
+//!
+//! A Git diff is a property of one session — what it changed since it launched
+//! — so it is shown in the Sessions tab's harness pane (`d` on a row swaps the
+//! terminal for the diff) rather than as a top-level tab over the whole fleet.
 //!
 //! Git subprocesses live in [`repository`], the cursor and cache in [`types`],
 //! and the reusable review model in [`medulla::ui::git_review`]. This module is
@@ -23,44 +27,25 @@ use std::path::Path;
 use medulla::ui::git_review::CommentAnchor;
 pub(crate) use types::GitChangesState;
 
-use super::types::{App, Cmd, PaneView, PromptKind, TABS};
+use super::types::{App, PaneView, PromptKind};
 use crate::ui::composer::{Draft, TextPrompt};
 use baseline::select_harness_baseline;
 
 impl App {
-    /// Open the Changes tab for the harness currently shown in the Agents pane.
-    ///
-    /// The draw path records the exact session resolved from the selected rail
-    /// row. Keeping that id before changing tabs lets the forced refresh pick
-    /// the matching launch snapshot instead of falling back to another, newer
-    /// harness in a different checkout. Unlike ordinary tab entry, this also
-    /// replaces an operator-selected commit or manual baseline: `d` means the
-    /// immutable launch diff for the harness under the cursor.
-    pub(super) fn open_selected_harness_changes(&mut self) -> Option<Cmd> {
-        let session = self.pane_session.clone()?;
-        self.rail_session = Some(session);
-        self.tab_index = TABS
-            .iter()
-            .position(|tab| *tab == "Changes")
-            .expect("Changes is a top-level tab");
-        self.selected = 0;
-        self.refresh_changes_from_selected_harness();
-        None
-    }
-
     /// Swap the harness pane between its terminal and its diff.
     ///
-    /// The diff is drawn *in the pane* rather than on the Changes tab, because
-    /// the operator asked a question about the row they are sitting on: sending
-    /// them to another tab makes the rail cursor, the pane title and the tab bar
-    /// all move at once to answer "what has this one changed". Same state and
-    /// same bindings as the tab — only the real estate differs — so `d` again
-    /// puts the terminal back.
+    /// The diff is drawn *in the pane* rather than on its own tab, because the
+    /// operator asked a question about the row they are sitting on: a Git diff
+    /// is a property of one session — what it changed since it launched — not a
+    /// view over the whole fleet, so `d` answers "what has this one changed"
+    /// without moving the rail cursor, the pane title or the tab bar. Same state
+    /// and same bindings as a full diff would have — only the real estate differs
+    /// — so `d` again puts the terminal back.
     ///
-    /// Each opening re-points Git at this session's launch snapshot, for the
-    /// reason [`open_selected_harness_changes`](Self::open_selected_harness_changes)
-    /// does: the collected diff is shared with the Changes tab, so it may be
-    /// describing a different harness entirely.
+    /// Each opening re-points Git at this session's launch snapshot: the
+    /// collected diff is shared state that may have been left describing a
+    /// different harness entirely, so it is re-rooted on the row under the cursor
+    /// before anything is drawn.
     pub(super) fn toggle_harness_diff_pane(&mut self) {
         if self.pane_view == PaneView::Diff {
             self.pane_view = PaneView::Harness;

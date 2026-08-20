@@ -6,9 +6,10 @@
 
 use std::collections::HashMap;
 
-use super::{is_structured_frame, wrapper_line_mapper};
+use super::{advance_status_state, heartbeat_due, is_structured_frame, wrapper_line_mapper};
 use crate::protocol::{
-    encode_harness_control_frame, encode_screen_message, ScreenMessage, SCREEN_PROTO,
+    encode_harness_control_frame, encode_screen_message, initial_status, ScreenMessage,
+    SemanticEvent, SCREEN_PROTO,
 };
 
 /// Every screen message kind is structured, whichever direction it travels.
@@ -88,4 +89,42 @@ fn configured_github_repository_override_reaches_the_mapper() {
         .payload
         .get("pull_request")
         .is_none()));
+}
+
+/// Real state changes are change-gated, not heartbeat-throttled.
+#[test]
+fn rapid_status_changes_are_both_emitted_inside_one_heartbeat_interval() {
+    let mut mapper = wrapper_line_mapper("claude", &HashMap::new(), false);
+    let prompt = r#"{"type":"user","timestamp":"2026-08-16T00:00:00Z","message":{"role":"user","content":"work"}}"#;
+    let tool = r#"{"type":"assistant","timestamp":"2026-08-16T00:00:00.001Z","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"true"}}]}}"#;
+    let semantics = [prompt, tool]
+        .iter()
+        .enumerate()
+        .flat_map(|(line, raw)| mapper.map_line(raw, line as i64))
+        .collect::<Vec<_>>();
+    let mut status = initial_status(0);
+
+    let emitted = semantics
+        .iter()
+        .filter_map(|semantic| {
+            advance_status_state(
+                &mut status,
+                &SemanticEvent {
+                    timestamp_ms: Some(semantic.timestamp_ms),
+                    event: semantic.event.decoded(),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(emitted.len(), 2);
+    assert_eq!(emitted[0].state, "running");
+    assert_eq!(emitted[1].state, "running_tool");
+}
+
+/// Heartbeats retain the configured minimum interval independently of changes.
+#[test]
+fn heartbeat_due_respects_its_interval() {
+    assert!(!heartbeat_due(1_000, 15_999, 15_000));
+    assert!(heartbeat_due(1_000, 16_000, 15_000));
 }

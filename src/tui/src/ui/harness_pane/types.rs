@@ -50,12 +50,12 @@ impl HarnessChoice {
     }
 }
 
-/// The live sessions this device is running — what the Agents tab reads and
+/// The live sessions this device is running — what the Sessions tab reads and
 /// types into.
 ///
 /// Two halves that are only useful together: [`sessions`](Self::sessions) holds
 /// the screens and the write side, and [`runtime`](Self::runtime) answers which
-/// session is serving a given task. Selecting a task in the Agents tab resolves
+/// session is serving a given task. Selecting a task in the Sessions tab resolves
 /// through the runtime and then renders through the manager.
 ///
 /// Cheap to clone — both fields are `Arc`-backed — and a clone does *not* keep

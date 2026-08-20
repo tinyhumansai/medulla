@@ -34,17 +34,22 @@ fn hosts_tab_lists_hosts_with_their_agents() {
 }
 
 #[test]
-fn the_local_host_offers_agent_creation_and_a_remote_does_not() {
+fn the_page_reports_each_hosts_declarations_without_offering_to_add_one() {
     // The v1 capability split, made visible: an agent is declared on the machine
-    // that owns it. Dispatch to a remote agent is unaffected — this is only
-    // about what the operator can change from this terminal.
+    // that owns it, and this end can only ever see a remote machine's tree.
+    // Declaring is now config-only — there is no key here that grows the tree —
+    // so the page must report what is declared and promise nothing more.
     let mut app = app_with_roster(vec![worker("w1", true)], None);
     app.focus_routing_subpage("Hosts");
 
     let out = render(&mut app, 130, 40);
     assert!(
-        out.contains("none declared here · n declares one"),
-        "the local host invites a new agent: {out}"
+        out.contains("none declared here"),
+        "the local host reports its tree: {out}"
+    );
+    assert!(
+        !out.contains("declares one") && !out.contains("declares another"),
+        "and must not advertise a key that no longer exists: {out}"
     );
     assert!(app.selected_host_is_local());
 
@@ -58,33 +63,6 @@ fn the_local_host_offers_agent_creation_and_a_remote_does_not() {
     assert!(
         out.contains("this hub lists what its roster reaches"),
         "and is honest that it cannot see that machine's declarations: {out}"
-    );
-
-    // `n` refuses on a remote host rather than being silently inert.
-    assert!(app.on_event(key(KeyCode::Char('n'))).is_none());
-    assert!(
-        app.status().contains("read-only"),
-        "status: {}",
-        app.status()
-    );
-
-    // On the local host it reaches the declare flow instead of refusing. This
-    // fixture hosts nothing, so the flow's own answer is that there is no host
-    // here to declare on — which is the point: what the local host must never
-    // say is that this end is a read-only view of somebody else's fleet. The
-    // flow opening on a hosting device is covered by
-    // `a_local_host_declares_its_agent_without_leaving_the_page`.
-    let _ = app.on_event(key(KeyCode::Up));
-    assert!(app.on_event(key(KeyCode::Char('n'))).is_none());
-    assert!(
-        !app.status().contains("read-only"),
-        "the local host is not read-only: {}",
-        app.status()
-    );
-    assert!(
-        app.status().contains("declare"),
-        "and the answer is about declaring: {}",
-        app.status()
     );
 }
 

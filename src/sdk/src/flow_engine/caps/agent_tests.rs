@@ -12,11 +12,14 @@ use async_trait::async_trait;
 use tinyflows::caps::AgentRunner;
 
 use super::{dispatch_harness, AgentRoute, HarnessAgentRunner};
+use crate::flow_engine::agent_evidence::AgentEvidence;
 use crate::flow_engine::caps::dispatch::HarnessDispatch;
 use crate::flow_engine::harness_choice::HarnessChoice;
 use crate::flow_engine::settings::CapabilitySettings;
+use crate::harness_transcript::TranscriptEntry;
 use crate::hub::{RunError, TaskOutcome, TaskRequest};
 use crate::protocol::{HarnessProvider, HarnessTransport};
+use crate::workflows::RunStep;
 
 /// A dispatch that is never actually reached: these tests stop at the request.
 struct UnusedDispatch;
@@ -59,6 +62,7 @@ impl HarnessDispatch for SubstitutingDispatch {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 
@@ -222,5 +226,86 @@ async fn the_registry_records_the_harness_the_dispatch_substituted() {
     assert!(
         crate::workflows::run::dispatches::in_flight("run-substituted").is_empty(),
         "the entry is withdrawn when the dispatch returns"
+    );
+}
+
+/// A dispatch that fails the way a real harness failure does: by the time the
+/// task returns an error, the collector has already folded some of the
+/// harness's events into a transcript. The workflow dispatch carries that
+/// account on the failure (`RunError::WorkerWithTranscript`), and the runner
+/// must record it onto the failed step — the step is the one place a transcript
+/// is worth keeping, since its prompt and error say what was asked and what went
+/// wrong but not what happened in between.
+struct TranscriptFailingDispatch {
+    message: String,
+    transcript: Vec<TranscriptEntry>,
+}
+
+#[async_trait]
+impl HarnessDispatch for TranscriptFailingDispatch {
+    async fn dispatch(&self, _request: TaskRequest) -> Result<TaskOutcome, RunError> {
+        Err(RunError::WorkerWithTranscript {
+            message: self.message.clone(),
+            transcript: self.transcript.clone(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_failed_dispatch_keeps_the_transcript_it_collected() {
+    let evidence = Arc::new(AgentEvidence::default());
+    let dispatch = Arc::new(TranscriptFailingDispatch {
+        message: "harness exited nonzero".to_string(),
+        transcript: vec![
+            TranscriptEntry {
+                at_ms: 1,
+                kind: "tool_call".to_string(),
+                text: "Bash(npm test)".to_string(),
+            },
+            TranscriptEntry {
+                at_ms: 2,
+                kind: "error".to_string(),
+                text: "tests failed".to_string(),
+            },
+        ],
+    });
+    let root = std::env::temp_dir().join("medulla-agent-tests");
+    let mut settings = CapabilitySettings::rooted_at(&root);
+    settings.default_worker_address = "worker".to_string();
+    let runner = HarnessAgentRunner::recording(
+        dispatch.clone(),
+        Arc::new(settings),
+        "run-failed-transcript",
+        evidence.clone(),
+    );
+
+    let error = runner
+        .run_on_harness(
+            AgentRoute::Default,
+            "do the thing".to_string(),
+            HarnessChoice::default(),
+            Some("work".to_string()),
+        )
+        .await
+        .expect_err("the dispatch fails");
+
+    assert!(
+        error.to_string().contains("harness exited nonzero"),
+        "the failure message still reaches the step error"
+    );
+
+    let mut step = RunStep {
+        node_id: "work".to_string(),
+        status: "error".to_string(),
+        duration_ms: 4,
+        input: None,
+        output: None,
+        diagnostics: Vec::new(),
+        transcript: Vec::new(),
+    };
+    evidence.attach(std::slice::from_mut(&mut step));
+    assert_eq!(
+        step.transcript, dispatch.transcript,
+        "the failed step keeps the transcript its harness collected"
     );
 }

@@ -98,6 +98,7 @@ fn options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),
         conversation: conversation.to_string(),

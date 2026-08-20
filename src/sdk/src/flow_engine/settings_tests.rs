@@ -79,6 +79,32 @@ fn an_allowlisted_domain_covers_its_subdomains_but_not_a_lookalike() {
 }
 
 #[test]
+fn a_blank_allowlist_entry_permits_nothing() {
+    // `host.ends_with(".{allowed}")` with an empty entry is `ends_with(".")`,
+    // which any host spelled with a trailing dot satisfies — one stray blank
+    // line in an operator's config would otherwise open the whole allowlist.
+    let mut settings = CapabilitySettings::rooted_at(Path::new("/home"));
+    settings.http_allowlist = vec!["".into(), "   ".into()];
+
+    assert!(!settings.http_host_allowed("evil.test"));
+    assert!(!settings.http_host_allowed("evil.test."));
+    assert!(!settings.http_host_allowed("169.254.169.254."));
+    assert!(!settings.http_host_allowed(""));
+}
+
+#[test]
+fn blank_allowlist_entries_are_dropped_when_config_is_loaded() {
+    let config = WorkflowsConfig {
+        http_allowlist: vec!["".into(), " api.github.com ".into(), "  ".into()],
+        ..Default::default()
+    };
+
+    let settings = CapabilitySettings::from_config(&config, "/home/.medulla");
+
+    assert_eq!(settings.http_allowlist, vec!["api.github.com".to_string()]);
+}
+
+#[test]
 fn config_becomes_settings_with_every_field_carried_across() {
     let config = WorkflowsConfig {
         enabled: true,

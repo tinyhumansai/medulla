@@ -309,3 +309,104 @@ fn seed_hook_grant_mints_a_real_grant_and_revokes_it_on_drop() {
         "the grant must be gone once its guard has dropped"
     );
 }
+
+/// The central claim of workflow tool-withholding, proven where it can
+/// actually fail: with a control plane bound, so a grant *was* available and
+/// declining it is a decision rather than the absence of one.
+///
+/// A harness serving a workflow `agent` node must be registered no MCP server
+/// at all — not a fleet-less one, not a read-only one. The node is a step of a
+/// graph that is already running, and `workflow_run` in its hands starts
+/// another outside the loop bound, the approval gates, and the concurrency
+/// budget the engine applies to its own nodes.
+#[test]
+fn a_withheld_launch_is_registered_no_mcp_server_at_all() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    let mut env = HashMap::new();
+    medulla::harness_tools::withhold(&mut env);
+    let mut args = Vec::new();
+
+    let granted = attach_cli(
+        HarnessProvider::Claude,
+        "claude",
+        "withheld-test-session",
+        &mut env,
+        &mut args,
+        None,
+    );
+
+    assert_eq!(granted, None, "a withheld launch must be minted no grant");
+    assert!(
+        !args.iter().any(|arg| arg == "--mcp-config"),
+        "a withheld launch must carry no server registration at all: {args:?}"
+    );
+}
+
+/// The control: the very same call without the marker does get a server and a
+/// grant. Asserted beside the case above so a bug that broke attachment
+/// wholesale could not pass as "withholding works".
+#[test]
+fn an_unmarked_launch_beside_it_still_gets_its_tools() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    let mut env = HashMap::new();
+    let mut args = Vec::new();
+
+    let granted = attach_cli(
+        HarnessProvider::Claude,
+        "claude",
+        "unmarked-control-test-session",
+        &mut env,
+        &mut args,
+        None,
+    );
+
+    assert!(
+        granted.is_some(),
+        "an ordinary launch must still be served its tools"
+    );
+    assert!(args.iter().any(|arg| arg == "--mcp-config"));
+    medulla::mcp::revoke_session(granted.as_deref().unwrap());
+}
+
+/// Withholding must survive an inherited capability. A workflow run started
+/// *by* a harness session carries that session's parent grant in the
+/// environment it hands down, and a nested launch that kept it would exchange
+/// its way back to exactly the fleet access the withholding exists to remove.
+#[test]
+fn withholding_survives_an_inherited_parent_grant() {
+    let _home = scratch_home();
+    ensure_control_plane();
+
+    let mut env = HashMap::new();
+    let (socket, token) =
+        medulla::mcp::local_hook_grant("inherited-grant-test-session").expect("a bound plane");
+    env.insert(
+        medulla::control_socket::MCP_SOCKET_ENV.to_string(),
+        socket.to_string_lossy().into_owned(),
+    );
+    env.insert(medulla::control_socket::MCP_GRANT_ENV.to_string(), token);
+
+    medulla::harness_tools::withhold(&mut env);
+
+    let mut args = Vec::new();
+    let granted = attach_cli(
+        HarnessProvider::Claude,
+        "claude",
+        "inherited-withheld-test-session",
+        &mut env,
+        &mut args,
+        None,
+    );
+
+    assert_eq!(granted, None);
+    assert!(!args.iter().any(|arg| arg == "--mcp-config"), "{args:?}");
+    assert!(
+        !env.contains_key(medulla::control_socket::MCP_GRANT_ENV),
+        "the inherited grant must be cleared, not merely unused: {env:?}"
+    );
+    medulla::mcp::revoke_session("inherited-grant-test-session");
+}

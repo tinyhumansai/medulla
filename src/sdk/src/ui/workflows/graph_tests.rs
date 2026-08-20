@@ -420,15 +420,15 @@ fn a_summary_names_what_identifies_the_node_for_its_kind() {
             node(
                 "s",
                 NodeKind::Shell,
-                json!({"script_path":"scripts/backup.sh","source":"echo ignored"}),
+                json!({"script_path":"scripts/backup.sh"}),
             ),
             "scripts/backup.sh",
         ),
         (
             node(
-                "s-source",
+                "s-script",
                 NodeKind::Shell,
-                json!({"source":"echo first\necho second"}),
+                json!({"script":"echo first\necho second","script_path":"scripts/ignored.sh"}),
             ),
             "echo first",
         ),
@@ -466,7 +466,7 @@ fn a_summary_names_what_identifies_the_node_for_its_kind() {
             node("gate", NodeKind::Gate, json!({"release":"quorum"})),
             "quorum",
         ),
-        (node("void", NodeKind::Void, json!({})), ""),
+        (node("void", NodeKind::Void, json!({})), "discarded"),
     ];
 
     for (node, expected) in cases {

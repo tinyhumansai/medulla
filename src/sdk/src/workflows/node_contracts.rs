@@ -194,6 +194,72 @@ pub fn apply_host_overlay(mut contract: NodeKindContract) -> NodeKindContract {
              node of the loop body and wire that body's last node back to this loop."
                 .to_string(),
         ],
+        "spawn" => vec![
+            // The engine's own note warns that a host may have injected no task
+            // runner, in which case the work runs inline and the overlap is
+            // silently lost. On this host it is wired, and saying so is the
+            // difference between an author designing around a cliff that is not
+            // there and one using the node as intended.
+            "This host wires a task runner, so a `spawn` genuinely overlaps: the work runs off \
+             the branch that started it and a downstream `gate` collects it. `target: \"tool\"` \
+             reaches the same `medulla:` tools a `tool_call` node does, and \
+             `target: \"workflow\"` runs the child graph against this run's own capabilities."
+                .to_string(),
+            "A spawned task inherits the run's deadline (`workflows.runTimeoutSecs`, 600 by \
+             default) and is failed at it rather than left running — its ticket then collects as \
+             `{failed: true, error}`. It does NOT get a deadline of its own, so a spawn started \
+             late in a long run has whatever is left of the run's."
+                .to_string(),
+            "`target: \"workflow\"` takes the child graph inline under `config.workflow`; there \
+             is no `workflow_id` here, unlike `sub_workflow`. A spawned child cannot pause for \
+             approval — nothing can address a resume to it — so a `requires_approval` gate it \
+             hits fails the ticket instead of parking it; the gate collecting it sees \
+             `{failed: true, error}`, not a silent partial success. Keep `requires_approval` \
+             out of a spawned graph."
+                .to_string(),
+            "This describes a production run. `workflow_dry_run` omits the task runner entirely \
+             and executes `spawn` inline against the same schema-aware stand-ins every other \
+             node validates against — so a dry run is synchronous and cannot be used to check \
+             that a `spawn`/`gate` pair actually overlaps in time."
+                .to_string(),
+        ],
+        "gate" => vec![
+            "Waiting costs super-steps: every poll is a node visit, so a gate over work that \
+             takes minutes — which a spawned `agent` step does on this host — wants a \
+             `poll_interval_ms` in the seconds and a `max_polls` to match, or \
+             `wait_mode: \"suspend\"`."
+                .to_string(),
+            "`release: \"quorum\"` or `\"any\"` leaves the stragglers running, and on this host a \
+             straggler is a live harness session holding a worker slot until it finishes or the \
+             run's deadline cuts it off. Releasing early frees the graph, not the worker."
+                .to_string(),
+        ],
+        "scatter" => vec![
+            // The ceiling is the thing an author gets wrong here: a scatter's
+            // width looks free, and on this host each lane can hold a session.
+            "`workflows.maxParallelAgents` (4 by default) still bounds the run, so a scatter 20 \
+             lanes wide whose body contains an `agent` node runs 4 harness sessions at a time and \
+             queues the rest. Lanes are cheap; what they hold is not. Set `lanes` to chunk a long \
+             list rather than opening one lane per item — check `workflow_host` for the ceiling."
+                .to_string(),
+            "Use a scatter when per-item work spans SEVERAL nodes. For per-item work inside one \
+             node, an `agent` node's own `execution: \"per_item\"` with a `concurrency` is \
+             simpler and reads more plainly on the canvas."
+                .to_string(),
+        ],
+        "void" => vec![
+            "Nothing is drained or cancelled when a run ends, so `spawn` -> `void` on this host \
+             leaves a live harness session running until it finishes on its own or the run's \
+             deadline cuts it off. Voiding a ticket says you do not want the *result*; it does \
+             not stop the work or free the worker slot early."
+                .to_string(),
+        ],
+        "gather" => vec![
+            "`on_lane_error: \"collect\"` (the default) is usually right on this host: a lane \
+             whose harness session failed becomes an item carrying the error, so the graph can \
+             branch on it rather than losing the whole fan-out to one bad repository."
+                .to_string(),
+        ],
         _ => Vec::new(),
     };
 

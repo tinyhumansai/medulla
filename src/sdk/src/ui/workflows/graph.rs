@@ -454,10 +454,10 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Dedup => "dedup",
         NodeKind::Loop => "loop",
         NodeKind::Spawn => "spawn",
+        NodeKind::Gate => "gate",
         NodeKind::Scatter => "scatter",
         NodeKind::Gather => "gather",
         NodeKind::Approval => "approval",
-        NodeKind::Gate => "gate",
         NodeKind::Void => "void",
     }
 }
@@ -474,6 +474,8 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::ToolCall => "⚒",
         NodeKind::HttpRequest => "⇅",
         NodeKind::Code => "λ",
+        // A prompt, because that is what the step is: a script handed to a
+        // shell, not a computation the graph carries.
         NodeKind::Shell => "$",
         NodeKind::Condition => "◆",
         NodeKind::Switch => "⑂",
@@ -491,11 +493,22 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // The one kind whose edges run backwards: the shape is the cycle it
         // draws on the canvas.
         NodeKind::Loop => "↺",
-        NodeKind::Spawn => "↗",
-        NodeKind::Scatter => "⋰",
-        NodeKind::Gather => "⋱",
+        // Work that leaves the branch and comes back later: the arrow points
+        // away from the path the graph is still walking.
+        NodeKind::Spawn => "⇗",
+        // The collecting half, pointing back in. Read beside a `spawn` the pair
+        // reads as one round trip.
+        NodeKind::Gate => "⇘",
+        // Fan-out and fan-in of the whole downstream path. Deliberately the
+        // heavier pair of arrows: unlike `split_out`, what widens here is the
+        // pipeline, not the item stream.
+        NodeKind::Scatter => "⇶",
+        NodeKind::Gather => "⇉",
+        // A human decision interrupts the automated path.
         NodeKind::Approval => "✓",
-        NodeKind::Gate => "⊣",
+        // A stop, not an arrow: the whole point of the kind is that nothing
+        // leaves it, and an operator scanning the canvas should be able to tell
+        // a deliberate sink from a branch someone forgot to wire.
         NodeKind::Void => "∅",
     }
 }
@@ -521,6 +534,10 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         // `dedup` reads durable state, but what it *does* to the graph is route:
         // an item either continues or is dropped, so it reads with the control
         // flow rather than with the kinds that reach outside the process.
+        // `spawn`/`gate` and `scatter`/`gather` read with the control flow for
+        // the same reason: what each does to the graph is decide where and how
+        // wide execution goes next. That the work itself may reach outside the
+        // process is the business of the nodes they start, not of these.
         NodeKind::Condition
         | NodeKind::Switch
         | NodeKind::Merge
@@ -528,9 +545,9 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::Dedup
         | NodeKind::Loop
         | NodeKind::Spawn
+        | NodeKind::Gate
         | NodeKind::Scatter
         | NodeKind::Gather
-        | NodeKind::Gate
         | NodeKind::Void => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
@@ -578,11 +595,10 @@ pub fn node_summary(node: &Node) -> String {
             }
         }
         NodeKind::Code => text("language").unwrap_or_default(),
-        NodeKind::Shell => text("script_path")
-            .or_else(|| {
-                text("source")
-                    .map(|source| source.split('\n').next().unwrap_or(&source).to_string())
-            })
+        // The script itself, when it is inline and short enough to read; the
+        // path otherwise, which is the other thing that says what will run.
+        NodeKind::Shell => text("script")
+            .or_else(|| text("script_path"))
             .unwrap_or_default(),
         NodeKind::Condition => text("expression")
             .or_else(|| text("left"))
@@ -620,19 +636,51 @@ pub fn node_summary(node: &Node) -> String {
             .and_then(|value| value.as_array())
             .map(|inputs| format!("{} inputs", inputs.len()))
             .unwrap_or_default(),
-        NodeKind::Spawn => text("target").unwrap_or_default(),
+        // What is being started, and the thing that identifies it — a tool's
+        // slug says far more than the bare word "tool".
+        NodeKind::Spawn => match (text("target"), text("slug")) {
+            (Some(target), Some(slug)) => format!("{target} · {slug}"),
+            (Some(target), None) => target,
+            (None, _) => String::new(),
+        },
+        // The release policy is the whole of what distinguishes a gate from a
+        // barrier, and `n` is meaningless without it.
+        NodeKind::Gate => release_summary(node),
+        // How wide it goes: an explicit lane count when the author capped it,
+        // otherwise the path whose length decides at run time.
         NodeKind::Scatter => match (
+            node.config.get("lanes").and_then(serde_json::Value::as_u64),
             text("path"),
-            node.config.get("lanes").and_then(|value| value.as_u64()),
         ) {
-            (Some(path), Some(lanes)) => format!("{path} · {lanes} lanes"),
-            (Some(path), None) => path,
-            (None, Some(lanes)) => format!("{lanes} lanes"),
+            (Some(lanes), Some(path)) => format!("{path} · {lanes} lanes"),
+            (Some(lanes), None) => format!("{lanes} lanes"),
+            (None, Some(path)) => path,
             (None, None) => String::new(),
         },
-        NodeKind::Gather | NodeKind::Gate => text("release").unwrap_or_else(|| "all".to_string()),
+        NodeKind::Gather => release_summary(node),
         NodeKind::Approval => text("title").or_else(|| text("prompt")).unwrap_or_default(),
-        NodeKind::Void => String::new(),
+        // A void node has no config worth a second line — it is the absence of
+        // an onward edge, said out loud — but a blank would read as an
+        // unlabelled node rather than a deliberate one.
+        NodeKind::Void => "discarded".to_string(),
+    }
+}
+
+/// The release policy of a `gate` or `gather`, as one line.
+///
+/// Shared because the two kinds read the same `release`/`n` pair and an operator
+/// scanning a canvas is asking the same question of both: what has to arrive
+/// before this proceeds. `all` is the engine's default, so a node that names no
+/// policy still says so rather than showing a blank.
+fn release_summary(node: &Node) -> String {
+    let release = node
+        .config
+        .get("release")
+        .and_then(|value| value.as_str())
+        .unwrap_or("all");
+    match node.config.get("n").and_then(serde_json::Value::as_u64) {
+        Some(n) => format!("{release} · n={n}"),
+        None => release.to_string(),
     }
 }
 

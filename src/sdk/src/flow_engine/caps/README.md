@@ -5,13 +5,19 @@ Assembling the capability bundle the engine runs against.
 ## Contents
 
 - [`agent.rs`](./agent.rs) — `agent` nodes, run on a real harness.
-- [`code.rs`](./code.rs) — The `code` node's runner — refusing by default.
 - [`dispatch.rs`](./dispatch.rs) — Handing a workflow node's instruction to a harness.
-- [`http.rs`](./http.rs) — Outbound HTTP for `http_request` nodes, behind a host allowlist.
-- [`mocks.rs`](./mocks.rs) — Capability stand-ins for dry runs.
 - [`mod.rs`](./mod.rs) — Assembling the capability bundle the engine runs against.
-- [`state.rs`](./state.rs) — Durable key/value state for stateful workflows.
 - [`tools.rs`](./tools.rs) — `tool_call` dispatch across two namespaces.
+
+## What is no longer here
+
+The capability implementations with no Medulla in them — the out-of-process
+script runner and its path policy, the `code` and `shell` runners, the file
+state store, the allowlisted HTTP client, and the dry-run stand-ins — moved to
+`tinyflows::caps::host`, behind that crate's `host-caps` feature. Every host
+embedding the engine needs them, and each one that wrote them itself rewrote the
+same subtle parts. [`mod.rs`](./mod.rs) re-exports them, so a call site in this
+crate still names one place.
 
 ## Maintenance
 

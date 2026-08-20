@@ -151,6 +151,9 @@ fn a_bounded_input_row_reads_as_the_text_it_was_given() {
     let mut record = settled();
     record.inputs = serde_json::json!({
         "instruction": {
+            // Deliberately the pre-move marker: this pins that a run record
+            // written by an older build still renders as an elision rather
+            // than as an object full of our own bookkeeping.
             "_medullaTruncated": true,
             "originalBytes": 9_001,
             "preview": "rebuild the index",

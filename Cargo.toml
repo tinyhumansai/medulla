@@ -116,15 +116,6 @@ unicode-width = "0.2"
 #
 # Vendored code stays out of `members` via `exclude`, so it keeps its own lints
 # and tests instead of joining this workspace's CI gates.
-#
-# The same rule applies to OpenHuman's *git* patch table, reproduced here for the
-# same reason. `tinymemory-api` is unpublished: the vendored `tinycortex` names it
-# by git revision while the vendored `tinymemory-core` names it by path, so
-# without this redirect the graph holds two `tinymemory_api::Memory` traits and
-# `ToolMemoryStore::new` stops accepting the memory the core builds.
-[patch."https://github.com/tinyhumansai/tinymemory"]
-tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/api" }
-
 [patch.crates-io]
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
 tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }

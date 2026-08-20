@@ -183,7 +183,7 @@ pub struct OpencodeConfig {
 /// On by default: a harness commit that does not name the tool that wrote it is
 /// the surprising case, not the other way round. Turn it off with
 /// `[attribution] commit = false`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AttributionConfig {
     /// Whether commits carry the `Co-authored-by: Medulla` trailer.
@@ -261,16 +261,6 @@ pub struct FavoriteWorkspace {
     pub name: String,
     /// The directory the favorite opens.
     pub path: String,
-}
-
-impl Default for HarnessSection {
-    fn default() -> Self {
-        HarnessSection {
-            skip_permissions: false,
-            recent_workspaces: Vec::new(),
-            favorite_workspaces: Vec::new(),
-        }
-    }
 }
 
 /// The `host` section: whether this machine also *runs* the work the

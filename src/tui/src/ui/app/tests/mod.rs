@@ -191,21 +191,20 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
 }
 
 #[test]
-fn enter_on_a_harness_asks_before_taking_it() {
+fn enter_on_an_exited_harness_is_consumed_without_attaching() {
     let mut a = app();
     a.tab_index = tab("Sessions");
     // The render pass records the harness behind the visible pane. This app
-    // hosts nothing, so the handover question has nothing to ask about and says
-    // so — the point being that Enter is consumed by the harness path rather
-    // than returning to the composer or submitting a turn, and that it never
-    // attaches on its own.
+    // hosts nothing, so the session is no longer attachable. Enter is consumed
+    // by the harness path rather than reaching another binding, and the retained
+    // screen stays view-only.
     a.pane_session = Some("just-exited".to_string());
 
     let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(cmd.is_none());
     assert!(a.sessions_rail_focused());
-    assert!(a.status().contains("not hosting"), "{}", a.status());
+    assert!(a.status().contains("exited"), "{}", a.status());
     assert_eq!(a.attached_session(), None);
 }
 

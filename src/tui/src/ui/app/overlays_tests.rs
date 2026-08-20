@@ -75,7 +75,7 @@ fn raise(app: &mut App, overlay: Overlay) {
 }
 
 /// Every variant, so a new one cannot be added without appearing here.
-const EVERY_OVERLAY: [Overlay; 7] = [
+const EVERY_OVERLAY: [Overlay; 8] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
     Overlay::SessionPicker,
@@ -243,6 +243,27 @@ fn cancelling_a_session_kill_with_the_mouse_does_not_click_through_the_modal() {
         app.tab_index, original_tab,
         "the cancellation click is consumed"
     );
+}
+
+#[test]
+fn pointer_input_cancels_workflow_delete_without_clicking_through() {
+    let mut app = app();
+    app.workflow_delete_armed = Some(("nightly".into(), "Nightly sweep".into()));
+    app.hit_tabs_row = 1;
+    app.hit_tabs = vec![(0, 4), (5, 10)];
+    let original_tab = app.tab_index;
+
+    let result = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 6,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(result.is_none());
+    assert!(app.workflow_delete_armed.is_none());
+    assert_eq!(app.status(), "Workflow deletion cancelled");
+    assert_eq!(app.tab_index, original_tab, "the cancellation click is consumed");
 }
 
 #[test]

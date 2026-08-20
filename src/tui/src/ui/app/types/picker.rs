@@ -42,7 +42,6 @@ pub(in crate::ui::app) enum Overlay {
     /// The destructive confirmation before ending a local harness or remote task.
     SessionKill,
     /// The confirmation shown before permanently deleting a workflow.
-    #[cfg(feature = "workflows")]
     WorkflowDelete,
     /// The question asked when the operator lets go of a session.
     HandbackPrompt,

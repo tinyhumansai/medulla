@@ -75,6 +75,47 @@ fn harness_picker_hint_only_advertises_bound_keys() {
         "the workspace step advertises the favorite key it actually binds"
     );
 }
+
+#[test]
+fn workflow_delete_prompt_renders_the_armed_workflow() {
+    let mut app = app();
+    app.workflow_delete_armed = Some(("nightly".into(), "Nightly sweep".into()));
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).expect("terminal");
+
+    terminal
+        .draw(|f| app.draw_workflow_delete_prompt(f, f.area()))
+        .expect("draw");
+    let output: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+
+    assert!(output.contains("Delete workflow"), "{output}");
+    assert!(output.contains("Delete \"Nightly sweep\" permanently?"), "{output}");
+    assert!(output.contains("[Delete] remove workflow"), "{output}");
+}
+
+#[test]
+fn workflow_delete_prompt_draws_nothing_when_unarmed() {
+    let mut app = app();
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).expect("terminal");
+
+    terminal
+        .draw(|f| app.draw_workflow_delete_prompt(f, f.area()))
+        .expect("draw");
+
+    assert!(terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .all(|cell| cell.symbol() == " "));
+}
 #[test]
 fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
     // The bug this pins: `release_session` was only reached from

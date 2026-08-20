@@ -67,7 +67,6 @@ impl App {
             subtask_pages: std::collections::HashMap::new(),
             watching: None,
             kill_armed: None,
-            #[cfg(feature = "workflows")]
             workflow_delete_armed: None,
             agent_scroll: 0,
             command_index: 0,
@@ -481,10 +480,7 @@ impl App {
         // A destructive confirmation is valid only while its question remains
         // visible. Any asynchronous status replacement cancels it.
         self.kill_armed = None;
-        #[cfg(feature = "workflows")]
-        {
-            self.workflow_delete_armed = None;
-        }
+        self.workflow_delete_armed = None;
         // The harness close question is the same kind of promise: it is only
         // answerable while the sentence asking it is the one on screen.
         self.harness_close_armed = None;

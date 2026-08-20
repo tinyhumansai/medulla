@@ -26,7 +26,6 @@ const WORKSPACE_ROW_WIDTH: usize = 43;
 
 impl App {
     /// Draw the destructive confirmation for deleting the selected workflow.
-    #[cfg(feature = "workflows")]
     pub(super) fn draw_workflow_delete_prompt(&mut self, f: &mut Frame, area: Rect) {
         let Some((_, name)) = &self.workflow_delete_armed else {
             return;

@@ -639,7 +639,6 @@ pub struct App {
     /// The watched `(worker, task)` awaiting destructive-action confirmation.
     pub(in crate::ui::app) kill_armed: Option<(String, String)>,
     /// The workflow awaiting a destructive-action confirmation.
-    #[cfg(feature = "workflows")]
     pub(in crate::ui::app) workflow_delete_armed: Option<(String, String)>,
     pub(in crate::ui::app) agent_scroll: usize,
     /// Selected row in the command peek, while it is open.

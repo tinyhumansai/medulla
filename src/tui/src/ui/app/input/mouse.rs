@@ -53,11 +53,7 @@ impl App {
         if harness_close_cancelled {
             self.set_status("Harness close cancelled");
         }
-        #[cfg(feature = "workflows")]
         let workflow_delete_cancelled = self.workflow_delete_armed.take().is_some();
-        #[cfg(not(feature = "workflows"))]
-        let workflow_delete_cancelled = false;
-        #[cfg(feature = "workflows")]
         if workflow_delete_cancelled {
             self.set_status("Workflow deletion cancelled");
         }
@@ -120,7 +116,6 @@ impl App {
         // the rail behind one would leave an overlay describing a row nobody
         // was pointing at. In particular, do not let a second session click
         // replace the session named by an already-visible hand-back prompt.
-        #[cfg(feature = "workflows")]
         if self.workflow_delete_armed.is_some() {
             return None;
         }

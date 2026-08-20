@@ -67,12 +67,21 @@ impl App {
                 })
                 .collect();
 
-        let hint = if focused {
-            "↑↓ nav · ⏎ open · Del delete · 1-9 jump"
-        } else {
-            "Esc list · c copilot"
-        };
+        let selected = rows.iter().find(|row| self.workflow_rail_selected(row));
+        let hint = rail_hint(focused, selected);
         multi_pane::draw_rows(f, area, block, &self.theme, &nav_rows, focused, hint, 0);
+    }
+}
+
+/// Return shortcuts that are valid for the row currently holding the cursor.
+pub(super) fn rail_hint(focused: bool, selected: Option<&WorkflowRailRow>) -> &'static str {
+    if !focused {
+        return "Esc list · c copilot";
+    }
+    if matches!(selected, Some(WorkflowRailRow::Workflow { .. })) {
+        "↑↓ nav · ⏎ open · Del delete · 1-9 jump"
+    } else {
+        "↑↓ nav · ⏎ open · 1-9 jump"
     }
 }
 

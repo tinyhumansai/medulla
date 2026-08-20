@@ -529,29 +529,40 @@ pub(super) fn spawn_delete(id: String, msg_tx: &tokio::sync::mpsc::UnboundedSend
                 Err(error) => DeleteOutcome::Failed(error),
             }
         })
-        .await
-        .unwrap_or_else(|error| {
-            DeleteOutcome::Failed(medulla::workflows::WorkflowError::Engine(error.to_string()))
-        });
-        let (status, deleted) = match outcome {
-            DeleteOutcome::Deleted => (format!("Deleted workflow {id}"), true),
-            DeleteOutcome::DeletedWithWarning(error) => (
-                format!("Deleted workflow {id}, but could not record undo history: {error}"),
-                true,
-            ),
-            DeleteOutcome::Failed(error) => {
-                (format!("Could not delete workflow {id}: {error}"), false)
-            }
-        };
-        let _ = tx.send(AppMsg::Status(status));
-        if deleted {
-            let _ = tx.send(AppMsg::WorkflowDeleted { id });
-        }
+        .await;
+        report_delete(id, outcome, &tx);
     });
 }
 
+/// Report a deletion result and only announce catalogue removal when the
+/// definition is known to be gone. Keeping this mapping synchronous makes all
+/// store and task-failure outcomes deterministic to test.
+pub(super) fn report_delete(
+    id: String,
+    outcome: Result<DeleteOutcome, tokio::task::JoinError>,
+    tx: &tokio::sync::mpsc::UnboundedSender<AppMsg>,
+) {
+    let outcome = outcome.unwrap_or_else(|error| {
+        DeleteOutcome::Failed(medulla::workflows::WorkflowError::Engine(error.to_string()))
+    });
+    let (status, deleted) = match outcome {
+        DeleteOutcome::Deleted => (format!("Deleted workflow {id}"), true),
+        DeleteOutcome::DeletedWithWarning(error) => (
+            format!("Deleted workflow {id}, but could not record undo history: {error}"),
+            true,
+        ),
+        DeleteOutcome::Failed(error) => {
+            (format!("Could not delete workflow {id}: {error}"), false)
+        }
+    };
+    let _ = tx.send(AppMsg::Status(status));
+    if deleted {
+        let _ = tx.send(AppMsg::WorkflowDeleted { id });
+    }
+}
+
 /// Whether deletion completed, partially completed, or left the definition intact.
-enum DeleteOutcome {
+pub(super) enum DeleteOutcome {
     /// Definition and undo bookkeeping were both updated.
     Deleted,
     /// The definition is gone, but the store failed while recording its revision.

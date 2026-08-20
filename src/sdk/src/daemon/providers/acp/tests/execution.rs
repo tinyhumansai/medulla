@@ -53,6 +53,68 @@ done
     assert_eq!(result.session_id.as_deref(), Some("acp-session-1"));
 }
 
+/// Auto-approve must answer a permission request by **kind**, never by
+/// position. Option order is the agent's presentation choice, so a harness
+/// that lists its reject option first turned positional auto-approve into
+/// auto-DENY — observed in the field as a correct read-only command dying
+/// instantly at the prompt.
+///
+/// The fake agent below lists `reject` first and reports back whichever
+/// option the client selected, so the assertion reads the answer off the
+/// wire rather than re-stating the selection rule.
+#[cfg(unix)]
+#[tokio::test]
+async fn auto_approve_picks_the_allow_option_a_harness_lists_last() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("fake-opencode");
+    std::fs::write(
+        &agent,
+        r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([^,}]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id" ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-session-1"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      # Reject first, allow last — the order that broke positional selection.
+      printf '{"jsonrpc":"2.0","id":9001,"method":"session/request_permission","params":{"sessionId":"acp-session-1","toolCall":{"toolCallId":"call-1"},"options":[{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"allow-once","name":"Allow","kind":"allow_once"}]}}\n'
+      IFS= read -r answer
+      picked=$(printf '%s\n' "$answer" | sed -n 's/.*"optionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"acp-session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"picked=%s"}}}}\n' "$picked"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut options = attribution_options(false);
+    options.provider = HarnessProvider::Opencode;
+    options.cwd = dir.path().to_string_lossy().into_owned();
+    options.skip_permissions = true;
+    options.timeout_ms = 10_000;
+    options.env.insert(
+        "TINYPLACE_OPENCODE_BIN".to_string(),
+        agent.to_string_lossy().into_owned(),
+    );
+
+    let result = super::super::execution::run_acp_task(options)
+        .await
+        .unwrap();
+
+    assert!(
+        result.reply.contains("picked=allow-once"),
+        "auto-approve must select the allow option wherever the harness lists \
+         it, got: {}",
+        result.reply
+    );
+}
+
 #[cfg(all(feature = "workflows", unix))]
 struct NoFleet;
 

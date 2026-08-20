@@ -163,6 +163,12 @@ pub(super) enum AppMsg {
         /// Why it failed.
         error: String,
     },
+    /// A manually deleted workflow no longer has a graph or conversation to retain.
+    #[cfg(feature = "workflows")]
+    WorkflowDeleted {
+        /// The removed workflow, used to stop and forget its copilot thread.
+        id: String,
+    },
     /// The workflow store was written to by something other than a copilot turn,
     /// so the catalogue on screen is stale.
     ///

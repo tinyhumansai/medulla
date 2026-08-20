@@ -170,6 +170,52 @@ fn d_simulates_and_x_runs_the_selected_workflow_from_the_sidebar() {
 }
 
 #[test]
+fn delete_opens_a_confirmation_for_the_selected_workflow_from_either_pane() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    let sidebar = key(&mut app, KeyCode::Delete);
+    assert!(matches!(sidebar, WorkflowsKey::Handled(None)));
+    assert_eq!(
+        app.workflow_delete_armed
+            .as_ref()
+            .map(|(id, _)| id.as_str()),
+        Some("sweep")
+    );
+
+    app.workflow_delete_armed = None;
+    key(&mut app, KeyCode::Enter);
+    let canvas = key(&mut app, KeyCode::Delete);
+    assert!(matches!(canvas, WorkflowsKey::Handled(None)));
+    assert_eq!(
+        app.workflow_delete_armed
+            .as_ref()
+            .map(|(id, _)| id.as_str()),
+        Some("sweep")
+    );
+}
+
+#[test]
+fn workflow_delete_requires_a_second_delete_key_to_dispatch() {
+    let (_home, mut app) = app_with(&[solo("sweep")]);
+
+    key(&mut app, KeyCode::Delete);
+    let cancelled = app.on_key(crossterm::event::KeyEvent::new(
+        KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert!(cancelled.is_none());
+    assert!(app.workflow_delete_armed.is_none());
+
+    key(&mut app, KeyCode::Delete);
+    let confirmed = app.on_key(crossterm::event::KeyEvent::new(
+        KeyCode::Delete,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert!(matches!(confirmed, Some(Cmd::DeleteWorkflow { ref id }) if id == "sweep"));
+    assert!(app.workflow_delete_armed.is_none());
+}
+
+#[test]
 fn u_undoes_the_selected_workflow_from_either_pane() {
     let (_home, mut app) = app_with(&[solo("sweep")]);
 

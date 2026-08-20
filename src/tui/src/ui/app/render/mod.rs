@@ -150,6 +150,7 @@ impl App {
                 Overlay::SessionPicker => self.draw_harness_picker(f, rows[2]),
                 Overlay::SessionKill => self.draw_session_kill_prompt(f, rows[2]),
                 Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
+                Overlay::WorkflowDelete => self.draw_workflow_delete_prompt(f, rows[2]),
                 Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
                 Overlay::ResumePicker => self.draw_resume(f, rows[3]),
             }

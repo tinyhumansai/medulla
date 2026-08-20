@@ -237,6 +237,10 @@ pub(crate) async fn run(
                         app.copilot_failed(&workflow, instruction, error);
                     }
                     #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowDeleted { id } => {
+                        apply_workflow_deleted(&mut app, &id, cmd_dispatch::close_copilot_host);
+                    }
+                    #[cfg(feature = "workflows")]
                     AppMsg::WorkflowsChanged => app.reload_workflows(),
                     AppMsg::FeedbackLoaded { query, page } => {
                         if !app.set_feedback_page(query, page) {
@@ -319,6 +323,15 @@ pub(crate) async fn run(
     } else {
         SessionExit::Quit
     })
+}
+
+/// Apply the UI-side consequences after a workflow definition is known to be
+/// gone, including shutting down its process-backed copilot conversation.
+#[cfg(feature = "workflows")]
+fn apply_workflow_deleted(app: &mut App, id: &str, close_host: impl FnOnce(&str)) {
+    close_host(id);
+    app.forget_copilot(id);
+    app.reload_workflows();
 }
 
 /// Whether a runtime broadcast wakeup means the snapshot on screen is stale.

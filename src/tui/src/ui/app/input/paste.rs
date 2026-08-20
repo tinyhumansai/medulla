@@ -60,6 +60,11 @@ impl App {
             self.set_status("Session kill cancelled");
             return;
         }
+        #[cfg(feature = "workflows")]
+        if self.workflow_delete_armed.take().is_some() {
+            self.set_status("Workflow deletion cancelled");
+            return;
+        }
         // The hand-back question is asked while still attached, so it outranks
         // even the harness. It swallows a paste on the question itself and takes
         // one into the note once `E` has made that a text input.

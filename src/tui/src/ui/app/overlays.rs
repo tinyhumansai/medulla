@@ -37,6 +37,10 @@ impl App {
                 self.kill_armed.is_some() || self.harness_close_armed.is_some(),
             ),
             (Overlay::HandbackPrompt, self.handback_prompt.is_some()),
+            (
+                Overlay::WorkflowDelete,
+                self.workflow_delete_armed.is_some(),
+            ),
             (Overlay::InlinePrompt, self.prompt.is_some()),
             (
                 Overlay::ResumePicker,

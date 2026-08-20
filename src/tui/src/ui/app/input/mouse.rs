@@ -53,11 +53,15 @@ impl App {
         if harness_close_cancelled {
             self.set_status("Harness close cancelled");
         }
+        let workflow_delete_cancelled = self.workflow_delete_armed.take().is_some();
+        if workflow_delete_cancelled {
+            self.set_status("Workflow deletion cancelled");
+        }
         // The cancellation click is the modal's answer, not a second click on
         // the content it covered. Returning here also prevents a captured
         // harness pointer gesture from receiving a stray release after a
         // destructive confirmation is dismissed.
-        if kill_cancelled || harness_close_cancelled {
+        if kill_cancelled || harness_close_cancelled || workflow_delete_cancelled {
             return None;
         }
         // Ahead of every other rule, including the modal one below: a button

@@ -22,6 +22,39 @@ const WORKSPACE_TRAILER_LINES: usize = 1;
 const WORKSPACE_ROW_WIDTH: usize = 43;
 
 impl App {
+    /// Draw the destructive confirmation for deleting the selected workflow.
+    pub(super) fn draw_workflow_delete_prompt(&mut self, f: &mut Frame, area: Rect) {
+        let Some((_, name)) = &self.workflow_delete_armed else {
+            return;
+        };
+        let area = centered(area, 62, 9);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme.accent))
+            .title(Span::styled(
+                "Delete workflow",
+                Style::default()
+                    .fg(self.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(area);
+        f.render_widget(Clear, area);
+        f.render_widget(block, area);
+        f.render_widget(
+            Paragraph::new(Text::from(vec![
+                TLine::from(format!("Delete \"{name}\" permanently?")),
+                TLine::from(Span::styled(
+                    "Its definition and local workflow history will be removed.",
+                    Style::default().fg(self.theme.dim_border),
+                )),
+                TLine::from(""),
+                TLine::from("[Delete] remove workflow    [Esc] cancel"),
+            ])),
+            inner,
+        );
+    }
+
     /// Draw the confirmation that guards terminating a harness or dispatched task.
     ///
     /// The status line repeats the question for compact terminals, but the

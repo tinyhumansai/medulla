@@ -4,10 +4,71 @@ use std::sync::Arc;
 
 use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
+#[cfg(feature = "workflows")]
+use medulla::workflows::{FileWorkflowStore, WorkflowRecord, WorkflowStore};
 use medulla_tui::ui::app::App;
+#[cfg(feature = "workflows")]
+use serde_json::json;
 
+#[cfg(feature = "workflows")]
+use super::apply_workflow_deleted;
 use super::update_checker::spawn_update_checker;
 use super::{runtime_ping_needs_refresh, should_refresh_context};
+
+#[cfg(feature = "workflows")]
+#[test]
+fn workflow_deleted_closes_conversation_and_reloads_catalogue() {
+    use medulla::workflows::copilot::{Thread, Transcripts};
+
+    let home = tempfile::tempdir().expect("tempdir");
+    let runtime = Arc::new(MockRuntime::demo());
+    let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
+    app.set_medulla_home(home.path().to_path_buf());
+    let store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::new(
+        vec![home.path().join("workflows")],
+        home.path().join("runs"),
+    ));
+    app.set_workflow_store(store.clone());
+    store
+        .save(&WorkflowRecord {
+            id: "sweep".into(),
+            name: "Sweep workflow".into(),
+            description: String::new(),
+            enabled: true,
+            defaults: Default::default(),
+            graph: serde_json::from_value(json!({
+                "name": "sweep",
+                "nodes": [{
+                    "id": "start",
+                    "kind": "trigger",
+                    "name": "Start",
+                    "config": { "trigger_kind": "manual" }
+                }],
+                "edges": []
+            }))
+            .expect("graph parses"),
+            source_path: None,
+        })
+        .expect("save workflow");
+    app.reload_workflows();
+    app.copilot_started("sweep", "improve it");
+    let _ = app.copilot_finished("sweep", "done".into(), vec![], None);
+    store.delete("sweep").expect("delete workflow");
+
+    let mut closed = None;
+    apply_workflow_deleted(&mut app, "sweep", |id| closed = Some(id.to_string()));
+
+    assert_eq!(closed.as_deref(), Some("sweep"));
+    assert!(app.workflow_summaries().is_empty());
+    let cwd = std::env::current_dir().expect("cwd");
+    assert!(
+        Transcripts::under(home.path(), &cwd)
+            .load(Thread::Workflow("sweep"))
+            .turns
+            .is_empty(),
+        "the deleted workflow's persisted conversation must be forgotten"
+    );
+}
 
 #[test]
 fn context_refresh_tracks_the_nested_settings_page() {

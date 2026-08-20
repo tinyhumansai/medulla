@@ -33,6 +33,7 @@ pub(super) fn adopt_copilot_host(thread: &str, created: &str) {
 /// End a copilot conversation whose workflow no longer exists.
 #[cfg(feature = "workflows")]
 pub(super) fn close_copilot_host(thread: &str) {
+    copilot_hosts::abort(thread);
     copilot_hosts::forget(thread);
 }
 
@@ -244,6 +245,8 @@ pub(super) fn run_cmd(
                 msg_tx,
             )
         }
+        #[cfg(feature = "workflows")]
+        Cmd::DeleteWorkflow { id } => workflows::spawn_delete(id, msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id, inputs } => workflows::spawn_dry_run(id, inputs, msg_tx),
         #[cfg(feature = "workflows")]

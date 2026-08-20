@@ -55,6 +55,11 @@ impl App {
             self.set_status("Session kill cancelled");
             return;
         }
+        #[cfg(feature = "workflows")]
+        if self.workflow_delete_armed.take().is_some() {
+            self.set_status("Workflow deletion cancelled");
+            return;
+        }
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {
             self.paste_into_harness(&session, text);
             return;

@@ -44,6 +44,16 @@ impl App {
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
 
+        #[cfg(feature = "workflows")]
+        if let Some((id, name)) = self.workflow_delete_armed.take() {
+            if k.code == KeyCode::Delete && k.modifiers.is_empty() {
+                self.set_status(format!("Deleting {name}…"));
+                return Some(Cmd::DeleteWorkflow { id });
+            }
+            self.set_status("Workflow deletion cancelled");
+            return None;
+        }
+
         // Killing a harness can lose in-progress work. Once armed, the prompt
         // owns exactly one keypress: only a deliberate `y` proceeds.
         if let Some((worker, task_id)) = self.kill_armed.take() {

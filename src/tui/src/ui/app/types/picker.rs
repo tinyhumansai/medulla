@@ -22,9 +22,8 @@ pub(in crate::ui::app) struct ResumePicker {
 /// An overlay the app can draw over the content pane.
 ///
 /// Ordered as they stack, back to front: the two that float over the content,
-/// then the session picker and destructive session question, then the question
-/// asked about a session being released, and finally the two that claim a row
-/// of their own below it.
+/// then the session picker and destructive confirmations, and finally the two
+/// that claim a row of their own below it.
 ///
 /// Produced by [`App::visible_overlays`](crate::ui::app::App::visible_overlays),
 /// which is the single source of truth for what is in front of the content —
@@ -39,6 +38,8 @@ pub(in crate::ui::app) enum Overlay {
     SessionPicker,
     /// The destructive confirmation before ending a local harness or remote task.
     SessionKill,
+    /// The confirmation shown before permanently deleting a workflow.
+    WorkflowDelete,
     /// The shared single-line prompt (Workers add/edit, Agents answer).
     InlinePrompt,
     /// The saved-chat resume picker.

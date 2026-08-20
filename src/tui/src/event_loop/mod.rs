@@ -237,6 +237,12 @@ pub(crate) async fn run(
                         app.copilot_failed(&workflow, instruction, error);
                     }
                     #[cfg(feature = "workflows")]
+                    AppMsg::WorkflowDeleted { id } => {
+                        cmd_dispatch::close_copilot_host(&id);
+                        app.forget_copilot(&id);
+                        app.reload_workflows();
+                    }
+                    #[cfg(feature = "workflows")]
                     AppMsg::WorkflowsChanged => app.reload_workflows(),
                     AppMsg::FeedbackLoaded { query, page } => {
                         if !app.set_feedback_page(query, page) {

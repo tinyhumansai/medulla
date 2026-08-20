@@ -142,31 +142,50 @@ fn resolve_embedded_key(
     }
 }
 
-/// Route the embedded core's inference through the shared proxy, starting it on
-/// demand.
+/// Resolve the endpoint and credential the embedded core should run this turn
+/// on.
 ///
-/// Returns `Ok(None)` when the run's endpoint is not OpenRouter-bound or the
-/// named key is absent — in either case the core keeps resolving its own
-/// provider bindings from the account's configuration, which is what an
+/// Two shapes, decided by where the configured endpoint points:
+///
+/// * **OpenRouter.** The core is pointed at a loopback mount of the shared
+///   proxy and presents a machine-local token, so the traffic is re-headed on
+///   the way out and the OpenRouter key never reaches the turn. This is the
+///   attribution story [`crate::inference_proxy`] exists for.
+/// * **Anything else** — a local router, a self-hosted gateway, a vendor's own
+///   OpenAI-compatible endpoint. There is nothing to re-head and no third
+///   party to credit, so the endpoint and its key are handed to the core
+///   directly. Proxying it would only interpose a hop that rewrites headers
+///   for an upstream it knows nothing about.
+///
+/// Returns `Ok(None)` when the run configured no endpoint, or when the key
+/// under the named variable is absent — in either case the core keeps resolving
+/// its own provider bindings from the account's configuration, which is what an
 /// operator who configured neither expects.
 ///
 /// # Errors
 ///
 /// The sentence [`shared`] produces when the loopback listener cannot bind.
+/// Only the OpenRouter shape can produce it; a direct endpoint starts no
+/// listener.
 pub fn route_embedded(
     router: &RouterConfig,
     env: &HashMap<String, String>,
 ) -> Result<Option<EmbeddedRouting>, String> {
     let provider = HarnessProvider::Openhuman;
-    if !router
-        .base_url_for(provider.as_str())
-        .is_some_and(is_openrouter)
-    {
+    let Some(base_url) = router.base_url_for(provider.as_str()) else {
         return Ok(None);
-    }
+    };
+    let direct = !is_openrouter(base_url);
+    let base_url = base_url.to_string();
     let Some((_, key)) = resolve_embedded_key(router, env) else {
         return Ok(None);
     };
+    if direct {
+        return Ok(Some(EmbeddedRouting {
+            base_url,
+            token: key,
+        }));
+    }
     let endpoint = shared(env)?.endpoint_for_key(&key);
     Ok(Some(EmbeddedRouting {
         base_url: endpoint.base_url(UpstreamShape::for_provider(provider)),

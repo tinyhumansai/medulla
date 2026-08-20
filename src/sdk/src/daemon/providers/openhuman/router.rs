@@ -18,7 +18,7 @@
 //! It no longer is. The core accepts a per-call route (`inference_url` +
 //! `api_key` on `inference_agent_chat`) that it applies to the turn's own
 //! in-memory config and never persists, so a preset can state the whole answer:
-//! this model, on OpenRouter, with this key.
+//! this model, on this endpoint, with this key.
 //!
 //! # Why the core is not given the OpenRouter key
 //!
@@ -28,19 +28,29 @@
 //! to Medulla rather than to OpenHuman. The one difference from a spawned run is
 //! that there is no environment to scrub: the key is read here, exchanged for a
 //! token here, and never written anywhere the turn can reach it.
+//!
+//! # Endpoints that are not OpenRouter
+//!
+//! A preset may name a local router, a self-hosted gateway, or a vendor's own
+//! OpenAI-compatible endpoint. Those are handed to the core as they are spelled,
+//! with the key the preset named: there is no third party to credit and no
+//! header to rewrite, so interposing the attribution proxy would add a hop that
+//! rewrites requests for an upstream it knows nothing about. That decision is
+//! [`crate::inference_proxy::route_embedded`]'s; this module only supplies the
+//! preconditions.
 
 use std::collections::HashMap;
 
 use crate::config::RouterConfig;
 use crate::inference_proxy::EmbeddedRouting;
 
-/// Resolve the loopback route this turn should run on, if any.
+/// Resolve the route this turn should run on, if any.
 ///
 /// `Ok(None)` — the common case — means the turn runs on whatever the account's
 /// own OpenHuman configuration resolves, which is the behaviour every run had
 /// before presets could state an endpoint. It covers a run with no router at
-/// all, a router pointing somewhere other than OpenRouter, a router whose named
-/// key is not exported, and a run with no model to route.
+/// all, a router that names no endpoint, a router whose named key is not
+/// exported, and a run with no model to route.
 ///
 /// The model is required because the core's per-call route is expressed as a
 /// provider/model pair: with no model there is nothing to pin the route to, and
@@ -53,7 +63,7 @@ use crate::inference_proxy::EmbeddedRouting;
 /// loopback listener cannot bind. Fatal on purpose: the operator asked for a
 /// specific endpoint, and quietly running the turn on a different provider —
 /// billed to a different account — is worse than failing.
-pub fn openrouter_route(
+pub fn embedded_route(
     router: Option<&RouterConfig>,
     env: &HashMap<String, String>,
     model: Option<&str>,
@@ -69,7 +79,7 @@ pub fn openrouter_route(
     }
     let route = crate::inference_proxy::route_embedded(router, env)?;
     if route.is_some() {
-        tracing::debug!("[openhuman] routing this turn through the attribution proxy");
+        tracing::debug!("[openhuman] routing this turn to the endpoint the preset named");
     }
     Ok(route)
 }

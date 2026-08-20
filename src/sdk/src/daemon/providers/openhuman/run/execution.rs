@@ -94,7 +94,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // should call and the token it should present. `None` for a run with no
     // OpenRouter-bound router or no key under the named variable, which leaves
     // the core resolving its own provider bindings exactly as before.
-    let route = super::super::openrouter_route(router.as_ref(), &env, model.as_deref())?;
+    let route = super::super::embedded_route(router.as_ref(), &env, model.as_deref())?;
 
     if abort.is_aborted() {
         return Err("openhuman task aborted before start".to_string());

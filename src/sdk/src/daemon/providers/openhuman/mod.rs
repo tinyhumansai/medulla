@@ -66,5 +66,5 @@ mod run;
 mod tests;
 
 pub use model::effective_model;
-pub use router::openrouter_route;
+pub use router::embedded_route;
 pub use run::{run_openhuman_task, uses_embedded_core};

@@ -95,7 +95,10 @@ fn workflow_delete_prompt_renders_the_armed_workflow() {
         .collect();
 
     assert!(output.contains("Delete workflow"), "{output}");
-    assert!(output.contains("Delete \"Nightly sweep\" permanently?"), "{output}");
+    assert!(
+        output.contains("Delete \"Nightly sweep\" permanently?"),
+        "{output}"
+    );
     assert!(output.contains("[Delete] remove workflow"), "{output}");
 }
 

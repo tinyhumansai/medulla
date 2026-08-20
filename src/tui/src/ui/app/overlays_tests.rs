@@ -263,7 +263,10 @@ fn pointer_input_cancels_workflow_delete_without_clicking_through() {
     assert!(result.is_none());
     assert!(app.workflow_delete_armed.is_none());
     assert_eq!(app.status(), "Workflow deletion cancelled");
-    assert_eq!(app.tab_index, original_tab, "the cancellation click is consumed");
+    assert_eq!(
+        app.tab_index, original_tab,
+        "the cancellation click is consumed"
+    );
 }
 
 #[test]

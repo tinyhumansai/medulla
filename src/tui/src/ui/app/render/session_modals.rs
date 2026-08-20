@@ -1,9 +1,8 @@
 //! Session overlays: the picker that starts one and the destructive close prompt.
 //!
-//! Both are centered popups over the content pane rather than strips under it,
-//! because both are asked *about* something on screen — the picker names the
-//! directory the rail is already showing, and the hand-back question is about
-//! the pane immediately behind it.
+//! Both are centered popups over the content pane rather than strips under it:
+//! the picker names the directory the rail is already showing, while the close
+//! prompt keeps the session whose work would be lost visible behind it.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};

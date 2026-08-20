@@ -1,5 +1,5 @@
 //! Unit tests for the outer render chrome: the compact tab labels, the picker's
-//! scroll window, and the per-tab shortcut line and keyboard hand-back.
+//! scroll window, and the per-tab shortcut line.
 //!
 //! The lane presence-glyph and chat-transcript tests that used to live here went
 //! with the surfaces they covered — the rail lists sessions rather than lanes,

@@ -894,8 +894,7 @@ pub struct App {
     // it draws in response to the pointer afterwards.
     pub(in crate::ui::app) pointer_grab: Option<PointerGrab>,
     // The "start a session" picker's outer box, and where each offered row was
-    // drawn with the index it stands for in that step's list. Recorded during
-    // the draw for the same reason the hand-back answers are: the harness step
+    // drawn with the index it stands for in that step's list. The harness step
     // windows a long list, so screen position and list index are not the same
     // number, and only the draw knows which window it used.
     pub(in crate::ui::app) hit_session_picker: Option<(Rect, Vec<(Rect, usize)>)>,

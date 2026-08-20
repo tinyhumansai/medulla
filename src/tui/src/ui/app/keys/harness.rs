@@ -137,9 +137,8 @@ impl App {
     /// Attach to one named operator-owned session.
     ///
     /// Split from [`attach_to_pane_session`](Self::attach_to_pane_session) so
-    /// callers that already know which session they mean — the takeover question
-    /// being answered, the rail row that was clicked — do not have to round-trip
-    /// through the cursor to say so.
+    /// callers that already know which rail row was clicked do not have to
+    /// round-trip through the cursor to say so.
     pub(in crate::ui::app) fn attach_to_session(&mut self, session: &str) {
         let running = self
             .local_sessions

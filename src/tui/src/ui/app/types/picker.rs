@@ -111,9 +111,9 @@ pub(in crate::ui::app) struct WorkspaceChoice {
 /// Terminals grab the pointer on press: every drag and the release belong to
 /// whoever took the press, regardless of where the pointer has moved to since.
 /// The embedded pane has to do the same, because the alternatives are both
-/// visible failures — a release that lands outside the pane, or one swallowed
-/// by the hand-back question the click itself opened, leaves the child holding
-/// a button nobody is pressing. Claude Code and Codex then read every later
+/// visible failures — a release that lands outside the pane or is swallowed by
+/// a modal leaves the child holding a button nobody is pressing. Claude Code
+/// and Codex then read every later
 /// motion as a drag and anchor their popups to a press the operator has long
 /// since let go of.
 #[derive(Clone)]

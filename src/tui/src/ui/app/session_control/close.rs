@@ -28,11 +28,8 @@ impl App {
 
     /// Close a harness: kill the child, and tidy up what held it.
     ///
-    /// Killing settles the handover question rather than raising it. There is no
-    /// session left to hand back, so a take recorded against it is dropped
-    /// instead of being turned into a hand-back prompt about a corpse — and the
-    /// keyboard comes back to the chrome, because the pane it was in has stopped
-    /// listening.
+    /// Killing also releases the attachment, returning the keyboard to the
+    /// chrome because the pane it was in has stopped listening.
     pub(crate) fn close_session(&mut self, session: &str) {
         let Some(harnesses) = self.local_sessions.clone() else {
             self.set_status("This device is not hosting, so it has no sessions");

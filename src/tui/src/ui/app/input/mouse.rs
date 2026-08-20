@@ -114,16 +114,9 @@ impl App {
                     // Only the attached harness's own rail row is not a
                     // destination away from it: clicking the row you are
                     // already typing in should move nothing and ask nothing.
-                    // Every other row is a departure, and used not to be
-                    // treated as one — the rail was waved through wholesale, so
-                    // a click on the lane next door skipped the hand-back
-                    // policy here and was then released silently by the next
-                    // draw, which notices the cursor has left the attached
-                    // session. Worse, a click on *another harness's* row opened
-                    // the handover question about that harness while detaching
-                    // this one, so answering it handed back a session the
-                    // operator had never typed in and left the one they had
-                    // held forever.
+                    // Every other row is a departure. Release the current
+                    // attachment before moving the rail cursor so input cannot
+                    // remain routed to a pane the operator has left.
                     let on_own_rail_row =
                         self.rail_session_at(m.column, m.row).as_deref() == Some(session.as_str());
                     if !inside_attached_pane && !on_own_rail_row {

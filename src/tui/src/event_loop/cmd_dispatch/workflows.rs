@@ -551,9 +551,7 @@ pub(super) fn report_delete(
             format!("Deleted workflow {id}, but could not record undo history: {error}"),
             true,
         ),
-        DeleteOutcome::Failed(error) => {
-            (format!("Could not delete workflow {id}: {error}"), false)
-        }
+        DeleteOutcome::Failed(error) => (format!("Could not delete workflow {id}: {error}"), false),
     };
     let _ = tx.send(AppMsg::Status(status));
     if deleted {

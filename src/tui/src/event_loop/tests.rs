@@ -10,10 +10,10 @@ use medulla_tui::ui::app::App;
 #[cfg(feature = "workflows")]
 use serde_json::json;
 
-use super::update_checker::spawn_update_checker;
-use super::{runtime_ping_needs_refresh, should_refresh_context};
 #[cfg(feature = "workflows")]
 use super::apply_workflow_deleted;
+use super::update_checker::spawn_update_checker;
+use super::{runtime_ping_needs_refresh, should_refresh_context};
 
 #[cfg(feature = "workflows")]
 #[test]

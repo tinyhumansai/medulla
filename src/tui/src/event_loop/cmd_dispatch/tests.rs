@@ -89,11 +89,7 @@ fn failed_delete_does_not_report_catalogue_removal() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let failure = medulla::workflows::WorkflowError::Engine("definition retained".into());
 
-    report_delete(
-        "sweep".into(),
-        Ok(DeleteOutcome::Failed(failure)),
-        &tx,
-    );
+    report_delete("sweep".into(), Ok(DeleteOutcome::Failed(failure)), &tx);
 
     assert_delete_messages(&mut rx, "Could not delete workflow sweep", false);
 }

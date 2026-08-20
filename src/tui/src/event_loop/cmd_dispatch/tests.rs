@@ -11,6 +11,9 @@ use medulla_tui::ui::app::Cmd;
 use super::run_cmd as dispatch_cmd;
 use crate::event_loop::types::AppMsg;
 
+#[cfg(feature = "workflows")]
+use super::workflows::{report_delete, DeleteOutcome};
+
 /// Dispatch through the production entry point with default workflow settings.
 fn run_cmd(
     cmd: Cmd,
@@ -33,6 +36,79 @@ async fn next(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppMsg>) -> AppMsg {
         .await
         .expect("dispatcher timed out")
         .expect("dispatcher dropped its response channel")
+}
+
+/// Assert the status followed by the optional catalogue-removal notification.
+#[cfg(feature = "workflows")]
+fn assert_delete_messages(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppMsg>,
+    status_fragment: &str,
+    deleted: bool,
+) {
+    match rx.try_recv().expect("deletion status") {
+        AppMsg::Status(status) => assert!(status.contains(status_fragment), "{status}"),
+        _ => panic!("deletion must report status first"),
+    }
+    if deleted {
+        assert!(matches!(
+            rx.try_recv().expect("workflow deletion notification"),
+            AppMsg::WorkflowDeleted { id } if id == "sweep"
+        ));
+    }
+    assert!(rx.try_recv().is_err(), "deletion sent an extra message");
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn successful_delete_reports_catalogue_removal() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    report_delete("sweep".into(), Ok(DeleteOutcome::Deleted), &tx);
+
+    assert_delete_messages(&mut rx, "Deleted workflow sweep", true);
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn delete_with_undo_warning_still_reports_catalogue_removal() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let warning = medulla::workflows::WorkflowError::Engine("revision unavailable".into());
+
+    report_delete(
+        "sweep".into(),
+        Ok(DeleteOutcome::DeletedWithWarning(warning)),
+        &tx,
+    );
+
+    assert_delete_messages(&mut rx, "could not record undo history", true);
+}
+
+#[cfg(feature = "workflows")]
+#[test]
+fn failed_delete_does_not_report_catalogue_removal() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let failure = medulla::workflows::WorkflowError::Engine("definition retained".into());
+
+    report_delete(
+        "sweep".into(),
+        Ok(DeleteOutcome::Failed(failure)),
+        &tx,
+    );
+
+    assert_delete_messages(&mut rx, "Could not delete workflow sweep", false);
+}
+
+#[cfg(feature = "workflows")]
+#[tokio::test]
+async fn delete_task_join_failure_does_not_report_catalogue_removal() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let join_error = tokio::spawn(async { panic!("injected task failure") })
+        .await
+        .expect_err("panicking task must fail to join");
+
+    report_delete("sweep".into(), Err(join_error), &tx);
+
+    assert_delete_messages(&mut rx, "Could not delete workflow sweep", false);
 }
 
 struct FailingRuntime;

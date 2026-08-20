@@ -39,8 +39,8 @@ pub use dispatches::{in_flight, InFlightDispatch};
 pub(crate) use preflight::clamp_loop_iterations;
 pub use registry::{cancel, is_running, CancelSignal, RunClaim, RunGuard};
 pub use summary::summarize;
-use tinyflows::store::types::diagnosis as diagnose;
-pub use tinyflows::store::types::diagnosis::{
+use tinyflows::diagnostics as diagnose;
+pub use tinyflows::diagnostics::{
     capturing, diagnose, CapturingObserver, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding,
 };
 

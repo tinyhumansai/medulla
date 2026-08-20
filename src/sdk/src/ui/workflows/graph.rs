@@ -457,6 +457,7 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Gate => "gate",
         NodeKind::Scatter => "scatter",
         NodeKind::Gather => "gather",
+        NodeKind::Approval => "approval",
         NodeKind::Void => "void",
     }
 }
@@ -503,6 +504,8 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // pipeline, not the item stream.
         NodeKind::Scatter => "⇶",
         NodeKind::Gather => "⇉",
+        // A human decision interrupts the automated path.
+        NodeKind::Approval => "✓",
         // A stop, not an arrow: the whole point of the kind is that nothing
         // leaves it, and an operator scanning the canvas should be able to tell
         // a deliberate sink from a branch someone forgot to wire.
@@ -526,7 +529,8 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::HttpRequest
         | NodeKind::Code
         | NodeKind::Shell
-        | NodeKind::Memory => "cyan",
+        | NodeKind::Memory
+        | NodeKind::Approval => "cyan",
         // `dedup` reads durable state, but what it *does* to the graph is route:
         // an item either continues or is dropped, so it reads with the control
         // flow rather than with the kinds that reach outside the process.
@@ -654,6 +658,7 @@ pub fn node_summary(node: &Node) -> String {
             (None, None) => String::new(),
         },
         NodeKind::Gather => release_summary(node),
+        NodeKind::Approval => text("title").or_else(|| text("prompt")).unwrap_or_default(),
         // A void node has no config worth a second line — it is the absence of
         // an onward edge, said out loud — but a blank would read as an
         // unlabelled node rather than a deliberate one.

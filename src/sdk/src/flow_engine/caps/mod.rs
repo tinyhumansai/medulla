@@ -306,6 +306,9 @@ impl Assembly {
             // rather than a shape the graph can express and the host cannot
             // honour.
             tasks: Some(Arc::new(MedullaTaskRunner::new(Arc::new(self.clone())))),
+            // Medulla settles approvals through checkpoint/resume rather than
+            // pushing them to a dedicated review provider.
+            approvals: None,
         }
     }
 }

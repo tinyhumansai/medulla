@@ -82,6 +82,11 @@ impl From<tinyhumans_sdk::Error> for ClientError {
                     details: None,
                 }
             }
+            other @ (Sdk::Socket(_)
+            | Sdk::MissingSocketToken
+            | Sdk::UnexpectedSocketPayload(_)
+            | Sdk::SocketAckTimeout
+            | Sdk::SocketAckClosed) => ClientError::Socket(other.to_string()),
         }
     }
 }

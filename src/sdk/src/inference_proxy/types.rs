@@ -166,18 +166,24 @@ impl ProxyEndpoint {
     }
 }
 
-/// Where an **in-process** caller sends its OpenRouter traffic.
+/// Where an **in-process** caller sends its inference traffic.
 ///
 /// The counterpart to [`ProxyRouting`] for a run with no child. The embedded
 /// OpenHuman core is configured with these two values directly, so there is no
-/// router document to rewrite and nothing to scrub: the real key never enters a
-/// process environment on this path, because the caller resolves it, hands it to
-/// the proxy, and passes on only the loopback token.
+/// router document to rewrite and nothing to scrub.
+///
+/// [`route_embedded`](super::route_embedded) fills it one of two ways. For an
+/// OpenRouter endpoint these are the proxy's loopback mount and its
+/// machine-local token, so the real key never enters a process environment on
+/// this path. For any other endpoint they are the operator's own endpoint and
+/// key, unproxied — there is no third party to credit and no header to rewrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddedRouting {
-    /// The OpenAI-shaped loopback mount to point the core at.
+    /// The OpenAI-compatible base URL to point the core at: the proxy's
+    /// loopback mount, or the configured endpoint itself.
     pub base_url: String,
-    /// The loopback token the core presents, in place of the OpenRouter key.
+    /// The credential the core presents to `base_url` — the loopback token for
+    /// a proxied route, the configured key for a direct one.
     pub token: String,
 }
 

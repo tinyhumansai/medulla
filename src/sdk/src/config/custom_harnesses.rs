@@ -26,11 +26,12 @@
 //!
 //! `baseUrl` and `apiKeyEnv` are live here too, though they arrive by a
 //! different road. For a spawned CLI they are layered into the child's
-//! environment; an OpenHuman turn has no child, so Medulla resolves the key,
-//! exchanges it for a loopback token at the attribution proxy, and passes the
-//! mount and the token to the core as a **per-call** route that the core applies
-//! to that turn alone and never persists. See
-//! [`crate::daemon::providers::openhuman::openrouter_route`].
+//! environment; an OpenHuman turn has no child, so Medulla resolves the key and
+//! passes the endpoint and the credential to the core as a **per-call** route
+//! that the core applies to that turn alone and never persists. An OpenRouter
+//! endpoint is exchanged for a loopback mount and a machine-local token at the
+//! attribution proxy first; any other endpoint is handed over as spelled. See
+//! [`crate::daemon::providers::openhuman::embedded_route`].
 //!
 //! A preset that leaves them at their defaults still works and still needs no
 //! OpenRouter key: with no key exported under `apiKeyEnv` the turn runs on the

@@ -183,7 +183,7 @@ pub struct OpencodeConfig {
 /// On by default: a harness commit that does not name the tool that wrote it is
 /// the surprising case, not the other way round. Turn it off with
 /// `[attribution] commit = false`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AttributionConfig {
     /// Whether commits carry the `Co-authored-by: Medulla` trailer.
@@ -227,7 +227,7 @@ impl Default for HookDefaultsConfig {
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*
 /// starts to serve tasks. These are the ones an operator opens by hand and the
 /// orchestrator is not allowed to touch.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct HarnessSection {
     /// Whether an operator-started harness launches with its provider's

@@ -14,8 +14,8 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime};
 
 use super::types::{
-    App, Cmd, HandbackPolicy, PaneView, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES,
-    SP_CONTEXT, SP_FEEDBACK, SP_USAGE, TABS,
+    App, Cmd, PaneView, ResumePicker, ROUTING_SUBPAGES, SETTINGS_SUBPAGES, SP_CONTEXT, SP_FEEDBACK,
+    SP_USAGE, TABS,
 };
 
 impl App {
@@ -44,8 +44,6 @@ impl App {
                     .position(|option| option.strategy == strategy)
             })
             .unwrap_or(0);
-        // Read before `loaded` is moved into the struct below.
-        let handback_policy = HandbackPolicy::from_config(&loaded.config.harness.handback);
         let harness_skip_permissions = loaded.config.harness.skip_permissions;
         let status_line_promotion_pending = loaded.config.status_line.is_none();
         App {
@@ -158,15 +156,9 @@ impl App {
             pane_remote_session: None,
             rail_session: None,
             session_picker: None,
-            handback_prompt: None,
             pointer_grab: None,
-            hit_handback: Vec::new(),
             hit_session_picker: None,
             help_scroll: 0,
-            handback_policy,
-            sessions_taken: std::collections::HashMap::new(),
-            orchestrator_claimed: std::collections::HashSet::new(),
-            pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
         }
@@ -427,15 +419,6 @@ impl App {
         self.session_picker.is_some()
     }
 
-    /// Whether the hand-back question is on screen.
-    ///
-    /// Inspection seam for the same reason as the picker above: the question is
-    /// what asks for a handback note, and a test that types one has to know it
-    /// was asked rather than inferring it from where the characters landed.
-    pub fn handback_prompt_open_for_test(&self) -> bool {
-        self.handback_prompt.is_some()
-    }
-
     /// The session currently receiving the operator's keystrokes.
     pub fn attached_session(&self) -> Option<&str> {
         self.harness_focus.attached_to()
@@ -467,15 +450,6 @@ impl App {
     }
 
     /// Set the status-line text.
-    /// Take the next command raised by a synchronous handler, if any.
-    ///
-    /// The event loop drains this after each input event. See
-    /// [`pending_cmds`](super::types::App::pending_cmds) for why the queue
-    /// exists at all.
-    pub fn take_pending_cmd(&mut self) -> Option<Cmd> {
-        self.pending_cmds.pop_front()
-    }
-
     pub fn set_status(&mut self, s: impl Into<String>) {
         // A destructive confirmation is valid only while its question remains
         // visible. Any asynchronous status replacement cancels it.

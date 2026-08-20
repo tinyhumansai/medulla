@@ -77,14 +77,8 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Sessions");
                 self.select_session_row(&id);
-                // Names the directory, because the picker's whole second step was
-                // choosing it and a confirmation that omits the answer is not
-                // one. "unmanaged" and not a friendlier synonym: it is the word
-                // the rail badge and the picker modal both use for this state,
-                // and renaming it here would leave the operator matching two
-                // vocabularies for one fact.
                 let mut status = format!(
-                    "Started {} in {workspace} · unmanaged",
+                    "Started {} in {workspace} · local session",
                     choice.display_name()
                 );
                 if let Err(error) = self.remember_harness_workspace(&workspace) {

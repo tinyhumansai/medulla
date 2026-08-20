@@ -38,7 +38,7 @@ fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
     assert_eq!(row.control, SessionControl::User);
     assert!(!row.busy, "nothing is running in it yet");
     assert!(
-        app.status().contains("unmanaged"),
+        app.status().contains("local session"),
         "the operator is told what they just started: {}",
         app.status()
     );

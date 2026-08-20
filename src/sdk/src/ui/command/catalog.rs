@@ -74,19 +74,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "session",
         aliases: &["harness"],
         args: "[harness] [path]",
-        description: "Start a session the orchestrator will not touch",
-    },
-    CommandSpec {
-        name: "takecontrol",
-        aliases: &["take"],
-        args: "",
-        description: "Take this session from the orchestrator",
-    },
-    CommandSpec {
-        name: "handoff",
-        aliases: &["hand"],
-        args: "[note]",
-        description: "Give this session back, with a note on what to continue",
+        description: "Start a local session",
     },
     CommandSpec {
         name: "abort",

@@ -78,15 +78,6 @@ impl App {
             return None;
         }
 
-        // The hand-back question outranks even the attached harness, and has to:
-        // it is asked *while still attached*, because releasing the keyboard
-        // before it is answered would hide the pane the question is about. So
-        // for the few keystrokes it is open, the chrome takes the keyboard back.
-        if self.handback_prompt.is_some() {
-            self.handle_handback_key(k.code);
-            return None;
-        }
-
         // An attached harness owns the keyboard outright — ahead of the
         // overlays and the quit chord both. Anything less is not a terminal:
         // the operator would be typing into Claude Code with a handful of keys
@@ -209,12 +200,6 @@ impl App {
                 // be, and the fast case was the one nobody could predict.
                 KeyCode::Char('t') => {
                     self.open_session_picker();
-                    return None;
-                }
-                // Grab or give: one chord for both directions, because the rail
-                // row and the pane title both say which way it will go.
-                KeyCode::Char('g') => {
-                    self.toggle_session_control();
                     return None;
                 }
                 // Walk the open threads. The bare arrows belong to the composer,

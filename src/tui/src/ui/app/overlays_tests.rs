@@ -18,10 +18,10 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
 use super::types::{
-    tab_pos, App, HandbackPrompt, Overlay, PromptKind, ResumePicker, SessionPicker,
-    SessionPickerStep, WorkspaceChoice, RP_TEMPLATES,
+    tab_pos, App, Overlay, PromptKind, ResumePicker, SessionPicker, SessionPickerStep,
+    WorkspaceChoice, RP_TEMPLATES,
 };
-use crate::ui::composer::{Draft, TextPrompt};
+use crate::ui::composer::TextPrompt;
 
 fn app() -> App {
     App::new(
@@ -52,15 +52,6 @@ fn raise(app: &mut App, overlay: Overlay) {
             })
         }
         Overlay::SessionKill => app.arm_harness_close("s".into()),
-        Overlay::HandbackPrompt => {
-            app.handback_prompt = Some(HandbackPrompt {
-                session: "s".into(),
-                took_control: false,
-                note: Draft::default(),
-                editing_note: false,
-                is_takeover: false,
-            })
-        }
         Overlay::WorkflowDelete => app.workflow_delete_armed = Some(("id".into(), "name".into())),
         Overlay::InlinePrompt => {
             app.prompt = Some(TextPrompt::new(PromptKind::HostAdd, "Add a host"))
@@ -75,12 +66,11 @@ fn raise(app: &mut App, overlay: Overlay) {
 }
 
 /// Every variant, so a new one cannot be added without appearing here.
-const EVERY_OVERLAY: [Overlay; 8] = [
+const EVERY_OVERLAY: [Overlay; 7] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
     Overlay::SessionPicker,
     Overlay::SessionKill,
-    Overlay::HandbackPrompt,
     Overlay::WorkflowDelete,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,
@@ -114,31 +104,6 @@ fn every_overlay_is_reachable_and_owns_input_on_its_own() {
             "{overlay:?} is drawn over the content, so it owns input"
         );
     }
-}
-
-#[test]
-fn handback_prompt_swallows_clicks_behind_it() {
-    let mut app = app();
-    raise(&mut app, Overlay::HandbackPrompt);
-    app.hit_tabs_row = 1;
-    app.hit_tabs = vec![(0, 4), (5, 10)];
-    let original_tab = app.tab_index;
-
-    let _ = app.on_mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: 6,
-        row: 1,
-        modifiers: KeyModifiers::NONE,
-    });
-
-    assert_eq!(
-        app.tab_index, original_tab,
-        "a handback prompt must not let a click navigate the UI behind it"
-    );
-    assert!(
-        app.handback_prompt.is_some(),
-        "the click must leave the pending harness decision intact"
-    );
 }
 
 #[test]
@@ -322,139 +287,4 @@ fn the_inline_prompt_replaces_the_resume_picker_rather_than_stacking_on_it() {
     raise(&mut app, Overlay::InlinePrompt);
 
     assert_eq!(app.visible_overlays(), vec![Overlay::InlinePrompt]);
-}
-
-#[test]
-fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
-    // The list is iterated to paint, so its order is the stacking order: the
-    // hand-back question is asked over the picker that may have opened it.
-    let mut app = app();
-    raise(&mut app, Overlay::SessionPicker);
-    raise(&mut app, Overlay::HandbackPrompt);
-    raise(&mut app, Overlay::Decisions);
-
-    assert_eq!(
-        app.visible_overlays(),
-        vec![
-            Overlay::Decisions,
-            Overlay::SessionPicker,
-            Overlay::HandbackPrompt
-        ]
-    );
-}
-
-#[test]
-fn a_handback_note_wider_than_the_modal_wraps_instead_of_vanishing() {
-    // Reported: typing a note into the leave-a-session prompt, everything past
-    // the visible width disappeared. The keystrokes still landed — the draft
-    // grew — but the operator could not read back or edit what they wrote,
-    // which is the one moment they actually have the context to write it.
-    //
-    // The note is one `TLine` holding the whole draft, so nothing folds it
-    // unless the `Paragraph` is told to wrap; ratatui clips an over-long line
-    // by default. The modal also grows a row per wrapped line, or wrapping just
-    // pushes the answer hint out of a fixed 12-row box instead.
-    let mut app = app();
-    raise(&mut app, Overlay::HandbackPrompt);
-    let note = "continue the migration: the socketioxide bump is done, next is \
-                the whisper README pass, then rerun the e2e suite";
-    if let Some(prompt) = app.handback_prompt.as_mut() {
-        prompt.editing_note = true;
-        prompt.note.text = note.to_string();
-    }
-
-    let mut terminal =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
-    terminal.draw(|f| app.draw(f)).expect("draw");
-    let screen: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
-
-    assert!(
-        screen.contains("continue the migration"),
-        "the start of the note should be visible"
-    );
-    // The tail lands on a later row rather than being clipped away.
-    assert!(
-        screen.contains("rerun the e2e suite"),
-        "the end of a wrapped note should be on screen"
-    );
-    // And the hint the wrapped rows could have displaced is still drawn.
-    assert!(
-        screen.contains("Type your note"),
-        "wrapping must grow the modal, not push its answer hint off the bottom"
-    );
-}
-
-#[test]
-fn a_click_answers_the_question_even_after_the_note_has_wrapped() {
-    // The wrapped note pushes the answer hint down a row. The hit boxes are
-    // recorded during the draw, so they have to follow it — a click aimed at
-    // the unwrapped row would land on the note's continuation and answer
-    // nothing, which is worse than the clipping this replaced: the controls are
-    // visible and simply do not respond.
-    //
-    // So the click is aimed where "[Y] hand back" is actually PAINTED, found by
-    // reading the rendered buffer back. Clicking the recorded box instead would
-    // pass whether or not the box agrees with the screen, which is the only
-    // thing worth testing here.
-    let mut app = app();
-    raise(&mut app, Overlay::HandbackPrompt);
-    if let Some(prompt) = app.handback_prompt.as_mut() {
-        prompt.note.text = "x".repeat(180);
-    }
-
-    let mut terminal =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
-    terminal.draw(|f| app.draw(f)).expect("draw");
-
-    let buffer = terminal.backend().buffer().clone();
-    let painted = (0..buffer.area.height)
-        .find_map(|y| {
-            let row: String = (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect();
-            row.find("[Y] hand back").map(|x| (x as u16, y))
-        })
-        .expect("the answer hint should be painted somewhere");
-
-    let _ = app.on_mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: painted.0,
-        row: painted.1,
-        modifiers: KeyModifiers::NONE,
-    });
-
-    assert!(
-        app.handback_prompt.is_none(),
-        "clicking the visible answer must resolve the question once the note wraps"
-    );
-}
-
-#[test]
-fn a_modal_too_tall_for_the_terminal_records_no_offscreen_answers() {
-    // `centered` clamps to the terminal, so a long note on a short screen
-    // clips the hint instead of drawing it. Recording boxes for a row that was
-    // never painted would answer the question for a click that landed on the
-    // pane behind the modal.
-    let mut app = app();
-    raise(&mut app, Overlay::HandbackPrompt);
-    if let Some(prompt) = app.handback_prompt.as_mut() {
-        prompt.note.text = "y".repeat(600);
-    }
-
-    let mut terminal =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 10)).expect("terminal");
-    terminal.draw(|f| app.draw(f)).expect("draw");
-
-    for (rect, _) in &app.hit_handback {
-        assert!(
-            rect.y < 10,
-            "a hit box must never sit below the terminal it was drawn in"
-        );
-    }
 }

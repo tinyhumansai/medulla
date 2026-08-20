@@ -22,8 +22,7 @@ pub enum SlashCommand {
     NewSession,
     /// `/resume` — open the saved-chat picker.
     Resume,
-    /// `/session [harness] [path]` — start a session the orchestrator will not
-    /// dispatch into.
+    /// `/session [harness] [path]` — start a local session.
     ///
     /// Both arguments are optional: with neither, the front end opens its
     /// picker. Parsing does not validate the path — only the front end knows
@@ -34,16 +33,6 @@ pub enum SlashCommand {
         provider: Option<String>,
         /// The working directory to start it in, when one was given.
         path: Option<String>,
-    },
-    /// `/takecontrol` — take the selected session from the orchestrator.
-    TakeControl,
-    /// `/handoff [note]` — give the selected session back to the orchestrator,
-    /// optionally saying what you were in the middle of.
-    HandOff {
-        /// What the operator wants continued, in their words. The single most
-        /// useful thing in a brief: the transcript shows what happened, this
-        /// says what it was *for*.
-        note: Option<String>,
     },
     /// `/abort` — request cancellation of the running cycle.
     Abort,

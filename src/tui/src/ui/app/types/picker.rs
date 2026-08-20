@@ -1,10 +1,8 @@
-//! Modal state for the manual-launcher picker and the small prompt/overlay
-//! surfaces the launcher and session control raise.
+//! Modal state for the manual-launcher picker and small prompt/overlay surfaces.
 //!
 //! The harness/workspace launcher ([`SessionPicker`], [`ResumePicker`],
 //! [`SessionPickerStep`], [`WorkspaceChoice`]) plus the single-line prompt
-//! overlays ([`Prompt`]/[`PromptKind`]) and the session-release question
-//! ([`HandbackPrompt`], [`TakeOrigin`], [`HandbackPolicy`]) sit here rather
+//! overlays ([`Prompt`]/[`PromptKind`]) sit here rather
 //! than in [`super::model`], which holds the screen model itself and is at its
 //! size ceiling. All are re-exported through [`super`] as `types::*`.
 
@@ -24,9 +22,8 @@ pub(in crate::ui::app) struct ResumePicker {
 /// An overlay the app can draw over the content pane.
 ///
 /// Ordered as they stack, back to front: the two that float over the content,
-/// then the session picker and destructive session question, then the question
-/// asked about a session being released, and finally the two that claim a row
-/// of their own below it.
+/// then the session picker and destructive confirmations, and finally the two
+/// that claim a row of their own below it.
 ///
 /// Produced by [`App::visible_overlays`](crate::ui::app::App::visible_overlays),
 /// which is the single source of truth for what is in front of the content —
@@ -43,8 +40,6 @@ pub(in crate::ui::app) enum Overlay {
     SessionKill,
     /// The confirmation shown before permanently deleting a workflow.
     WorkflowDelete,
-    /// The question asked when the operator lets go of a session.
-    HandbackPrompt,
     /// The shared single-line prompt (Workers add/edit, Agents answer).
     InlinePrompt,
     /// The saved-chat resume picker.
@@ -117,9 +112,9 @@ pub(in crate::ui::app) struct WorkspaceChoice {
 /// Terminals grab the pointer on press: every drag and the release belong to
 /// whoever took the press, regardless of where the pointer has moved to since.
 /// The embedded pane has to do the same, because the alternatives are both
-/// visible failures — a release that lands outside the pane, or one swallowed
-/// by the hand-back question the click itself opened, leaves the child holding
-/// a button nobody is pressing. Claude Code and Codex then read every later
+/// visible failures — a release that lands outside the pane or is swallowed by
+/// a modal leaves the child holding a button nobody is pressing. Claude Code
+/// and Codex then read every later
 /// motion as a drag and anchor their popups to a press the operator has long
 /// since let go of.
 #[derive(Clone)]
@@ -136,88 +131,6 @@ pub(in crate::ui::app) struct PointerGrab {
     /// arrives, and the release still has to be encoded against the geometry
     /// the child believes it has.
     pub(in crate::ui::app) rect: Rect,
-}
-
-/// The "you still hold this session" confirmation shown on release.
-///
-/// Modelled on an unsaved-changes prompt, and for the same reason: an operator
-/// who took a session over and walked away has left the orchestrator locked out
-/// of it, and the moment they release the keyboard is the only moment they are
-/// certainly thinking about it. Silently handing it back would be worse — it
-/// would resume dispatch into a session mid-thought.
-pub(in crate::ui::app) struct HandbackPrompt {
-    /// The session the question is about.
-    ///
-    /// Every answer acts on this, never on whatever the rail last resolved: the
-    /// question can outlive the frame that raised it, and a `y` that moved
-    /// control of a *different* session is the worst outcome this whole flow
-    /// has.
-    pub(in crate::ui::app) session: String,
-    /// Whether attaching is what took control, as opposed to an explicit
-    /// `/takecontrol`. An explicit take is a decision, so the prompt says so
-    /// rather than implying the operator got here by accident.
-    pub(in crate::ui::app) took_control: bool,
-    /// What the operator wants continued, typed into the prompt.
-    ///
-    /// This is the moment they actually have the context — they are leaving the
-    /// session *now* — so it is the one place worth asking. `/handoff <note>`
-    /// exists for the operator who already knows; this is for the one who is
-    /// only reminded by being asked.
-    pub(in crate::ui::app) note: crate::ui::composer::Draft,
-    /// Whether keystrokes are going into the note rather than answering.
-    ///
-    /// Modal because `y`/`n` have to keep meaning yes and no: an operator who
-    /// starts typing a note that begins with "no, ..." must not have the first
-    /// letter answer the question for them.
-    pub(in crate::ui::app) editing_note: bool,
-    /// Which direction the question is about: `true` asks whether to take the
-    /// session from the orchestrator, `false` whether to hand it back.
-    ///
-    /// One prompt for both because they are the same decision seen from either
-    /// side, and the answer is the same keystroke — but the sentence has to say
-    /// which way control is about to move, or the operator confirms the
-    /// opposite of what they meant.
-    pub(in crate::ui::app) is_takeover: bool,
-}
-
-/// How the operator came to hold a session the orchestrator had.
-///
-/// Only the wording of the release question turns on this — both origins ask,
-/// because both locked dispatch out of a workspace. What does *not* appear here
-/// is "started it myself": that session was never taken from anyone, so it is
-/// absent from [`App::sessions_taken`](crate::ui::app::App::sessions_taken)
-/// rather than being a third variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::ui::app) enum TakeOrigin {
-    /// Focusing in took it, which the operator may not have realised.
-    Focus,
-    /// `/takecontrol`, `Ctrl-G`, or answering the takeover question — a decision.
-    Explicit,
-}
-
-/// What to do when the operator releases a session they took.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum HandbackPolicy {
-    /// Ask, every time.
-    #[default]
-    Ask,
-    /// Always hand back without asking.
-    Always,
-    /// Never hand back; releasing the keyboard keeps control.
-    Never,
-}
-
-impl HandbackPolicy {
-    /// Parse the `[harness].handback` config value, falling back to
-    /// [`Ask`](Self::Ask) for anything unrecognized — a typo in a config file
-    /// should not silently change who controls a session.
-    pub fn from_config(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "always" => HandbackPolicy::Always,
-            "never" => HandbackPolicy::Never,
-            _ => HandbackPolicy::Ask,
-        }
-    }
 }
 
 /// The action a small inline prompt (Hosts add/edit, Agents answer) submits.

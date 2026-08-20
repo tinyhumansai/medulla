@@ -380,19 +380,6 @@ pub enum Cmd {
         /// The dispatched task whose session should be killed.
         task_id: String,
     },
-    /// Push a handoff brief for a session the operator just gave back.
-    ///
-    /// Off the render thread because it does two things that must not block a
-    /// frame: shells out to `git` for the branch, and awaits a socket emit.
-    /// Arrives with `branch`/`project` unset — the dispatcher fills them.
-    HandOffSession(Box<medulla::hub::HarnessHandoff>),
-    /// Tell the orchestrator the operator has taken the session in a workspace.
-    HoldSession {
-        /// The workspace being taken.
-        workspace: String,
-        /// Why, when the operator said.
-        reason: Option<String>,
-    },
     /// Fetch account-level usage from the backend for the Usage tab.
     LoadUsage,
     /// Load a page of the feedback board for the Feedback surface.
@@ -914,15 +901,8 @@ pub struct App {
     // which goes on believing the button is still down and misplaces everything
     // it draws in response to the pointer afterwards.
     pub(in crate::ui::app) pointer_grab: Option<PointerGrab>,
-    // Where the hand-back question drew each of its answers, and the key each
-    // one stands for. Recorded during the draw so a click can be answered by
-    // replaying the keystroke rather than by a second copy of the routing: the
-    // two would drift, and the direction they would drift in is a pointer that
-    // hands a harness back when the operator meant to keep it.
-    pub(in crate::ui::app) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
     // The "start a session" picker's outer box, and where each offered row was
-    // drawn with the index it stands for in that step's list. Recorded during
-    // the draw for the same reason the hand-back answers are: the harness step
+    // drawn with the index it stands for in that step's list. The harness step
     // windows a long list, so screen position and list index are not the same
     // number, and only the draw knows which window it used.
     pub(in crate::ui::app) hit_session_picker: Option<(Rect, Vec<(Rect, usize)>)>,
@@ -943,58 +923,8 @@ pub struct App {
     pub(in crate::ui::app) rail_session: Option<String>,
     /// The "start a session" picker, while it is open.
     pub(in crate::ui::app) session_picker: Option<SessionPicker>,
-    /// The "you still hold this session" confirmation, while it is open.
-    pub(in crate::ui::app) handback_prompt: Option<HandbackPrompt>,
     /// How far the Help page is scrolled, in lines.
     pub(in crate::ui::app) help_scroll: u16,
-    /// What releasing a held session does, from `[harness].handback`.
-    pub(in crate::ui::app) handback_policy: HandbackPolicy,
-    /// The sessions taken *from the orchestrator*, and how each was taken.
-    ///
-    /// Membership is the whole question the release prompt exists to ask. A
-    /// session the operator started themselves was never the orchestrator's, so
-    /// letting go of the keyboard owes it nothing, and asking about it every
-    /// time is how a confirmation becomes furniture. One taken out from under
-    /// dispatch is different: walking away from it leaves the orchestrator
-    /// locked out of a workspace, silently and indefinitely.
-    ///
-    /// The origin distinguishes "you picked this up by focusing in" from "you
-    /// asked for it with /takecontrol", which the release prompt words
-    /// differently: the second was a decision, and re-asking about it as though
-    /// it were an accident is how a confirmation becomes noise.
-    ///
-    /// Keyed by session rather than kept as one flag because several sessions
-    /// can be held at once — take A, keep it on release, then attach to B. A
-    /// single flag answered for whichever was touched last: it worded B's
-    /// question with A's takeover, and kept asking about sessions nobody had
-    /// taken from anyone.
-    pub(in crate::ui::app) sessions_taken: std::collections::HashMap<String, TakeOrigin>,
-    /// Sessions the operator has at some point given to the orchestrator.
-    ///
-    /// Separate from [`sessions_taken`](Self::sessions_taken), which says who
-    /// holds a session *now*; this remembers that dispatch once had a claim on
-    /// it, and it is never cleared.
-    ///
-    /// Needed because [`SessionOrigin`](crate::worker::pty::SessionOrigin) alone
-    /// under-counts. A session the operator started carries origin `User`
-    /// forever, but handing it back makes it genuinely dispatchable —
-    /// `SessionHandle::serves_label` lets a handed-back operator session be
-    /// adopted for a task. If that turn then fails, the executor hands it
-    /// straight back to the operator without going through
-    /// [`take_session`](App::take_session), leaving a session with origin
-    /// `User`, no entry in `sessions_taken`, and dispatch locked out of it.
-    /// Releasing that in silence is the bug this set closes.
-    pub(in crate::ui::app) orchestrator_claimed: std::collections::HashSet<String>,
-    /// Commands raised by synchronous input handlers, drained by the event loop.
-    ///
-    /// The key and mouse handlers that move session control cannot return a
-    /// [`Cmd`] — `handle_handback_key` returns `()`, `handle_harness_key`
-    /// returns `bool`, and the mouse path returns nothing — and threading an
-    /// `Option<Cmd>` back through all three would be a wide, test-breaking
-    /// change to say one thing. So they push here instead, and the loop drains
-    /// it right after the event that produced it. Commands run in submission
-    /// order.
-    pub(in crate::ui::app) pending_cmds: std::collections::VecDeque<Cmd>,
     /// Whether operator-started sessions launch with the permission-bypass
     /// flag, from `[harness].skipPermissions`.
     pub(in crate::ui::app) harness_skip_permissions: bool,

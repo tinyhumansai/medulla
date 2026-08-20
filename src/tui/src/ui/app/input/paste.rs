@@ -26,21 +26,16 @@ impl App {
     /// paste that landed somewhere the keyboard is not would be a payload the
     /// operator never sees again. In order:
     ///
-    /// 1. the hand-back question, asked while still attached — the chrome holds
-    ///    the keyboard until it is answered, and its note takes the paste once
-    ///    `E` has made that a text input;
-    /// 2. the attached harness, which owns the keyboard outright and therefore
+    /// 1. the attached harness, which owns the keyboard outright and therefore
     ///    owns the paste, delivered to the child as a paste rather than as the
     ///    keystrokes it happens to spell;
-    /// 3. an open inline prompt, flattened to one line because that is all it
+    /// 2. an open inline prompt, flattened to one line because that is all it
     ///    can draw;
-    /// 4. the session picker, whose workspace step is a path box and whose
+    /// 3. the session picker, whose workspace step is a path box and whose
     ///    harness step is a list;
-    /// 5. any remaining modal, before anything per-tab — one can be raised over
+    /// 4. any remaining modal, before anything per-tab — one can be raised over
     ///    a tab the operator has since moved to;
-    /// 6. the Workflows copilot, when it is the focused pane;
-    /// 7. the Sessions composer, when one is actually on screen, with `\r\n` and
-    ///    bare `\r` normalised to `\n`.
+    /// 5. the Workflows copilot, when it is the focused pane.
     ///
     /// Anything else drops the payload, and does so from an explicit arm: a
     /// surface that owns the keyboard and holds no visible field must swallow a
@@ -63,13 +58,6 @@ impl App {
         #[cfg(feature = "workflows")]
         if self.workflow_delete_armed.take().is_some() {
             self.set_status("Workflow deletion cancelled");
-            return;
-        }
-        // The hand-back question is asked while still attached, so it outranks
-        // even the harness. It swallows a paste on the question itself and takes
-        // one into the note once `E` has made that a text input.
-        if self.handback_prompt.is_some() {
-            self.paste_into_handback_note(text);
             return;
         }
         if let Some(session) = self.harness_focus.attached_to().map(str::to_string) {

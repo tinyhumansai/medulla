@@ -34,8 +34,6 @@ mod rail;
 mod render;
 mod routing_options;
 mod session_control;
-#[cfg(test)]
-mod session_control_tests;
 mod settings_edit;
 mod state;
 mod status_line;

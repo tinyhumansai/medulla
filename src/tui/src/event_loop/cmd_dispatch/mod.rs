@@ -15,7 +15,6 @@ use super::AppMsg;
 #[cfg(feature = "workflows")]
 mod copilot_hosts;
 mod feedback;
-mod handoff;
 #[cfg(feature = "workflows")]
 mod workflow_evolution;
 #[cfg(feature = "workflows")]
@@ -80,10 +79,6 @@ pub(super) fn run_cmd(
         Some(cmd) => *cmd,
         None => return,
     };
-    let cmd = match handoff::run_handoff_cmd(cmd, runtime, msg_tx) {
-        Some(cmd) => *cmd,
-        None => return,
-    };
     match cmd {
         Cmd::Quit => {}
         Cmd::LoadFeedback(_)
@@ -92,9 +87,6 @@ pub(super) fn run_cmd(
         | Cmd::CommentFeedback { .. }
         | Cmd::SubmitFeedback { .. } => {
             unreachable!("feedback commands return before main dispatch")
-        }
-        Cmd::HandOffSession(_) | Cmd::HoldSession { .. } => {
-            unreachable!("handoff commands return before main dispatch")
         }
         Cmd::Submit(input) => {
             let rt = runtime.clone();

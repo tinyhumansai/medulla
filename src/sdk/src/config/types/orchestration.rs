@@ -227,17 +227,9 @@ impl Default for HookDefaultsConfig {
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*
 /// starts to serve tasks. These are the ones an operator opens by hand and the
 /// orchestrator is not allowed to touch.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct HarnessSection {
-    /// What releasing the keyboard does when the operator holds the harness:
-    /// `ask` (the default), `always`, or `never`.
-    ///
-    /// `ask` prompts, the way an editor prompts about unsaved changes — an
-    /// operator who took a harness over and walked away has locked the
-    /// orchestrator out of it, and releasing the keyboard is the last moment
-    /// they are certainly thinking about it.
-    pub handback: String,
     /// Whether an operator-started harness launches with its provider's
     /// permission-bypass flag.
     ///
@@ -269,17 +261,6 @@ pub struct FavoriteWorkspace {
     pub name: String,
     /// The directory the favorite opens.
     pub path: String,
-}
-
-impl Default for HarnessSection {
-    fn default() -> Self {
-        HarnessSection {
-            handback: "ask".to_string(),
-            skip_permissions: false,
-            recent_workspaces: Vec::new(),
-            favorite_workspaces: Vec::new(),
-        }
-    }
 }
 
 /// The `host` section: whether this machine also *runs* the work the

@@ -36,7 +36,6 @@ impl App {
                 Overlay::SessionKill,
                 self.kill_armed.is_some() || self.harness_close_armed.is_some(),
             ),
-            (Overlay::HandbackPrompt, self.handback_prompt.is_some()),
             (
                 Overlay::WorkflowDelete,
                 self.workflow_delete_armed.is_some(),
@@ -60,8 +59,8 @@ impl App {
     /// render: an overlay that is painted over a composer must not leave that
     /// composer taking input nobody can see going in.
     ///
-    /// Note that the overlays which *do* own a text field — the hand-back note,
-    /// the inline prompt, the picker's workspace query — are routed to before
+    /// Note that the overlays which *do* own a text field — the inline prompt
+    /// and the picker's workspace query — are routed to before
     /// this is consulted, so answering `true` for them is not a contradiction.
     pub(in crate::ui::app) fn overlay_owns_keys(&self) -> bool {
         !self.visible_overlays().is_empty()

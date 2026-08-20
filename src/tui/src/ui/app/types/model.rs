@@ -925,16 +925,6 @@ pub struct App {
     pub(in crate::ui::app) session_picker: Option<SessionPicker>,
     /// How far the Help page is scrolled, in lines.
     pub(in crate::ui::app) help_scroll: u16,
-    /// Commands raised by synchronous input handlers, drained by the event loop.
-    ///
-    /// The key and mouse handlers that move session control cannot return a
-    /// [`Cmd`] — `handle_harness_key` returns `bool`, and the mouse path returns
-    /// nothing — and threading an
-    /// `Option<Cmd>` back through all three would be a wide, test-breaking
-    /// change to say one thing. So they push here instead, and the loop drains
-    /// it right after the event that produced it. Commands run in submission
-    /// order.
-    pub(in crate::ui::app) pending_cmds: std::collections::VecDeque<Cmd>,
     /// Whether operator-started sessions launch with the permission-bypass
     /// flag, from `[harness].skipPermissions`.
     pub(in crate::ui::app) harness_skip_permissions: bool,

@@ -1,6 +1,6 @@
-//! Session overlays: the picker that starts one and the destructive close prompt.
+//! Session overlays: the launcher, workflow-delete prompt, and session-close prompt.
 //!
-//! Both are centered popups over the content pane rather than strips under it:
+//! All are centered popups over the content pane rather than strips under it:
 //! the picker names the directory the rail is already showing, while the close
 //! prompt keeps the session whose work would be lost visible behind it.
 

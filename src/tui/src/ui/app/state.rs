@@ -159,7 +159,6 @@ impl App {
             pointer_grab: None,
             hit_session_picker: None,
             help_scroll: 0,
-            pending_cmds: std::collections::VecDeque::new(),
             harness_skip_permissions,
             copy_capture: None,
         }
@@ -451,15 +450,6 @@ impl App {
     }
 
     /// Set the status-line text.
-    /// Take the next command raised by a synchronous handler, if any.
-    ///
-    /// The event loop drains this after each input event. See
-    /// [`pending_cmds`](super::types::App::pending_cmds) for why the queue
-    /// exists at all.
-    pub fn take_pending_cmd(&mut self) -> Option<Cmd> {
-        self.pending_cmds.pop_front()
-    }
-
     pub fn set_status(&mut self, s: impl Into<String>) {
         // A destructive confirmation is valid only while its question remains
         // visible. Any asynchronous status replacement cancels it.

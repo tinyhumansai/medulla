@@ -15,6 +15,15 @@ impl App {
             self.set_status("No session on this row — select one to close it");
             return;
         };
+        if self
+            .local_sessions
+            .as_ref()
+            .and_then(|harnesses| harnesses.control(&session))
+            == Some(crate::worker::pty::SessionControl::Orchestrator)
+        {
+            self.set_status("Task sessions are view-only while they are running");
+            return;
+        }
         let running = self
             .local_sessions
             .as_ref()
@@ -35,6 +44,12 @@ impl App {
             self.set_status("This device is not hosting, so it has no sessions");
             return;
         };
+        // Control may have changed while the confirmation was open. Re-check at
+        // the destructive boundary so a stale prompt cannot kill active work.
+        if harnesses.control(session) == Some(crate::worker::pty::SessionControl::Orchestrator) {
+            self.set_status("Task sessions are view-only while they are running");
+            return;
+        }
         if !harnesses.sessions.close(session) {
             self.set_status("That session is gone");
             return;

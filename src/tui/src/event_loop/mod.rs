@@ -118,19 +118,6 @@ pub(crate) async fn run(
                             local_hosts.as_ref(),
                         );
                     }
-                    // Commands raised by handlers that cannot return one — the
-                    // handback prompt, the harness key layer, the mouse path.
-                    // Drained here, in submission order, so they run against the
-                    // same state the event that produced them left behind.
-                    while let Some(cmd) = app.take_pending_cmd() {
-                        run_cmd(
-                            cmd,
-                            &runtime,
-                            &app.loaded.config,
-                            &msg_tx,
-                            local_hosts.as_ref(),
-                        );
-                    }
                 }
             }
             recv = sub.recv(), if !runtime_sub_closed => {

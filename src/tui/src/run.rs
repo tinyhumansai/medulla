@@ -53,7 +53,7 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
     medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
 
-    let core = medulla::core_host::boot()
+    let core = medulla::core_host::boot_with_hooks(&loaded.config.hooks)
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))?;
     let runtime = Arc::new(

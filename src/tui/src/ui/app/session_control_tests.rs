@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use medulla::config::LoadedConfig;
-use medulla::runtime::mock::MockRuntime;
 #[cfg(unix)]
-use medulla::runtime::AgentDeclaration;
+use medulla::protocol::HarnessProvider;
+use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -51,7 +51,7 @@ fn taking_a_session_on_another_host_is_refused_by_name() {
     app.pane_session = None;
     app.pane_remote_session = Some("mac-studio-claude".to_string());
 
-    app.take_session_control();
+    app.toggle_session_control();
 
     let status = app.status().to_string();
     assert!(
@@ -85,18 +85,18 @@ fn hosting(app: &mut App) {
 #[test]
 fn the_take_chord_on_an_empty_row_still_says_so() {
     // The other side of the same branch: with no remote row recorded, the
-    // message must stay the plain one. A remote-session sentence on a host row
-    // or the composer would be worse than the generic answer.
+    // message must stay the plain one. A remote-session sentence on a row that
+    // names no session would be worse than the generic answer.
     let mut app = app();
     hosting(&mut app);
     app.pane_session = None;
     app.pane_remote_session = None;
 
-    app.take_session_control();
+    app.toggle_session_control();
 
     let status = app.status().to_string();
     assert!(
-        status.contains("No session on this row"),
+        status.contains("not holding any session"),
         "unexpected status: {status}"
     );
 }
@@ -109,10 +109,10 @@ fn draw_once(app: &mut App) {
 
 /// The rail index of the first row satisfying `wanted`.
 fn row_index(app: &App, wanted: impl Fn(&RailRow) -> bool) -> usize {
-    app.rail_rows()
-        .iter()
+    let rows = app.rail_rows();
+    rows.iter()
         .position(wanted)
-        .expect("the demo fixture has such a row")
+        .unwrap_or_else(|| panic!("no such row on the rail: {rows:?}"))
 }
 
 /// Select a rail row through the cursor API so its stable anchor follows it.
@@ -128,7 +128,7 @@ fn selecting_a_session_this_device_does_not_host_arms_the_remote_refusal() {
     // session the demo fixture dispatched belongs to another machine — and the
     // cursor landing on one is the whole of what arms the refusal.
     let mut app = app();
-    app.tab_index = tab_pos("Agents");
+    app.tab_index = tab_pos("Sessions");
     select_row(&mut app, |row| matches!(row, RailRow::Session(_)));
 
     draw_once(&mut app);
@@ -141,7 +141,7 @@ fn selecting_a_session_this_device_does_not_host_arms_the_remote_refusal() {
 
     // And the chord reads what the draw recorded, rather than the generic
     // "no session on this row" that an unarmed pointer would produce.
-    app.take_session_control();
+    app.toggle_session_control();
     let status = app.status().to_string();
     assert!(
         status.contains(&armed) && status.contains("another host"),
@@ -156,17 +156,22 @@ fn moving_off_the_row_or_off_the_tab_disarms_it_again() {
     // longer looking at, which is how `Ctrl-G` on Settings ends up talking about
     // somebody else's machine.
     let mut app = app();
-    app.tab_index = tab_pos("Agents");
+    // Hosting, so the rail carries the action row as well as the dispatched
+    // session — the test needs a second row to move the cursor onto.
+    app.set_local_sessions(super::rail::tests::shell_harnesses(
+        crate::worker::pty::PtyManager::new(),
+    ));
+    app.tab_index = tab_pos("Sessions");
     select_row(&mut app, |row| matches!(row, RailRow::Session(_)));
     draw_once(&mut app);
     assert!(app.pane_remote_session.is_some(), "armed to begin with");
 
-    // Off the row: the conversation is not a session at all.
-    select_row(&mut app, |row| matches!(row, RailRow::Lane(_)));
+    // Off the row: the action row is not a session at all.
+    select_row(&mut app, |row| matches!(row, RailRow::NewSession));
     draw_once(&mut app);
     assert!(
         app.pane_remote_session.is_none(),
-        "a lane row names no session: {:?}",
+        "the action row names no session: {:?}",
         app.pane_remote_session
     );
 
@@ -182,7 +187,7 @@ fn moving_off_the_row_or_off_the_tab_disarms_it_again() {
         app.pane_remote_session
     );
 
-    app.take_session_control();
+    app.toggle_session_control();
     let status = app.status().to_string();
     assert!(
         !status.contains("another host"),
@@ -196,7 +201,7 @@ fn an_unbound_character_in_a_harness_diff_does_not_type_into_the_hidden_draft() 
     app.pane_session = Some("session-a".to_string());
     app.pane_view = super::types::PaneView::Diff;
 
-    let _ = app.on_agents_rail_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    let _ = app.on_sessions_rail_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
 
     assert!(
         app.draft.text.is_empty(),
@@ -212,12 +217,11 @@ fn closing_one_of_two_taken_sessions_keeps_the_shared_workspace_held() {
     let sessions = crate::worker::pty::PtyManager::new();
     let mut app = app();
     app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
-    app.loaded.config.fleet.agent_declarations = vec![
-        AgentDeclaration::new("first", "", "codex", "/"),
-        AgentDeclaration::new("second", "", "codex", "/"),
-    ];
-    app.start_agent_session("first", "first", false);
-    app.start_agent_session("second", "second", false);
+    // Two sessions in one directory, opened the way the picker opens them:
+    // the workspace hold is per-directory, so both have to name the same one.
+    let choice = crate::ui::harness_pane::HarnessChoice::native(HarnessProvider::Codex);
+    app.spawn_session(choice.clone(), "/");
+    app.spawn_session(choice, "/");
     let ids: Vec<String> = sessions.rows().into_iter().map(|row| row.id).collect();
     assert_eq!(ids.len(), 2, "the fixture opened both sessions");
     for id in &ids {
@@ -238,5 +242,113 @@ fn closing_one_of_two_taken_sessions_keeps_the_shared_workspace_held() {
             .all(|cmd| !matches!(cmd, super::types::Cmd::HandOffSession(_))),
         "the workspace hold stays in place while another taken session covers it"
     );
+    sessions.shutdown();
+}
+
+// Unix-only because the fixture stands a real child up on a real pseudo-terminal.
+#[cfg(unix)]
+#[test]
+fn uppercase_k_kills_a_local_session_that_has_no_dispatched_task() {
+    // An operator-started harness has no task record, so it cannot be sent
+    // through the remote task-kill protocol. `K` must still end the local
+    // process after its destructive confirmation.
+    let sessions = crate::worker::pty::PtyManager::new();
+    let mut app = app();
+    app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
+    let choice = crate::ui::harness_pane::HarnessChoice::native(HarnessProvider::Codex);
+    app.spawn_session(choice, "/");
+    let id = sessions
+        .rows()
+        .into_iter()
+        .next()
+        .expect("a session was opened")
+        .id;
+    app.pane_session = Some(id.clone());
+
+    let action = app.on_sessions_rail_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+    assert!(matches!(action, super::keys::SessionsKey::Handled(None)));
+    assert_eq!(app.harness_close_armed.as_deref(), Some(id.as_str()));
+
+    app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert!(
+        !sessions
+            .row(&id)
+            .expect("the closed row is retained")
+            .state
+            .is_running(),
+        "confirmation should kill the local harness"
+    );
+}
+
+#[test]
+fn local_session_kill_confirmation_is_drawn_as_a_modal() {
+    let mut app = app();
+    app.arm_harness_close("session-a".into());
+    let backend = TestBackend::new(100, 32);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+
+    terminal.draw(|frame| app.draw(frame)).expect("draw modal");
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(rendered.contains("Kill this session?"), "{rendered}");
+    assert!(rendered.contains("[Y] kill session"), "{rendered}");
+}
+
+// Unix-only because the fixture stands a real child up on a real pseudo-terminal
+// via `/bin/sh`. The note plumbing itself is platform-independent.
+#[cfg(unix)]
+#[test]
+fn the_handback_note_editor_puts_the_operators_words_on_the_brief() {
+    // The note used to come from `/handoff <words>` typed into the orchestrator's
+    // composer. That composer went with the orchestrator, so the hand-back
+    // question's own editor is the one place an operator still writes one — and
+    // it has to reach the brief exactly as the command did.
+    let sessions = crate::worker::pty::PtyManager::new();
+    let mut app = app();
+    app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
+    let choice = crate::ui::harness_pane::HarnessChoice::native(HarnessProvider::Codex);
+    app.spawn_session(choice, "/");
+    let id = sessions.rows().remove(0).id;
+    sessions.set_control(&id, SessionControl::User);
+
+    app.handback_prompt = Some(super::types::HandbackPrompt {
+        session: id.clone(),
+        took_control: false,
+        note: Default::default(),
+        editing_note: false,
+        is_takeover: false,
+    });
+
+    // `e` opens the editor, the words go in, Enter sends the note with the brief.
+    app.handle_handback_key(KeyCode::Char('e'));
+    for character in "tests RED".chars() {
+        app.handle_handback_key(KeyCode::Char(character));
+    }
+    app.handle_handback_key(KeyCode::Enter);
+
+    let brief = app
+        .pending_cmds
+        .iter()
+        .find_map(|cmd| match cmd {
+            super::types::Cmd::HandOffSession(brief) => Some(brief.clone()),
+            _ => None,
+        })
+        .expect("answering the question queues a brief");
+    assert_eq!(brief.session_id, id);
+    assert_eq!(
+        brief.note.as_deref(),
+        Some("tests RED"),
+        "the operator's own words, capitalisation and all"
+    );
+    assert!(
+        app.handback_prompt.is_none(),
+        "and the question closes behind it"
+    );
+
     sessions.shutdown();
 }

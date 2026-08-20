@@ -1,10 +1,11 @@
-//! Prompt evidence storage for one workflow engine invocation.
+//! Prompt and transcript evidence storage for one workflow engine invocation.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use serde_json::Value;
 
+use crate::harness_transcript::TranscriptEntry;
 use crate::workflows::RunStep;
 
 use super::NODE_ID_FIELD;
@@ -13,10 +14,18 @@ const MAX_PROMPT_BYTES_PER_NODE: usize = 64 * 1024;
 const MAX_PROMPTS_PER_NODE: usize = 128;
 const TRUNCATED: &str = "[additional prompt evidence truncated]";
 
-/// Resolved agent prompts waiting to be attached to completed run steps.
+/// Resolved agent prompts and harness transcripts waiting to be attached to
+/// completed run steps.
+///
+/// Two queues rather than one keyed pair, because they are filled at different
+/// moments: the prompt is known when the request is resolved, the transcript
+/// only when the harness has finished. Both drain in the same completion order
+/// on [`attach`](Self::attach), which is what keeps the Nth activation of a
+/// fanned-out node matched with its own evidence.
 #[derive(Debug, Default)]
 pub(crate) struct AgentEvidence {
     prompts: Mutex<HashMap<String, VecDeque<String>>>,
+    transcripts: Mutex<HashMap<String, VecDeque<Vec<TranscriptEntry>>>>,
 }
 
 impl AgentEvidence {
@@ -54,8 +63,30 @@ impl AgentEvidence {
         queue.push_back(TRUNCATED.to_string());
     }
 
-    /// Attach prompts to their corresponding persisted steps in completion order.
+    /// Record the transcript one dispatch of `node_id` produced.
+    ///
+    /// An empty transcript is still queued — as a placeholder rather than a
+    /// dropped position. The queue is the Nth activation's slot:
+    /// [`attach_transcripts`](Self::attach_transcripts) pops one entry onto the
+    /// Nth step of the same node, so a dispatch that folded to nothing (only
+    /// status events, say) must keep its slot or every later transcript would
+    /// shift one step early and be misattributed to the wrong activation.
+    pub(crate) fn record_transcript(&self, node_id: &str, transcript: Vec<TranscriptEntry>) {
+        let mut transcripts = self.transcripts.lock().expect("agent evidence lock");
+        let queue = transcripts.entry(node_id.to_string()).or_default();
+        // The same ceiling the prompt queue uses, for the same reason: a node
+        // in a loop can activate without bound, and this is held in memory for
+        // the whole run. A placeholder counts like a real transcript — both are
+        // one activation's slot.
+        if queue.len() < MAX_PROMPTS_PER_NODE {
+            queue.push_back(transcript);
+        }
+    }
+
+    /// Attach prompts and transcripts to their corresponding persisted steps in
+    /// completion order.
     pub(crate) fn attach(&self, steps: &mut [RunStep]) {
+        self.attach_transcripts(steps);
         let mut prompts = self.prompts.lock().expect("agent evidence lock");
         let mut remaining = HashMap::<String, usize>::new();
         for step in steps.iter() {
@@ -84,6 +115,26 @@ impl AgentEvidence {
                 _ => Some(crate::workflows::bounded_evidence(&Value::Array(values))),
             };
             *steps_left -= 1;
+        }
+    }
+
+    /// Drain each node's queued transcripts onto its steps, in order.
+    ///
+    /// Simpler than the prompt pass beside it, and deliberately so. A prompt
+    /// queue may hold several entries for one step — a node that dispatched
+    /// more than once inside a single activation — so that pass has to decide
+    /// how many to fold together. A transcript is one whole harness turn, and a
+    /// step is one activation, so the mapping is one to one and the Nth
+    /// transcript belongs to the Nth step.
+    fn attach_transcripts(&self, steps: &mut [RunStep]) {
+        let mut transcripts = self.transcripts.lock().expect("agent evidence lock");
+        for step in steps {
+            let Some(queue) = transcripts.get_mut(&step.node_id) else {
+                continue;
+            };
+            if let Some(transcript) = queue.pop_front() {
+                step.transcript = transcript;
+            }
         }
     }
 }

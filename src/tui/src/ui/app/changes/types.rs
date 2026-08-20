@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use medulla::ui::checkout::Checkout;
 use medulla::ui::git_review::{
     hunks, next_hunk, origin_label, previous_hunk, ChangeOrigin, CommentAnchor, Hunk,
     ReviewComments,
@@ -70,6 +71,14 @@ impl ChangedFile {
 pub(crate) struct GitChangesState {
     /// Repository root discovered when the TUI session starts.
     pub(crate) root: Option<PathBuf>,
+    /// Which repository, worktree, and branch [`root`](Self::root) names.
+    ///
+    /// The diff is the one surface where an operator acts on what they read —
+    /// they leave a comment, or go and change the file — so it has to say which
+    /// checkout it is describing. Two worktrees of one repository produce
+    /// diffs that look alike and are not, and the pane view can be showing one
+    /// harness's checkout while the rail cursor has moved to another's.
+    pub(crate) checkout: Checkout,
     /// Commit checked out when the TUI session starts.
     pub(crate) baseline: Option<String>,
     /// Human-visible origin of [`baseline`](Self::baseline).
@@ -135,7 +144,13 @@ impl GitChangesState {
         let (Some(root), Some(baseline)) = (&self.root, &self.baseline) else {
             return;
         };
-        match repository::load(root, baseline) {
+        // Re-read every time, and outside the success branch: the checkout is a
+        // fact about `root`, so a load that fails must not leave the panes
+        // attributing the last repository's name to this one's error.
+        let checkout = crate::worker::pty::checkout::inspect::resolve_path(root);
+        let loaded = repository::load(root, baseline);
+        self.checkout = checkout;
+        match loaded {
             Ok((commits, recent_commits, files)) => {
                 self.commits = commits;
                 self.recent_commits = recent_commits;
@@ -156,6 +171,7 @@ impl GitChangesState {
             self.comments_root = self.root.clone();
         }
         self.root = None;
+        self.checkout = Checkout::default();
         self.baseline = None;
         self.baseline_source = BaselineSource::AppLaunch;
         self.harness_root = None;
@@ -259,6 +275,14 @@ impl GitChangesState {
         self.scroll = 0;
         self.refresh();
         Ok(())
+    }
+
+    /// Which repository, worktree, and branch the diff is being read from.
+    ///
+    /// `None` outside a repository, where the panes are showing an error rather
+    /// than a comparison and have nothing to attribute.
+    pub(crate) fn checkout_label(&self) -> Option<String> {
+        self.checkout.summary()
     }
 
     /// Display label for the active baseline.

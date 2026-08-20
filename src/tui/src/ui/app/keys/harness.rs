@@ -72,12 +72,6 @@ impl App {
                 // longer see the state of.
                 if self.begin_session_release(&session) {
                     self.release_session();
-                    // The keyboard has to land somewhere it can be seen. The
-                    // cursor is on a harness row, which draws no composer, so
-                    // the rail is the only half of the tab that can answer a
-                    // keystroke — leaving focus on the composer is what made
-                    // every key after a release look like a dead terminal.
-                    self.focus_agents_rail();
                     self.set_status(format!(
                         "Released the session · {FOCUS_CHORD_LABEL} to type again"
                     ));
@@ -95,7 +89,7 @@ impl App {
         if self.overlay_owns_keys() {
             return false;
         }
-        // `agents_rail_focused`, not the raw focus field. A harness row draws no
+        // `sessions_rail_focused`, not the raw focus field. A harness row draws no
         // composer, so the rail is driving the keyboard whether or not the
         // operator ever pressed Esc to say so — and the field alone is `Composer`
         // for anyone who arrived by `Alt`+`↓` or by clicking. Enter then fell
@@ -107,7 +101,7 @@ impl App {
             && key.modifiers == KeyModifiers::NONE
             && self.pane_view == PaneView::Harness
             && self.pane_session.is_some()
-            && self.agents_rail_focused();
+            && self.sessions_rail_focused();
         // Enter asks first. It is a navigation key, and walking the rail onto a
         // managed harness must not silently take it away from the orchestrator;
         // the chord below is the deliberate spelling and still attaches outright.
@@ -130,7 +124,7 @@ impl App {
         false
     }
 
-    /// Attach to the harness the Agents pane resolved on the last draw.
+    /// Attach to the harness the Sessions pane resolved on the last draw.
     ///
     /// Refuses, with a reason, rather than silently doing nothing: an operator
     /// who pressed the chord and saw no change has no way to tell "wrong row"

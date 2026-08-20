@@ -34,7 +34,7 @@ fn worker_app() -> App {
         Arc::new(MockRuntime::demo()),
         LoadedConfig::defaults("medulla.tui.json".into()),
     );
-    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Sessions").unwrap();
     // Walk the rail the way an operator does: focus it, then step down onto the
     // worker lane under the orchestrator.
     for code in [KeyCode::Esc, KeyCode::Down] {

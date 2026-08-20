@@ -163,6 +163,47 @@ pub(crate) fn discover_session_file(
     None
 }
 
+/// Every session file for `agent` rooted at `cwd`, newest first.
+///
+/// [`discover_session_file`] returns the single newest match — right for
+/// binding a tailer to "the session in this folder". This is the
+/// attribution-shaped variant: it returns *all* matches so a caller can prove
+/// the folder maps to exactly one session before trusting the newest's name.
+///
+/// Unlike `discover_session_file`, a transcript with no recorded cwd is not a
+/// candidate: without one it cannot be shown to belong to this folder, so it
+/// cannot anchor a label either.
+pub(crate) fn session_files_for_cwd(
+    env: &HashMap<String, String>,
+    agent: SessionAgentKind,
+    cwd: &str,
+) -> Vec<DiscoveredSession> {
+    // An unresolvable `here` proves nothing. Two `None` resolves compare equal,
+    // so without this guard a single session whose cwd also fails to resolve
+    // would pass the match below and be attributed to this folder on no
+    // evidence at all — the very mislabeling this function exists to prevent.
+    let Some(here) = safe_resolve(cwd) else {
+        return Vec::new();
+    };
+    let mut files = collect_session_files(agent, &sessions_dir_for(env, agent));
+    files.sort_by_key(|file| std::cmp::Reverse(file.mtime_ms));
+    files
+        .into_iter()
+        .filter_map(|file| {
+            let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
+            let summary = read_session_summary(agent, &file.path)?;
+            let session_cwd = summary.cwd?;
+            (safe_resolve(&session_cwd).as_deref() == Some(here.as_str())).then_some(
+                DiscoveredSession {
+                    path: canonical,
+                    id: summary.id,
+                    cwd: Some(session_cwd),
+                },
+            )
+        })
+        .collect()
+}
+
 /// Whether a session's recorded `cwd` resolves to the same path as `here`.
 /// Both sides must be present for a match.
 pub(super) fn is_here(cwd: Option<&str>, here: Option<&str>) -> bool {

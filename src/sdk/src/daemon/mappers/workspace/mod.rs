@@ -35,7 +35,7 @@ pub(crate) fn workspace_event_from_output(
     ts: i64,
     record_type: &str,
 ) -> Option<HarnessSemanticEvent> {
-    let checkout = json_report(output).or_else(|| text_report(output));
+    let checkout = worktree_checkout_from_output(output);
     let pull_request = pull_request_command.and_then(|command| match command {
         PullRequestCommand::Create => pull_request_url(output),
         PullRequestCommand::View => pull_request_url_from_json(output),
@@ -66,6 +66,15 @@ pub(crate) fn workspace_event_from_output(
         "agent",
         Value::Object(payload),
     ))
+}
+
+/// Read a stable worktree-helper report from command output.
+///
+/// Shared with transports that do not use the JSONL mapper (notably Codex
+/// app-server), so every Codex execution path applies the same signature checks
+/// before changing a session's runtime directory.
+pub(crate) fn worktree_checkout_from_output(output: &str) -> Option<(String, String)> {
+    json_report(output).or_else(|| text_report(output))
 }
 
 /// Read the `--json` report, allowing command output around the object.

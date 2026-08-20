@@ -25,6 +25,7 @@
 //!
 //! # Layout
 //!
+//! - [`body`] — the request-body rewrite that applies an upstream-provider pin.
 //! - [`headers`] — the pure request-header rewrite. All attribution policy.
 //! - [`lifecycle`] — listener startup and process-wide proxy ownership.
 //! - [`routing`] — provider-scoped router and child-environment rewriting.
@@ -38,6 +39,7 @@
 //! Medulla-routed runs only. A harness the operator has separately configured to
 //! reach OpenRouter through its own config file still bypasses this proxy.
 
+mod body;
 mod headers;
 mod lifecycle;
 mod routing;
@@ -47,10 +49,14 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod body_tests;
+
+pub use body::MAX_REWRITE_BYTES;
 pub use headers::{rewrite, MEDULLA_REFERER, MEDULLA_TITLE};
 pub use lifecycle::shared;
-pub use routing::{route_openrouter, route_run, route_spawn};
+pub use routing::{route_embedded, route_openrouter, route_run, route_spawn};
 pub use types::{
-    ProxyEndpoint, ProxyHandle, ProxyRouting, UpstreamShape, OPENROUTER_ROOT, PROXY_TOKEN_ENV,
-    UPSTREAM_URL_ENV,
+    EmbeddedRouting, ProxyEndpoint, ProxyHandle, ProxyRouting, UpstreamShape, OPENROUTER_ROOT,
+    PROXY_TOKEN_ENV, UPSTREAM_URL_ENV,
 };

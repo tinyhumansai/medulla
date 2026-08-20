@@ -285,6 +285,7 @@ fn the_selected_workflows_runs_are_listed_under_it_in_the_rail() {
             input: None,
             output: None,
             diagnostics: Vec::new(),
+            transcript: Vec::new(),
         }],
         pending_approvals: Vec::new(),
         error: None,
@@ -317,6 +318,7 @@ fn selecting_a_run_overlays_it_on_the_graph() {
                 input: None,
                 output: Some(json!({ "started": true })),
                 diagnostics: Vec::new(),
+                transcript: Vec::new(),
             },
             RunStep {
                 node_id: "check".into(),
@@ -325,6 +327,7 @@ fn selecting_a_run_overlays_it_on_the_graph() {
                 input: None,
                 output: None,
                 diagnostics: Vec::new(),
+                transcript: Vec::new(),
             },
         ],
         pending_approvals: Vec::new(),
@@ -448,7 +451,7 @@ fn the_footer_teaches_this_tabs_bindings_rather_than_the_agents_tabs() {
     assert!(screen.contains("i inspect"), "{screen}");
     assert!(
         !screen.contains("⌥A answer"),
-        "the Agents-tab steering keys do nothing here"
+        "the Sessions-tab steering keys do nothing here"
     );
 }
 

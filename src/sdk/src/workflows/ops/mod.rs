@@ -29,7 +29,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tinyflows::graph_ops::GraphOp;
 
-use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, WorkflowStore};
+use crate::workflows::{WorkflowError, WorkflowRecord, WorkflowStore};
 
 pub use evolve::{
     accept_proposal, add_note, author, evolve, notes, proposals, propose, reject_proposal,
@@ -47,7 +47,7 @@ pub use runs::{
 
 /// The store every operation reads and writes, discovered for this environment.
 pub fn discover_store(env: &HashMap<String, String>, cwd: &Path) -> Arc<dyn WorkflowStore> {
-    Arc::new(FileWorkflowStore::discover(env, cwd))
+    Arc::new(crate::workflows::store::discover(env, cwd))
 }
 
 /// A record as the document an author sees: the graph, with the host fields

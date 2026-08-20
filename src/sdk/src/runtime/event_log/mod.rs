@@ -6,9 +6,7 @@
 
 mod types;
 
-pub(crate) use types::ThreadEventLog;
-#[cfg(test)]
-pub(crate) use types::{CHAT_CAP, EVENT_CAP};
+pub(crate) use types::{trim_to_cap, ThreadEventLog, CHAT_CAP, EVENT_CAP};
 
 #[cfg(test)]
 mod tests;

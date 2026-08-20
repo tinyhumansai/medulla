@@ -47,7 +47,7 @@ const HEIGHT: u16 = 44;
 fn app_with_harnesses(sessions: PtyManager) -> App {
     let runtime: Arc<dyn Runtime> = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, LoadedConfig::defaults("medulla.tui.json".into()));
-    app.tab_index = TABS.iter().position(|t| *t == "Agents").unwrap();
+    app.tab_index = TABS.iter().position(|t| *t == "Sessions").unwrap();
 
     let config = medulla::daemon::DaemonConfig {
         hooks: medulla::harness_hooks::HooksConfig::default(),

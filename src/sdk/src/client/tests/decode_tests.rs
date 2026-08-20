@@ -205,6 +205,13 @@ fn blocked_route_maps_to_a_statusless_api_error() {
 }
 
 #[test]
+fn socket_failures_keep_their_transport_classification() {
+    let err: ClientError = tinyhumans_sdk::Error::MissingSocketToken.into();
+    assert!(matches!(err, ClientError::Socket(_)), "got {err:?}");
+    assert!(!err.is_auth_error());
+}
+
+#[test]
 fn auth_error_classification_covers_status_codes_and_non_api_errors() {
     let api_error = |status: Option<u16>, error_code: Option<&str>| ClientError::Api {
         status,

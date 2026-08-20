@@ -54,25 +54,33 @@ fn a_terminal_title_update_surfaces_as_the_thread_name() {
 }
 
 #[test]
-fn clearing_a_terminal_title_clears_the_thread_name() {
+fn an_empty_terminal_title_preserves_the_last_non_empty_thread_name() {
+    // The screen layer ignores empty OSC title samples so that a thread name
+    // discovered from the Codex session index (or from a prior non-empty title)
+    // is not erased by ordinary harness output that includes no title escape.
     let manager = PtyManager::new();
     let id = manager
-        .open(sh(
-            "printf '\\033]2;Named thread\\007'; read line; printf '\\033]2;   \\007'; sleep 30",
-        ))
+        .open(sh("printf '\\033]2;Named thread\\007'; read line; \
+             printf '\\033]2;\\007'; echo empty-title-done; sleep 30"))
         .unwrap();
     wait_for("initial thread name", || {
         manager.row(&id).and_then(|row| row.thread_name).as_deref() == Some("Named thread")
     });
 
     manager.write(&id, b"clear\n").unwrap();
-    wait_for("cleared thread name", || {
-        manager
-            .row(&id)
-            .is_some_and(|row| row.thread_name.is_none())
+    // The empty title must NOT overwrite: the name stays. The child writes its
+    // empty OSC sequence *then* the marker, and the reader thread feeds bytes to
+    // the emulator in order — so a marker on screen proves the empty sample has
+    // already passed through `process` before the name is checked. (A fixed
+    // sleep raced the reader and made this test flaky.)
+    wait_for("the empty title to have been emitted", || {
+        screen_text(&manager, &id).contains("empty-title-done")
     });
-
-    assert_eq!(manager.row(&id).unwrap().thread_name, None);
+    assert_eq!(
+        manager.row(&id).and_then(|row| row.thread_name),
+        Some("Named thread".to_string()),
+        "empty OSC title must not clear a previously set thread name"
+    );
     manager.close(&id);
 }
 
@@ -226,6 +234,25 @@ async fn writing_to_an_exited_session_is_refused() {
 }
 
 #[test]
+fn a_recorded_write_error_stamps_the_moment_it_happened() {
+    // The failure cue stamps itself with last_output_at, so a write error on a
+    // session that has produced no output for minutes must not inherit that
+    // stale output time — the brand-new failure would claim an age it does not
+    // have, forever, if the child stayed alive.
+    let manager = PtyManager::new();
+    let id = manager.open(sh("sleep 30")).unwrap();
+    let handle = manager.handle(&id).expect("a live handle");
+    let now = medulla::clock::now_millis();
+
+    handle.record_error("write queue full".to_string(), now);
+
+    let row = manager.row(&id).unwrap();
+    assert_eq!(row.last_error.as_deref(), Some("write queue full"));
+    assert_eq!(row.last_output_at, now);
+    manager.close(&id);
+}
+
+#[test]
 fn a_running_session_cannot_be_forgotten() {
     // Dropping the record while the child lives would orphan it holding a pty.
     let manager = PtyManager::new();
@@ -248,28 +275,6 @@ fn sessions_keep_open_order_so_the_cursor_does_not_jump() {
     assert_eq!(rows[1].id, b);
     assert_eq!(manager.running_count(), 2);
     manager.shutdown();
-}
-
-#[test]
-fn a_session_records_its_worktrees_branch() {
-    let dir = tempfile::tempdir().unwrap();
-    let status = std::process::Command::new("git")
-        .args(["init", "--quiet", "--initial-branch", "visible-branch"])
-        .arg(dir.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-
-    let manager = PtyManager::new();
-    let mut spec = sh("sleep 30");
-    spec.cwd = dir.path().to_string_lossy().into_owned();
-    let id = manager.open(spec).unwrap();
-
-    assert_eq!(
-        manager.row(&id).unwrap().branch.as_deref(),
-        Some("visible-branch")
-    );
-    manager.close(&id);
 }
 
 #[test]
@@ -367,19 +372,6 @@ fn an_unborn_repository_records_its_root_without_a_launch_commit() {
     );
     assert_eq!(row.launch_commit, None);
     assert!(row.launch_checkout_identity.is_some());
-    manager.close(&id);
-}
-
-#[test]
-fn a_session_outside_git_has_no_branch() {
-    let dir = tempfile::tempdir().unwrap();
-    let manager = PtyManager::new();
-    let mut spec = sh("sleep 30");
-    spec.cwd = dir.path().to_string_lossy().into_owned();
-    let id = manager.open(spec).unwrap();
-
-    assert!(manager.row(&id).unwrap().branch.is_none());
-    assert!(manager.row(&id).unwrap().launch_root.is_none());
     manager.close(&id);
 }
 

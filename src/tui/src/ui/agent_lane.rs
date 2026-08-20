@@ -1,6 +1,6 @@
 //! Shared one-line agent-lane presentation.
 //!
-//! Both the orchestrator's Agents tab and the daemon's reduced Agents tab use
+//! Both the orchestrator's Sessions tab and the daemon's reduced Agents tab use
 //! this formatter so presence glyphs, labels, suffix spacing, and selection
 //! styling do not drift into two similar-looking components.
 

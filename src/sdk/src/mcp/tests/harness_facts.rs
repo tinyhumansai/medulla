@@ -144,10 +144,12 @@ async fn the_host_tool_lists_the_harnesses_a_node_may_choose_between() {
     let (facts, _) = call(&store, "workflow_host", json!({})).await;
 
     // Flavors, not merely providers: `codex-server` is a name a node may write,
-    // so an author reading this list has to be told about it.
+    // so an author reading this list has to be told about it. `openhuman` is
+    // here for the same reason — a node may name the embedded core, and this
+    // list is where an author finds out.
     assert_eq!(
         facts["builtinHarnesses"],
-        json!(["claude", "codex", "codex-server", "opencode"])
+        json!(["claude", "codex", "codex-server", "opencode", "openhuman"])
     );
     // Default config pins neither, so a node inherits whatever the worker runs.
     assert_eq!(facts["defaultHarness"], json!(null));

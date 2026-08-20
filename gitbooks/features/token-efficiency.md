@@ -15,7 +15,8 @@ is wasting less. If you already pay for a Claude Max plan and a Codex allowance,
 tokens sitting unused on those seats at the end of the month are money you spent
 for nothing.
 
-Medulla treats them as separate problems, because they are.
+Medulla handles the two separately, and the rest of this page is split the same
+way.
 
 ## Spending less: keeping the surface small
 
@@ -27,24 +28,23 @@ See [RLM: Context Scaling Without Collapse](../rlm-context-scaling.md).
 
 Several mechanisms enforce it.
 
-* **Offload by threshold.** A tool result past a size limit moves to the store,
-  and the transcript keeps a pointer and a head excerpt.
-* **Compressed history.** Each reasoning pass leaves a summary rather than a
-  transcript, roughly 20:1, so a long operation carries forward without carrying
-  everything.
-* **A gate on fleet output.** Worker events are filtered and compressed, or
-  dropped, before reaching a thinking layer, which is to say before they cost
-  anything.
-* **Debounced worker events.** A chatty harness cannot churn the orchestrator's
-  prompt cache by emitting constantly.
-* **Narrowed tools.** A delegated task can bind a subset of tools instead of the
-  whole registry, cutting per-call input tokens sharply on a wide fan-out.
-* **A context guard.** When utilization crosses a high-water mark, older material
-  is evicted to the store rather than left to crowd the window.
+* A tool result past a size limit is offloaded to the store, and the transcript
+  keeps a pointer and a head excerpt.
+* Each reasoning pass leaves a summary rather than a transcript, roughly 20:1, so
+  a long operation carries forward without carrying everything.
+* Worker events are filtered and compressed, or dropped, before reaching a
+  thinking layer, which is to say before they cost anything.
+* Those events are also debounced, so a chatty harness cannot churn the
+  orchestrator's prompt cache by emitting constantly.
+* A delegated task can bind a subset of tools instead of the whole registry,
+  cutting per-call input tokens sharply on a wide fan-out.
+* When context utilization crosses a high-water mark, a guard evicts older
+  material to the store rather than leaving it to crowd the window.
 
-The payoff is measurable. Medulla's native workers average around 6,000 tokens
-per task, where an equivalent full harness session runs about 16 times that. That
-per-worker efficiency is what makes thousand-harness fleets economically sane.
+Our own measurements put Medulla's native workers at around 6,000 tokens per
+task, against roughly 16 times that for an equivalent full harness session. That
+is an internal figure rather than a benchmark, but it is the per-worker
+arithmetic that decides whether a fleet of a thousand harnesses is affordable.
 
 It also changes what you pay for. Because only the distilled slice reaches the
 orchestrator, you pay orchestrator rates on that slice rather than on the
@@ -64,7 +64,7 @@ scopes.
 | **Depth** | How many levels deep delegation may recurse. |
 | **Account** | A daily spend limit across everything. |
 
-Two design decisions make these behave well under pressure.
+How they behave when they bind is the part that matters.
 
 Concurrency is a semaphore rather than a scheduler. Excess tasks queue and run as
 slots free up, and nothing is rejected for arriving at a busy moment, so a
@@ -83,12 +83,11 @@ cumulative spend reaches it.
 
 ## Wasting less: tokenmax
 
-The second problem is the one most tooling ignores entirely.
-
 If you have connected your own paid subscriptions, whether a Claude Max plan, a
 ChatGPT Pro seat, or a Codex allowance, those tokens are already bought. Your
-harnesses burn them with your own credentials on your own machines. Leaving them
-unused at the end of a window is not saving money, it is throwing money away.
+harnesses burn them with your own credentials on your own machines. Tokens left
+unused when the window resets are money already spent, so the aim is to finish
+each window close to empty.
 
 So Medulla steers delegation toward seats that still have headroom. Workers on a
 seat with room sort first, and the fullest seat drains first. A seat with too
@@ -97,12 +96,11 @@ assignment. Each seat's remaining headroom is written into what the orchestrator
 reads, so it can size a task's token budget to a seat that actually fits it. All
 usage is metered back to the seat it was drawn from.
 
-Two properties keep this honest. Tokenmax is a preference and never a block, so
-an explicitly targeted worker still runs even on an exhausted seat. The
-accounting also fails open: if seat information is unavailable, delegation
-proceeds normally rather than stalling. Budget accounting is soft by contract,
-because an orchestrator that halts over its own bookkeeping is worse than one
-that occasionally over-delegates.
+Tokenmax is a preference and never a block, so an explicitly targeted worker
+still runs even on an exhausted seat. The accounting fails open too: if seat
+information is unavailable, delegation proceeds normally rather than stalling.
+Budget accounting is soft by contract, so a gap in Medulla's own bookkeeping
+costs you some over-delegation rather than a halted operation.
 
 Published allowances are estimates, since providers do not publish exact
 per-window numbers. Medulla treats its own ceilings as a starting guess and
@@ -120,6 +118,6 @@ spend broken out by tier, a sub-agent row with its task count, and per-task
 detail underneath. When you are logged in it adds account totals: plan, spend and
 call count for the cycle, remaining balance, and a per-model breakdown.
 
-The Agents tab carries the live view, with context used against the window per
+The Sessions tab carries the live view, with context used against the window per
 row and a bar for the selected agent. Watching that fill is usually how you
 notice a task is shaped wrong.

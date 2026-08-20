@@ -39,11 +39,18 @@ use openhuman_core::embed::{Core, CoreError};
 use openhuman_core::{CoreBuilder, DomainSet, HostKind, ServiceSet, TokenSource};
 
 pub mod auth;
+mod hooks;
+pub mod shared;
+pub mod turn_cwd;
 
 #[cfg(test)]
 mod auth_tests;
 #[cfg(test)]
+mod hooks_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_cwd_tests;
 
 /// The embed facade, re-exported so a host can name what [`boot`] returns
 /// without depending on the `openhuman` crate directly.
@@ -209,6 +216,41 @@ pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> St
     base_url.to_string()
 }
 
+/// Point the embedded core at everything a loaded config names, before it can
+/// boot.
+///
+/// [`boot`] reads the core's environment during construction, and the lazy boot
+/// path ([`shared`]) has no caller of its own to bind for it. A host that has
+/// its layered config in hand — `medulla workflow run`, an MCP server — calls
+/// this once to reproduce the startup bindings the TUI and `medulla run`
+/// perform: the workspace derived from `MEDULLA_HOME`, the agent's action
+/// directory from the configured workspace roots, and both backend URLs from
+/// `backend.base_url`. A workflow `agent` node or MCP turn that reaches the
+/// core first then reads this account's state and the configured deployment
+/// rather than ambient `~/.openhuman`.
+///
+/// Non-overriding, like every individual binding: an operator who exported any
+/// of the variables wins.
+pub fn bind_from_config(
+    env: &HashMap<String, String>,
+    config: &crate::config::TuiConfig,
+    home: &Path,
+) {
+    // The first configured workspace root is the agent's read/write root, the
+    // same precedence `app_loop.rs` gives it when the TUI binds its primary
+    // host. A blank or absent root leaves the variable alone.
+    let root = config
+        .workflow
+        .workspaces
+        .first()
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty());
+    bind_workspace(env, home);
+    bind_action_dir(env, root.as_deref());
+    bind_medulla_base_url(env, &config.backend.base_url);
+    bind_backend_api_url(env, &config.backend.base_url);
+}
+
 /// Build the embedded core and wrap it in the typed facade.
 ///
 /// Callers must have bound the workspace first — see [`bind_workspace`]. This
@@ -220,6 +262,24 @@ pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> St
 /// Propagates any failure from [`CoreBuilder::build`] — a workspace that cannot
 /// be created, or a token source that cannot be resolved.
 pub async fn boot() -> anyhow::Result<Core> {
+    boot_with_hooks(&crate::harness_hooks::HooksConfig::default()).await
+}
+
+/// Boot the embedded core with Medulla's supported in-process lifecycle hooks.
+///
+/// Registers Medulla's configured `Stop`, `PreToolUse`, and `PostToolUse` hooks
+/// as OpenHuman embedder lifecycle hooks **before** constructing the core — see
+/// [`hooks`]. Registration is process-global, but each boot replaces Medulla's
+/// previous hook registrations, including removing a kind no longer configured.
+///
+/// # Errors
+///
+/// Propagates any failure from [`CoreBuilder::build`], the same cases as
+/// [`boot`]: a workspace that cannot be created, or a token source that cannot
+/// be resolved. A hook command that fails to spawn also surfaces here only if
+/// the core startup itself fails; hook execution happens later, at runtime.
+pub async fn boot_with_hooks(hooks: &crate::harness_hooks::HooksConfig) -> anyhow::Result<Core> {
+    hooks::register_lifecycle_hooks(hooks);
     tracing::debug!("[core_host] boot start host_kind=detect_standalone");
     let runtime = CoreBuilder::new(HostKind::detect_standalone())
         .domains(DomainSet::embedded())

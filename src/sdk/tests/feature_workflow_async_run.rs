@@ -107,6 +107,7 @@ fn request<'a>(
         launch,
         env,
         cwd,
+        workspace: None,
         workflow_id: id,
         input: tinyflows::engine::RunInput::new(json!({})),
         sink: None,

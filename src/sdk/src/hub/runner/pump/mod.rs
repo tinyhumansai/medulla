@@ -144,6 +144,12 @@ pub(super) async fn route_frame(
                     // only party that knows which session ran the task, and
                     // this frame is the only place it says so.
                     session_id: frame.session_id,
+                    // Empty, and it will stay that way: this is a reply that
+                    // arrived over the bridge from another process, which never
+                    // saw the harness's event stream. A transcript exists only
+                    // where the dispatch and the harness share a host — see
+                    // [`crate::daemon::task_loop`]'s workflow dispatch.
+                    transcript: Vec::new(),
                 }));
             }
         }

@@ -69,6 +69,7 @@ impl crate::flow_engine::caps::dispatch::HarnessDispatch for StubHarness {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }

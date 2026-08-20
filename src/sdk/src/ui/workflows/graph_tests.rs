@@ -367,6 +367,7 @@ fn every_kind_has_a_wire_name_a_glyph_and_a_colour() {
         NodeKind::ToolCall,
         NodeKind::HttpRequest,
         NodeKind::Code,
+        NodeKind::Shell,
         NodeKind::Condition,
         NodeKind::Switch,
         NodeKind::Merge,
@@ -374,6 +375,15 @@ fn every_kind_has_a_wire_name_a_glyph_and_a_colour() {
         NodeKind::Transform,
         NodeKind::OutputParser,
         NodeKind::SubWorkflow,
+        NodeKind::Memory,
+        NodeKind::Dedup,
+        NodeKind::Loop,
+        NodeKind::Spawn,
+        NodeKind::Scatter,
+        NodeKind::Gather,
+        NodeKind::Approval,
+        NodeKind::Gate,
+        NodeKind::Void,
     ] {
         assert!(!kind_wire(&kind).is_empty(), "{kind:?}");
         assert!(!kind_glyph(&kind).is_empty(), "{kind:?}");
@@ -385,6 +395,10 @@ fn every_kind_has_a_wire_name_a_glyph_and_a_colour() {
             kind_wire(&kind)
         );
     }
+
+    assert_eq!(kind_wire(&NodeKind::Shell), "shell");
+    assert_eq!(kind_glyph(&NodeKind::Shell), "$");
+    assert_eq!(kind_color(&NodeKind::Shell), "cyan");
 }
 
 #[test]
@@ -403,6 +417,23 @@ fn a_summary_names_what_identifies_the_node_for_its_kind() {
             "first line",
         ),
         (
+            node(
+                "s",
+                NodeKind::Shell,
+                json!({"script_path":"scripts/backup.sh"}),
+            ),
+            "scripts/backup.sh",
+        ),
+        (
+            node(
+                "s-script",
+                NodeKind::Shell,
+                json!({"script":"echo first\necho second","script_path":"scripts/ignored.sh"}),
+            ),
+            "echo first",
+        ),
+        (node("s-empty", NodeKind::Shell, json!({})), ""),
+        (
             node("c", NodeKind::Condition, json!({"expression":"=.ok"})),
             "=.ok",
         ),
@@ -414,6 +445,28 @@ fn a_summary_names_what_identifies_the_node_for_its_kind() {
             node("t", NodeKind::Trigger, json!({"trigger_kind":"webhook"})),
             "webhook",
         ),
+        (
+            node("spawn", NodeKind::Spawn, json!({"target":"tool"})),
+            "tool",
+        ),
+        (
+            node(
+                "scatter",
+                NodeKind::Scatter,
+                json!({"path":"repos","lanes":8}),
+            ),
+            "repos · 8 lanes",
+        ),
+        (node("gather", NodeKind::Gather, json!({})), "all"),
+        (
+            node("approval", NodeKind::Approval, json!({"title":"Publish?"})),
+            "Publish?",
+        ),
+        (
+            node("gate", NodeKind::Gate, json!({"release":"quorum"})),
+            "quorum",
+        ),
+        (node("void", NodeKind::Void, json!({})), "discarded"),
     ];
 
     for (node, expected) in cases {

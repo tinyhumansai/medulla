@@ -146,10 +146,10 @@ fn render_value(value: &serde_json::Value) -> String {
 /// kind of literalism that makes a pane look like a debugger. Everything else is
 /// compact JSON, which is what a number, a flag, or a small list wants.
 pub fn value_text(value: &serde_json::Value) -> String {
-    if let Some(preview) = value
-        .get("_medullaTruncated")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+    // Both the current marker and the one written before the bounding moved to
+    // the engine crate — a run record is written once, so older ones stay
+    // readable only because this asks the engine rather than matching a literal.
+    if let Some(preview) = tinyflows::store::is_truncated(value)
         .then(|| value.get("preview").and_then(serde_json::Value::as_str))
         .flatten()
     {

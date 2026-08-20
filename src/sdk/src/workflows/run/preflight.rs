@@ -59,15 +59,26 @@ pub(crate) fn clamp_loop_iterations(
         if declared <= ceiling {
             continue;
         }
+        // A `loop` node whose config is not an object — `null`, or anything
+        // else a hand-edited document may hold — still needs the ceiling. The
+        // config is replaced with one carrying it rather than skipped: skipping
+        // would leave the node running to the engine's own default while the
+        // log line above claimed it had been clamped. Nothing is lost, because
+        // a non-object config held no settings to begin with.
+        match node.config.as_object_mut() {
+            Some(config) => {
+                config.insert("max_iterations".to_string(), ceiling.into());
+            }
+            None => {
+                node.config = serde_json::json!({ "max_iterations": ceiling });
+            }
+        }
         tracing::info!(
             node = %node.id,
             declared,
             ceiling,
             "clamping loop max_iterations to the host ceiling"
         );
-        if let Some(config) = node.config.as_object_mut() {
-            config.insert("max_iterations".to_string(), ceiling.into());
-        }
     }
     graph
 }
@@ -96,12 +107,12 @@ pub(super) fn settings_for(
     if workflow.defaults.is_empty() {
         return Ok(host.clone());
     }
-    let preference = workflow
-        .defaults
-        .preference()
-        .map_err(|message| WorkflowError::Invalid {
-            id: workflow.id.clone(),
-            messages: vec![format!("`defaults`: {message}")],
+    let preference =
+        crate::workflows::defaults_preference(&workflow.defaults).map_err(|message| {
+            WorkflowError::Invalid {
+                id: workflow.id.clone(),
+                messages: vec![format!("`defaults`: {message}")],
+            }
         })?;
     let choice =
         crate::flow_engine::HarnessChoice::resolve(&[preference, host.harness_preference()]);

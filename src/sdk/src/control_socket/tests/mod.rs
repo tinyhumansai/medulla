@@ -155,6 +155,7 @@ impl FleetOps for FakeFleet {
                 },
                 harness: None,
                 session_id: None,
+                transcript: Vec::new(),
             }),
             FakeOutcome::Fail(error) => Err(error),
             FakeOutcome::Hang => {

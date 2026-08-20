@@ -453,6 +453,12 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Memory => "memory",
         NodeKind::Dedup => "dedup",
         NodeKind::Loop => "loop",
+        NodeKind::Spawn => "spawn",
+        NodeKind::Scatter => "scatter",
+        NodeKind::Gather => "gather",
+        NodeKind::Approval => "approval",
+        NodeKind::Gate => "gate",
+        NodeKind::Void => "void",
     }
 }
 
@@ -485,6 +491,12 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // The one kind whose edges run backwards: the shape is the cycle it
         // draws on the canvas.
         NodeKind::Loop => "↺",
+        NodeKind::Spawn => "↗",
+        NodeKind::Scatter => "⋰",
+        NodeKind::Gather => "⋱",
+        NodeKind::Approval => "✓",
+        NodeKind::Gate => "⊣",
+        NodeKind::Void => "∅",
     }
 }
 
@@ -504,7 +516,8 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::HttpRequest
         | NodeKind::Code
         | NodeKind::Shell
-        | NodeKind::Memory => "cyan",
+        | NodeKind::Memory
+        | NodeKind::Approval => "cyan",
         // `dedup` reads durable state, but what it *does* to the graph is route:
         // an item either continues or is dropped, so it reads with the control
         // flow rather than with the kinds that reach outside the process.
@@ -513,7 +526,12 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::Merge
         | NodeKind::SplitOut
         | NodeKind::Dedup
-        | NodeKind::Loop => "yellow",
+        | NodeKind::Loop
+        | NodeKind::Spawn
+        | NodeKind::Scatter
+        | NodeKind::Gather
+        | NodeKind::Gate
+        | NodeKind::Void => "yellow",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }
@@ -602,6 +620,19 @@ pub fn node_summary(node: &Node) -> String {
             .and_then(|value| value.as_array())
             .map(|inputs| format!("{} inputs", inputs.len()))
             .unwrap_or_default(),
+        NodeKind::Spawn => text("target").unwrap_or_default(),
+        NodeKind::Scatter => match (
+            text("path"),
+            node.config.get("lanes").and_then(|value| value.as_u64()),
+        ) {
+            (Some(path), Some(lanes)) => format!("{path} · {lanes} lanes"),
+            (Some(path), None) => path,
+            (None, Some(lanes)) => format!("{lanes} lanes"),
+            (None, None) => String::new(),
+        },
+        NodeKind::Gather | NodeKind::Gate => text("release").unwrap_or_else(|| "all".to_string()),
+        NodeKind::Approval => text("title").or_else(|| text("prompt")).unwrap_or_default(),
+        NodeKind::Void => String::new(),
     }
 }
 

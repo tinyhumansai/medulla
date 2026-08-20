@@ -285,73 +285,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "axum"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
-dependencies = [
- "axum-core",
- "axum-macros",
- "base64 0.22.1",
- "bytes",
- "form_urlencoded",
- "futures-util",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "itoa",
- "matchit",
- "memchr",
- "mime",
- "percent-encoding",
- "pin-project-lite",
- "serde_core",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
- "sha1",
- "sync_wrapper",
- "tokio",
- "tokio-tungstenite 0.29.0",
- "tower",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "axum-core"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
-dependencies = [
- "bytes",
- "futures-core",
- "http",
- "http-body",
- "http-body-util",
- "mime",
- "pin-project-lite",
- "sync_wrapper",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "axum-macros"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aa268c23bfbbd2c4363b9cd302a4f504fb2a9dfe7e3451d66f35dd392e20aca"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "backoff"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1939,15 +1872,8 @@ version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bdc5a74b0feeb5e6a1dc2dd08c34280a61e37668d10a6a3b27ad69d0fb9ce2e"
 dependencies = [
- "aho-corasick",
- "base64 0.22.1",
  "bstr",
  "jaq-core",
- "jiff",
- "libm",
- "log",
- "regex-bites",
- "urlencoding",
 ]
 
 [[package]]
@@ -2042,12 +1968,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
-name = "libm"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
-
-[[package]]
 name = "libredox"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2133,12 +2053,6 @@ checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
 ]
-
-[[package]]
-name = "matchit"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "medulla"
@@ -2419,7 +2333,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openhuman"
-version = "0.63.7"
+version = "0.63.13"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -2457,7 +2371,6 @@ dependencies = [
  "rand 0.10.2",
  "regex",
  "reqwest",
- "ring",
  "rusqlite",
  "rustls",
  "schemars 1.2.2",
@@ -2476,7 +2389,6 @@ dependencies = [
  "tinycortex",
  "tinycortex-api",
  "tinyhumans-sdk",
- "tinyjuice",
  "tinymemory",
  "tinymemory-api",
  "tinymemory-core",
@@ -3042,12 +2954,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex-bites"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6a15a2fa0bfda9361941c45550896ae87b15cc6c8c939ea350079670332e211"
-
-[[package]]
 name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3439,17 +3345,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_path_to_error"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
-dependencies = [
- "itoa",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -3978,6 +3873,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",
@@ -4068,7 +3964,7 @@ dependencies = [
  "tinyagents",
  "tinycortex-api",
  "tokio",
- "toml 0.8.23",
+ "toml 1.1.4+spec-1.1.0",
  "tracing",
  "uuid",
  "walkdir",
@@ -4078,33 +3974,23 @@ dependencies = [
 name = "tinycortex-api"
 version = "0.1.1"
 dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.20",
- "uuid",
+ "tinymemory-api",
 ]
 
 [[package]]
 name = "tinyflows"
-version = "0.6.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
- "axum",
  "futures-timer",
  "futures-util",
  "getrandom 0.4.3",
  "jaq-core",
  "jaq-json",
  "jaq-std",
- "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
- "tinyagents",
  "tokio",
  "tracing",
 ]
@@ -4117,30 +4003,12 @@ dependencies = [
  "futures",
  "percent-encoding",
  "reqwest",
+ "rust_socketio",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "tinyjuice"
-version = "0.2.1"
-dependencies = [
- "async-trait",
- "dirs 6.0.0",
- "hex",
- "log",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "thiserror 2.0.20",
- "tokio",
- "unicode-segmentation",
- "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -4177,7 +4045,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "axum",
  "chrono",
  "dirs 5.0.1",
  "futures",
@@ -4194,8 +4061,9 @@ dependencies = [
  "tinyagents",
  "tinycortex",
  "tinycortex-api",
- "tinymemory",
  "tinymemory-api",
+ "tinymemory-sources",
+ "tinymemory-sync",
  "tokio",
  "tracing",
  "url",
@@ -4204,14 +4072,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinymemory-sources"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "regex",
+ "reqwest",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tinymemory-api",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "tinymemory-sync"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "tinymemory-tinycortex"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
  "tinycortex",
- "tinymemory",
  "tinymemory-api",
+ "tinymemory-core",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4387,6 +4293,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
+version = "0.9.12+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde_core",
+ "serde_spanned 1.1.1",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
 version = "1.1.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3aace63f4bbcdfc2c965b059de67119c89c4017a70d633be6c104910f67056f5"
@@ -4407,6 +4328,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.7.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
@@ -4466,7 +4396,6 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -4505,7 +4434,6 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5598,3 +5526,7 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "tinyjuice"
+version = "0.2.1"

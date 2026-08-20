@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tinyflows::caps::{Capabilities, WorkflowResolver};
+use tinyflows::caps::{Capabilities, TokioTaskRunner, WorkflowResolver};
 use tinyflows::engine::{Checkpointer, FileCheckpointer};
 
 use crate::flow_engine::agent_evidence::AgentEvidence;
@@ -190,6 +190,13 @@ fn build_capabilities_inner(
         // Standing one up on the state store would answer `recall` with an empty
         // set — indistinguishable from "the user never said that".
         memory: None,
+        // Spawn/gate nodes should retain TinyFlows' normal concurrent behavior.
+        // Leaving this unset is correct but silently executes spawned work
+        // inline, which would make a workflow's timing differ by host.
+        tasks: Some(Arc::new(TokioTaskRunner::new())),
+        // Medulla currently settles approvals through checkpoint/resume rather
+        // than pushing them to a dedicated review provider.
+        approvals: None,
     }
 }
 

@@ -45,7 +45,7 @@ tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
 # `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
 # deterministic capability stand-ins in ordinary builds.
-tinyflows = { version = "0.6", features = ["mock"] }
+tinyflows = { version = "0.8", features = ["mock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -116,6 +116,9 @@ unicode-width = "0.2"
 #
 # Vendored code stays out of `members` via `exclude`, so it keeps its own lints
 # and tests instead of joining this workspace's CI gates.
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/api" }
+
 [patch.crates-io]
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
 tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }

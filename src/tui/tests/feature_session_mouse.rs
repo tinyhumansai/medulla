@@ -313,4 +313,3 @@ fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
 
     sessions.shutdown();
 }
-

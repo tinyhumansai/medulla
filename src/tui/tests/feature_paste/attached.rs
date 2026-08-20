@@ -169,5 +169,3 @@ fn a_child_that_asked_for_bracketed_paste_gets_the_markers() {
 
     sessions.shutdown();
 }
-
-

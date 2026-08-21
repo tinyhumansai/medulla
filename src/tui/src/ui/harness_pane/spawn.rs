@@ -77,7 +77,7 @@ impl LocalSessions {
         // it. None of them mean anything at a `$` prompt, and the attribution
         // one would be a lie — commits an operator types by hand are theirs.
         if choice.is_shell() {
-            return self.open_shell(choice, &bin, cwd, name);
+            return self.open_shell(choice, &bin, &cwd, name);
         }
         let (mut env, mut extra_args) = self.spawn_env(choice)?;
         // The operator's own session gets Medulla's tools too. This is the door

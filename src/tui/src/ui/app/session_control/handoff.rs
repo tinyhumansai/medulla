@@ -221,6 +221,14 @@ impl App {
             self.set_status("That session is gone");
             return;
         };
+        // A shell has nothing to hand over. There is no prompt to dispatch into
+        // it and no transcript to brief anyone from, so handing one back would
+        // leave a row advertised as orchestrator-held that no task can ever
+        // reach — and would send a handoff brief summarising a terminal.
+        if row.provider == medulla::protocol::HarnessProvider::Shell {
+            self.set_status("A shell session is yours — there is nothing to hand to the orchestrator");
+            return;
+        }
         let lines = harnesses
             .sessions
             .tail_lines(session, medulla::hub::handoff::TRANSCRIPT_LINES);

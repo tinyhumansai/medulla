@@ -105,6 +105,17 @@ pub enum HarnessProvider {
     /// interchangeable with a coding CLI, so a task reaches it only by naming
     /// it. See [`crate::daemon::providers::detect_providers`].
     Openhuman,
+    /// A plain interactive shell — `bash`, `zsh`, whatever `$SHELL` names.
+    ///
+    /// Not a coding agent, and deliberately kept out of every path that treats
+    /// one as interchangeable with another: it is never detected as an
+    /// available provider ([`crate::daemon::providers::DAEMON_PROVIDERS`]) and
+    /// never dispatchable ([`is_dispatchable`](Self::is_dispatchable)), so no
+    /// peer frame can reach a shell however it spells the harness name. It
+    /// exists so an operator can open a terminal beside their agents, in the
+    /// same pane, on the same host, with the same working directory — which
+    /// until now meant leaving the TUI.
+    Shell,
 }
 
 impl HarnessProvider {
@@ -115,6 +126,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "codex",
             HarnessProvider::Opencode => "opencode",
             HarnessProvider::Openhuman => "openhuman",
+            HarnessProvider::Shell => "shell",
         }
     }
 
@@ -128,6 +140,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "Codex",
             HarnessProvider::Opencode => "OpenCode",
             HarnessProvider::Openhuman => "OpenHuman",
+            HarnessProvider::Shell => "Shell",
         }
     }
 
@@ -144,6 +157,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "◆",
             HarnessProvider::Opencode => "◻",
             HarnessProvider::Openhuman => "○",
+            HarnessProvider::Shell => "$",
         }
     }
 
@@ -154,6 +168,7 @@ impl HarnessProvider {
             "codex" => Some(HarnessProvider::Codex),
             "opencode" => Some(HarnessProvider::Opencode),
             "openhuman" => Some(HarnessProvider::Openhuman),
+            "shell" => Some(HarnessProvider::Shell),
             _ => None,
         }
     }

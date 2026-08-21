@@ -52,7 +52,7 @@ use std::sync::Arc;
 
 use openhuman_core::embed::{Core, CoreError};
 use openhuman_core::{
-    CoreBuilder, DomainSet, Harness, HarnessError, HostKind, ServiceSet, TokenSource, Workspace,
+    CoreBuilder, DomainSet, HarnessError, HostKind, ServiceSet, TokenSource, Workspace,
 };
 
 pub mod auth;

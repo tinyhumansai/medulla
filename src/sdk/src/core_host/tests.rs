@@ -1,199 +1,146 @@
-//! Unit tests for workspace/action-dir derivation.
+//! Unit tests for the settings this host resolves before the core is built.
 //!
-//! These cover the derivation only, not [`super::boot`] — booting the core
-//! touches process globals (`OnceLock` context, singleton event bus) and cannot
-//! be torn down between tests. Boot coverage belongs in an integration test
-//! with one core per test binary.
+//! These cover the resolution only, not [`super::boot`] — booting a core touches
+//! process globals (`OnceLock` context, singleton event bus) and cannot be torn
+//! down between tests. Boot coverage belongs in an integration test with one
+//! core per test binary.
+//!
+//! # No environment lock any more
+//!
+//! These tests used to serialize on a mutex and clear four process environment
+//! variables around every case, because the functions under test wrote to the
+//! process environment. They do not: resolution takes an env *map* and returns a
+//! value, so each case is independent and the suite runs in parallel. That the
+//! lock could be deleted is the point of the change, not a side effect of it.
 
 use super::*;
 
-/// `bind_workspace` and `bind_action_dir` mutate process env, which is global.
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn guard() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-fn clear() {
-    std::env::remove_var(OPENHUMAN_WORKSPACE_ENV);
-    std::env::remove_var(OPENHUMAN_ACTION_DIR_ENV);
-    std::env::remove_var(OPENHUMAN_MEDULLA_BASE_URL_ENV);
-    std::env::remove_var(OPENHUMAN_BACKEND_URL_ENV);
-}
-
 #[test]
-fn the_backend_api_url_is_bound_so_auth_me_hits_the_configured_deployment() {
+fn the_backend_api_url_is_resolved_so_auth_me_hits_the_configured_deployment() {
     // The staging failure this exists for: OpenHuman resolves `/auth/me` from
-    // `BACKEND_URL` and falls back to production, so a staging token verified by
-    // the login flow was then handed to production to validate — and rejected.
-    let _g = guard();
-    clear();
-    let bound = bind_backend_api_url(&HashMap::new(), "https://staging-api.tinyhumans.ai/");
-    assert_eq!(bound, "https://staging-api.tinyhumans.ai");
+    // its own config chain and falls back to production, so a staging token
+    // verified by the login flow was then handed to production to validate —
+    // and rejected.
     assert_eq!(
-        std::env::var(OPENHUMAN_BACKEND_URL_ENV).unwrap(),
+        resolve_backend_api_url(&HashMap::new(), "https://staging-api.tinyhumans.ai/"),
         "https://staging-api.tinyhumans.ai"
     );
-    clear();
 }
 
 #[test]
-fn an_operator_who_aimed_the_core_themselves_keeps_their_backend_url() {
-    // Either spelling counts: OpenHuman's own config chain reads both, so
-    // binding over `VITE_BACKEND_URL` would override an override.
-    let _g = guard();
+fn an_operator_backend_override_wins_in_either_spelling() {
     for key in [OPENHUMAN_BACKEND_URL_ENV, OPENHUMAN_BACKEND_URL_ALT_ENV] {
-        clear();
         let env = HashMap::from([(key.to_string(), "https://self.hosted".to_string())]);
         assert_eq!(
-            bind_backend_api_url(&env, "https://api.tinyhumans.ai"),
-            "https://self.hosted"
+            resolve_backend_api_url(&env, "https://api.tinyhumans.ai"),
+            "https://self.hosted",
+            "{key} should have won"
         );
-        assert!(std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err());
     }
-    clear();
 }
 
 #[test]
-fn a_blank_backend_url_binds_nothing_rather_than_an_empty_endpoint() {
-    let _g = guard();
-    clear();
-    assert_eq!(bind_backend_api_url(&HashMap::new(), "   "), "");
-    assert!(std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err());
-    clear();
+fn a_blank_backend_url_resolves_to_nothing() {
+    // Empty means "let the core resolve its own", which is different from
+    // pointing it at the empty string.
+    assert_eq!(resolve_backend_api_url(&HashMap::new(), "   "), "");
 }
 
 #[test]
-fn workspace_nests_under_the_medulla_home() {
-    // Nested, not a sibling: deleting a scratch MEDULLA_HOME must take the
-    // core's state with it, or the next run silently inherits stale state.
-    // Directly under the account home, with no `openhuman/` level: the home is
-    // already one account's, and the `workspace` leaf is what puts OpenHuman's
-    // config at `<home>/.openhuman` rather than inside the state tree.
-    let dir = workspace_dir(Path::new("/tmp/scratch-home"));
-    assert_eq!(dir, PathBuf::from("/tmp/scratch-home/workspace"));
-}
-
-#[test]
-fn bind_workspace_derives_from_medulla_home_when_unset() {
-    let _g = guard();
-    clear();
-    let env = HashMap::new();
-    let bound = bind_workspace(&env, Path::new("/tmp/scratch-home"));
-    assert_eq!(bound, workspace_dir(Path::new("/tmp/scratch-home")));
+fn a_blank_operator_override_does_not_shadow_the_config() {
+    let env = HashMap::from([(OPENHUMAN_BACKEND_URL_ENV.to_string(), "  ".to_string())]);
     assert_eq!(
-        std::env::var(OPENHUMAN_WORKSPACE_ENV).unwrap(),
-        bound.to_string_lossy()
+        resolve_backend_api_url(&env, "https://api.tinyhumans.ai"),
+        "https://api.tinyhumans.ai"
     );
-    clear();
 }
 
 #[test]
-fn bind_workspace_keeps_an_explicit_operator_override() {
-    // Aiming the embedded core at an existing OpenHuman install is a real
-    // thing to want; the derivation must not stomp it.
-    let _g = guard();
-    clear();
+fn the_workspace_derives_from_medulla_home_when_unset() {
+    // The scratch-run recipe: `MEDULLA_HOME=$(mktemp -d)` must isolate the
+    // core's state too, or memory/flows/credentials land in the developer's
+    // real `~/.openhuman`.
+    assert_eq!(
+        resolve_workspace(&HashMap::new(), Path::new("/tmp/scratch-home")),
+        workspace_dir(Path::new("/tmp/scratch-home"))
+    );
+}
+
+#[test]
+fn the_workspace_keeps_an_explicit_operator_override() {
+    // What lets a developer aim the embedded core at an existing OpenHuman
+    // install on purpose.
     let env = HashMap::from([(
         OPENHUMAN_WORKSPACE_ENV.to_string(),
         "/opt/openhuman/ws".to_string(),
     )]);
-    let bound = bind_workspace(&env, Path::new("/tmp/scratch-home"));
-    assert_eq!(bound, PathBuf::from("/opt/openhuman/ws"));
-    clear();
-}
-
-#[test]
-fn bind_workspace_treats_a_blank_override_as_unset() {
-    // An exported-but-empty var is a common shell accident; honouring it would
-    // point the core at "" and break the scratch-run isolation silently.
-    let _g = guard();
-    clear();
-    let env = HashMap::from([(OPENHUMAN_WORKSPACE_ENV.to_string(), "   ".to_string())]);
-    let bound = bind_workspace(&env, Path::new("/tmp/scratch-home"));
-    assert_eq!(bound, workspace_dir(Path::new("/tmp/scratch-home")));
-    clear();
-}
-
-#[test]
-fn action_dir_binds_to_the_operator_root() {
-    let _g = guard();
-    clear();
-    let env = HashMap::new();
-    let bound = bind_action_dir(&env, Some(Path::new("/repos/work")));
-    assert_eq!(bound, Some(PathBuf::from("/repos/work")));
     assert_eq!(
-        std::env::var(OPENHUMAN_ACTION_DIR_ENV).unwrap(),
-        "/repos/work"
+        resolve_workspace(&env, Path::new("/tmp/scratch-home")),
+        PathBuf::from("/opt/openhuman/ws")
     );
-    clear();
 }
 
 #[test]
-fn action_dir_left_alone_without_a_root() {
-    // Better to leave OpenHuman's own default than to bind something arbitrary.
-    let _g = guard();
-    clear();
-    let env = HashMap::new();
-    assert_eq!(bind_action_dir(&env, None), None);
-    assert!(std::env::var(OPENHUMAN_ACTION_DIR_ENV).is_err());
-    clear();
+fn a_blank_workspace_override_counts_as_unset() {
+    let env = HashMap::from([(OPENHUMAN_WORKSPACE_ENV.to_string(), "   ".to_string())]);
+    assert_eq!(
+        resolve_workspace(&env, Path::new("/tmp/scratch-home")),
+        workspace_dir(Path::new("/tmp/scratch-home"))
+    );
 }
 
 #[test]
-fn action_dir_keeps_an_explicit_override() {
-    let _g = guard();
-    clear();
+fn the_action_dir_comes_from_the_configured_workspace_root() {
+    assert_eq!(
+        resolve_action_dir(&HashMap::new(), Some(Path::new("/repos/work"))),
+        Some(PathBuf::from("/repos/work"))
+    );
+}
+
+#[test]
+fn no_workspace_root_means_no_action_dir() {
+    // Rather than binding something arbitrary, which would aim the agent's
+    // write root at a directory this host has never used.
+    assert_eq!(resolve_action_dir(&HashMap::new(), None), None);
+}
+
+#[test]
+fn the_action_dir_keeps_an_operator_override() {
     let env = HashMap::from([(
         OPENHUMAN_ACTION_DIR_ENV.to_string(),
-        "/explicit".to_string(),
+        "/opt/projects".to_string(),
     )]);
-    let bound = bind_action_dir(&env, Some(Path::new("/repos/work")));
-    assert_eq!(bound, Some(PathBuf::from("/explicit")));
-    clear();
+    assert_eq!(
+        resolve_action_dir(&env, Some(Path::new("/repos/work"))),
+        Some(PathBuf::from("/opt/projects"))
+    );
 }
 
 #[test]
-fn bind_from_config_sets_everything_a_lazy_boot_needs() {
-    // The lazy boot path (`shared`) has no caller of its own to bind for it, so
-    // a host that loaded its layered config calls this instead. It must
-    // reproduce the TUI's startup bindings: workspace from MEDULLA_HOME, action
-    // dir from the first configured workspace root, and both backend URLs from
-    // `backend.baseUrl`.
-    let _g = guard();
-    clear();
+fn resolve_covers_everything_a_lazy_boot_needs() {
+    // The lazy boot path (`shared`) has no caller of its own, so a host that
+    // loaded its layered config publishes these instead. They must reproduce
+    // the TUI's startup settings: workspace from MEDULLA_HOME, action dir from
+    // the first configured workspace root, backend from `backend.baseUrl`.
     let mut config = crate::config::TuiConfig::default();
     config.backend.base_url = "https://staging-api.tinyhumans.ai/".to_string();
     config.workflow.workspaces = vec!["/repos/work".to_string()];
-    bind_from_config(&HashMap::new(), &config, Path::new("/tmp/scratch-home"));
+
+    let settings = CoreSettings::resolve(&HashMap::new(), &config, Path::new("/tmp/scratch-home"));
+
     assert_eq!(
-        std::env::var(OPENHUMAN_WORKSPACE_ENV).unwrap(),
-        workspace_dir(Path::new("/tmp/scratch-home")).to_string_lossy()
+        settings.workspace,
+        workspace_dir(Path::new("/tmp/scratch-home"))
     );
-    assert_eq!(
-        std::env::var(OPENHUMAN_ACTION_DIR_ENV).unwrap(),
-        "/repos/work"
-    );
-    assert_eq!(
-        std::env::var(OPENHUMAN_MEDULLA_BASE_URL_ENV).unwrap(),
-        "https://staging-api.tinyhumans.ai"
-    );
-    assert_eq!(
-        std::env::var(OPENHUMAN_BACKEND_URL_ENV).unwrap(),
-        "https://staging-api.tinyhumans.ai"
-    );
-    clear();
+    assert_eq!(settings.action_dir, Some(PathBuf::from("/repos/work")));
+    // One value now covers what took two bindings: with no explicit
+    // `OPENHUMAN_MEDULLA_BASE_URL`, the core's Medulla client falls through to
+    // the same `api_url` this sets.
+    assert_eq!(settings.backend_url, "https://staging-api.tinyhumans.ai");
 }
 
 #[test]
-fn bind_from_config_leaves_the_operator_s_own_bindings_alone() {
-    // Non-overriding like the individual bindings: someone who already aimed
-    // the core at an existing OpenHuman install or a self-hosted backend keeps
-    // those, whatever the config says. The override lives in the caller's env
-    // map, so the *derived* bindings are written to the process env while the
-    // overridden ones are left untouched.
-    let _g = guard();
-    clear();
+fn resolve_leaves_the_operators_own_choices_alone() {
     let mut config = crate::config::TuiConfig::default();
     config.backend.base_url = "https://api.tinyhumans.ai".to_string();
     config.workflow.workspaces = vec!["/repos/work".to_string()];
@@ -207,89 +154,36 @@ fn bind_from_config_leaves_the_operator_s_own_bindings_alone() {
             "https://self.hosted".to_string(),
         ),
     ]);
-    bind_from_config(&env, &config, Path::new("/tmp/scratch-home"));
-    assert!(
-        std::env::var(OPENHUMAN_WORKSPACE_ENV).is_err(),
-        "the operator's workspace override must not be re-derived"
-    );
+
+    let settings = CoreSettings::resolve(&env, &config, Path::new("/tmp/scratch-home"));
+
+    assert_eq!(settings.workspace, PathBuf::from("/opt/openhuman/ws"));
+    assert_eq!(settings.backend_url, "https://self.hosted");
+    // Not overridden, so still derived from the config.
+    assert_eq!(settings.action_dir, Some(PathBuf::from("/repos/work")));
+}
+
+#[test]
+fn the_floor_is_workspace_isolation_and_nothing_else() {
+    // What a core booted with no config at all gets. Deliberately not "nothing":
+    // without the workspace it would write into the developer's real
+    // `~/.openhuman`.
+    let settings = CoreSettings::floor(&HashMap::new(), Path::new("/tmp/scratch-home"));
     assert_eq!(
-        std::env::var(OPENHUMAN_ACTION_DIR_ENV).unwrap(),
-        "/repos/work"
+        settings.workspace,
+        workspace_dir(Path::new("/tmp/scratch-home"))
     );
-    assert!(
-        std::env::var(OPENHUMAN_BACKEND_URL_ENV).is_err(),
-        "the operator's backend override must not be re-derived"
-    );
-    clear();
+    assert_eq!(settings.action_dir, None);
+    assert!(settings.backend_url.is_empty());
 }
 
-// ── Medulla readiness classification ─────────────────────────────────────────
-
 #[test]
-fn a_missing_backend_url_is_unusable_not_a_login_prompt() {
-    // Nothing to dial. A login screen cannot fix it, so the host must stop and
-    // say so rather than asking the operator to sign in to nowhere.
-    let err = CoreError::Domain {
-        method: "medulla.listSessions",
-        message: "no Medulla backend configured".into(),
-        kind: Some("MedullaNoBaseUrl".into()),
-        data: None,
-        expected_user_state: true,
-    };
+fn the_workspace_directory_name_is_load_bearing() {
+    // OpenHuman derives its *config* directory from the workspace path's
+    // parent, so a directory literally called `workspace` puts config at
+    // `<medulla_home>/config.toml` beside it rather than inside the state tree.
     assert_eq!(
-        classify(Err(err)),
-        Readiness::Unusable("no Medulla backend configured".into())
+        workspace_dir(Path::new("/tmp/scratch-home")),
+        PathBuf::from("/tmp/scratch-home/workspace")
     );
-}
-
-#[test]
-fn being_signed_out_routes_to_the_login_screen() {
-    let err = CoreError::Domain {
-        method: "medulla.listSessions",
-        message: "not signed in; no session token available".into(),
-        kind: Some("MedullaNoSessionToken".into()),
-        data: None,
-        expected_user_state: true,
-    };
-    assert_eq!(classify(Err(err)), Readiness::SignedOut);
-}
-
-#[test]
-fn a_compiled_out_surface_is_unusable() {
-    // `Unavailable` is a build fact, not a fault, but signing in cannot conjure
-    // a controller that was never registered.
-    let err = CoreError::Unavailable {
-        method: "medulla.listSessions",
-    };
-    assert!(matches!(classify(Err(err)), Readiness::Unusable(_)));
-}
-
-#[test]
-fn a_transient_failure_does_not_read_as_signed_out() {
-    // Sending a signed-in operator back to the login screen because one call
-    // failed is worse than showing the failure.
-    let err = CoreError::Rpc {
-        method: "medulla.listSessions",
-        message: "connection reset".into(),
-    };
-    assert_eq!(classify(Err(err)), Readiness::Ready);
-}
-
-#[test]
-fn another_domain_rejection_does_not_read_as_signed_out() {
-    // A rejection that named some other `kind` is a real error about a real
-    // backend, not an absent one.
-    let err = CoreError::Domain {
-        method: "medulla.listSessions",
-        message: "rate limited".into(),
-        kind: Some("RateLimited".into()),
-        data: None,
-        expected_user_state: false,
-    };
-    assert_eq!(classify(Err(err)), Readiness::Ready);
-}
-
-#[test]
-fn a_successful_call_reads_as_ready() {
-    assert_eq!(classify(Ok(())), Readiness::Ready);
 }

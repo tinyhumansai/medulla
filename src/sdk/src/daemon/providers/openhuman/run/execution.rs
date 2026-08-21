@@ -18,7 +18,7 @@ use serde_json::json;
 use crate::protocol::HarnessProvider;
 
 use super::super::super::types::{RunTaskOptions, RunTaskOrigin, RunTaskResult};
-use super::core_contract::{with_progress_sink, AgentProgress, ProgressSink};
+use super::core_contract::{AgentProgress, ProgressSink};
 use super::watchdog;
 use super::EventSink;
 

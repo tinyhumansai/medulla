@@ -48,6 +48,9 @@ impl ClientError {
 impl From<tinyhumans_sdk::Error> for ClientError {
     fn from(err: tinyhumans_sdk::Error) -> Self {
         use tinyhumans_sdk::Error as Sdk;
+        // Rendered before the match so the socket arms can report it without
+        // moving `err` out of a pattern that has already bound its fields.
+        let err_message = err.to_string();
         match err {
             Sdk::Http(e) => ClientError::Transport(e),
             Sdk::Decode(e) => ClientError::Decode(e.to_string()),
@@ -71,6 +74,21 @@ impl From<tinyhumans_sdk::Error> for ClientError {
                 message: error,
                 error_code,
                 details: (!details.is_null()).then_some(details),
+            },
+            // Socket.IO transport failures. Reported as transport rather than
+            // as an API failure: nothing at the other end refused the
+            // operation, the connection did not carry it. They are listed by
+            // name rather than swept into the arm below so that a future
+            // variant is a compile error here and gets classified deliberately.
+            Sdk::Socket(_)
+            | Sdk::MissingSocketToken
+            | Sdk::UnexpectedSocketPayload(_)
+            | Sdk::SocketAckTimeout
+            | Sdk::SocketAckClosed => ClientError::Api {
+                status: None,
+                message: err_message,
+                error_code: None,
+                details: None,
             },
             // Request-construction and route-gate failures never reach the
             // network, so there is no status or error code to report.

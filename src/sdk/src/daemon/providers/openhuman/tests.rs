@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 
-
 use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::SessionClass;
 

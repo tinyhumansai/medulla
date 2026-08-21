@@ -117,7 +117,7 @@ fn a_shell_session_is_spawned_bare() {
     std::fs::write(
         &bin,
         format!(
-            "#!/bin/sh\n{{ printf 'argv:%s\\n' \"$@\"; env; }} > {}\nsleep 30\n",
+            "#!/bin/sh\n{{ printf 'argc:%s\\n' \"$#\"; env; }} > {}\nsleep 30\n",
             record.display()
         ),
     )
@@ -151,8 +151,8 @@ fn a_shell_session_is_spawned_bare() {
     sessions.close(&id);
 
     assert!(
-        !recorded.contains("argv:"),
-        "a shell is handed a tty and nothing else: {recorded}"
+        recorded.contains("argc:0"),
+        "a shell is handed a tty and nothing else — no argv at all: {recorded}"
     );
     assert!(
         !recorded.contains("MEDULLA_ATTRIBUTION"),

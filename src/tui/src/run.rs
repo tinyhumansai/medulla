@@ -34,28 +34,22 @@ pub(crate) async fn run_core(args: &[String]) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let loaded = load_config(parsed.config.as_deref(), &env, &cwd)?;
 
-    // Bind the core's state directory before anything can construct it, exactly
-    // as the interactive path does. Without this a scripted run reads and writes
-    // the developer's real `~/.openhuman` instead of the `MEDULLA_HOME` it was
-    // pointed at — which is precisely what CI and container runs rely on.
+    // Resolve the core's settings before constructing it, exactly as the
+    // interactive path does. Without this a scripted run reads and writes the
+    // developer's real `~/.openhuman` instead of the `MEDULLA_HOME` it was
+    // pointed at — which is precisely what CI and container runs rely on — and
+    // a run on staging would use the session `medulla login` stored against a
+    // deployment that never issued it.
     let home = medulla::home::medulla_home(&env);
-    medulla::core_host::bind_workspace(&env, &home);
-    let first_workspace = loaded
-        .config
-        .workflow
-        .workspaces
-        .first()
-        .map(std::path::PathBuf::from);
-    medulla::core_host::bind_action_dir(&env, first_workspace.as_deref());
-    // And the endpoints, for the same reason: a scripted run on staging that let
-    // the core resolve its own backend would use the session stored by
-    // `medulla login` against a deployment that never issued it.
-    medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
-    medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
+    let settings = medulla::core_host::CoreSettings::resolve(&env, &loaded.config, &home);
+    // Published for anything that reaches the core without a caller, such as a
+    // workflow `agent` node dispatched by this run.
+    medulla::core_host::install_settings(settings.clone());
 
-    let core = medulla::core_host::boot_with_hooks(&loaded.config.hooks)
+    let harness = medulla::core_host::boot_with_hooks(settings, &loaded.config.hooks)
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))?;
+    let core = harness.core().clone();
     let runtime = Arc::new(
         OpenHumanRuntime::new(Arc::new(core))
             .with_backend_base_url(&loaded.config.backend.base_url),

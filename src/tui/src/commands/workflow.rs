@@ -223,7 +223,11 @@ fn local_context(
     // same config here. Without it a lazily booted core would fall back to
     // ambient `~/.openhuman` and the production backend instead of this
     // account's state and configured deployment.
-    medulla::core_host::bind_from_config(env, &loaded.config, &home);
+    medulla::core_host::install_settings(medulla::core_host::CoreSettings::resolve(
+        env,
+        &loaded.config,
+        &home,
+    ));
     let mut settings = CapabilitySettings::from_config(&loaded.config.workflows, &home);
     // A `medulla:shell` step runs where the command was invoked, matching what
     // an operator running it by hand would expect — unless `--workspace` named

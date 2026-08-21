@@ -283,16 +283,14 @@ async fn auth_core(
     config: Option<&str>,
 ) -> anyhow::Result<medulla::core_host::EmbeddedCore> {
     let home = medulla::home::medulla_home(env);
-    medulla::core_host::bind_workspace(env, &home);
     // The session must be stored against the backend this host is configured
     // for, or `medulla login` signs into one deployment and the TUI probes
-    // another.
+    // another — and storing a session validates it against `/auth/me` there.
+    // One setting covers both clients, so this is now one call rather than
+    // three env bindings.
     let loaded = load_config(config, env, &home)?;
-    medulla::core_host::bind_medulla_base_url(env, &loaded.config.backend.base_url);
-    // And the core's own backend client with it: storing a session validates it
-    // against `/auth/me` there, not on the Medulla base above.
-    medulla::core_host::bind_backend_api_url(env, &loaded.config.backend.base_url);
-    medulla::core_host::boot_for_auth()
+    let settings = medulla::core_host::CoreSettings::resolve(env, &loaded.config, &home);
+    medulla::core_host::boot_for_auth(settings)
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the embedded OpenHuman core: {e}"))
 }

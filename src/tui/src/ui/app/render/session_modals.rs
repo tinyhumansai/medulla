@@ -116,7 +116,7 @@ impl App {
         let (rows, title) = match picker.step {
             SessionPickerStep::Harness => (
                 picker.choices.len(),
-                "Choose a harness type — Enter workspace · Esc cancel",
+                "Choose a session type — Enter workspace · Esc cancel",
             ),
             SessionPickerStep::Workspace => (
                 picker.workspace_choices.len(),

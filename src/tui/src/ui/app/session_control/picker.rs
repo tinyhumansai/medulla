@@ -141,7 +141,7 @@ impl App {
                 if let Some(picker) = &mut self.session_picker {
                     picker.step = SessionPickerStep::Harness;
                 }
-                self.set_status("Pick a harness type · Enter workspace · Esc cancel");
+                self.set_status("Pick a session type · Enter workspace · Esc cancel");
             }
             KeyCode::Up => {
                 if let Some(picker) = &mut self.session_picker {
@@ -195,7 +195,7 @@ impl App {
                     .as_ref()
                     .and_then(|picker| picker.choices.get(picker.index).cloned())
                 else {
-                    self.set_status("Choose a harness type first");
+                    self.set_status("Choose a session type first");
                     return;
                 };
                 self.session_picker = None;

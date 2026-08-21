@@ -131,42 +131,48 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
     let home = medulla::home::medulla_home(&env);
 
-    // Bind the embedded core's state directory to this process's Medulla home
-    // BEFORE anything can construct the core. Both resolve state independently
-    // otherwise, which would silently route memory, flows, and credentials into
-    // the developer's real `~/.openhuman` even on a `MEDULLA_HOME=$(mktemp -d)`
-    // scratch run — the recipe that exists precisely to avoid that. Cheap, and
-    // a no-op when the operator set `OPENHUMAN_WORKSPACE` themselves.
-    let core_workspace = medulla::core_host::bind_workspace(&env, &home);
-    // Keep the subprocess snapshot in lockstep with the process environment.
-    // OpenHuman's picker entry inherits this map, so its native TUI opens the
-    // same persisted core and agents as Medulla instead of rediscovering the
-    // developer's default ~/.openhuman in the child.
+    // Resolve everything the embedded core runs on, once, before anything can
+    // construct it. This used to be four `std::env::set_var` calls; it is a
+    // value now, and `core_host::boot` takes it as an argument.
+    //
+    // Without it the core and Medulla resolve state independently, which
+    // silently routes memory, flows and credentials into the developer's real
+    // `~/.openhuman` even on a `MEDULLA_HOME=$(mktemp -d)` scratch run — the
+    // recipe that exists precisely to avoid that. Every field is
+    // non-overriding: an operator who exported the matching variable keeps it.
+    let core_settings = medulla::core_host::CoreSettings::resolve(&env, &loaded.config, &home);
+    // Published for the lazy boot path too: a workflow `agent` node dispatched
+    // from this process reaches the core with no caller to configure it.
+    medulla::core_host::install_settings(core_settings.clone());
+    let core_workspace = core_settings.workspace.clone();
+
+    // The child-process snapshot is a *separate* concern from configuring this
+    // process's core, and stays environment-shaped because that is genuinely
+    // what it is: OpenHuman's picker entry and the harness CLIs are spawned
+    // processes, and an environment variable is how a child is told anything.
+    // What changed is that we no longer mutate *this* process's environment to
+    // talk to a library living inside it.
     env.insert(
         medulla::core_host::OPENHUMAN_WORKSPACE_ENV.to_string(),
         core_workspace.to_string_lossy().into_owned(),
     );
-    // Same binding discipline for the backend: the core must dial the endpoint
-    // this host was configured for, or a staging/self-hosted install verifies a
-    // token against one deployment and stores it against another.
-    let medulla_base_url =
-        medulla::core_host::bind_medulla_base_url(&env, &loaded.config.backend.base_url);
-    if !medulla_base_url.is_empty() {
-        env.insert(
-            medulla::core_host::OPENHUMAN_MEDULLA_BASE_URL_ENV.to_string(),
-            medulla_base_url,
-        );
-    }
-    // The core's own backend client needs the same treatment: it resolves
-    // `/auth/me` from `BACKEND_URL`, which defaults to production and knows
-    // nothing about `MEDULLA_STAGING`, so the in-app login screen would verify a
-    // staging token and then have the core hand it to production to validate.
-    let backend_api_url =
-        medulla::core_host::bind_backend_api_url(&env, &loaded.config.backend.base_url);
-    if !backend_api_url.is_empty() {
+    if !core_settings.backend_url.is_empty() {
+        // Both spellings a child may read. The core resolves its Medulla client
+        // through the same value when no explicit override is set, which is why
+        // one setting now covers what took two bindings.
         env.insert(
             medulla::core_host::OPENHUMAN_BACKEND_URL_ENV.to_string(),
-            backend_api_url,
+            core_settings.backend_url.clone(),
+        );
+        env.insert(
+            medulla::core_host::OPENHUMAN_MEDULLA_BASE_URL_ENV.to_string(),
+            core_settings.backend_url.clone(),
+        );
+    }
+    if let Some(action_dir) = core_settings.action_dir.as_ref() {
+        env.insert(
+            medulla::core_host::OPENHUMAN_ACTION_DIR_ENV.to_string(),
+            action_dir.to_string_lossy().into_owned(),
         );
     }
 
@@ -183,7 +189,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let mut startup_status: Option<String> = None;
     // A booted-but-signed-out core, held across terminal setup: the login screen
     // needs the alt screen, which is not up yet at selection time.
-    let mut pending_core: Option<medulla::core_host::EmbeddedCore> = None;
+    let mut pending_core: Option<medulla::core_host::Harness> = None;
     let mut need_login: Option<String> = None;
     // The signed-in session, resolved once from the core. Everything that needs
     // a backend bearer — the hub uplink, the Account subpage — takes it from
@@ -198,7 +204,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let hub_slot: crate::hub_relay::HubSlot = Arc::new(Mutex::new(None));
     // Cloned before the core is consumed: a relogin rebuilds the runtime around
     // the same in-process core rather than booting a second one.
-    let mut core_arc: Option<Arc<medulla::core_host::EmbeddedCore>> = None;
+    let mut core_arc: Option<Arc<medulla::core_host::Harness>> = None;
     // Active workspace roots whose `MEDULLA.md` profiles ride every backend
     // session mint (`workspaceProfiles`). Roots without a profile are skipped by
     // the collector, so passing every configured workspace is safe.
@@ -209,18 +215,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .iter()
         .map(std::path::PathBuf::from)
         .collect();
-    // The agent's read/write root. OpenHuman defaults this to
-    // `~/OpenHuman/projects`, which a Medulla operator has never used — their
-    // repos are the configured workspace roots. Binding the first keeps the
-    // agent writing where the operator actually works. Also non-overriding.
-    if let Some(action_dir) =
-        medulla::core_host::bind_action_dir(&env, workspace_roots.first().map(|p| p.as_path()))
-    {
-        env.insert(
-            medulla::core_host::OPENHUMAN_ACTION_DIR_ENV.to_string(),
-            action_dir.to_string_lossy().into_owned(),
-        );
-    }
     // The hub narrates itself; those lines must not reach the terminal while the
     // TUI owns the screen, so they are captured here instead.
     let hub_logs = medulla_tui::log::LogBuffer::new();

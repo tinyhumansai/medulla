@@ -30,14 +30,18 @@ pub fn decode_task_frame(body: &str) -> Option<TaskFrame> {
         .get("correlationId")
         .and_then(|v| v.as_str())
         .map(str::to_string);
+    // Both name what should *run* this frame's work, so both are parsed as
+    // dispatch targets: an unrecognized — or undispatchable — name decodes as
+    // `None` and the responder falls back to its own default, rather than a
+    // peer choosing a harness this host would never have offered.
     let harness = obj
         .get("harness")
         .and_then(|v| v.as_str())
-        .and_then(HarnessProvider::from_wire);
+        .and_then(HarnessProvider::dispatchable_from_wire);
     let provider = obj
         .get("provider")
         .and_then(|v| v.as_str())
-        .and_then(HarnessProvider::from_wire);
+        .and_then(HarnessProvider::dispatchable_from_wire);
     let model = obj
         .get("model")
         .and_then(|v| v.as_str())

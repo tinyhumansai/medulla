@@ -229,7 +229,11 @@ impl HarnessProvider {
             CODEX_SERVER_FLAVOR | "codex_server" => {
                 Some((HarnessProvider::Codex, HarnessTransport::AppServer))
             }
-            _ => Self::from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
+            // Dispatch-only, like every caller of this: a flavor is what a
+            // workflow node, a fleet tool, or a task frame names as the thing
+            // that should *run* something. `"shell"` parses nowhere there — see
+            // [`is_dispatchable`](Self::is_dispatchable).
+            _ => Self::dispatchable_from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
         }
     }
 
@@ -930,9 +934,12 @@ where
     D: Deserializer<'de>,
 {
     let raw = de_string_array(deserializer)?;
+    // Dropped rather than trusted: this list is a *peer's* claim about what it
+    // can run, and the orchestrator picks a provider from it. A peer that
+    // advertised `"shell"` would be offering to take work on a terminal.
     Ok(raw
         .iter()
-        .filter_map(|s| HarnessProvider::from_wire(s))
+        .filter_map(|s| HarnessProvider::dispatchable_from_wire(s))
         .collect())
 }
 

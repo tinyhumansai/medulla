@@ -233,7 +233,8 @@ impl HarnessProvider {
             // workflow node, a fleet tool, or a task frame names as the thing
             // that should *run* something. `"shell"` parses nowhere there — see
             // [`is_dispatchable`](Self::is_dispatchable).
-            _ => Self::dispatchable_from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
+            _ => Self::dispatchable_from_wire(value)
+                .map(|provider| (provider, HarnessTransport::Cli)),
         }
     }
 

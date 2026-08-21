@@ -74,7 +74,10 @@ fn a_pinned_shell_leads_without_hiding_the_others() {
     let offered = available(&env, &installed(&["/bin/sh", "bash"]));
 
     assert_eq!(offered[0].name, "sh");
-    assert!(offered.iter().any(|shell| shell.name == "bash"), "{offered:?}");
+    assert!(
+        offered.iter().any(|shell| shell.name == "bash"),
+        "{offered:?}"
+    );
 }
 
 #[test]

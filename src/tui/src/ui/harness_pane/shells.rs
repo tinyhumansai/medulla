@@ -60,10 +60,7 @@ const CANDIDATES: [&str; 4] = ["zsh", "bash", "fish", "sh"];
 /// daemon uses for coding CLIs, injected so this is testable without touching
 /// the machine's real `PATH`. Duplicates are dropped by *name*, not by path, so
 /// `$SHELL=/bin/zsh` does not produce a second `zsh` row for the one on `PATH`.
-pub fn available(
-    env: &HashMap<String, String>,
-    exists: &dyn Fn(&str) -> bool,
-) -> Vec<ShellChoice> {
+pub fn available(env: &HashMap<String, String>, exists: &dyn Fn(&str) -> bool) -> Vec<ShellChoice> {
     let configured = medulla::protocol::env::provider_bin(HarnessProvider::Shell, env);
     let mut choices: Vec<ShellChoice> = Vec::new();
     for bin in std::iter::once(configured.as_str()).chain(CANDIDATES) {

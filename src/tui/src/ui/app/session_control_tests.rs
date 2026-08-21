@@ -365,12 +365,11 @@ fn a_shell_session_cannot_be_handed_to_the_orchestrator() {
     let sessions = crate::worker::pty::PtyManager::new();
     let mut app = app();
     app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
-    let choice = crate::ui::harness_pane::HarnessChoice::shell(
-        crate::ui::harness_pane::ShellChoice {
+    let choice =
+        crate::ui::harness_pane::HarnessChoice::shell(crate::ui::harness_pane::ShellChoice {
             name: "sh".to_string(),
             bin: "/bin/sh".to_string(),
-        },
-    );
+        });
     app.spawn_session(choice, "/");
     let id = sessions.rows().remove(0).id;
 

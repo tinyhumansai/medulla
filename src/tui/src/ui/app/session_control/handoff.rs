@@ -226,7 +226,9 @@ impl App {
         // leave a row advertised as orchestrator-held that no task can ever
         // reach — and would send a handoff brief summarising a terminal.
         if row.provider == medulla::protocol::HarnessProvider::Shell {
-            self.set_status("A shell session is yours — there is nothing to hand to the orchestrator");
+            self.set_status(
+                "A shell session is yours — there is nothing to hand to the orchestrator",
+            );
             return;
         }
         let lines = harnesses

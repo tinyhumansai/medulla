@@ -13,7 +13,10 @@ use crate::protocol::{
 
 #[test]
 fn shell_names_itself_but_is_not_dispatchable() {
-    assert_eq!(HarnessProvider::from_wire("shell"), Some(HarnessProvider::Shell));
+    assert_eq!(
+        HarnessProvider::from_wire("shell"),
+        Some(HarnessProvider::Shell)
+    );
     assert_eq!(HarnessProvider::Shell.as_str(), "shell");
     assert!(!HarnessProvider::Shell.is_dispatchable());
     assert_eq!(HarnessProvider::dispatchable_from_wire("shell"), None);

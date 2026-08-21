@@ -151,6 +151,11 @@ fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
             "TINYPLACE_OPENHUMAN_BIN",
             "OPENHUMAN_BIN",
         ],
+        // `SHELL` is listed as an override key rather than special-cased below
+        // because that is exactly what it is: the operator's own statement of
+        // which shell they use. It sits behind the namespaced key so a host can
+        // still pin one shell for Medulla without changing the login shell.
+        HarnessProvider::Shell => &["MEDULLA_SHELL_BIN", "SHELL"],
     }
 }
 
@@ -190,6 +195,10 @@ fn default_bin(provider: HarnessProvider) -> &'static str {
         // The crate's installed binary retains this historical name even
         // though the product and picker label are simply OpenHuman.
         HarnessProvider::Openhuman => "openhuman-core",
+        // There is no binary named `shell`. `sh` is the one shell POSIX
+        // guarantees exists, so it is what an environment naming none falls
+        // back to rather than a guess that may not be installed.
+        HarnessProvider::Shell => "sh",
         _ => provider.as_str(),
     }
 }
@@ -345,8 +354,9 @@ fn router_env_vars(provider: HarnessProvider) -> (&'static str, &'static str) {
         HarnessProvider::Codex => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
         HarnessProvider::Opencode => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
         // OpenHuman uses the shared core's own provider/agent configuration;
-        // it is not redirected through a coding-harness router.
-        HarnessProvider::Openhuman => ("", ""),
+        // it is not redirected through a coding-harness router. Neither is a
+        // shell, which sends no inference to redirect.
+        HarnessProvider::Openhuman | HarnessProvider::Shell => ("", ""),
     }
 }
 
@@ -403,6 +413,9 @@ fn default_sessions_dir(provider: HarnessProvider) -> PathBuf {
             .join("opencode")
             .join("sessions"),
         HarnessProvider::Openhuman => home.join(".openhuman"),
+        // A shell writes no transcript. `HOME` stands in so the signature
+        // stays total; nothing tails it.
+        HarnessProvider::Shell => home,
     }
 }
 

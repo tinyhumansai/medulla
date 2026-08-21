@@ -221,6 +221,15 @@ fn a_retained_yes_no_exchange_above_the_composer_is_not_a_choice() {
     assert!(detect(HarnessProvider::Opencode, screen).is_none());
 }
 
+/// A shell's screen is whatever the last command printed — including wording
+/// that would read as a choice cue from a harness, like `rm -i`'s `(y/n)`. The
+/// shell veto at the top of `detect` must outrank every heuristic below it, so
+/// this never becomes a blinking attention row nobody can clear.
+#[test]
+fn a_shell_screen_is_never_a_cue_even_when_it_looks_like_one() {
+    assert!(detect(HarnessProvider::Shell, "Overwrite config.toml? (y/n)").is_none());
+}
+
 #[test]
 fn opencode_permission_wording_is_an_approval() {
     let screen = "opencode wants to run `git push`\n  Allow once   Always allow   Reject";

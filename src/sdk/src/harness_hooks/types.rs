@@ -134,6 +134,9 @@ impl HookEvent {
             HarnessProvider::Claude => true,
             HarnessProvider::Codex => self != HookEvent::Notification,
             HarnessProvider::Opencode => false,
+            // A shell raises no events: there are no tool calls to sit
+            // between, and nothing Medulla could install into it.
+            HarnessProvider::Shell => false,
             HarnessProvider::Openhuman => matches!(
                 self,
                 HookEvent::PreToolUse | HookEvent::PostToolUse | HookEvent::Stop

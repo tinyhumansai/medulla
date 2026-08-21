@@ -94,7 +94,7 @@ pub fn delivery(provider: HarnessProvider, hooks: &HooksConfig) -> AcpDelivery {
         // named in `notes` as dropped. Kept explicit rather than as a catch-all
         // so that adapting either provider makes this arm a compile error
         // instead of a silent no-op.
-        HarnessProvider::Opencode | HarnessProvider::Openhuman => {}
+        HarnessProvider::Opencode | HarnessProvider::Openhuman | HarnessProvider::Shell => {}
     }
     delivery
 }

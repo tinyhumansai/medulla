@@ -109,7 +109,7 @@ pub fn hook_injection(provider: HarnessProvider, hooks: &HooksConfig) -> HookInj
     match provider {
         HarnessProvider::Claude => injection.args = claude::settings_args(&document),
         HarnessProvider::Codex => injection.args = codex::config_args(&document),
-        HarnessProvider::Opencode | HarnessProvider::Openhuman => {}
+        HarnessProvider::Opencode | HarnessProvider::Openhuman | HarnessProvider::Shell => {}
     }
     injection
 }
@@ -210,6 +210,7 @@ fn unsupported_reason(provider: HarnessProvider, event: HookEvent) -> String {
             "OpenHuman's embedded runner currently raises PreToolUse, PostToolUse, and Stop"
                 .to_string()
         }
+        HarnessProvider::Shell => "a shell raises no hook events".to_string(),
         HarnessProvider::Claude | HarnessProvider::Codex => {
             format!(
                 "{} does not raise the {} event",

@@ -110,9 +110,13 @@ impl UpstreamShape {
     pub fn for_provider(provider: HarnessProvider) -> Self {
         match provider {
             HarnessProvider::Claude => Self::Anthropic,
-            HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
-                Self::OpenAi
-            }
+            HarnessProvider::Codex
+            | HarnessProvider::Opencode
+            | HarnessProvider::Openhuman
+            // Never routed — a shell is not given a router at all — but it has
+            // to name a dialect, and the OpenAI-shaped one is the default the
+            // rest of the non-Anthropic providers share.
+            | HarnessProvider::Shell => Self::OpenAi,
         }
     }
 

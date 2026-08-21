@@ -202,8 +202,9 @@ pub fn interactive_args(
                 args.push(model.to_string());
             }
             // OpenHuman selects agents through its own shared configuration;
-            // a coding-provider model override has no meaning for it.
-            HarnessProvider::Openhuman => {}
+            // a coding-provider model override has no meaning for it, and a
+            // shell has no model at all.
+            HarnessProvider::Openhuman | HarnessProvider::Shell => {}
         }
     }
     args.extend(extra.iter().cloned());
@@ -226,6 +227,8 @@ pub fn bypass_flag(provider: HarnessProvider) -> &'static [&'static str] {
         HarnessProvider::Codex => &["--dangerously-bypass-approvals-and-sandbox"],
         HarnessProvider::Opencode => &[],
         HarnessProvider::Openhuman => &[],
+        // A shell asks no permission to begin with; there is nothing to bypass.
+        HarnessProvider::Shell => &[],
     }
 }
 
@@ -254,6 +257,9 @@ pub fn paints_a_screen(provider: HarnessProvider) -> bool {
             | HarnessProvider::Codex
             | HarnessProvider::Opencode
             | HarnessProvider::Openhuman
+            // Not a full-screen interface, but the same deal: it writes to a
+            // tty, so the emulator has something to show.
+            | HarnessProvider::Shell
     )
 }
 

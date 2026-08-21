@@ -105,6 +105,17 @@ pub enum HarnessProvider {
     /// interchangeable with a coding CLI, so a task reaches it only by naming
     /// it. See [`crate::daemon::providers::detect_providers`].
     Openhuman,
+    /// A plain interactive shell — `bash`, `zsh`, whatever `$SHELL` names.
+    ///
+    /// Not a coding agent, and deliberately kept out of every path that treats
+    /// one as interchangeable with another: it is never detected as an
+    /// available provider ([`crate::daemon::providers::DAEMON_PROVIDERS`]) and
+    /// never dispatchable ([`is_dispatchable`](Self::is_dispatchable)), so no
+    /// peer frame can reach a shell however it spells the harness name. It
+    /// exists so an operator can open a terminal beside their agents, in the
+    /// same pane, on the same host, with the same working directory — which
+    /// until now meant leaving the TUI.
+    Shell,
 }
 
 impl HarnessProvider {
@@ -115,6 +126,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "codex",
             HarnessProvider::Opencode => "opencode",
             HarnessProvider::Openhuman => "openhuman",
+            HarnessProvider::Shell => "shell",
         }
     }
 
@@ -128,6 +140,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "Codex",
             HarnessProvider::Opencode => "OpenCode",
             HarnessProvider::Openhuman => "OpenHuman",
+            HarnessProvider::Shell => "Shell",
         }
     }
 
@@ -144,6 +157,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "◆",
             HarnessProvider::Opencode => "◻",
             HarnessProvider::Openhuman => "○",
+            HarnessProvider::Shell => "$",
         }
     }
 
@@ -154,6 +168,7 @@ impl HarnessProvider {
             "codex" => Some(HarnessProvider::Codex),
             "opencode" => Some(HarnessProvider::Opencode),
             "openhuman" => Some(HarnessProvider::Openhuman),
+            "shell" => Some(HarnessProvider::Shell),
             _ => None,
         }
     }
@@ -165,7 +180,7 @@ impl HarnessProvider {
 
     /// Whether this provider accepts delegated coding-task frames.
     ///
-    /// Every provider does. The distinction this used to draw — OpenHuman
+    /// Every coding agent does. The distinction this used to draw — OpenHuman
     /// excluded because it "owns its own agent loop" — did not survive
     /// contact with the fact that every harness here owns one; Claude Code's
     /// simply sits behind a process boundary instead of a function call. What
@@ -174,11 +189,15 @@ impl HarnessProvider {
     /// belongs: it is never auto-detected as an available provider, so a task
     /// reaches it only by naming it.
     ///
-    /// Kept as a method rather than deleted because it is the one place that
-    /// question is asked, and a provider that genuinely cannot take a frame may
-    /// yet be added.
+    /// [`Shell`](Self::Shell) is the one that answers `false`, and it is the
+    /// reason this stayed a method. A shell reads no prompt and reports no
+    /// completion, so a task frame naming one would be a turn that never
+    /// answers — and a peer that could name one would have a way to run
+    /// arbitrary commands on this host without a harness in between. Both are
+    /// refused at the parse: [`dispatchable_from_wire`](Self::dispatchable_from_wire)
+    /// returns `None` for `"shell"`.
     pub fn is_dispatchable(self) -> bool {
-        true
+        !matches!(self, Self::Shell)
     }
 
     /// Whether running this provider means spawning an executable.
@@ -210,7 +229,12 @@ impl HarnessProvider {
             CODEX_SERVER_FLAVOR | "codex_server" => {
                 Some((HarnessProvider::Codex, HarnessTransport::AppServer))
             }
-            _ => Self::from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
+            // Dispatch-only, like every caller of this: a flavor is what a
+            // workflow node, a fleet tool, or a task frame names as the thing
+            // that should *run* something. `"shell"` parses nowhere there — see
+            // [`is_dispatchable`](Self::is_dispatchable).
+            _ => Self::dispatchable_from_wire(value)
+                .map(|provider| (provider, HarnessTransport::Cli)),
         }
     }
 
@@ -219,7 +243,24 @@ impl HarnessProvider {
     ///
     /// A default-transport pair is simply the provider name, so round-tripping
     /// an ordinary harness never invents a suffix nobody wrote.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// `self` must be [`is_dispatchable`](Self::is_dispatchable). `flavor_from_wire`
+    /// never *parses* a non-dispatchable provider's name back into a flavor —
+    /// `"shell"` returns `None` — so a caller that fed one in here would get a
+    /// string dispatch parsers reject, breaking the round trip this method
+    /// promises. Every caller in this codebase already sources `self` from a
+    /// dispatchable set (`dispatchable_flavors`, a parsed `TaskRequest`
+    /// provider, a resolved `HarnessChoice`), so this should never fire
+    /// outside a bug; the debug assertion catches that bug in tests rather
+    /// than emitting a wire-invalid flavor in release.
     pub fn flavor_name(self, transport: HarnessTransport) -> &'static str {
+        debug_assert!(
+            self.is_dispatchable(),
+            "flavor_name called on non-dispatchable provider {self:?}; \
+             flavor_from_wire cannot parse its name back, breaking the round trip"
+        );
         match (self, transport) {
             (HarnessProvider::Codex, HarnessTransport::AppServer) => CODEX_SERVER_FLAVOR,
             _ => self.as_str(),
@@ -911,9 +952,12 @@ where
     D: Deserializer<'de>,
 {
     let raw = de_string_array(deserializer)?;
+    // Dropped rather than trusted: this list is a *peer's* claim about what it
+    // can run, and the orchestrator picks a provider from it. A peer that
+    // advertised `"shell"` would be offering to take work on a terminal.
     Ok(raw
         .iter()
-        .filter_map(|s| HarnessProvider::from_wire(s))
+        .filter_map(|s| HarnessProvider::dispatchable_from_wire(s))
         .collect())
 }
 

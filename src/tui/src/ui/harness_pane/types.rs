@@ -15,6 +15,15 @@ pub struct HarnessChoice {
     pub provider: medulla::protocol::HarnessProvider,
     /// The configured preset, absent for a native CLI entry.
     pub preset: Option<medulla::config::CustomHarnessConfig>,
+    /// Which shell to run, set only when
+    /// [`provider`](Self::provider) is
+    /// [`Shell`](medulla::protocol::HarnessProvider::Shell).
+    ///
+    /// A shell is the one choice whose binary is not implied by its provider:
+    /// `bash` and `zsh` are the same entry as far as the enum is concerned, and
+    /// the operator is picking between them. Carried here so the picker row and
+    /// the spawn agree on which one was picked.
+    pub shell: Option<super::shells::ShellChoice>,
 }
 
 impl HarnessChoice {
@@ -23,6 +32,7 @@ impl HarnessChoice {
         Self {
             provider,
             preset: None,
+            shell: None,
         }
     }
 
@@ -31,11 +41,44 @@ impl HarnessChoice {
         Self {
             provider: preset.base_harness,
             preset: Some(preset),
+            shell: None,
+        }
+    }
+
+    /// Build a choice for a plain interactive shell.
+    pub fn shell(shell: super::shells::ShellChoice) -> Self {
+        Self {
+            provider: medulla::protocol::HarnessProvider::Shell,
+            preset: None,
+            shell: Some(shell),
+        }
+    }
+
+    /// Whether this choice opens a terminal rather than a coding agent.
+    ///
+    /// The one question the spawn path asks before deciding what a session is
+    /// owed: a shell gets no MCP registration, no managed skills, no router,
+    /// and no commit attribution, because none of those describe a person
+    /// typing at a prompt. See [`open_unmanaged_named`].
+    ///
+    /// [`open_unmanaged_named`]: LocalSessions::open_unmanaged_named
+    pub fn is_shell(&self) -> bool {
+        self.provider == medulla::protocol::HarnessProvider::Shell
+    }
+
+    /// The binary this choice launches, resolved against `env`.
+    pub fn bin(&self, env: &std::collections::HashMap<String, String>) -> String {
+        match &self.shell {
+            Some(shell) => shell.bin.clone(),
+            None => medulla::protocol::env::provider_bin(self.provider, env),
         }
     }
 
     /// Human-readable picker label.
     pub fn display_name(&self) -> &str {
+        if let Some(shell) = &self.shell {
+            return shell.name.as_str();
+        }
         self.preset.as_ref().map_or_else(
             || self.provider.display_name(),
             |preset| preset.name.as_str(),
@@ -44,6 +87,9 @@ impl HarnessChoice {
 
     /// Stable identifier used in session labels and status messages.
     pub fn id(&self) -> &str {
+        if let Some(shell) = &self.shell {
+            return shell.name.as_str();
+        }
         self.preset
             .as_ref()
             .map_or_else(|| self.provider.as_str(), |preset| preset.id.as_str())
@@ -137,6 +183,14 @@ impl LocalSessions {
                     .iter()
                     .cloned()
                     .map(HarnessChoice::custom),
+            )
+            // Last, and deliberately: the picker's first row is what Enter
+            // starts, and that should stay the coding agent an operator opens
+            // this modal for. A shell is the exception they scroll to.
+            .chain(
+                super::shells::available(&self.env, &lookup)
+                    .into_iter()
+                    .map(HarnessChoice::shell),
             )
             .collect()
     }

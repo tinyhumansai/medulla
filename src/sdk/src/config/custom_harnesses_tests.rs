@@ -311,3 +311,17 @@ providerOnly = ["streamlake"]
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].provider_only, vec!["streamlake"]);
 }
+
+/// A preset is a model reached through a CLI, and a shell has neither. Refused
+/// at normalization so the picker never offers a "custom harness" with nowhere
+/// to route — the alternative is an entry that starts a terminal and ignores
+/// every field the operator filled in.
+#[test]
+fn a_shell_cannot_be_the_base_harness_of_a_preset() {
+    let error = CustomHarnessConfig::from_editor_line(
+        "sh | Shell preset | shell | z-ai/glm-5.2 | | this-device",
+    )
+    .expect_err("a shell-backed preset is refused");
+
+    assert!(error.contains("shell"), "{error}");
+}

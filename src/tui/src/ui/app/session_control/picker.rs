@@ -77,6 +77,12 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Sessions");
                 self.select_session_row(&id);
+                // Names the directory, because the picker's whole second step
+                // was choosing it and a confirmation that omits the answer is
+                // not one. "local session" covers a shell as squarely as it
+                // covers a harness: it states where the session runs and who
+                // holds it, not whether the orchestrator declined to dispatch
+                // into it, so a shell needs no wording of its own here.
                 let mut status = format!(
                     "Started {} in {workspace} · local session",
                     choice.display_name()
@@ -135,7 +141,7 @@ impl App {
                 if let Some(picker) = &mut self.session_picker {
                     picker.step = SessionPickerStep::Harness;
                 }
-                self.set_status("Pick a harness type · Enter workspace · Esc cancel");
+                self.set_status("Pick a session type · Enter workspace · Esc cancel");
             }
             KeyCode::Up => {
                 if let Some(picker) = &mut self.session_picker {
@@ -189,7 +195,7 @@ impl App {
                     .as_ref()
                     .and_then(|picker| picker.choices.get(picker.index).cloned())
                 else {
-                    self.set_status("Choose a harness type first");
+                    self.set_status("Choose a session type first");
                     return;
                 };
                 self.session_picker = None;

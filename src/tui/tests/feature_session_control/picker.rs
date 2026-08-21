@@ -16,7 +16,7 @@ fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
 
     let _ = app.on_event(ctrl('t'));
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("Choose a harness type"), "{out}");
+    assert!(out.contains("Choose a session type"), "{out}");
     assert!(
         out.contains("the orchestrator will not dispatch into it"),
         "the picker must say what unmanaged means: {out}"
@@ -179,7 +179,7 @@ fn the_picker_cancels_without_starting_anything() {
     let _ = app.on_event(key(KeyCode::Esc));
 
     let out = render(&mut app, 140, 44);
-    assert!(!out.contains("Choose a harness type"), "{out}");
+    assert!(!out.contains("Choose a session type"), "{out}");
     assert!(sessions.rows().is_empty(), "Esc must not start a harness");
 }
 

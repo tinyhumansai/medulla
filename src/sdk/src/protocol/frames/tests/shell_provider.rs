@@ -59,3 +59,13 @@ fn an_advertised_shell_provider_is_dropped() {
 
     assert_eq!(capabilities.providers, vec![HarnessProvider::Claude]);
 }
+
+/// `flavor_name` is documented as the inverse of `flavor_from_wire`, which
+/// never parses `"shell"` back into a flavor. Calling it on the one provider
+/// that breaks that round trip must fail loudly in debug builds rather than
+/// silently emitting a flavor no dispatch parser accepts.
+#[test]
+#[should_panic(expected = "flavor_name called on non-dispatchable provider")]
+fn flavor_name_panics_on_a_shell_in_debug_builds() {
+    let _ = HarnessProvider::Shell.flavor_name(crate::protocol::HarnessTransport::Cli);
+}

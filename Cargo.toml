@@ -116,6 +116,18 @@ unicode-width = "0.2"
 #
 # Vendored code stays out of `members` via `exclude`, so it keeps its own lints
 # and tests instead of joining this workspace's CI gates.
+# The vendored tinycortex takes `tinymemory-api` by **git** (it re-exports the
+# TinyMemory contract rather than duplicating it). Without this entry cargo
+# resolves that git copy *and* the path copy under
+# `vendor/openhuman/vendor/tinymemory` as two distinct crates, and a
+# `tinymemory_api::MemoryTaint` from one is not the same type as from the other
+# — a wall of E0308s inside vendored code that compiles fine in the openhuman
+# host. Mirrors the entry openhuman's own manifest carries, rebased onto
+# `vendor/openhuman/vendor/*` like every entry below; the key has no `.git`
+# suffix, matching the dep URL.
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/crates/tinymemory-api" }
+
 [patch.crates-io]
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }
 tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
@@ -125,7 +137,6 @@ tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
 # their own patch tables, so Medulla must bind it at this workspace root too.
 tinycortex-api = { path = "vendor/openhuman/vendor/tinycortex/api" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
-tinyjuice = { path = "vendor/openhuman/vendor/tinyjuice" }
 # Load-bearing even though no crate in this workspace links tinyplace any more:
 # the vendored OpenHuman core still does, and without the redirect Cargo would
 # resolve the published crate instead of the vendored tree.

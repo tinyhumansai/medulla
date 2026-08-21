@@ -128,7 +128,7 @@ async fn store_if_same_account(
         Disposition::Store => {}
     }
 
-    medulla::core_host::auth::store_session(core, jwt)
+    core.auth().store(medulla::core_host::Session::backend(jwt))
         .await
         .map_err(|e| anyhow::anyhow!("signed in, but the core rejected the session: {e}"))?;
     Ok(SignIn::SameAccount)

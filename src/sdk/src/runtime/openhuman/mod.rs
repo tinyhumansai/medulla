@@ -578,7 +578,7 @@ impl Runtime for OpenHumanRuntime {
         // the profile on disk, so anything less leaves the real credential in
         // place and the next start signed in again.
         Box::pin(async move {
-            crate::core_host::auth::clear_session(&core).await?;
+            core.auth().clear().await?;
             Ok(())
         })
     }

@@ -55,13 +55,10 @@ use openhuman_core::{
     CoreBuilder, DomainSet, HarnessError, HostKind, ServiceSet, TokenSource, Workspace,
 };
 
-pub mod auth;
 mod hooks;
 pub mod shared;
 pub mod turn_cwd;
 
-#[cfg(test)]
-mod auth_tests;
 #[cfg(test)]
 mod hooks_tests;
 #[cfg(test)]

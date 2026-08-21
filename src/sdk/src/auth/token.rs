@@ -10,7 +10,7 @@ use std::collections::HashMap;
 /// 1. an inline `backend.token` in the loaded config,
 /// 2. the `backend.tokenEnv` environment variable (an empty value is ignored),
 /// 3. `session` — the app session the embedded core holds, read by the caller
-///    via [`crate::core_host::auth::session_token`].
+///    via the core's typed auth facade (`core.auth().token()`).
 ///
 /// Returns `None` when no source yields a token. Pure over its inputs; the caller
 /// supplies the process environment and the session.

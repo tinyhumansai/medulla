@@ -2393,7 +2393,7 @@ dependencies = [
  "tinycortex-api",
  "tinyhumans-sdk",
  "tinymemory",
- "tinymemory-api 0.1.1",
+ "tinymemory-api",
  "tinymemory-core",
  "tinymemory-tinycortex",
  "tinyplace",
@@ -3977,7 +3977,7 @@ dependencies = [
 name = "tinycortex-api"
 version = "0.1.1"
 dependencies = [
- "tinymemory-api 0.1.1 (git+https://github.com/tinyhumansai/tinymemory?rev=4549cda222de3891b95e2fa58e2565bb2c194328)",
+ "tinymemory-api",
 ]
 
 [[package]]
@@ -4023,7 +4023,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "tinymemory-api 0.1.1",
+ "tinymemory-api",
 ]
 
 [[package]]
@@ -4037,23 +4037,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tinymemory-bus",
-]
-
-[[package]]
-name = "tinymemory-api"
-version = "0.1.1"
-source = "git+https://github.com/tinyhumansai/tinymemory?rev=4549cda222de3891b95e2fa58e2565bb2c194328#4549cda222de3891b95e2fa58e2565bb2c194328"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "log",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "thiserror 2.0.20",
- "uuid",
 ]
 
 [[package]]
@@ -4091,7 +4074,7 @@ dependencies = [
  "tinyagents",
  "tinycortex",
  "tinycortex-api",
- "tinymemory-api 0.1.1",
+ "tinymemory-api",
  "tinymemory-sources",
  "tinymemory-sync",
  "tokio",
@@ -4114,7 +4097,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
- "tinymemory-api 0.1.1",
+ "tinymemory-api",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
@@ -4144,7 +4127,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinycortex",
- "tinymemory-api 0.1.1",
+ "tinymemory-api",
  "tinymemory-core",
  "tokio",
  "uuid",
@@ -5532,7 +5515,3 @@ dependencies = [
  "log",
  "simd-adler32",
 ]
-
-[[patch.unused]]
-name = "tinyjuice"
-version = "0.2.1"

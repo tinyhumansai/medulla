@@ -360,12 +360,10 @@ pub async fn boot_for_auth(settings: CoreSettings) -> anyhow::Result<Core> {
         builder = builder.action_dir(action_dir);
     }
     if !settings.backend_url.is_empty() {
-        // Auth is the whole point of this core: `/auth/me` must be resolved
-        // against the deployment the operator's token came from.
-        let mut config = openhuman_core::openhuman::config::Config::default();
-        config.api_url = Some(settings.backend_url);
-        config.workspace_dir = builder_workspace(&builder);
-        let _ = config;
+        // Auth is the whole point of this core: `/auth/me` has to be resolved
+        // against the deployment the operator's token came from, or a valid
+        // staging token is handed to production and rejected.
+        builder = builder.backend_url(settings.backend_url);
     }
 
     let runtime = builder.build().await?;

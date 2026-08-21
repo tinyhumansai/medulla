@@ -51,7 +51,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use openhuman_core::embed::{Core, CoreError};
-use openhuman_core::{CoreBuilder, DomainSet, HostKind, ServiceSet, TokenSource};
+use openhuman_core::{
+    CoreBuilder, DomainSet, Harness, HarnessError, HostKind, ServiceSet, TokenSource, Workspace,
+};
 
 pub mod auth;
 mod hooks;
@@ -70,6 +72,14 @@ mod turn_cwd_tests;
 /// The embed facade, re-exported so a host can name what [`boot`] returns
 /// without depending on the `openhuman` crate directly.
 pub use openhuman_core::embed::Core as EmbeddedCore;
+
+/// Who the core is signed in as.
+///
+/// Re-exported rather than mirrored: this host used to keep its own narrow
+/// projection of the core's auth response, decoded by hand out of the RPC
+/// envelope. The core models it now, so a second definition would be one more
+/// thing to keep in step for no gain.
+pub use openhuman_core::embed::AuthState;
 
 /// Environment variable OpenHuman reads for its state directory.
 pub const OPENHUMAN_WORKSPACE_ENV: &str = "OPENHUMAN_WORKSPACE";
@@ -105,15 +115,68 @@ pub fn workspace_dir(medulla_home: &Path) -> PathBuf {
     medulla_home.join("workspace")
 }
 
-/// Point OpenHuman at a workspace derived from this process's Medulla home.
+/// Everything this host decides about the core before it is built.
 ///
-/// Idempotent and **non-overriding**: an operator who sets
-/// `OPENHUMAN_WORKSPACE` explicitly keeps it, which is what lets a developer
-/// aim the embedded core at an existing OpenHuman install on purpose. Returns
-/// the directory in effect either way.
+/// Resolved once by [`CoreSettings::resolve`], then handed to [`boot`]. Held as
+/// a value rather than written to the process environment — see the module docs
+/// on why that distinction is worth a type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoreSettings {
+    /// The core's state directory.
+    pub workspace: PathBuf,
+    /// The agent's read/write root, when this host has one to name.
+    pub action_dir: Option<PathBuf>,
+    /// The backend deployment the core dials. Empty when nothing named one, in
+    /// which case the core resolves its own.
+    pub backend_url: String,
+}
+
+impl CoreSettings {
+    /// The floor every core gets: workspace isolation and nothing else.
+    ///
+    /// A host that reaches the core without a loaded config — a lazily booted
+    /// workflow run, an MCP subprocess — still must not write into the
+    /// developer's real `~/.openhuman`. This is the minimum that prevents it.
+    pub fn floor(env: &HashMap<String, String>, medulla_home: &Path) -> Self {
+        Self {
+            workspace: resolve_workspace(env, medulla_home),
+            action_dir: None,
+            backend_url: String::new(),
+        }
+    }
+
+    /// Everything a loaded config names.
+    ///
+    /// The first configured workspace root is the agent's read/write root, the
+    /// same precedence `app_loop.rs` gives it when the TUI binds its primary
+    /// host. A blank or absent root leaves it unset rather than binding
+    /// something arbitrary.
+    pub fn resolve(
+        env: &HashMap<String, String>,
+        config: &crate::config::TuiConfig,
+        medulla_home: &Path,
+    ) -> Self {
+        let root = config
+            .workflow
+            .workspaces
+            .first()
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty());
+        Self {
+            workspace: resolve_workspace(env, medulla_home),
+            action_dir: resolve_action_dir(env, root.as_deref()),
+            backend_url: resolve_backend_api_url(env, &config.backend.base_url),
+        }
+    }
+}
+
+/// The workspace this process's core should use.
 ///
-/// Call before [`boot`]; the core reads the variable during construction.
-pub fn bind_workspace(env: &HashMap<String, String>, medulla_home: &Path) -> PathBuf {
+/// **Non-overriding**: an operator who exported `OPENHUMAN_WORKSPACE` keeps it,
+/// which is what lets a developer aim the embedded core at an existing
+/// OpenHuman install on purpose. Otherwise it derives from `MEDULLA_HOME`, so
+/// the scratch-run recipe in the module docs isolates the core too.
+pub fn resolve_workspace(env: &HashMap<String, String>, medulla_home: &Path) -> PathBuf {
     if let Some(explicit) = env
         .get(OPENHUMAN_WORKSPACE_ENV)
         .map(|v| v.trim())
@@ -128,7 +191,6 @@ pub fn bind_workspace(env: &HashMap<String, String>, medulla_home: &Path) -> Pat
     }
 
     let dir = workspace_dir(medulla_home);
-    std::env::set_var(OPENHUMAN_WORKSPACE_ENV, &dir);
     tracing::debug!(
         "[core_host] workspace derived from MEDULLA_HOME: {}",
         dir.display()
@@ -136,16 +198,19 @@ pub fn bind_workspace(env: &HashMap<String, String>, medulla_home: &Path) -> Pat
     dir
 }
 
-/// Point the agent's read/write root at the operator's own workspace roots.
+/// The agent's read/write root.
 ///
 /// OpenHuman defaults `action_dir` to `~/OpenHuman/projects`, which is not
 /// where a Medulla operator works — their repos are the workspace roots already
 /// in Medulla's config. Leaving the default would aim the agent's write root at
 /// a directory this host has never used.
 ///
-/// Non-overriding for the same reason as [`bind_workspace`]. A `None` or empty
-/// `root` leaves the variable alone rather than binding something arbitrary.
-pub fn bind_action_dir(env: &HashMap<String, String>, root: Option<&Path>) -> Option<PathBuf> {
+/// Non-overriding for the same reason as [`resolve_workspace`]. A `None` or
+/// empty `root` yields `None` rather than something arbitrary.
+pub fn resolve_action_dir(
+    env: &HashMap<String, String>,
+    root: Option<&Path>,
+) -> Option<PathBuf> {
     if let Some(explicit) = env
         .get(OPENHUMAN_ACTION_DIR_ENV)
         .map(|v| v.trim())
@@ -157,65 +222,29 @@ pub fn bind_action_dir(env: &HashMap<String, String>, root: Option<&Path>) -> Op
     if root.as_os_str().is_empty() {
         return None;
     }
-    std::env::set_var(OPENHUMAN_ACTION_DIR_ENV, root);
-    tracing::debug!("[core_host] action_dir bound to {}", root.display());
+    tracing::debug!("[core_host] action_dir resolved to {}", root.display());
     Some(root.to_path_buf())
 }
 
-/// Point the core's Medulla client at the backend this host is configured for.
+/// The backend deployment the core should dial.
 ///
-/// The core resolves its own backend URL from OpenHuman's config chain, which
-/// on a default install lands on the same hosted deployment Medulla's
-/// `backend.baseUrl` names. On a staging or self-hosted install it does not: the
-/// login screen would verify a token against the configured endpoint while the
-/// core probed and stored it against a different one — the readiness probe fails
-/// or the backend rejects a freshly verified token, and neither failure names
-/// the mismatch that caused it.
+/// Covers both of the core's backend clients at once. `openhuman.auth_store_session`
+/// validates a token against `/auth/me` on the base OpenHuman's own config chain
+/// resolves — which otherwise falls back to *production* and has never heard of
+/// `MEDULLA_STAGING`. So on staging the login flow verified a staging JWT,
+/// handed it to the core, and the core asked production whether it was valid; it
+/// is not, and the failure surfaced as "backend rejected session token", which
+/// names the symptom and not the two endpoints that disagreed. The same mismatch
+/// hits any self-hosted install.
 ///
-/// Non-overriding, like [`bind_workspace`]: an operator who exported
-/// `OPENHUMAN_MEDULLA_BASE_URL` themselves is aiming the core somewhere on
-/// purpose. Returns the URL in effect either way.
+/// The core's Medulla client resolves through the same value: with no
+/// `OPENHUMAN_MEDULLA_BASE_URL` override it falls through to
+/// `effective_backend_api_url`, which reads exactly the `api_url` this sets.
+/// That is why one setting now replaces the two bindings this used to need.
 ///
-/// Call before [`boot`]; the core reads the variable when it resolves a client.
-pub fn bind_medulla_base_url(env: &HashMap<String, String>, base_url: &str) -> String {
-    if let Some(explicit) = env
-        .get(OPENHUMAN_MEDULLA_BASE_URL_ENV)
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
-        tracing::debug!("[core_host] medulla base url from the operator's override");
-        return explicit.to_string();
-    }
-    let base_url = base_url.trim().trim_end_matches('/');
-    if base_url.is_empty() {
-        return String::new();
-    }
-    std::env::set_var(OPENHUMAN_MEDULLA_BASE_URL_ENV, base_url);
-    tracing::debug!("[core_host] medulla base url bound from the Medulla config");
-    base_url.to_string()
-}
-
-/// Point the core's *own* backend client at the same deployment.
-///
-/// [`bind_medulla_base_url`] covers the core's Medulla client only. Auth is a
-/// different client: `openhuman.auth_store_session` validates a token against
-/// `/auth/me` on the base OpenHuman's own config chain resolves, which consults
-/// `BACKEND_URL` / `VITE_BACKEND_URL` and otherwise falls back to *production*
-/// — it has never heard of `MEDULLA_STAGING`.
-///
-/// So on staging the login flow verified a staging JWT, handed it to the core,
-/// and the core asked production whether it was valid. It is not, and the
-/// failure surfaces as `auth_store_session: Session validation failed (GET
-/// /auth/me): backend rejected session token` — which names the symptom and not
-/// the two endpoints that disagreed. The same mismatch hits any self-hosted
-/// install, staging just makes it certain.
-///
-/// Non-overriding, like the bindings above, and either spelling counts as the
-/// operator having aimed the core somewhere on purpose. Returns the URL in
-/// effect either way.
-///
-/// Call before [`boot`]; the core reads the variable when it resolves a client.
-pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> String {
+/// Non-overriding, and either environment spelling counts as the operator
+/// having aimed the core somewhere on purpose.
+pub fn resolve_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> String {
     for key in [OPENHUMAN_BACKEND_URL_ENV, OPENHUMAN_BACKEND_URL_ALT_ENV] {
         if let Some(explicit) = env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
             tracing::debug!("[core_host] backend api url from the operator's {key} override");
@@ -226,44 +255,8 @@ pub fn bind_backend_api_url(env: &HashMap<String, String>, base_url: &str) -> St
     if base_url.is_empty() {
         return String::new();
     }
-    std::env::set_var(OPENHUMAN_BACKEND_URL_ENV, base_url);
-    tracing::debug!("[core_host] backend api url bound from the Medulla config");
+    tracing::debug!("[core_host] backend api url resolved from the Medulla config");
     base_url.to_string()
-}
-
-/// Point the embedded core at everything a loaded config names, before it can
-/// boot.
-///
-/// [`boot`] reads the core's environment during construction, and the lazy boot
-/// path ([`shared`]) has no caller of its own to bind for it. A host that has
-/// its layered config in hand — `medulla workflow run`, an MCP server — calls
-/// this once to reproduce the startup bindings the TUI and `medulla run`
-/// perform: the workspace derived from `MEDULLA_HOME`, the agent's action
-/// directory from the configured workspace roots, and both backend URLs from
-/// `backend.base_url`. A workflow `agent` node or MCP turn that reaches the
-/// core first then reads this account's state and the configured deployment
-/// rather than ambient `~/.openhuman`.
-///
-/// Non-overriding, like every individual binding: an operator who exported any
-/// of the variables wins.
-pub fn bind_from_config(
-    env: &HashMap<String, String>,
-    config: &crate::config::TuiConfig,
-    home: &Path,
-) {
-    // The first configured workspace root is the agent's read/write root, the
-    // same precedence `app_loop.rs` gives it when the TUI binds its primary
-    // host. A blank or absent root leaves the variable alone.
-    let root = config
-        .workflow
-        .workspaces
-        .first()
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty());
-    bind_workspace(env, home);
-    bind_action_dir(env, root.as_deref());
-    bind_medulla_base_url(env, &config.backend.base_url);
-    bind_backend_api_url(env, &config.backend.base_url);
 }
 
 /// Build the embedded core and wrap it in the typed facade.

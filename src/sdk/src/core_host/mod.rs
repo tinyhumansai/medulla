@@ -30,6 +30,21 @@
 //! own presentation layer — no HTTP listener, no Socket.IO, but the background
 //! work a long session expects. Both are OpenHuman presets named for that
 //! shape; see their docs for why this host is not `harness()`.
+//!
+//! # Settings are values, not environment variables
+//!
+//! This module used to configure the core by calling `std::env::set_var` four
+//! times before [`boot`], because that was the only channel the core offered.
+//! It has drawbacks that are easy to state and hard to notice in review: the
+//! calls have to happen before a constructor they do not appear in, they are
+//! process-global so a second consumer in the same process silently inherits
+//! them, they leak into every child process this host spawns, and newer Rust
+//! editions make mutating the environment increasingly hostile.
+//!
+//! [`CoreSettings`] replaces them. The *precedence* is unchanged and still
+//! belongs here — an operator who exported `OPENHUMAN_WORKSPACE` still wins —
+//! but it is now resolved into a value and handed to the builder, so the
+//! ordering requirement is a parameter rather than a convention.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

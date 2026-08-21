@@ -4,7 +4,8 @@
 //! per-mode gate on it; [`session`] drives a real child on a real
 //! pseudo-terminal to cover the session-facing half of [`super::LocalSessions`];
 //! [`spawn`] covers what a session is opened *with* — provider choice,
-//! attribution, and the argv a real spawn produces.
+//! attribution, and the argv a real spawn produces; [`shells`] covers the plain
+//! `bash`/`zsh` door beside them.
 //!
 //! The encoder is where a mistake is invisible until an operator is sitting in
 //! front of a harness that ignores their arrow keys, so every family it emits is
@@ -29,6 +30,11 @@ mod origin;
 // check what a real spawn produces, not just the argv builder in isolation.
 #[cfg(unix)]
 mod spawn;
+
+// Same constraint as [`session`]: it starts a real shell on a real pty to
+// check what that door hands the child — and, mostly, what it does not.
+#[cfg(unix)]
+mod shells;
 
 mod buttons;
 

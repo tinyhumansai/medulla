@@ -243,7 +243,24 @@ impl HarnessProvider {
     ///
     /// A default-transport pair is simply the provider name, so round-tripping
     /// an ordinary harness never invents a suffix nobody wrote.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// `self` must be [`is_dispatchable`](Self::is_dispatchable). `flavor_from_wire`
+    /// never *parses* a non-dispatchable provider's name back into a flavor —
+    /// `"shell"` returns `None` — so a caller that fed one in here would get a
+    /// string dispatch parsers reject, breaking the round trip this method
+    /// promises. Every caller in this codebase already sources `self` from a
+    /// dispatchable set ([`dispatchable_flavors`], a parsed [`TaskRequest`]
+    /// provider, a resolved [`HarnessChoice`]), so this should never fire
+    /// outside a bug; the debug assertion catches that bug in tests rather
+    /// than emitting a wire-invalid flavor in release.
     pub fn flavor_name(self, transport: HarnessTransport) -> &'static str {
+        debug_assert!(
+            self.is_dispatchable(),
+            "flavor_name called on non-dispatchable provider {self:?}; \
+             flavor_from_wire cannot parse its name back, breaking the round trip"
+        );
         match (self, transport) {
             (HarnessProvider::Codex, HarnessTransport::AppServer) => CODEX_SERVER_FLAVOR,
             _ => self.as_str(),

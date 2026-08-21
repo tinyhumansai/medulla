@@ -202,7 +202,7 @@ impl App {
     }
 
     /// Record who the core is signed in as, for the Account subpage.
-    pub fn set_account(&mut self, account: Option<medulla::core_host::auth::AuthState>) {
+    pub fn set_account(&mut self, account: Option<medulla::core_host::AuthState>) {
         self.account = account;
     }
 

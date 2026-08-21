@@ -769,7 +769,7 @@ pub struct App {
     /// returns to the login screen instead of returning to the shell.
     pub(in crate::ui::app) relogin_requested: bool,
     /// Who the embedded core is signed in as, for the Account subpage.
-    pub(in crate::ui::app) account: Option<medulla::core_host::auth::AuthState>,
+    pub(in crate::ui::app) account: Option<medulla::core_host::AuthState>,
     /// The Medulla home directory, used to locate the credential store the
     /// Account subpage clears. Injectable so feature tests never touch the real
     /// home; `None` disables logout.

@@ -213,7 +213,7 @@ pub(crate) struct SessionWiring {
     ///
     /// Resolved once at startup rather than polled: the session cannot change
     /// under a running app — logging out quits it.
-    pub account: Option<medulla::core_host::auth::AuthState>,
+    pub account: Option<medulla::core_host::AuthState>,
     /// Live events from a history share the welcome flow left running.
     pub sharing:
         Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,

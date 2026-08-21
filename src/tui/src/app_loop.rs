@@ -743,7 +743,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // Only the embedded core can be signed back in; every other
                 // runtime reports that it holds no session, so its logout never
                 // succeeds and this arm is unreachable for it.
-                if let Some(core) = core_arc.clone() {
+                if let Some(harness) = core_arc.clone() {
+                    // The relogin surfaces take the typed facade; the harness
+                    // owns the core's lifetime, and `Core` is Arc-backed.
+                    let core = Arc::new(harness.core().clone());
                     match relogin(&mut terminal, &core, &env, &loaded.config.backend.base_url).await
                     {
                         // Signing in as a different account re-homes the

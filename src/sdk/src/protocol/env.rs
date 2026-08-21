@@ -354,8 +354,9 @@ fn router_env_vars(provider: HarnessProvider) -> (&'static str, &'static str) {
         HarnessProvider::Codex => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
         HarnessProvider::Opencode => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
         // OpenHuman uses the shared core's own provider/agent configuration;
-        // it is not redirected through a coding-harness router.
-        HarnessProvider::Openhuman => ("", ""),
+        // it is not redirected through a coding-harness router. Neither is a
+        // shell, which sends no inference to redirect.
+        HarnessProvider::Openhuman | HarnessProvider::Shell => ("", ""),
     }
 }
 
@@ -412,6 +413,9 @@ fn default_sessions_dir(provider: HarnessProvider) -> PathBuf {
             .join("opencode")
             .join("sessions"),
         HarnessProvider::Openhuman => home.join(".openhuman"),
+        // A shell writes no transcript. `HOME` stands in so the signature
+        // stays total; nothing tails it.
+        HarnessProvider::Shell => home,
     }
 }
 

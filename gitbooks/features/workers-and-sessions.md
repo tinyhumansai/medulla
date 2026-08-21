@@ -280,7 +280,9 @@ Hosts tab. Under the transcript is the composer.
 `Ctrl-T` opens a session from any row: pick what to start, pick a directory,
 and it is running. The list offers this machine's coding CLIs and any harness
 presets you have registered — and, after them, the shells installed here, your
-own `$SHELL` first. A shell session is an ordinary terminal in the same pane,
+own `$SHELL` first (or `MEDULLA_SHELL_BIN`, when a host pins one — it leads
+ahead of `$SHELL` rather than merely ahead of the rest of the list). A shell
+session is an ordinary terminal in the same pane,
 attached with Enter and detached with `Ctrl-]` exactly as a harness is, and it
 is yours permanently: the orchestrator never dispatches into one, and a task
 naming a shell is refused before it reaches a host.

@@ -10,13 +10,16 @@
 //!
 //! * [`AgentProgress`] — the enum the agent turn loop emits as it works.
 //! * [`ProgressSink`] — the channel the core sends those events on.
-//! * [`with_progress_sink`] — scopes a sink around a future, via a
-//!   `tokio::task_local` the core reads when it builds the agent for an
-//!   `openhuman.inference_agent_chat` turn.
 //!
-//! `with_progress_sink` is the same mechanism as
-//! [`crate::core_host::turn_cwd::with_turn_cwd`], so the two compose by
-//! wrapping the same `invoke` future.
+//! `with_progress_sink` used to be named here too: the sink was scoped around
+//! the dispatch by hand, through a `tokio::task_local` the core read when it
+//! built the turn's agent. `Turn::on_progress` takes the sink as an argument
+//! now and enters that scope itself, so this provider no longer has to know the
+//! mechanism exists — only the two types the events arrive as.
+//!
+//! [`crate::core_host::turn_cwd::with_turn_cwd`] is still scoped by hand, and
+//! deliberately: it is read by *Medulla's* process-global lifecycle hooks, not
+//! by the core, so there is nothing upstream that could take it as an argument.
 //!
 //! The crate exports these as its whole public progress surface
 //! (`openhuman_core::agent_progress`), so nothing here reaches through a

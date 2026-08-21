@@ -178,8 +178,14 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     let reply = match outcome {
         Ok(outcome) => outcome.reply,
         Err(err) => {
-            sink.emit("error", json!({ "message": err, "fatal": true }));
-            return Err(format!("openhuman turn failed: {err}"));
+            // Rendered here rather than carried structurally: every other
+            // harness reports a failure as a sentence, and a caller that had to
+            // branch on which one ran would have to know which harness it got.
+            // `CoreError`'s `Display` already names the method and the domain
+            // message, which is what an operator reads.
+            let message = err.to_string();
+            sink.emit("error", json!({ "message": message, "fatal": true }));
+            return Err(format!("openhuman turn failed: {message}"));
         }
     };
     let reply = if reply.trim().is_empty() {

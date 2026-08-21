@@ -246,6 +246,9 @@ pub fn build_resumed_run_args(
         }
         // Operator-only; daemon parsing rejects it before reaching this seam.
         HarnessProvider::Openhuman => args.push("tui".to_string()),
+        // Never dispatched to at all — `dispatchable_from_wire` refuses the
+        // name — so there is no headless invocation to build.
+        HarnessProvider::Shell => {}
     }
     args
 }
@@ -268,6 +271,8 @@ pub fn session_id_field(provider: HarnessProvider) -> Option<&'static str> {
         HarnessProvider::Claude => Some("session_id"),
         HarnessProvider::Codex => Some("thread_id"),
         HarnessProvider::Opencode | HarnessProvider::Openhuman => None,
+        // No stream to read a session id off: a shell writes to a terminal.
+        HarnessProvider::Shell => None,
     }
 }
 

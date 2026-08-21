@@ -451,6 +451,9 @@ fn agent_for_with_env(
         HarnessProvider::Openhuman => {
             unreachable!("OpenHuman's operator TUI is not an ACP coding provider")
         }
+        HarnessProvider::Shell => {
+            unreachable!("a shell takes no task frames, so it never reaches an ACP session")
+        }
     };
     // `AcpAgentConfig::envs` overlays an inheriting command instead of clearing
     // it. Run the actual ACP command through `env -u` as well as scrubbing the

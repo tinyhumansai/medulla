@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 
-use serde_json::json;
 
 use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::SessionClass;

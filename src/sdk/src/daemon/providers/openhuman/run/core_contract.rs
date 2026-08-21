@@ -23,4 +23,4 @@
 //! private module. Note the *crate* is `openhuman_core`; the module of the same
 //! name one level in is the core's own internal tree.
 
-pub use openhuman_core::agent_progress::{with_progress_sink, AgentProgress, ProgressSink};
+pub use openhuman_core::agent_progress::{AgentProgress, ProgressSink};

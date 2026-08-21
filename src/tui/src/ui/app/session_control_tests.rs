@@ -352,3 +352,40 @@ fn the_handback_note_editor_puts_the_operators_words_on_the_brief() {
 
     sessions.shutdown();
 }
+
+/// A shell is the operator's, permanently. Handing one to the orchestrator
+/// would advertise a row as dispatchable that no task can reach — a task frame
+/// naming a shell is refused at the wire parse — and would queue a handoff
+/// brief summarising a terminal.
+// Unix-only for the same reason its neighbours are: the fixture stands a real
+// child up on a real pseudo-terminal.
+#[cfg(unix)]
+#[test]
+fn a_shell_session_cannot_be_handed_to_the_orchestrator() {
+    let sessions = crate::worker::pty::PtyManager::new();
+    let mut app = app();
+    app.set_local_sessions(super::rail::tests::shell_harnesses(sessions.clone()));
+    let choice = crate::ui::harness_pane::HarnessChoice::shell(
+        crate::ui::harness_pane::ShellChoice {
+            name: "sh".to_string(),
+            bin: "/bin/sh".to_string(),
+        },
+    );
+    app.spawn_session(choice, "/");
+    let id = sessions.rows().remove(0).id;
+
+    app.hand_back_session(&id, None);
+
+    assert_eq!(
+        sessions.control(&id),
+        Some(SessionControl::User),
+        "the shell stays with the operator"
+    );
+    assert!(
+        app.pending_cmds
+            .iter()
+            .all(|cmd| !matches!(cmd, super::types::Cmd::HandOffSession(_))),
+        "and no brief is queued for it"
+    );
+    sessions.shutdown();
+}

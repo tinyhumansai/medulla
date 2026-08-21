@@ -190,6 +190,18 @@ fn build_capabilities_inner(
         // Standing one up on the state store would answer `recall` with an empty
         // set — indistinguishable from "the user never said that".
         memory: None,
+        // The engine's own tokio-backed runner, so a `spawn` node genuinely
+        // overlaps with the `gate` that collects it. `None` would still be
+        // *correct* — spawn runs inline and hands back a settled ticket — but
+        // silently serial, which is a performance cliff rather than an error and
+        // therefore the wrong kind of default to accept by omission.
+        tasks: Some(Arc::new(tinyflows::caps::TokioTaskRunner::default())),
+        // `None` until Medulla has a human-review surface to push an `approval`
+        // node at. The node still works: the engine pauses the run and the host
+        // settles it through `engine::resume`, which is the flow the TUI already
+        // drives. What is missing is only the push, so refusing here would take
+        // away a feature that works rather than admitting one that does not.
+        approvals: None,
     }
 }
 

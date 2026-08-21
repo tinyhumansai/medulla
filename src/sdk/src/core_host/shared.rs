@@ -28,6 +28,13 @@
 //! the same account. [`shared`] therefore boots under a [`OnceCell`], so
 //! concurrent first callers await one boot rather than racing into several.
 //!
+//! OpenHuman enforces the same rule from its side now — a second
+//! [`Harness`](openhuman_core::Harness) in one process is refused with
+//! `HarnessError::AlreadyRunning` rather than quietly sharing the first's
+//! keyring, event bus and subscribers. This `OnceCell` is still what makes that
+//! refusal unreachable in normal operation: it is the thing that ensures only
+//! one boot is ever attempted.
+//!
 //! # Failure is remembered as failure, not retried forever
 //!
 //! A boot that fails — no workspace, an unreadable state directory — fails for
@@ -40,10 +47,10 @@ use std::sync::Arc;
 
 use tokio::sync::OnceCell;
 
-use super::EmbeddedCore;
+use openhuman_core::Harness;
 
-/// The process's core, once someone has installed or booted one.
-static SHARED: OnceCell<Result<Arc<EmbeddedCore>, String>> = OnceCell::const_new();
+/// The process's harness, once someone has installed or booted one.
+static SHARED: OnceCell<Result<Arc<Harness>, String>> = OnceCell::const_new();
 
 /// Donate an already-booted core as this process's shared one.
 ///
@@ -56,8 +63,8 @@ static SHARED: OnceCell<Result<Arc<EmbeddedCore>, String>> = OnceCell::const_new
 /// core it holds and the process keeps the first. Reported rather than swapped,
 /// because a swap would leave the earlier core's background services running
 /// with nothing referring to them.
-pub fn install(core: Arc<EmbeddedCore>) -> bool {
-    SHARED.set(Ok(core)).is_ok()
+pub fn install(harness: Arc<Harness>) -> bool {
+    SHARED.set(Ok(harness)).is_ok()
 }
 
 /// This process's core, booting one if nobody has installed any.
@@ -67,7 +74,7 @@ pub fn install(core: Arc<EmbeddedCore>) -> bool {
 /// Returns the boot failure as a string, and returns the *same* failure to
 /// every later caller — see the module docs on why a failed boot is not
 /// retried.
-pub async fn shared() -> Result<Arc<EmbeddedCore>, String> {
+pub async fn shared() -> Result<Arc<Harness>, String> {
     shared_with_hooks(&crate::harness_hooks::HooksConfig::default()).await
 }
 
@@ -78,23 +85,19 @@ pub async fn shared() -> Result<Arc<EmbeddedCore>, String> {
 /// policy as a TUI-hosted core.
 pub async fn shared_with_hooks(
     hooks: &crate::harness_hooks::HooksConfig,
-) -> Result<Arc<EmbeddedCore>, String> {
+) -> Result<Arc<Harness>, String> {
     SHARED
         .get_or_init(|| async {
-            // A host that never bound the core — a workflow run, an MCP
-            // subprocess, a headless daemon — still gets workspace isolation:
-            // the core reads its state directory during construction, so it
-            // must be pointed at this process's Medulla home before the lazy
-            // boot, not after. Without this floor a lazily booted core would
-            // fall back to the developer's real `~/.openhuman` and read its
-            // memory, flows, and credentials. A caller with the full config
-            // binds the rest (action dir, backend URLs) through
-            // [`super::bind_from_config`]; this binding is non-overriding, so
-            // the earlier, more specific one still wins.
-            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-            let home = crate::home::medulla_home(&env);
-            super::bind_workspace(&env, &home);
-            super::boot_with_hooks(hooks)
+            // A host that never configured the core — a workflow run, an MCP
+            // subprocess, a headless daemon — still gets workspace isolation.
+            // Whoever had the loaded config installs the full settings with
+            // [`super::install_settings`]; this falls back to the floor, which
+            // is the workspace derived from this process's Medulla home.
+            // Without it a lazily booted core would fall back to the
+            // developer's real `~/.openhuman` and read its memory, flows and
+            // credentials.
+            let settings = super::settings_or_floor();
+            super::boot_with_hooks(settings, hooks)
                 .await
                 .map(Arc::new)
                 .map_err(|err| format!("could not start the embedded OpenHuman core: {err}"))

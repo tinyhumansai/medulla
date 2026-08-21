@@ -81,6 +81,16 @@ pub use openhuman_core::embed::Core as EmbeddedCore;
 /// thing to keep in step for no gain.
 pub use openhuman_core::embed::AuthState;
 
+/// A session to install into the core's credential store.
+///
+/// Re-exported for the same reason as [`AuthState`]: hosts in this workspace
+/// (the TUI, the CLI verbs) name it without taking a direct dependency on the
+/// `openhuman` crate.
+pub use openhuman_core::embed::Session;
+
+/// The embedded harness this host boots.
+pub use openhuman_core::Harness;
+
 /// Environment variable OpenHuman reads for its state directory.
 pub const OPENHUMAN_WORKSPACE_ENV: &str = "OPENHUMAN_WORKSPACE";
 

@@ -273,7 +273,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // it was booted against the home the gate chose, so this is the
                 // first moment the session can be stored where it belongs.
                 if let Some(jwt) = pending_jwt.take() {
-                    if let Err(e) = core.auth().store(openhuman_core::embed::Session::backend(&jwt)).await
+                    if let Err(e) = core.auth().store(medulla::core_host::Session::backend(&jwt)).await
                     {
                         anyhow::bail!("signed in, but the core rejected the session: {e}");
                     }

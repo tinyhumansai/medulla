@@ -251,8 +251,8 @@ impl HarnessProvider {
     /// `"shell"` returns `None` — so a caller that fed one in here would get a
     /// string dispatch parsers reject, breaking the round trip this method
     /// promises. Every caller in this codebase already sources `self` from a
-    /// dispatchable set ([`dispatchable_flavors`], a parsed [`TaskRequest`]
-    /// provider, a resolved [`HarnessChoice`]), so this should never fire
+    /// dispatchable set (`dispatchable_flavors`, a parsed `TaskRequest`
+    /// provider, a resolved `HarnessChoice`), so this should never fire
     /// outside a bug; the debug assertion catches that bug in tests rather
     /// than emitting a wire-invalid flavor in release.
     pub fn flavor_name(self, transport: HarnessTransport) -> &'static str {

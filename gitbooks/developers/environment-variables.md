@@ -56,6 +56,7 @@ behind it, so hosts configured before the rename keep working.
 | `MEDULLA_HARNESS_PROTOCOL` | `acp` makes the daemon talk to harnesses over the Agent Client Protocol instead of the legacy provider JSONL. | unset (legacy JSONL) |
 | `MEDULLA_HARNESS_TRANSPORT` | `app-server` selects the shared-process Codex path for a caller with no frame to state a flavor on. | unset |
 | `MEDULLA_<P>_BIN` | Overrides the provider binary. Claude also honours the legacy `TINYVERSE_CLAUDE_BIN`. Treated as untrusted configuration: an overridden binary is withheld the fleet grant. | `claude`, `codex`, `opencode` |
+| `MEDULLA_SHELL_BIN` | The shell the Sessions picker offers first. Falls back to `$SHELL`, then `sh`. | `$SHELL` |
 | `MEDULLA_<P>_ARGS` | Extra arguments prepended to the child argv, whitespace-split. | none |
 | `MEDULLA_<P>_DM_TO`, `MEDULLA_HARNESS_DM_TO` | The owner a wrapped session forwards envelopes to, and by default receives input from. Falls back to `MEDULLA_OPENHUMAN_OWNER` and then `OPENHUMAN_OWNER_AGENT`. | unset |
 | `MEDULLA_<P>_RECEIVE_FROM`, `MEDULLA_HARNESS_RECEIVE_FROM` | The peer whose inbound frames are injected as input. Falls back to the DM recipient. | the DM recipient |

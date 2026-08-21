@@ -138,8 +138,7 @@ impl App {
         self.draw_tabs(f, rows[1]);
         self.draw_content(f, rows[2]);
         // Painted from the one list of what is in front of the content, back to
-        // front — the picker can open the directory prompt, and the hand-back
-        // question is asked over whichever pane the operator is releasing. The
+        // front — the picker can open the directory prompt. The
         // same list answers who owns the keyboard and the clipboard, so an
         // overlay drawn over a composer can never leave that composer quietly
         // taking input behind it.
@@ -149,7 +148,6 @@ impl App {
                 Overlay::TemplatePopup => self.draw_template_modal(f, rows[2]),
                 Overlay::SessionPicker => self.draw_harness_picker(f, rows[2]),
                 Overlay::SessionKill => self.draw_session_kill_prompt(f, rows[2]),
-                Overlay::HandbackPrompt => self.draw_handback_prompt(f, rows[2]),
                 Overlay::WorkflowDelete => self.draw_workflow_delete_prompt(f, rows[2]),
                 Overlay::InlinePrompt => self.draw_prompt(f, rows[3]),
                 Overlay::ResumePicker => self.draw_resume(f, rows[3]),

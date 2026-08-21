@@ -25,15 +25,10 @@ impl App {
             TLine::from("Ctrl-T opens a session: pick a harness type, then a workspace directory"),
             TLine::from("↑↓ walk the rail · Enter on the + row opens the picker"),
             TLine::from(format!(
-                "{FOCUS_CHORD_LABEL} type into the selected session (and take it from the orchestrator)"
+                "{FOCUS_CHORD_LABEL} type into the selected local session"
             )),
-            TLine::from("Ctrl-G grabs the selected session or gives it back to the orchestrator"),
             TLine::from("d shows what the session has changed · K then y kills it · k closes it"),
             TLine::from("⌥X cancels a dispatched task · ⌥A answers its open question"),
-            TLine::from(Span::styled(
-                "While you hold a session the orchestrator will not dispatch into it",
-                dim,
-            )),
             TLine::from(" "),
             TLine::from(Span::styled("Subconscious", bold)),
             TLine::from(Span::styled(

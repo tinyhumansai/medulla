@@ -77,23 +77,16 @@ impl App {
             Ok(id) => {
                 self.tab_index = tab_pos("Sessions");
                 self.select_session_row(&id);
-                // Names the directory, because the picker's whole second step was
-                // choosing it and a confirmation that omits the answer is not
-                // one. "unmanaged" and not a friendlier synonym: it is the word
-                // the rail badge and the picker modal both use for this state,
-                // and renaming it here would leave the operator matching two
-                // vocabularies for one fact.
-                // A shell is not labelled "unmanaged": the word names a
-                // harness the orchestrator could have dispatched into and is
-                // not, and there is no other kind of shell session.
-                let mut status = if choice.is_shell() {
-                    format!("Started {} in {workspace}", choice.display_name())
-                } else {
-                    format!(
-                        "Started {} in {workspace} · unmanaged",
-                        choice.display_name()
-                    )
-                };
+                // Names the directory, because the picker's whole second step
+                // was choosing it and a confirmation that omits the answer is
+                // not one. "local session" covers a shell as squarely as it
+                // covers a harness: it states where the session runs and who
+                // holds it, not whether the orchestrator declined to dispatch
+                // into it, so a shell needs no wording of its own here.
+                let mut status = format!(
+                    "Started {} in {workspace} · local session",
+                    choice.display_name()
+                );
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }

@@ -1,14 +1,9 @@
-//! Session lifecycle UI wiring.
+//! Session lifecycle controls for [`App`](super::types::App).
 //!
-//! The focused child modules own handoff state changes, session creation, and
-//! closing a local harness. Keeping this module as wiring makes those distinct
-//! controls easy to locate without coupling their implementations.
+//! The focused child modules own the app's session creation, selection, focus,
+//! and close behavior.
 
 mod close;
 mod focus;
-mod handoff;
 mod picker;
 mod select;
-
-#[cfg(test)]
-pub(in crate::ui::app) use picker::is_text_input;

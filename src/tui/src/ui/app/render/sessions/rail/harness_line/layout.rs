@@ -288,7 +288,7 @@ fn harness_text(row: &SessionRow, style: HarnessNameStyle) -> String {
 fn control_text(control: SessionControl, style: ControlStyle) -> String {
     match (style, control) {
         (ControlStyle::Text, SessionControl::User) => "unmanaged",
-        (ControlStyle::Text, SessionControl::Orchestrator) => "orchestrator",
+        (ControlStyle::Text, SessionControl::Orchestrator) => "task",
         // `⊘` reads as "dispatch does not enter here", which is exactly what an
         // operator-held session means; `⊙` is the orchestrator holding it.
         (ControlStyle::Icon, SessionControl::User) => "⊘",

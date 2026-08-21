@@ -25,10 +25,6 @@ impl App {
         // terminal that is no longer on screen.
         self.hit_session = None;
         self.hit_workflow_preview = None;
-        // Same again for the hand-back question's answers: a click must never
-        // reach a `[Y]` that was on screen two frames ago, least of all when
-        // what it now sits over is the session the operator went back to.
-        self.hit_handback.clear();
         // Focus follows the pane, not the other way round. `sessions_selection`
         // (called only while drawing the Sessions tab) is what notices the cursor
         // moving off the attached session; it has nothing to say once the

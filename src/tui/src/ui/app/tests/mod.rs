@@ -2,6 +2,8 @@
 //! header toggle shows, and the composer/slash-command dispatch behaves.
 
 mod harness_pane;
+#[cfg(unix)]
+mod session_access;
 
 use super::*;
 use std::sync::Arc;
@@ -191,26 +193,6 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
 }
 
 #[test]
-fn enter_on_a_harness_asks_before_taking_it() {
-    let mut a = app();
-    a.tab_index = tab("Sessions");
-    // The render pass records the harness behind the visible pane. This app
-    // hosts nothing, so the handover question has nothing to ask about and says
-    // so — the point being that Enter is consumed by the harness path rather
-    // than returning to the composer or submitting a turn, and that it never
-    // attaches on its own.
-    a.pane_session = Some("just-exited".to_string());
-
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert!(cmd.is_none());
-    assert!(a.sessions_rail_focused());
-    assert!(a.status().contains("not hosting"), "{}", a.status());
-    assert!(a.handback_prompt.is_none());
-    assert_eq!(a.attached_session(), None);
-}
-
-#[test]
 fn d_on_a_selected_harness_swaps_the_pane_for_its_diff() {
     let mut a = app();
     a.tab_index = tab("Sessions");
@@ -297,7 +279,6 @@ fn enter_applies_the_open_diff_baseline_picker() {
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(a.changes.picking_baseline);
-    assert!(a.handback_prompt.is_none());
     assert_eq!(a.attached_session(), None);
     assert!(
         a.status().contains("No session Git repository"),

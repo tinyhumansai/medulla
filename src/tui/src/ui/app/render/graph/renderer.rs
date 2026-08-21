@@ -268,7 +268,7 @@ fn legend() -> TLine<'static> {
     TLine::from(
         [
             entry(NodeKind::Source, "sources"),
-            entry(NodeKind::Orchestrator, "orchestrator"),
+            entry(NodeKind::Orchestrator, "medulla"),
             entry(NodeKind::Agent, "agents"),
             entry(NodeKind::Subagent, "subagents"),
             entry(NodeKind::Loop, "loops"),

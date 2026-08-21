@@ -1,12 +1,7 @@
-//! The pointer while a harness holds the keyboard: who owns a gesture that
-//! starts in the embedded pane, and what a click that leaves one settles.
+//! Pointer ownership while an operator-owned harness holds the keyboard.
 //!
-//! Both halves of this file are about the same failure told from two sides. A
-//! click out of an attached harness raises the hand-back question, and that
-//! question used to arrive wrong in two ways at once — it swallowed the release
-//! of a press the child was still holding, and when the click landed on the
-//! rail it named the wrong harness while the next draw quietly detached the
-//! right one.
+//! These tests cover terminal pointer grabs and clicks on the attached session's
+//! own rail row without relying on the retired session-handoff UI.
 //!
 //! The child is a real `/bin/sh` on a real pty that turns mouse reporting on and
 //! echoes what it receives with `cat -v`, so the assertions read the actual
@@ -216,15 +211,6 @@ fn attach_to_first_harness(app: &mut App) -> String {
         .pane_session_for_test()
         .expect("the rail cursor to reach a harness row")
         .to_string();
-    // Put it under the orchestrator for the instant before the chord, so that
-    // attaching *takes* it. That is what makes leaving it again a question worth
-    // asking, and these tests are all about how the pointer behaves while that
-    // question is up. A harness the operator started is released without one —
-    // covered in `feature_session_control`.
-    app.local_sessions()
-        .expect("sessions")
-        .clone()
-        .set_control(&session, SessionControl::Orchestrator);
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char(']'),
         KeyModifiers::CONTROL,
@@ -236,22 +222,6 @@ fn attach_to_first_harness(app: &mut App) -> String {
         "the chord must attach before the pointer cases begin"
     );
     session
-}
-
-/// Where an answer's label starts on the hand-back question's answer line.
-///
-/// Found by searching the drawn frame rather than by recomputing the layout, so
-/// the tests click what an operator would actually be aiming at.
-fn answer_at(lines: &[String], label: &str) -> (u16, u16) {
-    for (row, line) in lines.iter().enumerate() {
-        if let Some(byte) = line.find(label) {
-            // Cells, not bytes: the frame is full of box-drawing characters, so
-            // a byte offset would point well to the right of the label.
-            let column = line[..byte].chars().count() as u16;
-            return (column, row as u16);
-        }
-    }
-    panic!("no answer {label:?} on screen:\n{}", lines.join("\n"));
 }
 
 /// The rows a harness occupies on the rail, top to bottom.
@@ -307,125 +277,6 @@ fn a_release_outside_the_pane_still_reaches_the_harness_that_took_the_press() {
 }
 
 #[test]
-fn the_handback_question_does_not_swallow_the_release_of_a_press_it_interrupted() {
-    // The reported sequence exactly: press inside the harness, click out, and
-    // answer the question that opens. The click-out is a fresh press the modal
-    // is entitled to swallow — the release of the *earlier* press is not, and
-    // swallowing it is what left the child mid-drag behind the prompt.
-    let sessions = PtyManager::new();
-    let mut app = app_with_harnesses(sessions.clone());
-    let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_sessions().expect("harnesses").clone();
-    wait_for("the child to paint", || {
-        screen(&harnesses, &id).contains("READY")
-    });
-    wait_for("the child to ask for the mouse", || {
-        harnesses.takes_mouse(&id)
-    });
-
-    attach_to_first_harness(&mut app);
-    let (pane, _) = app
-        .harness_pane_rect_for_test()
-        .expect("the draw to record the pane");
-
-    let _ = app.on_event(press(pane.x + 4, pane.y + 1));
-    wait_for("the press to arrive", || {
-        screen(&harnesses, &id).contains("^[[<0;5;2M")
-    });
-
-    // Click out onto the tab strip. This opens the hand-back question, which
-    // owns the pointer from here on.
-    let _ = app.on_event(press(3, 1));
-    let out = render(&mut app).join("\n");
-    assert!(
-        out.contains("You still have this session"),
-        "clicking out must raise the hand-back question: {out}"
-    );
-
-    // The button the operator was still holding now comes up.
-    let _ = app.on_event(release(3, 1));
-    wait_for("the interrupted release to arrive", || {
-        screen(&harnesses, &id).contains("^[[<0;1;1m")
-    });
-
-    // The click that opened the question was never forwarded — only the release
-    // of the press that preceded it.
-    let out = screen(&harnesses, &id);
-    assert_eq!(
-        out.matches("^[[<0;").count(),
-        2,
-        "exactly the press and its own release reached the child: {out}"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn clicking_another_session_row_asks_about_the_session_being_left() {
-    // The rail used to be waved through as navigation chrome, so a click on the
-    // neighbouring harness row skipped the hand-back policy entirely. The next
-    // draw then detached the attached session silently — while the question on
-    // screen named the harness that had just been *clicked*. Answering it handed
-    // back a session the operator had never typed in and left the one they had
-    // held locked to them forever.
-    let sessions = PtyManager::new();
-    let mut app = app_with_harnesses(sessions.clone());
-    let held = mouse_reporting_session(&sessions);
-    let other = mouse_reporting_session(&sessions);
-    let harnesses = app.local_sessions().expect("harnesses").clone();
-    wait_for("both children to paint", || {
-        screen(&harnesses, &held).contains("READY") && screen(&harnesses, &other).contains("READY")
-    });
-
-    let attached = attach_to_first_harness(&mut app);
-    assert_eq!(attached, held, "the first rail row is the first session");
-
-    let lines = render(&mut app);
-    let rows = harness_rail_rows(&lines);
-    assert_eq!(
-        rows.len(),
-        2,
-        "both harnesses must be on the rail: {rows:?}"
-    );
-
-    let _ = app.on_event(press(5, rows[1]));
-    assert_eq!(
-        app.attached_session(),
-        Some(held.as_str()),
-        "the click is not applied until the question is answered"
-    );
-    let out = render(&mut app).join("\n");
-    assert!(
-        out.contains("You still have this session"),
-        "leaving a session by the rail must ask the same question: {out}"
-    );
-    assert_eq!(
-        app.attached_session(),
-        Some(held.as_str()),
-        "and the draw must not detach behind the question it is asking"
-    );
-
-    let _ = app.on_event(key(KeyCode::Char('y')));
-    assert_eq!(
-        harnesses.control(&held),
-        Some(SessionControl::Orchestrator),
-        "yes hands back the harness the operator was actually in"
-    );
-    assert_eq!(
-        harnesses.control(&other),
-        Some(SessionControl::User),
-        "and never the one they merely clicked on"
-    );
-    assert_eq!(
-        app.attached_session(),
-        None,
-        "answering releases the keyboard"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
 fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
     // The row you are already typing in is not a destination away from it. This
     // is the carve-out the rail rule above narrows to, and it has to survive:
@@ -458,169 +309,6 @@ fn clicking_the_attached_session_own_row_neither_asks_nor_releases() {
         harnesses.control(&attached),
         Some(SessionControl::User),
         "and must not change who holds the harness"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn clicking_into_an_orchestrator_held_pane_asks_exactly_as_enter_does() {
-    // The pointer and the keyboard must not disagree about who ends up holding
-    // a harness. Enter on the rail row asked before taking one off dispatch,
-    // while a click straight into the same pane took it silently — and clicking
-    // into a terminal is the gesture an operator reaches for first, so the
-    // question existed and was routinely bypassed.
-    let sessions = PtyManager::new();
-    let mut app = app_with_harnesses(sessions.clone());
-    let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_sessions().expect("sessions").clone();
-    wait_for("the child to paint", || {
-        screen(&harnesses, &id).contains("READY")
-    });
-    harnesses.set_control(&id, SessionControl::Orchestrator);
-
-    // Walk the rail onto the harness without attaching, so the draw records the
-    // pane rect the click needs.
-    render(&mut app);
-    let _ = app.on_event(key(KeyCode::Esc));
-    render(&mut app);
-    for _ in 0..16 {
-        if app.pane_session_for_test().is_some() {
-            break;
-        }
-        let _ = app.on_event(key(KeyCode::Down));
-        render(&mut app);
-    }
-    let (pane, _) = app
-        .harness_pane_rect_for_test()
-        .expect("the draw to record the pane");
-
-    let _ = app.on_event(press(pane.x + 2, pane.y + 2));
-
-    let out = render(&mut app).join("\n");
-    assert!(
-        out.contains("Take control of this session"),
-        "the click must raise the same question Enter does: {out}"
-    );
-    assert_eq!(app.attached_session(), None, "asking is not taking");
-    assert_eq!(
-        harnesses.control(&id),
-        Some(SessionControl::Orchestrator),
-        "control must not move until the question is answered"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn the_handback_question_is_answered_by_clicking_its_answers() {
-    // The question is the one overlay a click can raise, so it is the one an
-    // operator reaches with their hand already on the mouse. Each answer is a
-    // target spanning its own label, and clicking it does exactly what pressing
-    // the key in the bracket does.
-    let sessions = PtyManager::new();
-    let mut app = app_with_harnesses(sessions.clone());
-    let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_sessions().expect("harnesses").clone();
-    wait_for("the child to paint", || {
-        screen(&harnesses, &id).contains("READY")
-    });
-
-    let attached = attach_to_first_harness(&mut app);
-    let _ = app.on_event(press(3, 1));
-    let lines = render(&mut app);
-    assert!(
-        lines.join("\n").contains("You still have this session"),
-        "the question must be up before it can be clicked"
-    );
-
-    // [E] opens the note field without answering the question.
-    let (x, y) = answer_at(&lines, "[E] add a note");
-    let _ = app.on_event(press(x + 1, y));
-    let lines = render(&mut app);
-    assert!(
-        lines.join("\n").contains("Note: █"),
-        "clicking [E] must start the note: {}",
-        lines.join("\n")
-    );
-    assert_eq!(
-        harnesses.control(&attached),
-        Some(SessionControl::User),
-        "and must not answer the question on the way"
-    );
-
-    // [Esc] on the note line goes back to the question, still unanswered.
-    let (x, y) = answer_at(&lines, "[Esc] back to the question");
-    let _ = app.on_event(press(x + 1, y));
-    let lines = render(&mut app);
-    assert!(
-        lines.join("\n").contains("[Y] hand back"),
-        "clicking [Esc] must return to the answers: {}",
-        lines.join("\n")
-    );
-
-    // [Y] hands the harness back, exactly as the key does.
-    let (x, y) = answer_at(&lines, "[Y] hand back");
-    let _ = app.on_event(press(x + 1, y));
-    assert_eq!(
-        harnesses.control(&attached),
-        Some(SessionControl::Orchestrator),
-        "clicking [Y] must hand the harness back"
-    );
-    assert_eq!(app.attached_session(), None, "and release the keyboard");
-    assert!(
-        !render(&mut app)
-            .join("\n")
-            .contains("You still have this session"),
-        "and close the question"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn a_click_on_the_question_that_is_not_an_answer_answers_nothing() {
-    // The rest of the modal still swallows the pointer. The failure this guards
-    // is the one that would follow from answering and then falling through: a
-    // click that both closed the question and landed on the rail behind it.
-    let sessions = PtyManager::new();
-    let mut app = app_with_harnesses(sessions.clone());
-    let id = mouse_reporting_session(&sessions);
-    let harnesses = app.local_sessions().expect("harnesses").clone();
-    wait_for("the child to paint", || {
-        screen(&harnesses, &id).contains("READY")
-    });
-
-    let attached = attach_to_first_harness(&mut app);
-    let _ = app.on_event(press(3, 1));
-    let lines = render(&mut app);
-
-    // The prose line above the answers is not a target.
-    let (x, y) = answer_at(&lines, "While you hold it");
-    let _ = app.on_event(press(x + 2, y));
-    let out = render(&mut app).join("\n");
-    assert!(
-        out.contains("You still have this session"),
-        "a click on the body must leave the question up: {out}"
-    );
-    assert_eq!(
-        harnesses.control(&attached),
-        Some(SessionControl::User),
-        "and must answer nothing"
-    );
-
-    // Nor is the separator between two answers.
-    let (x, y) = answer_at(&lines, "[Y] hand back");
-    let _ = app.on_event(press(x + "[Y] hand back".chars().count() as u16 + 1, y));
-    let out = render(&mut app).join("\n");
-    assert!(
-        out.contains("You still have this session"),
-        "a click between answers must leave the question up: {out}"
-    );
-    assert_eq!(
-        harnesses.control(&attached),
-        Some(SessionControl::User),
-        "and must answer nothing"
     );
 
     sessions.shutdown();

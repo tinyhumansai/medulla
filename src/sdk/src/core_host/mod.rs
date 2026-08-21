@@ -214,10 +214,7 @@ pub fn resolve_workspace(env: &HashMap<String, String>, medulla_home: &Path) -> 
 ///
 /// Non-overriding for the same reason as [`resolve_workspace`]. A `None` or
 /// empty `root` yields `None` rather than something arbitrary.
-pub fn resolve_action_dir(
-    env: &HashMap<String, String>,
-    root: Option<&Path>,
-) -> Option<PathBuf> {
+pub fn resolve_action_dir(env: &HashMap<String, String>, root: Option<&Path>) -> Option<PathBuf> {
     if let Some(explicit) = env
         .get(OPENHUMAN_ACTION_DIR_ENV)
         .map(|v| v.trim())

@@ -638,7 +638,9 @@ pub fn node_summary(node: &Node) -> String {
         NodeKind::Spawn => text("ticket").or_else(|| text("label")).unwrap_or_default(),
         // The collection being fanned over — a scatter's whole meaning is
         // "this, once per item".
-        NodeKind::Scatter => text("items").or_else(|| text("expression")).unwrap_or_default(),
+        NodeKind::Scatter => text("items")
+            .or_else(|| text("expression"))
+            .unwrap_or_default(),
         // The release policy is what makes a gather more than a barrier: it is
         // the difference between waiting for all lanes and settling for a
         // quorum.

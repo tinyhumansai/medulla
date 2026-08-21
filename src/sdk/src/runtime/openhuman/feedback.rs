@@ -34,7 +34,9 @@ impl OpenHumanRuntime {
         let Some(base_url) = base_url else {
             return Ok(None);
         };
-        let jwt = core.auth().token()
+        let jwt = core
+            .auth()
+            .token()
             .await
             .map_err(|e| anyhow::anyhow!("could not read the stored session: {e}"))?;
         Ok(jwt.map(|jwt| MedullaClient::new(base_url, jwt)))

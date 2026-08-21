@@ -99,7 +99,8 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
     // Boot last: the flow above can take minutes of browser round-trip, and a
     // core sitting open across it buys nothing.
     let core = auth_core(&env, parsed.config.as_deref()).await?;
-    core.auth().store(medulla::core_host::Session::backend(&jwt))
+    core.auth()
+        .store(medulla::core_host::Session::backend(&jwt))
         .await
         .map_err(|e| anyhow::anyhow!("the core rejected the session: {e}"))?;
     sweep_retired_credentials(&env);
@@ -306,9 +307,7 @@ async fn session_credentials(
     base_url: &str,
 ) -> Option<Credentials> {
     let core = auth_core(env, None).await.ok()?;
-    let jwt = core.auth().token()
-        .await
-        .ok()??;
+    let jwt = core.auth().token().await.ok()??;
     Some(Credentials {
         base_url: base_url.to_string(),
         jwt,
@@ -322,7 +321,8 @@ async fn session_credentials(
 pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let core = auth_core(&env, None).await?;
-    core.auth().clear()
+    core.auth()
+        .clear()
         .await
         .map_err(|e| anyhow::anyhow!("failed to clear the session: {e}"))?;
     sweep_retired_credentials(&env);

@@ -262,8 +262,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // and every drive method would otherwise return the same error behind a UI
     // that looks live. It takes the offline demo, exactly as `--mock` does.
     if runtime.is_none() {
-        match medulla::core_host::boot_with_hooks(core_settings.clone(), &loaded.config.hooks)
-            .await
+        match medulla::core_host::boot_with_hooks(core_settings.clone(), &loaded.config.hooks).await
         {
             Ok(harness) => {
                 // The harness owns the core's lifetime; the surfaces below want
@@ -273,7 +272,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // it was booted against the home the gate chose, so this is the
                 // first moment the session can be stored where it belongs.
                 if let Some(jwt) = pending_jwt.take() {
-                    if let Err(e) = core.auth().store(medulla::core_host::Session::backend(&jwt)).await
+                    if let Err(e) = core
+                        .auth()
+                        .store(medulla::core_host::Session::backend(&jwt))
+                        .await
                     {
                         anyhow::bail!("signed in, but the core rejected the session: {e}");
                     }

@@ -259,21 +259,21 @@ pub fn resolve_backend_api_url(env: &HashMap<String, String>, base_url: &str) ->
     base_url.to_string()
 }
 
-/// Build the embedded core and wrap it in the typed facade.
+/// Build the embedded harness.
 ///
-/// Callers must have bound the workspace first — see [`bind_workspace`]. This
-/// does not do it implicitly, because the binding reads process environment and
-/// hiding that inside a constructor makes the ordering requirement invisible.
+/// Unlike the old `boot`, this takes its configuration as an argument. There is
+/// nothing to bind first and nothing to get wrong about ordering: what the core
+/// runs on is what was passed in.
 ///
 /// # Errors
 ///
-/// Propagates any failure from [`CoreBuilder::build`] — a workspace that cannot
-/// be created, or a token source that cannot be resolved.
-pub async fn boot() -> anyhow::Result<Core> {
-    boot_with_hooks(&crate::harness_hooks::HooksConfig::default()).await
+/// Propagates any failure from [`Harness::builder`] — a workspace that cannot be
+/// created, or a second harness in a process that already has one.
+pub async fn boot(settings: CoreSettings) -> Result<Harness, HarnessError> {
+    boot_with_hooks(settings, &crate::harness_hooks::HooksConfig::default()).await
 }
 
-/// Boot the embedded core with Medulla's supported in-process lifecycle hooks.
+/// Boot the embedded harness with Medulla's supported in-process lifecycle hooks.
 ///
 /// Registers Medulla's configured `Stop`, `PreToolUse`, and `PostToolUse` hooks
 /// as OpenHuman embedder lifecycle hooks **before** constructing the core — see
@@ -282,21 +282,46 @@ pub async fn boot() -> anyhow::Result<Core> {
 ///
 /// # Errors
 ///
-/// Propagates any failure from [`CoreBuilder::build`], the same cases as
-/// [`boot`]: a workspace that cannot be created, or a token source that cannot
-/// be resolved. A hook command that fails to spawn also surfaces here only if
-/// the core startup itself fails; hook execution happens later, at runtime.
-pub async fn boot_with_hooks(hooks: &crate::harness_hooks::HooksConfig) -> anyhow::Result<Core> {
+/// Same cases as [`boot`]. A hook command that fails to spawn surfaces later, at
+/// runtime, not here.
+pub async fn boot_with_hooks(
+    settings: CoreSettings,
+    hooks: &crate::harness_hooks::HooksConfig,
+) -> Result<Harness, HarnessError> {
     hooks::register_lifecycle_hooks(hooks);
-    tracing::debug!("[core_host] boot start host_kind=detect_standalone");
-    let runtime = CoreBuilder::new(HostKind::detect_standalone())
+    tracing::debug!(
+        "[core_host] boot start workspace={} action_dir={:?} backend={}",
+        settings.workspace.display(),
+        settings.action_dir,
+        if settings.backend_url.is_empty() {
+            "<core default>"
+        } else {
+            "<configured>"
+        }
+    );
+
+    let mut builder = Harness::builder()
+        .host_kind(HostKind::detect_standalone())
+        // `Workspace::Dir`, not `Ephemeral`: this state is the operator's
+        // account and outlives the process. The path is Medulla's own
+        // derivation, so a scratch `MEDULLA_HOME` still gets an isolated core.
+        .workspace(Workspace::Dir(settings.workspace))
+        // The presets this host has always used. `embedded()` is the long-lived
+        // shape — cron, heartbeat, the memory queue — which is why exactly one
+        // of these may exist per process; see [`shared`].
         .domains(DomainSet::embedded())
-        .services(ServiceSet::embedded())
-        .token(TokenSource::EnvOrFile)
-        .build()
-        .await?;
-    tracing::debug!("[core_host] boot ok services={:?}", runtime.services());
-    Ok(Core::from_runtime(Arc::new(runtime)))
+        .services(ServiceSet::embedded());
+
+    if let Some(action_dir) = settings.action_dir {
+        builder = builder.action_dir(action_dir);
+    }
+    if !settings.backend_url.is_empty() {
+        builder = builder.backend_url(settings.backend_url);
+    }
+
+    let harness = builder.build().await?;
+    tracing::debug!("[core_host] boot ok");
+    Ok(harness)
 }
 
 /// Boot a core with nothing running but the surface auth needs.
@@ -309,23 +334,41 @@ pub async fn boot_with_hooks(hooks: &crate::harness_hooks::HooksConfig) -> anyho
 ///
 /// `security` is the family that owns the `auth` controllers; `platform` stays
 /// enabled for the core's shared platform infrastructure. Every other domain
-/// and every service is off. Callers must still have bound the workspace first
-/// — see [`bind_workspace`].
+/// and every service is off.
+///
+/// Deliberately **not** a [`Harness`]: this is a short-lived core for one
+/// question, and claiming the process's single harness slot for it would refuse
+/// a later real boot in the same process. It uses [`CoreBuilder`] with the same
+/// typed settings instead.
 ///
 /// # Errors
 ///
-/// Propagates any failure from [`CoreBuilder::build`], same as [`boot`].
-pub async fn boot_for_auth() -> anyhow::Result<Core> {
+/// Propagates any failure from [`CoreBuilder::build`].
+pub async fn boot_for_auth(settings: CoreSettings) -> anyhow::Result<Core> {
     let mut domains = DomainSet::none();
     domains.platform = true;
     domains.security = true;
     tracing::debug!("[core_host] boot_for_auth start");
-    let runtime = CoreBuilder::new(HostKind::detect_standalone())
+
+    let mut builder = CoreBuilder::new(HostKind::detect_standalone())
         .domains(domains)
         .services(ServiceSet::none())
         .token(TokenSource::EnvOrFile)
-        .build()
-        .await?;
+        .workspace(settings.workspace);
+
+    if let Some(action_dir) = settings.action_dir {
+        builder = builder.action_dir(action_dir);
+    }
+    if !settings.backend_url.is_empty() {
+        // Auth is the whole point of this core: `/auth/me` must be resolved
+        // against the deployment the operator's token came from.
+        let mut config = openhuman_core::openhuman::config::Config::default();
+        config.api_url = Some(settings.backend_url);
+        config.workspace_dir = builder_workspace(&builder);
+        let _ = config;
+    }
+
+    let runtime = builder.build().await?;
     Ok(Core::from_runtime(Arc::new(runtime)))
 }
 

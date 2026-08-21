@@ -177,7 +177,11 @@ impl LocalSessions {
             // parse for the same reason.
             control: SessionControl::User,
             origin: SessionOrigin::User,
-            name,
+            // Named after the shell when the operator named nothing. The row
+            // otherwise reads `shell` for every one of them, which is the one
+            // fact they share and not the one that was chosen: `bash` and `zsh`
+            // are different sessions, and the picker just asked which.
+            name: name.or_else(|| Some(choice.display_name().to_string())),
             mcp_grant_session: None,
         })
     }

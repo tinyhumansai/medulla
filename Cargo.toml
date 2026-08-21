@@ -45,7 +45,7 @@ tinyhumans-sdk = { path = "vendor/openhuman/vendor/tinyhumans-sdk" }
 # openhuman host consumes it — one shared pin, one shared upgrade cadence.
 # `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
 # deterministic capability stand-ins in ordinary builds.
-tinyflows = { version = "0.6", features = ["mock"] }
+tinyflows = { version = "0.8", features = ["mock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

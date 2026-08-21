@@ -180,7 +180,7 @@ impl HarnessProvider {
 
     /// Whether this provider accepts delegated coding-task frames.
     ///
-    /// Every provider does. The distinction this used to draw — OpenHuman
+    /// Every coding agent does. The distinction this used to draw — OpenHuman
     /// excluded because it "owns its own agent loop" — did not survive
     /// contact with the fact that every harness here owns one; Claude Code's
     /// simply sits behind a process boundary instead of a function call. What
@@ -189,11 +189,15 @@ impl HarnessProvider {
     /// belongs: it is never auto-detected as an available provider, so a task
     /// reaches it only by naming it.
     ///
-    /// Kept as a method rather than deleted because it is the one place that
-    /// question is asked, and a provider that genuinely cannot take a frame may
-    /// yet be added.
+    /// [`Shell`](Self::Shell) is the one that answers `false`, and it is the
+    /// reason this stayed a method. A shell reads no prompt and reports no
+    /// completion, so a task frame naming one would be a turn that never
+    /// answers — and a peer that could name one would have a way to run
+    /// arbitrary commands on this host without a harness in between. Both are
+    /// refused at the parse: [`dispatchable_from_wire`](Self::dispatchable_from_wire)
+    /// returns `None` for `"shell"`.
     pub fn is_dispatchable(self) -> bool {
-        true
+        !matches!(self, Self::Shell)
     }
 
     /// Whether running this provider means spawning an executable.

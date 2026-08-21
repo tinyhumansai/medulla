@@ -11,10 +11,9 @@
 //! are scoped around the dispatch rather than passed as parameters — see
 //! [`run_openhuman_task`] and the task-locals it enters.
 
-use openhuman_core::openhuman::agent::turn_origin::{
-    with_origin, AgentTurnOrigin, TrustedAutomationSource,
-};
-use serde_json::{json, Value};
+use openhuman_core::embed::Route;
+use openhuman_core::openhuman::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
+use serde_json::json;
 
 use crate::protocol::HarnessProvider;
 
@@ -22,14 +21,6 @@ use super::super::super::types::{RunTaskOptions, RunTaskOrigin, RunTaskResult};
 use super::core_contract::{with_progress_sink, AgentProgress, ProgressSink};
 use super::watchdog;
 use super::EventSink;
-
-/// The core method that runs a full agent turn.
-///
-/// The tool-using loop with memory and the approval gate, not
-/// `inference_agent_chat_simple` beside it — that one is a bare model
-/// completion, which would make an OpenHuman node a strictly worse `llm` node
-/// rather than a harness.
-const AGENT_CHAT: &str = "openhuman.inference_agent_chat";
 
 /// Slack, in progress events, between the core and this supervisor.
 ///
@@ -124,29 +115,6 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // knowing which provider ran it.
     sink.emit("user_prompt", json!({ "text": prompt }));
 
-    // snake_case, not camelCase: `AgentChatParams` carries no `rename_all`, so
-    // the controller deserializes the field names as they are spelled in Rust.
-    // `cwd` is optional on the core side and roots the turn's file and shell
-    // tools in the node's checkout; the origin trust decision rides a
-    // task-local instead — see the scope below.
-    let mut params = json!({
-        "message": prompt,
-        "model_override": model,
-        "thread_id": thread_id,
-        "cwd": &cwd,
-    });
-    // Only when the preset asked for it. The core treats the pair as one
-    // statement and ignores a half of it, so both keys are added together or
-    // neither is — an absent pair is what "run on the account's own inference"
-    // looks like on the wire.
-    if let Some(route) = route {
-        let map = params
-            .as_object_mut()
-            .expect("the params literal above is an object");
-        map.insert("inference_url".into(), json!(route.base_url));
-        map.insert("api_key".into(), json!(route.token));
-    }
-
     // Annotated with the core's own alias rather than inferred: the sender half
     // *is* the contract's `ProgressSink`, and saying so keeps a future change to
     // its element type a compile error here instead of a silent mismatch.
@@ -154,31 +122,61 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         tokio::sync::mpsc::channel::<AgentProgress>(PROGRESS_CAPACITY);
     let cwd_path = std::path::PathBuf::from(&cwd);
 
-    // Task-local scopes around the same call, composed by wrapping, in the
-    // order the supervisor's own scopes read shortest-lived-first:
-    //
-    // * `with_progress_sink` is read by the core when it builds this turn's
-    //   agent, and is what makes the watchdog below an idle watchdog rather
-    //   than a stopwatch.
-    // * `with_turn_cwd` is read by the process-global lifecycle hooks while a
-    //   tool runs — without it a `PostToolUse` auto-commit hook is told the
-    //   Medulla process's startup directory and checkpoints the wrong
-    //   repository. See `core_host::turn_cwd`.
-    // * `scoped_origin` labels a workflow node's external-effect tools as
-    //   operator-authorized automation; every other dispatch stays unlabelled
-    //   and OpenHuman's approval gate fails closed for it.
-    let call = with_progress_sink(
-        progress_tx,
-        crate::core_host::turn_cwd::with_turn_cwd(
-            Some(cwd_path.as_path()),
-            scoped_origin(origin, &thread_id, core.raw().invoke(AGENT_CHAT, params)),
-        ),
-    );
+    // The turn, described rather than hand-encoded. This used to be a
+    // `serde_json::json!` literal whose keys had to match `AgentChatParams`
+    // field-for-field — with no `rename_all` upstream, an unmarked rename there
+    // was a silent runtime failure here. The builder owns that contract now, and
+    // the progress sink and the origin scope ride with it instead of being
+    // task-locals this file has to remember to enter.
+    let mut turn = harness
+        .turn(&prompt)
+        // The core's own continuity key, minted above because the caller is
+        // told the session id before the turn runs.
+        .session(&thread_id)
+        // Roots the turn's file and shell tools in the node's checkout, so
+        // relative paths resolve there rather than in the Medulla process's
+        // startup directory.
+        .cwd(&cwd)
+        .on_progress(progress_tx);
+
+    if let Some(model) = model.as_deref() {
+        turn = turn.model(model);
+    }
+    // Only when the preset asked for it. `Route` takes the endpoint and the key
+    // together because the core ignores a half of the pair — an absent route is
+    // what "run on the account's own inference" looks like.
+    if let Some(route) = route {
+        turn = turn.route(Route::openai_compatible(route.base_url, route.token));
+    }
+    // Unattended workflow authority, for workflow nodes only. Delegated tasks,
+    // conversational turns, local sessions and capability probes stay
+    // unlabelled on purpose: OpenHuman then applies its fail-closed approval
+    // policy to their external-effect tools.
+    if origin == RunTaskOrigin::Workflow {
+        turn = turn.origin(AgentTurnOrigin::TrustedAutomation {
+            // The turn's own id, so an audit row or a parked approval names the
+            // dispatch it came from rather than a constant.
+            job_id: thread_id.clone(),
+            source: TrustedAutomationSource::Workflow {
+                // The node already ran because the operator's graph said it
+                // should; parking each tool call for a second decision would
+                // strand an unattended run on a prompt nobody is watching.
+                require_approval: false,
+            },
+        });
+    }
+
+    // `with_turn_cwd` is still scoped by hand: it is read by Medulla's own
+    // process-global lifecycle hooks while a tool runs, not by the core. Without
+    // it a `PostToolUse` auto-commit hook is told the Medulla process's startup
+    // directory and checkpoints the wrong repository. See
+    // `core_host::turn_cwd`.
+    let call = crate::core_host::turn_cwd::with_turn_cwd(Some(cwd_path.as_path()), turn.send());
 
     let outcome = watchdog::drive(call, &mut progress_rx, &abort, timeout_ms, &mut sink).await?;
 
     let reply = match outcome {
-        Ok(value) => reply_text(value),
+        Ok(outcome) => outcome.reply,
         Err(err) => {
             sink.emit("error", json!({ "message": err, "fatal": true }));
             return Err(format!("openhuman turn failed: {err}"));
@@ -203,54 +201,4 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
         usage: None,
         session_id: Some(thread_id),
     })
-}
-
-/// Run `future` with unattended workflow authority only for workflow nodes.
-///
-/// Delegated tasks, conversational turns, local sessions, and capability
-/// probes intentionally remain unlabelled: OpenHuman then applies its
-/// fail-closed approval policy to their external-effect tools.
-async fn scoped_origin<F>(origin: RunTaskOrigin, thread_id: &str, future: F) -> F::Output
-where
-    F: std::future::Future,
-{
-    if origin == RunTaskOrigin::Workflow {
-        with_origin(
-            AgentTurnOrigin::TrustedAutomation {
-                // The turn's own id, so an audit row or a parked approval names
-                // the dispatch it came from rather than a constant.
-                job_id: thread_id.to_string(),
-                source: TrustedAutomationSource::Workflow {
-                    // The node already ran because the operator's graph said it
-                    // should; parking each tool call for a second decision would
-                    // strand an unattended run on a prompt nobody is watching.
-                    require_approval: false,
-                },
-            },
-            future,
-        )
-        .await
-    } else {
-        future.await
-    }
-}
-
-/// The answer text out of whatever shape the controller returned.
-///
-/// The core serializes through `RpcOutcome`, whose wire shape is *variable*: a
-/// handler that logged nothing returns the value itself, and one that logged
-/// anything returns `{ "result": …, "logs": [...] }`. Whether a given method
-/// logs is an implementation detail that can change without notice, so both are
-/// accepted rather than the one this method happens to emit today.
-pub(in crate::daemon::providers) fn reply_text(value: Value) -> String {
-    let payload = value
-        .get("result")
-        .filter(|_| value.get("logs").is_some_and(Value::is_array))
-        .unwrap_or(&value);
-    match payload {
-        Value::String(text) => text.clone(),
-        // Not expected from this method, but a controller that one day answers
-        // structurally should be rendered rather than reported as empty.
-        other => other.to_string(),
-    }
 }

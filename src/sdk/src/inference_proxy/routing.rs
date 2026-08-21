@@ -119,7 +119,9 @@ pub(super) fn resolve_key(
     let provider_key = match provider {
         HarnessProvider::Claude => "ANTHROPIC_AUTH_TOKEN",
         HarnessProvider::Codex | HarnessProvider::Opencode => "OPENAI_API_KEY",
-        HarnessProvider::Openhuman => return None,
+        // Neither inherits a coding provider's credential: OpenHuman resolves
+        // its own, and a shell sends no inference at all.
+        HarnessProvider::Openhuman | HarnessProvider::Shell => return None,
     };
     [OPENROUTER_API_KEY_ENV, provider_key]
         .into_iter()

@@ -453,6 +453,15 @@ pub fn kind_wire(kind: &NodeKind) -> &'static str {
         NodeKind::Memory => "memory",
         NodeKind::Dedup => "dedup",
         NodeKind::Loop => "loop",
+        // Concurrency and human-review kinds, added in tinyflows 0.8. Wire
+        // names are the enum's own `snake_case` serde spelling, which is what a
+        // saved document carries.
+        NodeKind::Spawn => "spawn",
+        NodeKind::Scatter => "scatter",
+        NodeKind::Gather => "gather",
+        NodeKind::Gate => "gate",
+        NodeKind::Approval => "approval",
+        NodeKind::Void => "void",
     }
 }
 
@@ -485,6 +494,16 @@ pub fn kind_glyph(kind: &NodeKind) -> &'static str {
         // The one kind whose edges run backwards: the shape is the cycle it
         // draws on the canvas.
         NodeKind::Loop => "↺",
+        // Concurrency: work leaving the main line, and the barrier that
+        // collects it again. The arrows say which direction the branching runs.
+        NodeKind::Spawn => "⇥",
+        NodeKind::Scatter => "⇶",
+        NodeKind::Gather => "⇉",
+        NodeKind::Gate => "⊣",
+        // A step that waits on a person rather than on the graph.
+        NodeKind::Approval => "☑",
+        // Consumes and produces nothing — the shape is the empty set.
+        NodeKind::Void => "∅",
     }
 }
 
@@ -513,7 +532,18 @@ pub fn kind_color(kind: &NodeKind) -> &'static str {
         | NodeKind::Merge
         | NodeKind::SplitOut
         | NodeKind::Dedup
-        | NodeKind::Loop => "yellow",
+        | NodeKind::Loop
+        // Concurrency routes work rather than transforming it, so it reads with
+        // the rest of the control flow rather than earning a fifth colour — the
+        // legend is four groups on purpose.
+        | NodeKind::Spawn
+        | NodeKind::Scatter
+        | NodeKind::Gather
+        | NodeKind::Gate
+        | NodeKind::Void => "yellow",
+        // The one kind that waits on a person. Grouped with the entry point
+        // because both are places a human meets the graph.
+        NodeKind::Approval => "green",
         NodeKind::Transform | NodeKind::OutputParser => "blue",
     }
 }

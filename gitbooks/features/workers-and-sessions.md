@@ -277,6 +277,14 @@ omitted rather than drawn at zero, so an empty bar always means a real zero. The
 rail shows what is *running* and nothing else; the declared fleet lives on the
 Hosts tab. Under the transcript is the composer.
 
+`Ctrl-T` opens a session from any row: pick what to start, pick a directory,
+and it is running. The list offers this machine's coding CLIs and any harness
+presets you have registered — and, after them, the shells installed here, your
+own `$SHELL` first. A shell session is an ordinary terminal in the same pane,
+attached with Enter and detached with `Ctrl-]` exactly as a harness is, and it
+is yours permanently: the orchestrator never dispatches into one, and a task
+naming a shell is refused before it reaches a host.
+
 Selecting a session shows that session's own turns, and if it has raised a
 question, Enter answers it rather than starting a new cycle, so you answer where
 the question appeared.

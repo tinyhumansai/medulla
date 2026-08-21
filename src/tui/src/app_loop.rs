@@ -63,15 +63,13 @@ async fn session_of(
     base_url: &str,
 ) -> (
     Option<medulla::auth::Credentials>,
-    Option<medulla::core_host::auth::AuthState>,
+    Option<medulla::core_host::AuthState>,
 ) {
     // A failed read is indistinguishable from signed out for every consumer, and
     // this runs before the terminal guard is up — printing here would land on
     // the screen the login flow is about to take over.
-    let jwt = medulla::core_host::auth::session_token(core)
-        .await
-        .unwrap_or_default();
-    let account = medulla::core_host::auth::state(core).await.ok();
+    let jwt = core.auth().token().await.unwrap_or_default();
+    let account = core.auth().state().await.ok();
     let session = jwt.map(|jwt| medulla::auth::Credentials {
         base_url: base_url.to_string(),
         jwt,
@@ -196,7 +194,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // here rather than looking it up again, so
     // no two surfaces can disagree about whether this process is signed in.
     let mut session: Option<medulla::auth::Credentials> = None;
-    let mut account: Option<medulla::core_host::auth::AuthState> = None;
+    let mut account: Option<medulla::core_host::AuthState> = None;
 
     // Shared hub roster slot: filled after the hub connects, read by the
     // runtime's worker surface so the Workers tab manages the hub's host-link
@@ -264,13 +262,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // and every drive method would otherwise return the same error behind a UI
     // that looks live. It takes the offline demo, exactly as `--mock` does.
     if runtime.is_none() {
-        match medulla::core_host::boot_with_hooks(&loaded.config.hooks).await {
-            Ok(core) => {
+        match medulla::core_host::boot_with_hooks(core_settings.clone(), &loaded.config.hooks)
+            .await
+        {
+            Ok(harness) => {
+                // The harness owns the core's lifetime; the surfaces below want
+                // the typed facade, which is `Clone` and Arc-backed.
+                let core = harness.core().clone();
                 // A token from the sign-in gate above: the core now exists, and
                 // it was booted against the home the gate chose, so this is the
                 // first moment the session can be stored where it belongs.
                 if let Some(jwt) = pending_jwt.take() {
-                    if let Err(e) = medulla::core_host::auth::store_session(&core, &jwt).await {
+                    if let Err(e) = core.auth().store(openhuman_core::embed::Session::backend(&jwt)).await
+                    {
                         anyhow::bail!("signed in, but the core rejected the session: {e}");
                     }
                 }
@@ -278,6 +282,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     medulla::core_host::Readiness::Ready => {
                         (session, account) =
                             session_of(&core, &loaded.config.backend.base_url).await;
+                        let harness = Arc::new(harness);
                         let core = Arc::new(core);
                         // Donated before anything else can want one. A workflow
                         // `agent` node that names `harness: openhuman` runs
@@ -288,8 +293,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         // its own scheduler writing the same memory database.
                         // Idempotent: the sign-in path below reaches here too,
                         // and the first core installed is the one that stays.
-                        medulla::core_host::shared::install(Arc::clone(&core));
-                        core_arc = Some(Arc::clone(&core));
+                        medulla::core_host::shared::install(Arc::clone(&harness));
+                        core_arc = Some(Arc::clone(&harness));
                         runtime = Some(
                             core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url)
                                 .await,
@@ -299,7 +304,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     // is the one thing that does not end here: the core is held and
                     // the login screen runs once the terminal is up.
                     medulla::core_host::Readiness::SignedOut => {
-                        pending_core = Some(core);
+                        pending_core = Some(harness);
                         need_login = Some(loaded.config.backend.base_url.clone());
                     }
                     // No backend to reach, or the surface compiled out. Neither is

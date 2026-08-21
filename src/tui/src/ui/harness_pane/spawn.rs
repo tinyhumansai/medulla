@@ -70,7 +70,15 @@ impl LocalSessions {
         }
 
         let provider = choice.provider;
-        let bin = medulla::protocol::env::provider_bin(provider, &self.env);
+        let bin = choice.bin(&self.env);
+        // A shell is not a harness, and every step below this line is a favour
+        // done to a coding agent: tools it can call, skills describing them, a
+        // router pointing it at a model, a commit trailer saying Medulla ran
+        // it. None of them mean anything at a `$` prompt, and the attribution
+        // one would be a lie — commits an operator types by hand are theirs.
+        if choice.is_shell() {
+            return self.open_shell(choice, &bin, cwd, name);
+        }
         let (mut env, mut extra_args) = self.spawn_env(choice)?;
         // The operator's own session gets Medulla's tools too. This is the door
         // a person is actually sitting in, so it is the one where a missing
@@ -120,6 +128,57 @@ impl LocalSessions {
             origin: SessionOrigin::User,
             name,
             mcp_grant_session,
+        })
+    }
+
+    /// Start a plain interactive shell in `cwd`.
+    ///
+    /// The whole of the difference from a harness launch is what is *not* here:
+    /// no MCP registration, no managed skills, no router injection, no
+    /// attribution environment. What is left is the operator's own environment
+    /// with the embedded core's state scrubbed out of it — the one thing a
+    /// shell must not inherit, because a `cargo test` run started from it would
+    /// otherwise resolve the live credential store as its keyring (see
+    /// [`medulla::protocol::env::scrub_core_state`]).
+    ///
+    /// `bin` is the shell the picker row named, already resolved. No argv: a
+    /// shell handed a tty and no command is interactive by definition, and
+    /// every flag that could be added here — `-l`, `-i` — changes which startup
+    /// files run and so which prompt the operator gets.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_unmanaged`](Self::open_unmanaged): a bad directory, or a shell
+    /// that cannot be executed.
+    fn open_shell(
+        &self,
+        choice: &HarnessChoice,
+        bin: &str,
+        cwd: &str,
+        name: Option<String>,
+    ) -> Result<String, String> {
+        let mut env = self.env.clone();
+        medulla::protocol::env::scrub_core_state(&mut env, choice.provider);
+        self.sessions.open(LaunchSpec {
+            provider: choice.provider,
+            preset: None,
+            bin: bin.to_string(),
+            cwd: cwd.to_string(),
+            env,
+            extra_args: Vec::new(),
+            // There are no permissions to skip: the shell is the permission.
+            skip_permissions: false,
+            label: format!("you:{}", choice.id()),
+            model: None,
+            session_id: None,
+            // Held by the operator and, unlike a harness, never handed over:
+            // dispatch has nothing it could send a shell and no way to read an
+            // answer back. `HarnessProvider::Shell` is refused at the wire
+            // parse for the same reason.
+            control: SessionControl::User,
+            origin: SessionOrigin::User,
+            name,
+            mcp_grant_session: None,
         })
     }
 

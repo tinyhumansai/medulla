@@ -670,6 +670,14 @@ fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
 /// screen shows no question we can recognise — which is the common case, and
 /// deliberately not the same as "the harness is busy".
 pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    // A shell is always waiting on the operator and never blocked on anything a
+    // cue could describe. Every heuristic below reads a *harness* screen, and a
+    // terminal shows whatever the last command printed — a `y/n` from `rm -i`,
+    // a bell from a finished build — so running them here would turn ordinary
+    // output into a blinking row nobody can clear.
+    if provider == HarnessProvider::Shell {
+        return None;
+    }
     // Claude 2.1 leaves its tool line saying `Waiting…` above the permission
     // menu. That word resembles active progress, so this narrow structural
     // confirmation must outrank the generic working veto below it.

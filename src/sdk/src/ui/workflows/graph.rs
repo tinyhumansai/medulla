@@ -632,6 +632,28 @@ pub fn node_summary(node: &Node) -> String {
             .and_then(|value| value.as_array())
             .map(|inputs| format!("{} inputs", inputs.len()))
             .unwrap_or_default(),
+        // What a spawned branch is *for* is the only thing that distinguishes
+        // two spawns on a canvas; the ticket name is how a gate later refers
+        // back to it.
+        NodeKind::Spawn => text("ticket").or_else(|| text("label")).unwrap_or_default(),
+        // The collection being fanned over — a scatter's whole meaning is
+        // "this, once per item".
+        NodeKind::Scatter => text("items").or_else(|| text("expression")).unwrap_or_default(),
+        // The release policy is what makes a gather more than a barrier: it is
+        // the difference between waiting for all lanes and settling for a
+        // quorum.
+        NodeKind::Gather | NodeKind::Gate => text("release")
+            .or_else(|| text("policy"))
+            .unwrap_or_default(),
+        // The subject is what a person is being asked to decide about, which is
+        // the only part of an approval node worth a second line.
+        NodeKind::Approval => text("subject")
+            .or_else(|| text("prompt"))
+            .unwrap_or_default(),
+        // Declarative and configuration-free: the kind already says everything
+        // ("this branch ends here, deliberately"), so a summary line would only
+        // repeat the glyph.
+        NodeKind::Void => String::new(),
     }
 }
 

@@ -17,7 +17,9 @@
 //! - [`HarnessFocus`] — which of the TUI and the harness owns the keyboard;
 //! - [`keys`] — encoding a crossterm key back into the bytes a terminal sends;
 //! - [`spawn`] — starting a harness the orchestrator will not dispatch into,
-//!   and handing one between the operator and the orchestrator.
+//!   and handing one between the operator and the orchestrator;
+//! - [`shells`] — the plain `bash`/`zsh` sessions the picker offers beside the
+//!   coding agents, for the work that is a command rather than a prompt.
 //!
 //! The emulator, the child processes, and the screen-to-ratatui translation are
 //! not here: they are [`crate::worker::pty`] and [`crate::worker::screen`],
@@ -27,12 +29,14 @@ use crate::worker::pty::{PtyManager, ScreenSnapshot};
 
 pub mod keys;
 pub mod mouse;
+pub mod shells;
 mod spawn;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
+pub use shells::ShellChoice;
 pub use types::{HarnessChoice, HarnessFocus, LocalSessions};
 
 /// How the focus chord is written in hints and titles.

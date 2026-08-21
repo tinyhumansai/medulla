@@ -176,6 +176,12 @@ impl CustomHarnessConfig {
         if self.api_key_env.is_empty() {
             return Err("API-key environment variable is required".into());
         }
+        // A preset is a model behind a CLI, and a shell has neither. Refused
+        // here rather than shrugged off later so the picker never offers a
+        // "custom harness" that cannot route anywhere.
+        if self.base_harness == HarnessProvider::Shell {
+            return Err("a shell cannot be used as a custom harness".into());
+        }
         Ok(self)
     }
 
@@ -186,9 +192,13 @@ impl CustomHarnessConfig {
         } else {
             match self.base_harness {
                 HarnessProvider::Claude => OPENROUTER_ANTHROPIC_URL,
-                HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
-                    OPENROUTER_OPENAI_URL
-                }
+                // Shell is rejected by `normalize`, so no preset reaches here
+                // with one; it shares the OpenAI-shaped default rather than
+                // being a fourth case nobody can produce.
+                HarnessProvider::Codex
+                | HarnessProvider::Opencode
+                | HarnessProvider::Openhuman
+                | HarnessProvider::Shell => OPENROUTER_OPENAI_URL,
             }
         }
     }

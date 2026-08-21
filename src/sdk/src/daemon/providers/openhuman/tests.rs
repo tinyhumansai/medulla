@@ -57,39 +57,14 @@ fn only_openhuman_runs_on_the_embedded_core() {
     assert!(!uses_embedded_core(&options(HarnessProvider::Opencode)));
 }
 
-/// A handler that logged nothing returns the bare value.
-#[test]
-fn a_bare_string_reply_is_the_answer() {
-    assert_eq!(reply_text(json!("all done")), "all done");
-}
-
-/// A handler that logged anything wraps the answer, and whether it logs is an
-/// implementation detail that can change without notice — so both shapes are
-/// accepted rather than the one it emits today.
-#[test]
-fn a_logged_outcome_envelope_is_unwrapped() {
-    let wire = json!({ "result": "all done", "logs": ["agent chat completed"] });
-    assert_eq!(reply_text(wire), "all done");
-}
-
-/// An object that merely *has* a `result` field is not an envelope. Unwrapping
-/// it would hand back a fragment of the answer as the whole of it.
-#[test]
-fn a_value_that_is_not_an_envelope_is_left_alone() {
-    let wire = json!({ "result": "partial", "other": 1 });
-    assert_eq!(reply_text(wire.clone()), wire.to_string());
-
-    let wire = json!({ "result": "partial", "logs": 3 });
-    assert_eq!(reply_text(wire.clone()), wire.to_string());
-}
-
-/// A structural answer is rendered rather than reported as empty — this method
-/// returns a string today, and a build that meets something else should show
-/// it.
-#[test]
-fn a_structural_reply_is_rendered_rather_than_dropped() {
-    assert_eq!(reply_text(json!({ "a": 1 })), "{\"a\":1}");
-}
+// The `RpcOutcome` envelope tests that used to live here are gone with
+// `reply_text`. Whether a controller wraps its answer in `{result, logs}` is
+// upstream's implementation detail, and this host no longer decodes it: the
+// typed facade returns a `TurnOutcome` whose `reply` is already the answer, and
+// the unwrapping is tested once, next to the code that does it
+// (`openhuman_core::embed::call`). Two hosts keeping private copies of that
+// heuristic — this one had a looser variant than `core_host::auth`'s — is the
+// duplication the port removed.
 
 /// An already-aborted task fails before the core is touched. Asserted because
 /// the alternative is booting a core to run work that was already cancelled.

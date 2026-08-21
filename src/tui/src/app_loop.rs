@@ -344,7 +344,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // a clean quit — there is no third option, because a TUI with no runtime has
     // nothing to show.
     if let Some(base_url) = need_login.take() {
-        let core = pending_core.take().expect("a core is held for the login");
+        let harness = pending_core.take().expect("a core is held for the login");
+        let core = harness.core().clone();
         // Same flow as a mid-session relogin, and deliberately the same code: an
         // install with an account whose session went missing is signing in
         // against an already-booted core, which is exactly what that is. Signing
@@ -373,6 +374,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     medulla::core_host::Readiness::Ready => {
                         (session, account) =
                             session_of(&core, &loaded.config.backend.base_url).await;
+                        let harness = Arc::new(harness);
                         let core = Arc::new(core);
                         // Donated before anything else can want one. A workflow
                         // `agent` node that names `harness: openhuman` runs
@@ -383,8 +385,8 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         // its own scheduler writing the same memory database.
                         // Idempotent: the sign-in path below reaches here too,
                         // and the first core installed is the one that stays.
-                        medulla::core_host::shared::install(Arc::clone(&core));
-                        core_arc = Some(Arc::clone(&core));
+                        medulla::core_host::shared::install(Arc::clone(&harness));
+                        core_arc = Some(Arc::clone(&harness));
                         runtime = Some(
                             core_runtime(core, hub_slot.clone(), &loaded.config.backend.base_url)
                                 .await,

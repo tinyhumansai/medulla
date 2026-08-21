@@ -173,17 +173,22 @@ impl LocalWorkflowHost {
 ///
 /// Every path in this module starts an embedded daemon that may dispatch an
 /// `agent` node to the embedded core, which boots on first use
-/// ([`crate::core_host::shared`]) and reads its environment during
-/// construction. The TUI and `medulla run` bind the core at startup; none of
-/// these do, so each binds what it knows before starting the host: the core's
-/// state directory derived from `MEDULLA_HOME`, and the agent's action
+/// ([`crate::core_host::shared`]), which takes whatever settings are installed
+/// when it fires. The TUI and `medulla run` install theirs at startup; none of
+/// these do, so each installs what it knows before starting the host: the
+/// core's state directory derived from `MEDULLA_HOME`, and the agent's action
 /// directory from the workspace the run resolved to. A caller with the full
-/// layered config binds the backend URLs too — see
-/// [`crate::core_host::bind_from_config`].
+/// layered config installs the backend URL too — see
+/// [`crate::core_host::CoreSettings::resolve`].
+///
+/// Installing is first-writer-wins, so this never overrides a more complete set
+/// a startup path already published.
 fn bind_core(env: &std::collections::HashMap<String, String>, workspace: &str) {
     let home = crate::home::medulla_home(env);
-    crate::core_host::bind_workspace(env, &home);
-    crate::core_host::bind_action_dir(env, Some(std::path::Path::new(workspace)));
+    let mut settings = crate::core_host::CoreSettings::floor(env, &home);
+    settings.action_dir =
+        crate::core_host::resolve_action_dir(env, Some(std::path::Path::new(workspace)));
+    crate::core_host::install_settings(settings);
 }
 
 /// One local run, described before it starts.

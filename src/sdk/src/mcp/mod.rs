@@ -341,13 +341,17 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     let loaded =
         crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd).ok();
     // A workflow this server runs may dispatch an `agent` node to the embedded
-    // core, which boots lazily and reads its environment during construction.
-    // This subprocess is not the TUI — nothing bound the core for it — so it
-    // binds the four core variables from the same config before the first run,
-    // or a lazily booted core would fall back to ambient `~/.openhuman` and the
+    // core, which boots lazily and takes whatever settings are installed then.
+    // This subprocess is not the TUI — nothing configured the core for it — so
+    // it publishes settings from the same config before the first run, or a
+    // lazily booted core would fall back to ambient `~/.openhuman` and the
     // production backend instead of this account's state and deployment.
     if let Some(loaded) = &loaded {
-        crate::core_host::bind_from_config(env, &loaded.config, &crate::home::medulla_home(env));
+        crate::core_host::install_settings(crate::core_host::CoreSettings::resolve(
+            env,
+            &loaded.config,
+            &crate::home::medulla_home(env),
+        ));
     }
     let workflows_enabled = loaded
         .as_ref()

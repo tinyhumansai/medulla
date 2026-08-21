@@ -259,6 +259,49 @@ pub fn resolve_backend_api_url(env: &HashMap<String, String>, base_url: &str) ->
     base_url.to_string()
 }
 
+/// The settings a later, caller-less boot should use.
+///
+/// The lazy boot in [`shared`] has no caller to hand settings to — a workflow
+/// `agent` node runs deep inside the engine, and the dispatch signature belongs
+/// to every harness, not just this one. So whoever *does* have the loaded config
+/// leaves it here first.
+///
+/// This is process-global, like the environment variables it replaces, and that
+/// is not an accident of the port — it is the same problem. What changes is the
+/// blast radius: a typed cell this crate owns affects this process's core and
+/// nothing else, where `OPENHUMAN_WORKSPACE` and friends affected every library
+/// in the process and every child it spawns.
+static SETTINGS: std::sync::OnceLock<CoreSettings> = std::sync::OnceLock::new();
+
+/// Publish the settings a later lazy boot should use.
+///
+/// Returns whether this call is the one that installed them. `false` means
+/// settings were already present and *these* are not them — reported rather
+/// than swapped, because a swap after a core has booted would describe a core
+/// that no longer matches.
+pub fn install_settings(settings: CoreSettings) -> bool {
+    let installed = SETTINGS.set(settings).is_ok();
+    if !installed {
+        tracing::debug!("[core_host] core settings already installed; keeping the first");
+    }
+    installed
+}
+
+/// The installed settings, or the floor derived from this process's environment.
+///
+/// The floor is workspace isolation only. It is deliberately not "nothing":
+/// a lazily booted core with no settings at all would write into the
+/// developer's real `~/.openhuman`.
+pub fn settings_or_floor() -> CoreSettings {
+    if let Some(settings) = SETTINGS.get() {
+        return settings.clone();
+    }
+    let env: HashMap<String, String> = std::env::vars().collect();
+    let home = crate::home::medulla_home(&env);
+    tracing::debug!("[core_host] no settings installed; using the workspace-isolation floor");
+    CoreSettings::floor(&env, &home)
+}
+
 /// Build the embedded harness.
 ///
 /// Unlike the old `boot`, this takes its configuration as an argument. There is

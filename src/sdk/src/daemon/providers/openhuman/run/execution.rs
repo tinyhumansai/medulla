@@ -94,7 +94,7 @@ pub async fn run_openhuman_task(options: RunTaskOptions) -> Result<RunTaskResult
     // A headless workflow may be the first OpenHuman caller in this process.
     // Its hooks must reach that lazy boot; an already installed TUI core is
     // retained by `shared_with_hooks` and already owns its hook registration.
-    let core = crate::core_host::shared::shared_with_hooks(&hooks).await?;
+    let harness = crate::core_host::shared::shared_with_hooks(&hooks).await?;
 
     // The core's own continuity key. A bounded workflow node arrives with no
     // resume id and gets a fresh thread — which is the isolation a node needs,

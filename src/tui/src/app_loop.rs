@@ -203,16 +203,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Cloned before the core is consumed: a relogin rebuilds the runtime around
     // the same in-process core rather than booting a second one.
     let mut core_arc: Option<Arc<medulla::core_host::Harness>> = None;
-    // Active workspace roots whose `MEDULLA.md` profiles ride every backend
-    // session mint (`workspaceProfiles`). Roots without a profile are skipped by
-    // the collector, so passing every configured workspace is safe.
-    let workspace_roots: Vec<std::path::PathBuf> = loaded
-        .config
-        .workflow
-        .workspaces
-        .iter()
-        .map(std::path::PathBuf::from)
-        .collect();
     // The hub narrates itself; those lines must not reach the terminal while the
     // TUI owns the screen, so they are captured here instead.
     let hub_logs = medulla_tui::log::LogBuffer::new();

@@ -83,10 +83,17 @@ impl App {
                 // the rail badge and the picker modal both use for this state,
                 // and renaming it here would leave the operator matching two
                 // vocabularies for one fact.
-                let mut status = format!(
-                    "Started {} in {workspace} · unmanaged",
-                    choice.display_name()
-                );
+                // A shell is not labelled "unmanaged": the word names a
+                // harness the orchestrator could have dispatched into and is
+                // not, and there is no other kind of shell session.
+                let mut status = if choice.is_shell() {
+                    format!("Started {} in {workspace}", choice.display_name())
+                } else {
+                    format!(
+                        "Started {} in {workspace} · unmanaged",
+                        choice.display_name()
+                    )
+                };
                 if let Err(error) = self.remember_harness_workspace(&workspace) {
                     status.push_str(&format!(" · {error}"));
                 }

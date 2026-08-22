@@ -15,7 +15,6 @@ use super::AppMsg;
 #[cfg(feature = "workflows")]
 mod copilot_hosts;
 mod feedback;
-mod handoff;
 #[cfg(feature = "workflows")]
 mod workflow_evolution;
 #[cfg(feature = "workflows")]
@@ -34,6 +33,7 @@ pub(super) fn adopt_copilot_host(thread: &str, created: &str) {
 /// End a copilot conversation whose workflow no longer exists.
 #[cfg(feature = "workflows")]
 pub(super) fn close_copilot_host(thread: &str) {
+    copilot_hosts::abort(thread);
     copilot_hosts::forget(thread);
 }
 
@@ -79,10 +79,6 @@ pub(super) fn run_cmd(
         Some(cmd) => *cmd,
         None => return,
     };
-    let cmd = match handoff::run_handoff_cmd(cmd, runtime, msg_tx) {
-        Some(cmd) => *cmd,
-        None => return,
-    };
     match cmd {
         Cmd::Quit => {}
         Cmd::LoadFeedback(_)
@@ -91,9 +87,6 @@ pub(super) fn run_cmd(
         | Cmd::CommentFeedback { .. }
         | Cmd::SubmitFeedback { .. } => {
             unreachable!("feedback commands return before main dispatch")
-        }
-        Cmd::HandOffSession(_) | Cmd::HoldSession { .. } => {
-            unreachable!("handoff commands return before main dispatch")
         }
         Cmd::Submit(input) => {
             let rt = runtime.clone();
@@ -252,6 +245,8 @@ pub(super) fn run_cmd(
                 msg_tx,
             )
         }
+        #[cfg(feature = "workflows")]
+        Cmd::DeleteWorkflow { id } => workflows::spawn_delete(id, msg_tx),
         #[cfg(feature = "workflows")]
         Cmd::DryRunWorkflow { id, inputs } => workflows::spawn_dry_run(id, inputs, msg_tx),
         #[cfg(feature = "workflows")]

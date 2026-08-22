@@ -92,10 +92,12 @@ pub fn attribution_args(provider: HarnessProvider, enabled: bool) -> Vec<String>
     }
     match provider {
         HarnessProvider::Claude => vec!["--settings".to_string(), claude_settings_json()],
-        // No override exists for these; see the module docs.
-        HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
-            Vec::new()
-        }
+        // No override exists for these; see the module docs. A shell makes no
+        // commits of its own — whatever the operator types in one is theirs.
+        HarnessProvider::Codex
+        | HarnessProvider::Opencode
+        | HarnessProvider::Openhuman
+        | HarnessProvider::Shell => Vec::new(),
     }
 }
 

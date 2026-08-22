@@ -29,13 +29,18 @@ use super::super::LocalSessions;
 /// `--session-id`, which `/bin/sh` would reject as an unknown option. Codex
 /// takes no preset id, so its argv is empty and the script is the whole command.
 pub(super) fn sh(script: &str) -> LaunchSpec {
+    sh_for(HarnessProvider::Codex, script)
+}
+
+/// A shell PTY carrying `provider` metadata for provider-specific input tests.
+fn sh_for(provider: HarnessProvider, script: &str) -> LaunchSpec {
     let mut env = HashMap::new();
     if let Ok(path) = std::env::var("PATH") {
         env.insert("PATH".to_string(), path);
     }
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     LaunchSpec {
-        provider: HarnessProvider::Codex,
+        provider,
         preset: None,
         bin: "/bin/sh".to_string(),
         cwd: "/".to_string(),
@@ -292,6 +297,42 @@ fn alternate_scroll_without_mouse_reporting_gets_arrow_scroll_events() {
 }
 
 #[test]
+fn codex_without_negotiated_mouse_mode_gets_location_aware_wheel_events() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // Current Codex releases enable bracketed paste and handle crossterm mouse
+    // events, but do not ask their terminal to enable mouse reporting. Preserve
+    // the pointer location by sending the SGR event Codex can already decode;
+    // cursor-key fallback would operate prompt history and discard (3,4).
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?2004hready'; sleep 0.3; cat -v; sleep 30",
+        ))
+        .unwrap();
+
+    wait_for("the Codex stand-in to become ready", || {
+        text(&harnesses, &id).contains("ready")
+    });
+    assert_eq!(sessions.alternate_scroll(&id), Some(false));
+    assert!(matches!(
+        sessions.mouse_protocol(&id),
+        Some((vt100::MouseProtocolMode::None, _))
+    ));
+
+    harnesses.scroll(&id, 3, 4, true, 3);
+
+    wait_for("Codex to receive a location-aware wheel event", || {
+        text(&harnesses, &id).contains("[<64;4;5M")
+    });
+    let out = text(&harnesses, &id);
+    assert!(
+        !out.contains("^[[A"),
+        "wheel must not navigate history: {out}"
+    );
+    sessions.close(&id);
+}
+
+#[test]
 fn alternate_screen_without_alternate_scroll_does_not_receive_arrows() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());
@@ -320,6 +361,9 @@ fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     let sessions = PtyManager::new();
     let harnesses = harnesses(sessions.clone());
     // Enough lines to push history off a 30-row screen, and no mouse reporting.
+    // Codex stands in for "some harness": the stand-in never turns on bracketed
+    // paste or alternate scrolling, so the wheel must fall through to our own
+    // emulator rather than be synthesized into cursor keys.
     let id = sessions
         .open(sh(
             "i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done; sleep 30",
@@ -351,6 +395,37 @@ fn a_child_that_never_asked_for_the_mouse_gets_our_scrollback_instead() {
     harnesses.scroll_to_live(&id);
     assert!(text(&harnesses, &id).contains("line-200"));
     sessions.close(&id);
+}
+
+#[test]
+fn an_exited_codex_session_scrolls_our_retained_history() {
+    let sessions = PtyManager::new();
+    let harnesses = harnesses(sessions.clone());
+    // A codex that raised its input layer (bracketed paste) and then exited:
+    // there is no child to synthesize cursor keys for any more, so the wheel
+    // must move the emulator's own retained lines — the ones the operator is
+    // reading how the session ended.
+    let id = sessions
+        .open(sh(
+            "printf '\\033[?2004h'; i=1; while [ $i -le 200 ]; do echo line-$i; i=$((i+1)); done",
+        ))
+        .unwrap();
+
+    wait_for("the codex stand-in to exit", || !harnesses.is_running(&id));
+    wait_for("the retained screen to hold the tail", || {
+        text(&harnesses, &id).contains("line-200")
+    });
+    // The input layer was up, but the child is gone: cursor keys have no
+    // listener, which is exactly the case that must fall through.
+    assert_eq!(harnesses.sessions.bracketed_paste(&id), Some(true));
+    assert!(harnesses.write(&id, b"x").is_err());
+
+    harnesses.scroll(&id, 0, 0, true, 40);
+    let scrolled = text(&harnesses, &id);
+    assert!(
+        !scrolled.contains("line-200"),
+        "an exited codex must scroll its retained history:\n{scrolled}"
+    );
 }
 
 #[test]

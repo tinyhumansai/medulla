@@ -5,8 +5,10 @@
 # medulla daemons — each with its own workspace, MEDULLA_HOME and enrolled link
 # identity — against one shared mock link forwarder and one shared mock LLM:
 #
-#   mock forwarder ──┬── daemon "alpha" (workspace work-alpha) ── opencode ──┐
-#                    └── daemon "beta"  (workspace work-beta)  ── opencode ──┴─→ mock LLM
+#   mock forwarder ──┬── daemon "alpha" (workspace work-alpha) ── CLI ──┐
+#                    └── daemon "beta"  (workspace work-beta)  ── CLI ──┴─→ mock LLM
+#
+# The CLI is whichever `$E2E_HARNESS` names (see `harness.sh`).
 #
 # Each daemon is a separately enrolled host with its own pair key, so the two
 # fleets share nothing but the blind forwarder in the middle.

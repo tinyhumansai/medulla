@@ -13,12 +13,13 @@ use std::sync::Arc;
 
 use ratatui::layout::Rect;
 
-use crate::ui::composer::{Draft, TextPrompt};
+use crate::ui::composer::Draft;
 use crate::ui::theme::Theme;
 use medulla::client::{FeedbackComment, FeedbackItem, FeedbackQuery, FeedbackType};
 use medulla::config::LoadedConfig;
 use medulla::runtime::{ContextItem, Runtime, RuntimeSnapshot, WorkerOp};
 
+use super::picker::*;
 use super::rail_hit::RailHit;
 
 /// The ordered top-level tab names. The tab index selects into this array.
@@ -27,7 +28,7 @@ use super::rail_hit::RailHit;
 /// two of them diagnostic — so they now sit under Settings, keeping the tab bar
 /// to the views a session is actually driven from.
 ///
-/// Chat used to live here too, and is now the Agents tab: talking to the
+/// Chat used to live here too, and is now the Sessions tab: talking to the
 /// orchestrator *is* selecting its lane and typing. Splitting them meant reading
 /// what an operation was doing on one tab and steering it on another, with two
 /// scroll positions and no way to answer an agent's question from where the
@@ -38,16 +39,32 @@ use super::rail_hit::RailHit;
 /// exists, and a workflow is *work* — a plan they read, edit, and run, with a
 /// graph to navigate and a copilot to edit it by. Three panes' worth of surface
 /// does not fit in a subpage of something else.
+/// Subconscious sits after Workflows because it is the tier *under* the work
+/// rather than another view of it: what gets filtered on the way in, what is
+/// learned from the difference between expectation and outcome, and what is
+/// escalated for a human to approve. It is a tab and not a Settings subpage for
+/// the same reason Workflows is — approvals are work an operator acts on, not a
+/// setting they configure. It draws a placeholder for now, and is listed anyway,
+/// because an operator who can see where approvals will surface knows the layer
+/// is not going to act behind their back.
+///
 /// `Tasks` and `Memory` are commented out rather than deleted: the code behind
 /// both still builds and their render paths are intact, so restoring either is
 /// putting one line back. Memory is out of the build entirely (its tab said
-/// "coming soon"); Tasks duplicates what the Agents tab already shows per lane.
+/// "coming soon"); Tasks duplicates what the Sessions tab already shows per lane.
+///
+/// `Changes` is gone rather than commented out: a Git diff is a property of one
+/// session — what it changed since it launched — not a view over the whole fleet.
+/// It lives on the Sessions tab as the `d` pane (`PaneView::Diff`), drawn over
+/// the harness terminal for the row under the cursor. The shared diff state and
+/// bindings stay in `app::changes`; only the top-level tab and its `D` shortcut
+/// were removed.
 #[cfg(feature = "workflows")]
 pub const TABS: [&str; 7] = [
     "Overview",
-    "Agents",
+    "Sessions",
     "Workflows",
-    "Changes",
+    "Subconscious",
     "Hosts",
     "Feedback",
     "Settings",
@@ -55,9 +72,19 @@ pub const TABS: [&str; 7] = [
 
 /// Without the workflow engine. A slim build must not offer a tab that cannot
 /// draw anything.
+///
+/// This is the workflow-enabled list minus `Workflows`: every remaining tab —
+/// the fleet Overview, the Sessions rail with its `d` diff pane, Subconscious
+/// (still drawing its placeholder), Hosts, Feedback, and Settings — renders
+/// without the workflow engine.
 #[cfg(not(feature = "workflows"))]
 pub const TABS: [&str; 6] = [
-    "Overview", "Agents", "Changes", "Hosts", "Feedback", "Settings",
+    "Overview",
+    "Sessions",
+    "Subconscious",
+    "Hosts",
+    "Feedback",
+    "Settings",
 ];
 
 /// The Routing tab's left-nav pages.
@@ -71,7 +98,7 @@ pub const TABS: [&str; 6] = [
 /// Templates` is the catalog of what may be provisioned onto any of it. `Add
 /// Host` and `Strategies` are the two actions that belong to no level.
 ///
-/// There is no `Fleet` page: the whole declared tree lives in the Agents rail,
+/// There is no `Fleet` page: the whole declared tree lives in the Sessions rail,
 /// beside the lanes running on it. These pages are the *management* surfaces —
 /// what you register, authenticate, and choose — not the picture. Workflows is
 /// not here either: it is a tab of its own (see [`TABS`]).
@@ -160,27 +187,6 @@ pub(in crate::ui::app) const SP_HELP: usize = 8;
 /// list grows.
 pub(in crate::ui::app) fn tab_pos(name: &str) -> usize {
     TABS.iter().position(|t| *t == name).unwrap_or(0)
-}
-
-/// Which half of the Agents tab the keyboard is driving.
-///
-/// The tab merges a list (the rail) with a text input (the composer), and a
-/// terminal has one keyboard for both. Typing has to work the instant the tab
-/// opens — that is the point of folding chat in here — so the composer holds
-/// focus by default and the bare arrows belong to the caret.
-///
-/// That left the rail reachable only by `Alt`+`↑`/`↓`, which most macOS
-/// terminals do not send at all unless the user has rebound the Option key.
-/// Focus is therefore explicit and movable, matching the menu/content model
-/// Settings and Routing already use: `Esc` steps out to the rail, `Enter` (or
-/// simply typing) steps back in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AgentsFocus {
-    /// The composer has the keyboard: arrows move the caret, Enter submits.
-    #[default]
-    Composer,
-    /// The rail has the keyboard: arrows walk the rows, Enter returns below.
-    Rail,
 }
 
 /// What the pane beside the rail is showing for the selected harness.
@@ -302,10 +308,10 @@ pub struct WorkflowsState {
     pub(in crate::ui::app) inspector_open: bool,
     /// The run being overlaid on the graph, when a run row is selected.
     pub(in crate::ui::app) overlay: Option<medulla::workflows::RunId>,
-    /// The Agents-rail run this state was last pointed at, so the mirror is
+    /// The Sessions-rail run this state was last pointed at, so the mirror is
     /// re-established only when the rail cursor actually moves.
     ///
-    /// The Agents tab draws the workflow canvas inline for a selected run, which
+    /// The Sessions tab draws the workflow canvas inline for a selected run, which
     /// means every frame would otherwise call
     /// [`select_workflow`](crate::ui::app::App::select_workflow) — and that
     /// re-reads the run store and re-lays out the graph, both off the disk, at
@@ -374,19 +380,6 @@ pub enum Cmd {
         /// The dispatched task whose session should be killed.
         task_id: String,
     },
-    /// Push a handoff brief for a session the operator just gave back.
-    ///
-    /// Off the render thread because it does two things that must not block a
-    /// frame: shells out to `git` for the branch, and awaits a socket emit.
-    /// Arrives with `branch`/`project` unset — the dispatcher fills them.
-    HandOffSession(Box<medulla::hub::HarnessHandoff>),
-    /// Tell the orchestrator the operator has taken the session in a workspace.
-    HoldSession {
-        /// The workspace being taken.
-        workspace: String,
-        /// Why, when the operator said.
-        reason: Option<String>,
-    },
     /// Fetch account-level usage from the backend for the Usage tab.
     LoadUsage,
     /// Load a page of the feedback board for the Feedback surface.
@@ -431,6 +424,12 @@ pub enum Cmd {
         /// operator before this command was emitted. Empty when the workflow
         /// declares none.
         inputs: serde_json::Map<String, serde_json::Value>,
+    },
+    /// Permanently remove an installed workflow after the operator confirms it.
+    #[cfg(feature = "workflows")]
+    DeleteWorkflow {
+        /// The workflow to remove.
+        id: String,
     },
     /// Ask the copilot to change or explain a workflow.
     ///
@@ -532,321 +531,6 @@ pub enum Cmd {
     },
 }
 
-/// The modal state for the "resume a chat" picker overlay.
-pub(in crate::ui::app) struct ResumePicker {
-    /// The resumable chats to choose from.
-    pub(in crate::ui::app) chats: Vec<crate::ui::chat_store::MainChatSummary>,
-    /// The highlighted row.
-    pub(in crate::ui::app) index: usize,
-}
-
-/// An overlay the app can draw over the content pane.
-///
-/// Ordered as they stack, back to front: the two that float over the content,
-/// then the session picker, then the question asked about a session being
-/// released, and finally the two that claim a row of their own below it.
-///
-/// Produced by [`App::visible_overlays`], which is the single source of truth
-/// for what is in front of the content — see [`super::super::overlays`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::ui::app) enum Overlay {
-    /// The prepared-decision board.
-    Decisions,
-    /// The agent-template detail popup.
-    TemplatePopup,
-    /// The "start a session" picker.
-    AgentPicker,
-    /// The question asked when the operator lets go of a session.
-    HandbackPrompt,
-    /// The shared single-line prompt (Workers add/edit, Agents answer).
-    InlinePrompt,
-    /// The saved-chat resume picker.
-    ResumePicker,
-}
-
-/// What the harness-type/workspace picker is being used for.
-///
-/// The same two steps — pick a CLI, pick a directory — answer both questions the
-/// Agents tab asks, and they differ only in what happens at the end. Declaring an
-/// agent writes `harness × workspace` to the config and starts nothing; spawning
-/// starts a session and declares nothing. Carrying the intent on the picker keeps
-/// one overlay rather than two that would drift apart.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::ui::app) enum PickerPurpose {
-    /// Start a session here and now, declaring nothing — the `/session` path.
-    Spawn,
-    /// Declare an agent: `harness × workspace`, named on the step after.
-    DeclareAgent,
-}
-
-/// The modal state for the harness-type/workspace picker overlay.
-pub(in crate::ui::app) struct AgentPicker {
-    /// What confirming the last step will do.
-    pub(in crate::ui::app) purpose: PickerPurpose,
-    /// Installed providers and registered presets, in offer order.
-    pub(in crate::ui::app) choices: Vec<crate::ui::harness_pane::HarnessChoice>,
-    /// The highlighted row.
-    pub(in crate::ui::app) index: usize,
-    /// Which half of the two-step picker owns the keyboard.
-    pub(in crate::ui::app) step: AgentPickerStep,
-    /// Default directory used to seed the editable workspace query.
-    pub(in crate::ui::app) cwd: String,
-    /// Inline fuzzy-completion text on the workspace step.
-    pub(in crate::ui::app) workspace_query: String,
-    /// Cached workspace rows, refreshed only when the query changes.
-    pub(in crate::ui::app) workspace_choices: Vec<WorkspaceChoice>,
-    /// Highlighted workspace completion.
-    pub(in crate::ui::app) workspace_index: usize,
-    /// Whether the operator has deliberately picked one of the completions.
-    ///
-    /// Distinct from `workspace_index != 0`, which cannot express it: a query
-    /// that offers a single completion leaves the cursor on row zero however
-    /// deliberately it was moved there. Set by the arrows, cleared whenever the
-    /// query changes, and read by
-    /// [`selected_picker_workspace`](App::selected_picker_workspace) to decide
-    /// whether an entered directory outranks the completions listed under it.
-    pub(in crate::ui::app) workspace_picked: bool,
-}
-
-/// Active stage of the manual session launcher.
-///
-/// There is deliberately no "managed or unmanaged?" stage. A session the
-/// operator starts by hand is theirs — that is what starting it by hand *means*
-/// — and the orchestrator spawns its own sessions managed without asking
-/// anybody. So the question only ever had one sensible answer, and asking it
-/// bought a keystroke, an extra screen, and a freshly started session the
-/// operator then had to take back from the orchestrator before typing into it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::ui::app) enum AgentPickerStep {
-    /// Choose an installed CLI or registered preset.
-    Harness,
-    /// Choose or complete the working directory.
-    Workspace,
-}
-
-/// One cached workspace completion and why it was suggested.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::ui::app) struct WorkspaceChoice {
-    /// Absolute directory path.
-    pub(in crate::ui::app) path: String,
-    /// Short operator-facing provenance such as `recent` or `folder`.
-    pub(in crate::ui::app) source: &'static str,
-}
-
-/// A pointer gesture a harness owns until the button comes back up.
-///
-/// Terminals grab the pointer on press: every drag and the release belong to
-/// whoever took the press, regardless of where the pointer has moved to since.
-/// The embedded pane has to do the same, because the alternatives are both
-/// visible failures — a release that lands outside the pane, or one swallowed
-/// by the hand-back question the click itself opened, leaves the child holding
-/// a button nobody is pressing. Claude Code and Codex then read every later
-/// motion as a drag and anchor their popups to a press the operator has long
-/// since let go of.
-#[derive(Clone)]
-pub(in crate::ui::app) struct PointerGrab {
-    /// The session that received the press.
-    pub(in crate::ui::app) session: String,
-    /// The button that went down, so a second button's events are not stolen.
-    pub(in crate::ui::app) button: crate::ui::harness_pane::mouse::Button,
-    /// Where that session's pane was when the press landed.
-    ///
-    /// Carried rather than re-read from `hit_session` because the grab has to
-    /// outlive the pane: the click that opened a modal, detached the harness,
-    /// or scrolled the rail can move or remove the rect before the release
-    /// arrives, and the release still has to be encoded against the geometry
-    /// the child believes it has.
-    pub(in crate::ui::app) rect: Rect,
-}
-
-/// The "you still hold this session" confirmation shown on release.
-///
-/// Modelled on an unsaved-changes prompt, and for the same reason: an operator
-/// who took a session over and walked away has left the orchestrator locked out
-/// of it, and the moment they release the keyboard is the only moment they are
-/// certainly thinking about it. Silently handing it back would be worse — it
-/// would resume dispatch into a session mid-thought.
-pub(in crate::ui::app) struct HandbackPrompt {
-    /// The session the question is about.
-    ///
-    /// Every answer acts on this, never on whatever the rail last resolved: the
-    /// question can outlive the frame that raised it, and a `y` that moved
-    /// control of a *different* session is the worst outcome this whole flow
-    /// has.
-    pub(in crate::ui::app) session: String,
-    /// Whether attaching is what took control, as opposed to an explicit
-    /// `/takecontrol`. An explicit take is a decision, so the prompt says so
-    /// rather than implying the operator got here by accident.
-    pub(in crate::ui::app) took_control: bool,
-    /// What the operator wants continued, typed into the prompt.
-    ///
-    /// This is the moment they actually have the context — they are leaving the
-    /// session *now* — so it is the one place worth asking. `/handoff <note>`
-    /// exists for the operator who already knows; this is for the one who is
-    /// only reminded by being asked.
-    pub(in crate::ui::app) note: crate::ui::composer::Draft,
-    /// Whether keystrokes are going into the note rather than answering.
-    ///
-    /// Modal because `y`/`n` have to keep meaning yes and no: an operator who
-    /// starts typing a note that begins with "no, ..." must not have the first
-    /// letter answer the question for them.
-    pub(in crate::ui::app) editing_note: bool,
-    /// Which direction the question is about: `true` asks whether to take the
-    /// session from the orchestrator, `false` whether to hand it back.
-    ///
-    /// One prompt for both because they are the same decision seen from either
-    /// side, and the answer is the same keystroke — but the sentence has to say
-    /// which way control is about to move, or the operator confirms the
-    /// opposite of what they meant.
-    pub(in crate::ui::app) is_takeover: bool,
-}
-
-/// How the operator came to hold a session the orchestrator had.
-///
-/// Only the wording of the release question turns on this — both origins ask,
-/// because both locked dispatch out of a workspace. What does *not* appear here
-/// is "started it myself": that session was never taken from anyone, so it is
-/// absent from [`App::sessions_taken`] rather than being a third variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::ui::app) enum TakeOrigin {
-    /// Focusing in took it, which the operator may not have realised.
-    Focus,
-    /// `/takecontrol`, `Ctrl-G`, or answering the takeover question — a decision.
-    Explicit,
-}
-
-/// What to do when the operator releases a session they took.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum HandbackPolicy {
-    /// Ask, every time.
-    #[default]
-    Ask,
-    /// Always hand back without asking.
-    Always,
-    /// Never hand back; releasing the keyboard keeps control.
-    Never,
-}
-
-impl HandbackPolicy {
-    /// Parse the `[harness].handback` config value, falling back to
-    /// [`Ask`](Self::Ask) for anything unrecognized — a typo in a config file
-    /// should not silently change who controls a session.
-    pub fn from_config(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "always" => HandbackPolicy::Always,
-            "never" => HandbackPolicy::Never,
-            _ => HandbackPolicy::Ask,
-        }
-    }
-}
-
-/// The action a small inline prompt (Hosts add/edit, Agents answer) submits.
-pub(in crate::ui::app) enum PromptKind {
-    /// Select an arbitrary Git revision as the Changes comparison baseline.
-    ChangesBaseline,
-    /// Attach a session-local review comment to a file, hunk, or patch line.
-    ChangesComment {
-        /// Repository-relative path being reviewed.
-        path: std::path::PathBuf,
-        /// Position within that file's patch the note is bound to.
-        anchor: medulla::ui::git_review::CommentAnchor,
-    },
-    /// Add a worker from an address/@handle line.
-    HostAdd,
-    /// Edit the label of the worker with the given id.
-    HostEditLabel(String),
-    /// Declare another directory this device may work in.
-    WorkspaceAdd,
-    /// Name the agent about to be declared for this `harness × workspace`.
-    ///
-    /// Blank accepts the id [`suggest_agent_id`](medulla::runtime::suggest_agent_id)
-    /// minted from the directory, which is how a person refers to the agent
-    /// anyway — the prompt exists for the case where it is not.
-    AgentName {
-        /// The CLI the agent runs.
-        harness: String,
-        /// The absolute directory its sessions work in.
-        workspace: String,
-    },
-    /// Name the session about to be opened under an already-declared agent.
-    ///
-    /// A session a person spins up is [`SessionOrigin::User`](crate::worker::pty::SessionOrigin)
-    /// and is the only kind that carries a name; a dispatched one is labelled
-    /// from its task. Blank leaves it unnamed rather than inventing one.
-    SessionName {
-        /// The agent whose harness type and workspace the session inherits.
-        agent_id: String,
-        /// Whether the orchestrator may dispatch into it — ownership at birth.
-        managed: bool,
-    },
-    /// Add a named OpenRouter-backed coding harness.
-    CustomHarnessAdd,
-    /// Edit the custom harness with the given stable id.
-    CustomHarnessEdit(String),
-    /// Declare a lifecycle hook for every harness Medulla launches.
-    HookAdd,
-    /// Edit the hook at the given row of the Hooks page.
-    HookEdit(usize),
-    /// Reject a workflow proposal with the operator's explanation.
-    RejectProposal {
-        /// The workflow the proposal belongs to.
-        workflow: String,
-        /// The proposal awaiting the decision.
-        proposal_id: String,
-    },
-    /// Answer a pending sub-agent question.
-    AnswerQuestion {
-        /// The cycle the question belongs to.
-        cycle_id: String,
-        /// The pending question's id.
-        question_id: String,
-    },
-    /// Answer a prepared decision and dismiss it locally once routed.
-    DecisionAnswer {
-        /// Stable decision id.
-        decision_id: String,
-        /// Cycle that owns the question.
-        cycle_id: String,
-        /// Harness question id.
-        question_id: String,
-    },
-    /// Comment on the given feedback board item.
-    FeedbackComment {
-        /// The item being commented on.
-        id: String,
-    },
-    /// Step one of submitting feedback: the title. Submitting advances to
-    /// [`PromptKind::FeedbackBody`] rather than sending anything.
-    FeedbackTitle {
-        /// Feature request or bug report, chosen by which key opened the prompt.
-        kind: FeedbackType,
-    },
-    /// Step two of submitting feedback: the body. Submitting sends it.
-    FeedbackBody {
-        /// Feature request or bug report.
-        kind: FeedbackType,
-        /// The title captured in step one.
-        title: String,
-    },
-    /// One field of a workflow's declared inputs, collected before the run
-    /// starts. Submitting either opens the prompt for the next field or, when
-    /// this was the last, dispatches the run.
-    ///
-    /// The whole set is carried on the prompt rather than parked in `App`
-    /// state, so cancelling with `Esc` abandons the collected values with it —
-    /// a half-filled set cannot leak into the next run.
-    WorkflowInput {
-        /// The workflow the values are being collected for.
-        workflow_id: String,
-        /// Whether to dispatch a dry run rather than a real one.
-        dry_run: bool,
-        /// The fields still to ask about; the head is the one on screen.
-        remaining: Vec<medulla::workflows::WorkflowInput>,
-        /// What has been collected so far, keyed by input name.
-        collected: serde_json::Map<String, serde_json::Value>,
-    },
-}
-
 /// The Feedback surface's state: the loaded page, the selected row, that row's
 /// comments, and the active query.
 pub(in crate::ui::app) struct FeedbackState {
@@ -887,9 +571,6 @@ impl Default for FeedbackState {
     }
 }
 
-/// A single-line inline input overlay shared with daemon controls.
-pub(in crate::ui::app) type Prompt = TextPrompt<PromptKind>;
-
 /// Cached credential-presence flags displayed by Routing's Manage Keys pane.
 #[derive(Default)]
 pub(in crate::ui::app) struct CredentialStatus {
@@ -913,8 +594,6 @@ pub struct App {
     /// Git changes from the selected session or operator-chosen commit.
     pub(in crate::ui::app) changes: super::super::changes::GitChangesState,
     pub(in crate::ui::app) draft: Draft,
-    pub(in crate::ui::app) history: Vec<String>,
-    pub(in crate::ui::app) history_index: i64,
     pub(in crate::ui::app) selected: usize,
     /// The Overview tab's animated workflow graph. Held on the app because its
     /// simulation has to survive between frames; it is advanced by the draw
@@ -926,7 +605,7 @@ pub struct App {
     pub(in crate::ui::app) update_notice: Option<String>,
     pub(in crate::ui::app) contexts: Vec<ContextItem>,
     pub(in crate::ui::app) context_index: usize,
-    pub(in crate::ui::app) agent_index: usize,
+    pub(in crate::ui::app) rail_index: usize,
     /// Which selectable rail row remains selected while the live rail is rebuilt.
     pub(in crate::ui::app) agent_anchor: Option<super::super::rail::RailAnchor>,
     /// Extra pages of sublanes revealed under an agent lane, keyed by lane key.
@@ -946,10 +625,9 @@ pub struct App {
     pub(in crate::ui::app) watching: Option<(String, String)>,
     /// The watched `(worker, task)` awaiting destructive-action confirmation.
     pub(in crate::ui::app) kill_armed: Option<(String, String)>,
-    /// Which half of the Agents tab the keyboard is driving.
-    pub(in crate::ui::app) agents_focus: AgentsFocus,
+    /// The workflow awaiting a destructive-action confirmation.
+    pub(in crate::ui::app) workflow_delete_armed: Option<(String, String)>,
     pub(in crate::ui::app) agent_scroll: usize,
-    pub(in crate::ui::app) chat_scroll: usize,
     /// Selected row in the command peek, while it is open.
     pub(in crate::ui::app) command_index: usize,
     /// Selected row on the Routing Hosts page.
@@ -1118,7 +796,7 @@ pub struct App {
     pub(in crate::ui::app) area: Rect,
     pub(in crate::ui::app) hit_tabs: Vec<(u16, u16)>,
     pub(in crate::ui::app) hit_tabs_row: u16,
-    /// Where the Agents rail drew, and the rendered row each visible line
+    /// Where the Sessions rail drew, and the rendered row each visible line
     /// belongs to. A row may wrap onto several lines, so a click resolves
     /// through this snapshot rather than by adding an offset to a freshly
     /// rebuilt row list that may have changed since the frame was drawn.
@@ -1179,7 +857,7 @@ pub struct App {
     // picture of the world — the host is a peer to it, not part of it.
     pub(in crate::ui::app) host_obs: Option<medulla::daemon::embedded::HostObservation>,
     // The live sessions this device is running. `None` when this machine
-    // does not host, in which case the Agents tab has no local screen to show
+    // does not host, in which case the Sessions tab has no local screen to show
     // and falls back to a remote worker's streamed one, or to the transcript.
     pub(in crate::ui::app) local_sessions: Option<crate::ui::harness_pane::LocalSessions>,
     // Workflow runs the harnesses on this device started over MCP, keyed by the
@@ -1197,7 +875,7 @@ pub struct App {
     // `Chrome` whenever the attached session stops being the selected one, so
     // the operator's keys can never land in a session they are not looking at.
     pub(in crate::ui::app) harness_focus: crate::ui::harness_pane::HarnessFocus,
-    // The session the Agents pane resolved on the last draw, and the
+    // The session the Sessions pane resolved on the last draw, and the
     // only one the attach chord can act on. Recorded during render because that
     // is where the rail cursor is turned into a selection; cleared at the top of
     // every draw so it can never name a pane that is no longer on screen.
@@ -1223,18 +901,11 @@ pub struct App {
     // which goes on believing the button is still down and misplaces everything
     // it draws in response to the pointer afterwards.
     pub(in crate::ui::app) pointer_grab: Option<PointerGrab>,
-    // Where the hand-back question drew each of its answers, and the key each
-    // one stands for. Recorded during the draw so a click can be answered by
-    // replaying the keystroke rather than by a second copy of the routing: the
-    // two would drift, and the direction they would drift in is a pointer that
-    // hands a harness back when the operator meant to keep it.
-    pub(in crate::ui::app) hit_handback: Vec<(Rect, crossterm::event::KeyCode)>,
     // The "start a session" picker's outer box, and where each offered row was
-    // drawn with the index it stands for in that step's list. Recorded during
-    // the draw for the same reason the hand-back answers are: the harness step
+    // drawn with the index it stands for in that step's list. The harness step
     // windows a long list, so screen position and list index are not the same
     // number, and only the draw knows which window it used.
-    pub(in crate::ui::app) hit_agent_picker: Option<(Rect, Vec<(Rect, usize)>)>,
+    pub(in crate::ui::app) hit_session_picker: Option<(Rect, Vec<(Rect, usize)>)>,
     // The agent behind a selected session row that this device does NOT run,
     // recorded alongside `pane_session` on the same draw.
     //
@@ -1245,65 +916,15 @@ pub struct App {
     // operator who presses the take chord on one deserves that answer rather
     // than "no session on this row".
     pub(in crate::ui::app) pane_remote_session: Option<String>,
-    // The session selected on the Agents rail, retained while another tab is
+    // The session selected on the Sessions rail, retained while another tab is
     // visible. Unlike `pane_session`, this is navigation state rather than a
     // keyboard-routing capability: Changes uses it to keep following
     // the repository the operator selected after an intervening tab draw.
     pub(in crate::ui::app) rail_session: Option<String>,
     /// The "start a session" picker, while it is open.
-    pub(in crate::ui::app) agent_picker: Option<AgentPicker>,
-    /// The "you still hold this session" confirmation, while it is open.
-    pub(in crate::ui::app) handback_prompt: Option<HandbackPrompt>,
+    pub(in crate::ui::app) session_picker: Option<SessionPicker>,
     /// How far the Help page is scrolled, in lines.
     pub(in crate::ui::app) help_scroll: u16,
-    /// What releasing a held session does, from `[harness].handback`.
-    pub(in crate::ui::app) handback_policy: HandbackPolicy,
-    /// The sessions taken *from the orchestrator*, and how each was taken.
-    ///
-    /// Membership is the whole question the release prompt exists to ask. A
-    /// session the operator started themselves was never the orchestrator's, so
-    /// letting go of the keyboard owes it nothing, and asking about it every
-    /// time is how a confirmation becomes furniture. One taken out from under
-    /// dispatch is different: walking away from it leaves the orchestrator
-    /// locked out of a workspace, silently and indefinitely.
-    ///
-    /// The origin distinguishes "you picked this up by focusing in" from "you
-    /// asked for it with /takecontrol", which the release prompt words
-    /// differently: the second was a decision, and re-asking about it as though
-    /// it were an accident is how a confirmation becomes noise.
-    ///
-    /// Keyed by session rather than kept as one flag because several sessions
-    /// can be held at once — take A, keep it on release, then attach to B. A
-    /// single flag answered for whichever was touched last: it worded B's
-    /// question with A's takeover, and kept asking about sessions nobody had
-    /// taken from anyone.
-    pub(in crate::ui::app) sessions_taken: std::collections::HashMap<String, TakeOrigin>,
-    /// Sessions the operator has at some point given to the orchestrator.
-    ///
-    /// Separate from [`sessions_taken`](Self::sessions_taken), which says who
-    /// holds a session *now*; this remembers that dispatch once had a claim on
-    /// it, and it is never cleared.
-    ///
-    /// Needed because [`SessionOrigin`](crate::worker::pty::SessionOrigin) alone
-    /// under-counts. A session the operator started carries origin `User`
-    /// forever, but handing it back makes it genuinely dispatchable —
-    /// `SessionHandle::serves_label` lets a handed-back operator session be
-    /// adopted for a task. If that turn then fails, the executor hands it
-    /// straight back to the operator without going through
-    /// [`take_session`](App::take_session), leaving a session with origin
-    /// `User`, no entry in `sessions_taken`, and dispatch locked out of it.
-    /// Releasing that in silence is the bug this set closes.
-    pub(in crate::ui::app) orchestrator_claimed: std::collections::HashSet<String>,
-    /// Commands raised by synchronous input handlers, drained by the event loop.
-    ///
-    /// The key and mouse handlers that move session control cannot return a
-    /// [`Cmd`] — `handle_handback_key` returns `()`, `handle_harness_key`
-    /// returns `bool`, and the mouse path returns nothing — and threading an
-    /// `Option<Cmd>` back through all three would be a wide, test-breaking
-    /// change to say one thing. So they push here instead, and the loop drains
-    /// it right after the event that produced it. Commands run in submission
-    /// order.
-    pub(in crate::ui::app) pending_cmds: std::collections::VecDeque<Cmd>,
     /// Whether operator-started sessions launch with the permission-bypass
     /// flag, from `[harness].skipPermissions`.
     pub(in crate::ui::app) harness_skip_permissions: bool,

@@ -5,6 +5,27 @@
 //! one job — make a model that has never seen this workflow call
 //! `mcp__medulla__workflow_run` with the right argument shape, and behave
 //! sensibly when the tool is not attached.
+//!
+//! # Why the text is terse
+//!
+//! Every installed skill is a standing tax on the operator's context, paid twice
+//! over: a harness loads each skill's frontmatter `description` into *every*
+//! session so the model can match a request against it, and loads the body
+//! whenever the skill fires. An operator with ten saved workflows was spending
+//! thousands of tokens before typing anything.
+//!
+//! So the template says each thing exactly once, in the fewest tokens that still
+//! say it, and nothing that is true of every workflow is repeated in prose that
+//! the reader could infer. Two rules keep it that way:
+//!
+//! - **Nothing is dropped, only relocated.** A description or an input note too
+//!   long for the frontmatter is condensed there and kept whole in the body;
+//!   what the body condenses stays in the store, one
+//!   [`workflow_get`](GET_WORKFLOW_TOOL) call away, and the body says so. The
+//!   skill is an index into the workflow, not a copy of it.
+//! - **Condensing is sentence-aware.** A note is cut at a sentence boundary
+//!   where one fits and at a word boundary otherwise, so a truncated line still
+//!   reads as a sentence rather than as damage.
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -21,6 +42,43 @@ const RUN_TOOL: &str = "mcp__medulla__workflow_run";
 /// skill that only knew the first would report "it is running" and never say
 /// how it went.
 const GET_TOOL: &str = "mcp__medulla__workflow_run_get";
+
+/// How a session says which checkout the run should work in.
+///
+/// Written into every generated skill because the alternative is worse than not
+/// knowing: a session that cannot say where a run works either starts it against
+/// whatever directory the server happens to be in, or invents a declared input
+/// for the path — which the script policy then refuses for leaving the
+/// workspace.
+/// Kept tight on purpose: this rides in every generated skill body, which is
+/// held to a token budget the render tests enforce.
+const WORKSPACE_SECTION: &str = "## Where it runs\n\n\
+     The run works in the directory Medulla's MCP server started in. To point it \
+     at another checkout, add `\"workspace\": \"<path>\"` to the call — absolute, or \
+     relative to that one. That is the only way to move a run; a path passed as \
+     an ordinary input cannot leave the workspace, and a workspace that is not a \
+     directory is refused.\n";
+/// The tool that serves the full text this rendering condensed.
+///
+/// Named wherever a note is shortened, so the shortening is a pointer rather
+/// than a loss: the store still holds every word the workflow's author wrote.
+const GET_WORKFLOW_TOOL: &str = "mcp__medulla__workflow_get";
+
+/// How much workflow description the frontmatter carries.
+///
+/// The frontmatter is the part loaded into every session whether the skill fires
+/// or not, so it is the one place where length is charged unconditionally. A
+/// couple of sentences is enough for the model to match a paraphrased request
+/// against; the rest lands in the body, which is only read once the match has
+/// already been made.
+pub(super) const MAX_FRONTMATTER_DESCRIPTION_CHARS: usize = 220;
+
+/// How much of an input's note the inputs list carries.
+///
+/// Long enough for the sentence that says what the input *is*, short enough that
+/// a workflow with a thoroughly documented signature does not turn its skill
+/// into the documentation. The remainder stays in the store.
+const MAX_INPUT_NOTE_CHARS: usize = 120;
 
 /// The longest slug either verified harness accepts as a skill name.
 ///
@@ -115,27 +173,22 @@ pub fn render_command(skill: &super::RenderedSkill, summary: &WorkflowSummary) -
     ));
     out.push_str("---\n\n");
     out.push_str(&format!(
-        "Run the `{id}` Medulla workflow for the operator.\n\n",
-        id = summary.id
-    ));
-    out.push_str(&format!(
-        "Call `{RUN_TOOL}` with:\n\n```json\n{example}\n```\n\n",
+        "Run the `{id}` Medulla workflow for the operator, who typed: $ARGUMENTS\n\n\
+         ```json\n{example}\n```\n\n",
+        id = summary.id,
         example = call_example(summary)
     ));
-    out.push_str(
-        "The operator typed: $ARGUMENTS\n\n\
-         Map that text onto the inputs above. Ask for any required input it does not \
-         supply rather than guessing — a missing or misnamed input is rejected and \
-         nothing runs.\n\n",
-    );
-    out.push_str(&inputs_section(&summary.inputs));
+    out.push_str(&inputs_section(summary));
+    // The command is typed by an operator who wants it *run*, so it says the one
+    // thing the skill's fallback line does not: what to do with their words.
+    //
+    // `$ARGUMENTS` now rides in the header line above, so the separate paragraph
+    // this branch used to add here would say it twice.
     out.push('\n');
+    out.push_str(WORKSPACE_SECTION);
     out.push_str(&format!(
-        "The call comes back at once with a `runId`; the run keeps going without it, \
-         and can take minutes to hours. Follow it with `{GET_TOOL}` using that id, and \
-         report the run's status and, if it failed, the id and error of the failing \
-         step.\n\n{}",
-        fallback_section(summary)
+        "\nMap the typed text onto those inputs, then follow the run with `{GET_TOOL}`.\n\n{}",
+        fallback_line(summary)
     ));
     seal(&summary.id, &out).0
 }
@@ -325,32 +378,147 @@ fn parse_marker_fields(rest: &str) -> Option<(String, String)> {
     Some((workflow?, rev?))
 }
 
-/// The frontmatter description: the workflow's own words plus an explicit
-/// trigger clause.
+/// The frontmatter description: the workflow's own words plus a trigger clause.
 ///
 /// The clause is not decoration. A description that only restates the workflow
 /// name gives the model nothing to match a paraphrased request against, and the
 /// whole feature turns on that match. It is also why the result is never empty:
 /// a workflow whose author wrote no description still gets a usable trigger.
+///
+/// Both halves are kept short because this string is loaded into every session,
+/// fired or not. The clause names the workflow id and the two things a request
+/// can look like — "run it" or "do what it does" — in one line rather than a
+/// sentence of throat-clearing, and the workflow's own words are condensed to
+/// [`MAX_FRONTMATTER_DESCRIPTION_CHARS`]. Anything condensed away is restored in
+/// the body by [`skill_content`], so the full text is still one skill-fire away.
 fn description_for(summary: &WorkflowSummary) -> String {
-    let own = summary.description.trim();
     let trigger = format!(
-        "Use when the operator asks to run the Medulla \"{id}\" workflow, or describes the work it does.",
+        "Medulla workflow \"{id}\" — use when asked to run it, or to do this work.",
         id = summary.id
     );
-    if own.is_empty() {
-        trigger
+    match condense(&summary.description, MAX_FRONTMATTER_DESCRIPTION_CHARS) {
+        Some(own) => format!("{own} {trigger}"),
+        None => trigger,
+    }
+}
+
+/// Whether the frontmatter description dropped any of the workflow's own words.
+///
+/// Drives the one conditional paragraph in the body: reprinting a description
+/// the frontmatter already carries in full would be the exact duplication this
+/// template exists to remove, but silently losing the tail of a long one would
+/// be worse.
+fn description_was_condensed(summary: &WorkflowSummary) -> bool {
+    was_condensed(&summary.description, MAX_FRONTMATTER_DESCRIPTION_CHARS)
+}
+
+/// Collapses all whitespace runs — newlines included — to single spaces.
+///
+/// Descriptions and input notes are authored as prose and may wrap over several
+/// lines; every place they are rendered here is a one-line context (a YAML
+/// scalar, a list item), so the normalisation happens once, up front.
+fn normalise_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether rendering prose at `max` characters omits any of its words.
+///
+/// [`condense`] closes a short unterminated sentence with punctuation, which is
+/// presentation rather than truncation. Track omission from the normalised
+/// source length so that punctuation alone does not advertise a needless
+/// workflow lookup.
+fn was_condensed(text: &str, max: usize) -> bool {
+    normalise_ws(text).chars().count() > max
+}
+
+/// Shortens prose to `max` characters, or `None` when there is no prose at all.
+///
+/// Sentence boundaries are preferred: a note cut after its first sentence still
+/// reads as something its author wrote, whereas a note cut mid-clause reads as a
+/// bug. Only when even the first sentence overruns does this fall back to a word
+/// boundary and an ellipsis, which is the signal to the reader that the rest is
+/// elsewhere. Text that already fits is returned whole with a closing period, so
+/// the caller can always join it to a following sentence.
+pub(super) fn condense(text: &str, max: usize) -> Option<String> {
+    let text = normalise_ws(text);
+    if text.is_empty() {
+        return None;
+    }
+    if text.chars().count() <= max {
+        return Some(terminate(&text));
+    }
+    // Accumulate whole sentences while they fit, so a two-sentence note under
+    // the cap keeps both rather than only its first.
+    let mut kept = String::new();
+    for sentence in sentences(&text) {
+        if kept.chars().count() + sentence.trim_end().chars().count() > max {
+            break;
+        }
+        kept.push_str(sentence);
+    }
+    let kept = kept.trim_end();
+    if !kept.is_empty() {
+        return Some(terminate(kept));
+    }
+    // The opening sentence alone overruns: cut on a word boundary instead, and
+    // say so with an ellipsis rather than pretending the sentence ended there.
+    let mut truncated = String::new();
+    for word in text.split(' ') {
+        if truncated.chars().count() + word.chars().count() + 1 > max.saturating_sub(1) {
+            break;
+        }
+        if !truncated.is_empty() {
+            truncated.push(' ');
+        }
+        truncated.push_str(word);
+    }
+    if truncated.is_empty() {
+        // A single word longer than the cap. Cut it rather than return nothing.
+        truncated = text.chars().take(max.saturating_sub(1)).collect();
+    }
+    Some(format!("{truncated}…"))
+}
+
+/// Splits normalised prose into sentences, each keeping its own terminator and
+/// the space that followed it.
+///
+/// Deliberately simple — a terminator followed by a space ends a sentence. An
+/// abbreviation would split early, which costs a few characters of a condensed
+/// note and nothing else; the alternative is a sentence tokeniser this file has
+/// no business carrying.
+fn sentences(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(byte, b'.' | b'!' | b'?') && bytes.get(index + 1) == Some(&b' ') {
+            out.push(&text[start..index + 2]);
+            start = index + 2;
+        }
+    }
+    if start < text.len() {
+        out.push(&text[start..]);
+    }
+    out
+}
+
+/// Gives prose a closing period unless it already ends in terminating
+/// punctuation, so it can be joined to the trigger clause without running on.
+fn terminate(text: &str) -> String {
+    if text.ends_with('.') || text.ends_with('!') || text.ends_with('?') || text.ends_with('…') {
+        text.to_string()
     } else {
-        let own = if own.ends_with('.') || own.ends_with('!') || own.ends_with('?') {
-            own.to_string()
-        } else {
-            format!("{own}.")
-        };
-        format!("{own} {trigger}")
+        format!("{text}.")
     }
 }
 
 /// The whole skill body below the marker.
+///
+/// Four things, in the order a model needs them: the call to make, the inputs to
+/// fill in, what the answer means, and what to do when the tool is missing. The
+/// headings that used to separate them are gone — a section header costs tokens
+/// on every load and earns them back only in a document long enough to navigate,
+/// which this deliberately is not.
 fn skill_content(summary: &WorkflowSummary, slug: &str, description: &str) -> String {
     let mut out = String::new();
     out.push_str("---\n");
@@ -359,103 +527,114 @@ fn skill_content(summary: &WorkflowSummary, slug: &str, description: &str) -> St
     out.push_str("---\n\n");
 
     out.push_str(&format!(
-        "# Run the `{id}` Medulla workflow\n\n",
-        id = summary.id
-    ));
-    if !summary.description.trim().is_empty() {
-        out.push_str(&format!("{}\n\n", summary.description.trim()));
-    }
-    out.push_str(&format!(
-        "Start it with the Medulla MCP server — one tool call, no shell:\n\n```json\n{example}\n```\n\n",
+        "# `{id}`\n\n```json\n{example}\n```\n\n",
+        id = summary.id,
         example = call_example(summary)
     ));
 
-    out.push_str(&inputs_section(&summary.inputs));
+    out.push_str(&inputs_section(summary));
+    out.push('\n');
+    out.push_str(WORKSPACE_SECTION);
     out.push('\n');
 
-    out.push_str(&format!(
-        "## While it runs\n\n\
-         This call **does not wait for the run**. It starts it and answers at once with \
-         a `runId`, and the run carries on without the call — a workflow can take \
-         minutes to hours. Do not start it again; tell the operator it is under way if \
-         they ask, and follow the run by its id.\n\n\
-         ## Reading the result\n\n\
-         Call `{GET_TOOL}` with that `runId`. While `status` is `running` the run has \
-         not finished — say so and check again later rather than treating it as a \
-         result. Once it settles, `status` is `succeeded`, `failed`, or `cancelled`, and \
-         `steps` lists each node with its own status and a bounded preview of its \
-         output; pass `\"steps\": \"full\"` when a truncated one is what you need to \
-         read. On failure, report the id of the first failing step and its error \
-         verbatim rather than summarising it away; that string is what the operator \
-         needs to fix the workflow.\n\n"
-    ));
-    out.push_str(&fallback_section(summary));
+    out.push_str(&fallback_line(summary));
     out
 }
 
-/// The inputs table, or the sentence that replaces it when there are none.
-fn inputs_section(inputs: &[WorkflowInput]) -> String {
-    if inputs.is_empty() {
-        return "## Inputs\n\nThis workflow takes no inputs. Pass `\"inputs\": {}`.\n".to_string();
-    }
-    let mut out = String::from("## Inputs\n\n| name | type | required | meaning | default |\n| --- | --- | --- | --- | --- |\n");
-    for input in inputs {
-        let meaning = input
-            .description
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .unwrap_or("—");
-        let default = match &input.default {
-            Some(value) => format!("`{value}`"),
-            None => "—".to_string(),
-        };
-        out.push_str(&format!(
-            "| `{name}` | {ty} | {required} | {meaning} | {default} |\n",
-            name = input.name,
-            ty = input.ty.as_str(),
-            required = if input.required { "yes" } else { "no" },
-            meaning = escape_cell(meaning),
-        ));
-    }
-    out.push_str(
-        "\nCollect every required input from the operator before calling; do not invent \
-         one. A missing or misnamed input is rejected and nothing runs.\n",
-    );
-    out
-}
-
-/// The paragraph that keeps a skill useful when the server is not attached.
+/// The one sentence that keeps a skill useful when the server is not attached.
 ///
-/// Skills are copied into user-scope directories that outlive any particular
-/// MCP configuration, so the tool being absent is a normal state, not a bug —
-/// and a model that dead-ends there is worse than no skill at all.
-fn fallback_section(summary: &WorkflowSummary) -> String {
+/// Everything else a caller needs about `workflow_run` — that it answers at once
+/// with a `runId`, that the run outlives the call by minutes to hours, that
+/// [`workflow_run_get`](GET_TOOL) is how you read it, that a missing or misnamed
+/// input is rejected — is already in the tool's own MCP description and input
+/// schema, which the model is holding whenever the tool exists. Restating it
+/// here charged every skill for text the reader already had.
+///
+/// What the tool's description cannot cover is its own absence. Skills are
+/// copied into user-scope directories that outlive any particular MCP
+/// configuration, so a missing server is a normal state rather than a bug — and
+/// a model that dead-ends there, or worse reports a run it never started, is
+/// worse than no skill at all. Hence this line, and only this line.
+fn fallback_line(summary: &WorkflowSummary) -> String {
+    let inputs =
+        serde_json::to_string(&example_input_map(summary)).unwrap_or_else(|_| "{}".to_string());
     format!(
-        "## If the tool is not available\n\n\
-         `{RUN_TOOL}` missing means the Medulla MCP server is not attached to this \
-         session. Do not claim the run started. Either run it from the shell:\n\n\
-         ```sh\nmedulla workflow run {id} --inputs '{inputs}'\n```\n\n\
-         or attach the server once with `medulla skills install --with-mcp` and try the \
-         tool again.\n",
+        "No `{RUN_TOOL}`? The Medulla MCP server is not attached — say so rather than \
+         claiming a start, and run:\n\n```sh\nmedulla workflow run {id} --inputs {inputs}\n```\n\n\
+         Or attach it once with `medulla skills install --with-mcp`.\n",
         id = shell_quote_arg(&summary.id),
-        inputs = example_inputs(summary),
+        inputs = shell_quote_arg(&inputs),
     )
 }
 
+/// The inputs list, or the sentence that replaces it when there are none.
+///
+/// A list rather than the markdown table this used to be: the table spent five
+/// header cells and a rule row on every workflow, plus two pipes and padding per
+/// input, to lay out what `name type = default — note` says in one line.
+///
+/// Notes are condensed to [`MAX_INPUT_NOTE_CHARS`]. Whenever this rendering — or
+/// the frontmatter above it — had to shorten the author's words, the trailer
+/// names [`workflow_get`](GET_WORKFLOW_TOOL), which serves them whole. That
+/// pointer is why the skill can afford to be an index rather than a copy: the
+/// full text is one call away, and only fetched by a model that needs it.
+fn inputs_section(summary: &WorkflowSummary) -> String {
+    let mut condensed_any = description_was_condensed(summary);
+    if summary.inputs.is_empty() {
+        let mut out = String::from("No inputs — pass `\"inputs\": {}`.\n");
+        if condensed_any {
+            out.push_str(&format!("\n{}\n", full_text_pointer().trim()));
+        }
+        return out;
+    }
+    let mut out = String::from("Inputs (`*` required):\n\n");
+    for input in &summary.inputs {
+        out.push_str(&format!(
+            "- `{name}`{star} {ty}",
+            name = input.name,
+            star = if input.required { "*" } else { "" },
+            ty = input.ty.as_str(),
+        ));
+        if let Some(default) = &input.default {
+            out.push_str(&format!(" = `{default}`"));
+        }
+        let note = input.description.as_deref().unwrap_or_default();
+        if let Some(condensed) = condense(note, MAX_INPUT_NOTE_CHARS) {
+            condensed_any |= was_condensed(note, MAX_INPUT_NOTE_CHARS);
+            out.push_str(&format!(" — {condensed}"));
+        }
+        out.push('\n');
+    }
+    // Examples include type-shaped values for every input, including required
+    // ones. Make clear that those placeholders demonstrate the call shape; they
+    // are not authorisation to invent an operator's required values.
+    if summary.inputs.iter().any(|input| input.required) {
+        out.push_str(
+            "\nBefore calling, ask the operator for every required `*` input they did not supply; never use an example placeholder as its value.\n",
+        );
+    }
+    if condensed_any {
+        out.push_str(&format!("\n{}\n", full_text_pointer().trim()));
+    }
+    out
+}
+
+/// The sentence that says where the words this rendering shortened still live.
+fn full_text_pointer() -> String {
+    format!("`{GET_WORKFLOW_TOOL}` has the full description and input notes.")
+}
+
 /// A concrete, copyable call for this workflow's declared signature.
+///
+/// Written on one line rather than pretty-printed: a model reads the argument
+/// shape either way, and the indented form spends a line and its padding on
+/// every input the list below already names.
 fn call_example(summary: &WorkflowSummary) -> String {
     let call = json!({ "id": summary.id, "inputs": example_input_map(summary) });
     format!(
         "{RUN_TOOL}\n{}",
-        serde_json::to_string_pretty(&call).unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string(&call).unwrap_or_else(|_| "{}".to_string())
     )
-}
-
-/// Just the inputs object, compact, for the shell fallback.
-fn example_inputs(summary: &WorkflowSummary) -> String {
-    serde_json::to_string(&Value::Object(example_input_map(summary)))
-        .unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Placeholder values for every declared input.
@@ -516,23 +695,19 @@ fn yaml_scalar(text: &str) -> String {
     out
 }
 
-/// Keeps a description with a pipe in it inside its markdown table cell.
-fn escape_cell(text: &str) -> String {
-    text.replace('|', "\\|").replace('\n', " ")
-}
-
-/// Renders a workflow id as a single shell word.
+/// Renders text as a single shell word.
 ///
-/// Ids are normally plain, but the fallback line is a command an operator will
-/// paste, so an id with a space in it must not silently become two arguments.
-fn shell_quote_arg(id: &str) -> String {
-    if id
+/// The fallback line is a command an operator will paste, so a workflow id or
+/// JSON value with shell-significant characters must not become multiple
+/// arguments or change the command's meaning.
+fn shell_quote_arg(value: &str) -> String {
+    if value
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-        && !id.is_empty()
+        && !value.is_empty()
     {
-        id.to_string()
+        value.to_string()
     } else {
-        format!("'{}'", id.replace('\'', "'\\''"))
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }

@@ -150,7 +150,16 @@ impl MedullaToolInvoker {
         let cwd = non_empty_str(&args, "cwd", "a non-empty path")?
             .map(|raw| policy.resolve_cwd(raw))
             .transpose()?;
-        let env = read_env(args.get("env"))?;
+        let mut env = read_env(args.get("env"))?;
+        // The run's workspace, named so a script can use it without the author
+        // knowing which checkout this run was pointed at — the counterpart to
+        // `workspace` being a run parameter rather than a declared input.
+        // Layered *under* `args.env`, so a step that sets it deliberately still
+        // wins.
+        if let Some(workspace) = policy.workspace() {
+            env.entry("MEDULLA_WORKSPACE".to_string())
+                .or_insert_with(|| workspace.to_string_lossy().to_string());
+        }
 
         // A node may name its own interpreter, which is how one step reaches
         // the operator's login shell without every step paying for it. Absent,

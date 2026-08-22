@@ -227,17 +227,9 @@ impl Default for HookDefaultsConfig {
 /// Distinct from [`HostSection`], which is about the harnesses the *orchestrator*
 /// starts to serve tasks. These are the ones an operator opens by hand and the
 /// orchestrator is not allowed to touch.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct HarnessSection {
-    /// What releasing the keyboard does when the operator holds the harness:
-    /// `ask` (the default), `always`, or `never`.
-    ///
-    /// `ask` prompts, the way an editor prompts about unsaved changes — an
-    /// operator who took a harness over and walked away has locked the
-    /// orchestrator out of it, and releasing the keyboard is the last moment
-    /// they are certainly thinking about it.
-    pub handback: String,
     /// Whether an operator-started harness launches with its provider's
     /// permission-bypass flag.
     ///
@@ -251,16 +243,24 @@ pub struct HarnessSection {
     /// orchestrated tasks may run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_workspaces: Vec<String>,
+    /// Saved directory shortcuts for the manual harness launcher.
+    ///
+    /// Favorites are deliberately separate from recent history: a favorite is
+    /// an operator's named destination and remains useful even after it has not
+    /// been used for a while. Like history, it does not grant the orchestrator
+    /// access to the directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub favorite_workspaces: Vec<FavoriteWorkspace>,
 }
 
-impl Default for HarnessSection {
-    fn default() -> Self {
-        HarnessSection {
-            handback: "ask".to_string(),
-            skip_permissions: false,
-            recent_workspaces: Vec::new(),
-        }
-    }
+/// A durable, operator-chosen name for a directory used by the manual launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteWorkspace {
+    /// The short name shown in the directory picker and matched by search.
+    pub name: String,
+    /// The directory the favorite opens.
+    pub path: String,
 }
 
 /// The `host` section: whether this machine also *runs* the work the
@@ -458,7 +458,23 @@ pub struct WorkflowsConfig {
     pub evolve: EvolveSettings,
 }
 
-/// Reject operator-only harnesses at the persisted workflow-dispatch boundary.
+/// Reject a harness that cannot take a dispatched task, at the persisted
+/// workflow-dispatch boundary.
+///
+/// Every built-in harness currently can, including OpenHuman — naming it here
+/// is how an operator says "run unrouted nodes on my own core", which is a
+/// legitimate choice rather than the misconfiguration this once treated it as.
+/// So this rejects nothing today.
+///
+/// Kept anyway, and kept *here*: this is the one place a provider reaches the
+/// dispatch path from persisted config rather than from a node an author
+/// wrote, and the node path already refuses the same thing
+/// ([`crate::flow_engine::harness_choice::HarnessSelector::parse`]). A build
+/// that adds a genuinely operator-only provider should be caught at both doors,
+/// not just the one someone remembered.
+///
+/// The message lists what *is* accepted rather than naming three harnesses
+/// literally, so it cannot drift from the enum the way the previous wording had.
 fn deserialize_dispatch_provider<'de, D>(
     deserializer: D,
 ) -> Result<Option<HarnessProvider>, D::Error>
@@ -467,9 +483,11 @@ where
 {
     let provider = Option::<HarnessProvider>::deserialize(deserializer)?;
     match provider {
-        Some(provider) if !provider.is_dispatchable() => Err(serde::de::Error::custom(
-            "workflows.defaultProvider must be claude, codex, or opencode",
-        )),
+        Some(provider) if !provider.is_dispatchable() => Err(serde::de::Error::custom(format!(
+            "workflows.defaultProvider is `{}`, which cannot run a dispatched task — use one of {}",
+            provider.as_str(),
+            crate::flow_engine::harness_choice::HarnessSelector::builtin_names().join(", "),
+        ))),
         provider => Ok(provider),
     }
 }

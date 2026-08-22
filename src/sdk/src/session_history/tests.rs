@@ -3,8 +3,8 @@
 
 use super::scan::{collect_session_files, is_here, is_session_file, sessions_dir_for};
 use super::summary::{
-    as_message_content, extract_text, first_prompt_text, read_claude_summary, read_codex_summary,
-    slug_label,
+    as_message_content, codex_index_map, codex_thread_label, codex_thread_label_for_cwd,
+    extract_text, first_prompt_text, read_claude_summary, read_codex_summary, slug_label,
 };
 use super::*;
 use crate::ui::util::SLUG_MAX_CHARS;
@@ -26,7 +26,7 @@ fn write_session(dir: &Path, name: &str, contents: &str) -> PathBuf {
 fn ranks_current_cwd_first_then_recency() {
     let tmp = std::env::temp_dir().join(format!("medulla-sh-{}", std::process::id()));
     let claude_dir = tmp.join("claude");
-    let codex_dir = tmp.join("codex");
+    let codex_dir = tmp.join("codex").join("sessions");
     fs::create_dir_all(&claude_dir).unwrap();
     fs::create_dir_all(&codex_dir).unwrap();
 
@@ -53,6 +53,11 @@ fn ranks_current_cwd_first_then_recency() {
             serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"do B here"}]}})
         ),
     );
+    fs::write(
+        tmp.join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-b","thread_name":"Named Codex thread"}).to_string(),
+    )
+    .unwrap();
 
     let mut env = HashMap::new();
     env.insert(
@@ -69,8 +74,8 @@ fn ranks_current_cwd_first_then_recency() {
     assert_eq!(sessions[0].id, "codex-b", "current-cwd session ranks first");
     assert_eq!(sessions[0].agent, SessionAgentKind::Codex);
     assert_eq!(
-        sessions[0].label, "b-here",
-        "the prompt is slugged, filler dropped"
+        sessions[0].label, "named-codex-thread",
+        "Codex's persisted thread name takes precedence over its prompt"
     );
     assert_eq!(sessions[1].id, "claude-a");
     assert_eq!(sessions[1].label, "do-a");
@@ -252,6 +257,169 @@ fn codex_summary_uses_id_fallback_and_no_prompt_label() {
     assert_eq!(summary.id, "codex-x");
     assert_eq!(summary.cwd.as_deref(), Some("/here"));
     assert_eq!(summary.label, "(no prompt)");
+}
+
+#[test]
+fn codex_thread_label_reads_the_persisted_rename() {
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("ship-sidebar")
+    );
+    assert_eq!(codex_thread_label(&env, "missing"), None);
+}
+
+#[test]
+fn codex_thread_label_and_index_map_agree_on_duplicate_ids() {
+    // The index is append-only: a second /rename for the same id appends a
+    // second record. Both the single-id lookup and the batch map must surface
+    // the newest (last) record, or the rail and the Sessions tab diverge.
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-1","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    let map = codex_index_map(&env);
+    assert_eq!(
+        map.get("codex-1").map(String::as_str),
+        Some("land-auth-flow")
+    );
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("land-auth-flow")
+    );
+}
+
+#[test]
+fn codex_thread_label_for_cwd_finds_the_newest_rollout_in_the_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label_for_cwd(&env, &project_str).as_deref(),
+        Some("ship-sidebar")
+    );
+    // A cwd with no session in it has no label to read.
+    let elsewhere = home.path().join("elsewhere").to_string_lossy().into_owned();
+    assert_eq!(codex_thread_label_for_cwd(&env, &elsewhere), None);
+}
+
+#[test]
+fn codex_thread_label_for_cwd_needs_an_unambiguous_folder() {
+    // Two sessions sharing a directory: the cwd cannot prove which rollout
+    // produced this label, so the fallback must decline rather than put one
+    // session's name on the other's row.
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_session(
+        &sessions,
+        "rollout-b.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-b","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-b","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(codex_thread_label_for_cwd(&env, &project_str), None);
+    // A transcript with no recorded cwd is not a candidate either, nor is one
+    // whose head window yields no summary at all.
+    write_session(
+        &sessions,
+        "rollout-cwdless.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-c"}
+        })
+        .to_string(),
+    );
+    write_session(
+        &sessions,
+        "rollout-nonesummary.jsonl",
+        &serde_json::json!({"type":"response_item"}).to_string(),
+    );
+    let alone = home.path().join("solo").to_string_lossy().into_owned();
+    fs::create_dir_all(&alone).unwrap();
+    assert_eq!(codex_thread_label_for_cwd(&env, &alone), None);
 }
 
 #[test]

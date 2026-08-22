@@ -7,11 +7,93 @@ use super::AttentionKind;
 
 /// Phrases that mean the harness is *working*, not waiting.
 ///
-/// Claude and Codex both footer their running turn with "esc to interrupt". A
-/// screen carrying one of these is busy, which is what vetoes the vaguest cues:
-/// a bell rung as a tool finishes must not leave a working harness flagged as
-/// blocked for the rest of its turn.
-const WORKING: &[&str] = &["esctointerrupt", "esctocancel", "ctrlctostop"];
+/// Codex still footers its running turn with "esc to interrupt", and so do the
+/// older Claude builds. A screen carrying one of these is busy, which is what
+/// vetoes the vaguest cues: a bell rung as a tool finishes must not leave a
+/// working harness flagged as blocked for the rest of its turn.
+///
+/// The last entry is Claude's composer placeholder while a turn is in flight —
+/// it replaces the ordinary hint text for exactly as long as the harness is
+/// busy, which makes it the one *phrase* current Claude reliably offers.
+const WORKING: &[&str] = &[
+    "esctointerrupt",
+    "esctocancel",
+    "ctrlctostop",
+    "pressuptoeditqueuedmessages",
+];
+
+/// Glyphs Claude cycles at the head of its live progress line.
+///
+/// It animates, so no single one of them can be required; membership in the set
+/// is what identifies the line.
+const PROGRESS_GLYPHS: &[char] = &['·', '*', '✢', '✳', '∗', '✻', '✽', '✶', '✴'];
+
+/// How far up from the live tail a progress line may be found.
+///
+/// It is drawn immediately above the composer, so a short window is enough — and
+/// necessary, because a transcript is full of retained progress lines from turns
+/// that finished long ago.
+const PROGRESS_TAIL_LINES: usize = 6;
+
+/// Whether Claude's animated progress line is on the live tail of `screen`.
+///
+/// Current Claude Code does *not* print "esc to interrupt". It draws a spinner,
+/// a gerund, and a parenthesised elapsed timer:
+///
+/// ```text
+/// ✽ Considering… (7s · ↓ 193 tokens · thinking with medium effort)
+/// ```
+///
+/// That mattered more than it looks: [`is_working`] is what vetoes the vague
+/// cues, so a Claude whose working state we could not recognise had no veto at
+/// all — and no way to say a harness was busy rather than merely alive.
+///
+/// Matched structurally, on the shape rather than the wording, because the
+/// gerund is drawn from a long and cheerfully unstable list ("Considering",
+/// "Cogitating", "Puzzling"). Three things are required together — the spinner
+/// glyph, the ellipsis, and the elapsed timer — because each alone appears in
+/// ordinary output and the combination does not.
+fn has_live_progress_line(screen: &str) -> bool {
+    screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(PROGRESS_TAIL_LINES)
+        // A normal composer below a retained spinner means Claude has returned
+        // control to the operator. Do not let that old line keep the session
+        // marked busy forever.
+        .take_while(|line| !is_composer(line))
+        .any(is_progress_line)
+}
+
+/// Whether one line is a spinner-led progress line with an elapsed timer.
+fn is_progress_line(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    let Some(first) = trimmed.chars().next() else {
+        return false;
+    };
+    PROGRESS_GLYPHS.contains(&first) && trimmed.contains('…') && has_elapsed_timer(trimmed)
+}
+
+/// Whether `line` carries a `(12s` style elapsed counter.
+///
+/// The digits must be followed by `s` and then the end of the group or a
+/// separator, so a version string like `(2s3)` or a path fragment cannot match.
+fn has_elapsed_timer(line: &str) -> bool {
+    line.match_indices('(').any(|(at, _)| {
+        let rest = &line[at + 1..];
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 {
+            return false;
+        }
+        let mut after = rest[digits..].chars();
+        after.next() == Some('s')
+            && matches!(
+                after.next(),
+                None | Some(' ') | Some(')') | Some('·') | Some('•')
+            )
+    })
+}
 
 /// What each harness puts on screen when it is asking the operator something.
 ///
@@ -40,6 +122,218 @@ const MARKERS: &[(HarnessProvider, &[&str], AttentionKind, &str)] = &[
     ),
 ];
 
+/// Screens that mean the harness stopped because something is wrong.
+///
+/// Read as: if the squashed screen contains the marker, the harness is blocked
+/// for the stated reason. All of these are printed *instead of* a completed
+/// turn — the work did not happen — and every one of them needs a person: a new
+/// credential, a wait for a quota window, a retry.
+///
+/// Provider-agnostic on purpose. These phrases come from the model APIs rather
+/// than from any one CLI's chrome, so they read the same whichever harness
+/// surfaced them, and a new provider inherits the detection for free.
+///
+/// Deliberately narrow. "error" alone appears in every second line of ordinary
+/// tool output; each marker here names a *terminal* condition and nothing that a
+/// harness routinely prints while recovering on its own.
+const ERRORS: &[(&str, &str)] = &[
+    ("usagelimitreached", "usage limit reached"),
+    ("youvehityourusagelimit", "usage limit reached"),
+    ("creditbalanceistoolow", "credit balance too low"),
+    ("invalidapikey", "credential rejected — needs sign-in"),
+    ("oauthtokenhasexpired", "sign-in expired"),
+    ("pleaserunlogin", "needs sign-in"),
+    ("signinwithchatgpt", "needs sign-in"),
+    ("authenticationfailed", "authentication failed"),
+    ("accountdoesnothaveaccess", "account lacks access"),
+];
+
+/// Whether the harness has already recovered from an error it printed earlier.
+///
+/// A terminal retains everything: an expired-token message from an hour ago sits
+/// in the same scrollback as the turn that succeeded after the operator signed
+/// back in. Only the live tail can be a *current* error, so the search is bound
+/// to it the same way the menu detectors bind theirs.
+const ERROR_TAIL_LINES: usize = 12;
+
+/// The blocking error on the live tail of `screen`, if there is one.
+fn blocking_error(screen: &str) -> Option<&'static str> {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(ERROR_TAIL_LINES);
+    let tail = &lines[tail_start..];
+    let error_index = tail.iter().rposition(|line| {
+        if is_composer(line) {
+            return false;
+        }
+        let squashed = squash(line);
+        ERRORS.iter().any(|(marker, _)| squashed.contains(marker))
+    })?;
+    // A submitted retry leaves its old composer in the transcript and restores
+    // the persistent composer once the turn settles. Two composers after an
+    // error therefore prove that a later turn completed; the old error no
+    // longer describes the session's live state.
+    if tail[error_index + 1..]
+        .iter()
+        .filter(|line| is_composer(line))
+        .nth(1)
+        .is_some()
+    {
+        return None;
+    }
+    // An error is terminal only when the harness printed it and then went
+    // idle. The scan covers the matched line onward, because the matched line
+    // itself can be the final line of a completed turn that merely mentions
+    // the phrase — "The invalid API key has been replaced." names the marker
+    // and describes the resolution, so it is not a live error. Any line, the
+    // match or what follows it, that shows the harness kept going — a tool that
+    // echoed "authentication failed" and continued, the tail of a turn that
+    // completed anyway — proves the phrase was part of a turn's output, not the
+    // reason the harness stopped. A wrapped continuation of the error message
+    // itself is not such evidence: a narrow pane breaks "Your limit will reset
+    // at 3pm." onto its own row, and that row must not read as a recovered
+    // turn.
+    if tail[error_index..]
+        .iter()
+        .filter(|line| !is_composer(line))
+        .any(|line| is_recovery_evidence(line))
+    {
+        return None;
+    }
+    // A bare marker phrase that is the last content in the tail, with only the
+    // restored composer beneath it, is ambiguous: it can be a terminal error,
+    // but it can equally be the final line of a completed turn whose reply
+    // merely quotes the phrase — asking the harness to "reply exactly
+    // `authentication failed`" puts that line exactly where an error would sit,
+    // with none of the recovery vocabulary that would name it as a turn's
+    // content. The screen cannot tell the two apart, and a missed blink is
+    // cheaper than a rail that blinks at nothing, so the message must carry
+    // context beyond the bare marker — extra words on the matched line, or a
+    // continuation row below — before it is reported as blocking.
+    let below = &tail[error_index + 1..];
+    if !below.is_empty()
+        && below.iter().all(|line| is_composer(line))
+        && ERRORS
+            .iter()
+            .any(|(marker, _)| squash(tail[error_index]) == *marker)
+    {
+        return None;
+    }
+    // The prompt is part of the terminal viewport too, but it is operator
+    // input rather than harness output; a draft such as `> fix invalid API
+    // key` must not turn an otherwise idle session red. The matched line is a
+    // non-composer by construction, so resolving the description from it skips
+    // any draft while staying pinned to the *latest* failure — rescanning the
+    // whole tail in `ERRORS` table order could report an older error still on
+    // screen instead of the one `error_index` deliberately chose.
+    let matched = squash(tail[error_index]);
+    ERRORS
+        .iter()
+        .find(|(marker, _)| matched.contains(marker))
+        .map(|(_, what)| *what)
+}
+
+/// Whether a non-composer line below a matched error proves the harness went
+/// on — a live status/activity line rather than a wrapped continuation of the
+/// error text itself.
+///
+/// A terminal error message wraps in a narrow pane: "Claude usage limit
+/// reached. Your limit will reset at 3pm." can break after "reached", leaving
+/// a plain-prose continuation row that names no error marker. Such a row is
+/// layout, not recovery. Status lines, by contrast, are marked: they lead with
+/// an activity glyph (`✓ done`, `⏺ Working on it…`, `• Working (8s …)`) or say
+/// in words that the harness is working or finished. That also covers a line
+/// that mentions an error phrase while *describing* its resolution — "The
+/// invalid API key has been replaced." — which names a marker yet says the
+/// problem is over, the opposite of a terminal message.
+fn is_recovery_evidence(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
+    // A checkmark or the record glyph is unambiguously completion/activity —
+    // a harness draws `✓ done`, `⏺ Working on it…` to mark progress and never
+    // opens a terminal error with one — so either stands on its own as proof
+    // the harness went on.
+    if trimmed
+        .chars()
+        .next()
+        .is_some_and(|first| "✓⏺".contains(first))
+    {
+        return true;
+    }
+    // The spinner/bullet family is different: `•`, `*`, `·`, `✽` are also how a
+    // terminal error or its wrapped instruction is commonly prefixed —
+    // `• Invalid API key · Please run /login` opens with `•`. A bare leading
+    // glyph is layout, not evidence the harness recovered, so one of these
+    // lines clears a blocking error only when it carries the full activity
+    // shape: an animated ellipsis or a live elapsed counter (`• Working (8s …)`).
+    if trimmed
+        .chars()
+        .next()
+        .is_some_and(|first| PROGRESS_GLYPHS.contains(&first) || first == '•')
+        && (trimmed.contains('…') || has_elapsed_timer(trimmed))
+    {
+        return true;
+    }
+    let squashed = squash(trimmed);
+    let lower = trimmed.to_lowercase();
+    if WORKING.iter().any(|marker| squashed.contains(marker)) {
+        return true;
+    }
+    // A recovery word is evidence only when it is positive. Matching it by
+    // substring anywhere in the line would clear a genuine terminal error that
+    // *names* the failure in recovering vocabulary: "the API key is not
+    // working" and "the request could not be completed" both contain a
+    // recovery word yet mean the opposite. Guard the match against a negator
+    // so a negated phrase never reads as a recovered turn.
+    has_positive_recovery_word(&lower)
+}
+
+/// Whether `line` (lowercased) contains a recovery word that is not negated.
+///
+/// A recovery word counts as proof the harness went on only when it is not
+/// the object of a negation — the failure "is not working", "could not be
+/// completed", "couldn't be resolved". A separate negator ("not", "never",
+/// "cannot", any `n't` contraction) just before the word, or a `un`/`non`
+/// prefix folded into it ("unresolved", "undone"), disqualifies it: the line
+/// describes the failure rather than a recovered turn. Only near-negation is
+/// considered, so ordinary lines that merely *mention* a negator further back
+/// ("no errors, all fixed") still count as recovery.
+fn has_positive_recovery_word(lower: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "working",
+        "done",
+        "finished",
+        "completed",
+        "succeeded",
+        "replaced",
+        "resolved",
+        "fixed",
+        "recovered",
+        "retried",
+        "retrying",
+    ];
+    const NEGATORS: &[&str] = &["not", "never", "cannot", "can't", "couldn't", "won't"];
+    let negates = |w: &str| -> bool {
+        NEGATORS.contains(&w) || w == "un" || w == "non" || w.ends_with("n't")
+    };
+    WORDS.iter().any(|word| {
+        lower.match_indices(word).any(|(at, _)| {
+            let before = &lower[..at];
+            // `un`/`non` are matched as bare tokens so ordinary words that
+            // merely start with them ("understanding", "none") disqualify
+            // nothing; only when the prefix is the token right before the
+            // recovery word does it negate it.
+            !before
+                .split_whitespace()
+                .rev()
+                .take(3)
+                .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+                .any(negates)
+        })
+    })
+}
+
 /// Whether OpenCode drew its permission action menu.
 ///
 /// Each label alone is ordinary prose ("always allow retries", "allow once").
@@ -67,11 +361,18 @@ fn has_claude_plan_exit_menu(screen: &str) -> bool {
     };
     // The selected row starts the actionable portion of the live menu. A
     // matching row above it belongs to retained output (or an older menu), so
-    // it must not relabel the current choice as a plan-exit decision.
-    tail[selected..]
-        .iter()
-        .enumerate()
-        .any(|(offset, _)| numbered_option_contains(tail, selected + offset, "keepplanning"))
+    // it must not relabel the current choice as a plan-exit decision. Likewise,
+    // a composer below the selected option means Claude accepted the menu and
+    // returned to idle input; those retained options are no longer actionable.
+    if tail[selected + 1..].iter().any(|line| is_composer(line)) {
+        return false;
+    }
+    tail[selected..].iter().enumerate().any(|(offset, _)| {
+        let index = selected + offset;
+        numbered_option_contains(tail, index, "keepplanning")
+            || numbered_option_contains(tail, index, "yesandautoacceptedits")
+            || numbered_option_contains(tail, index, "yesandmanuallyapproveedits")
+    })
 }
 
 /// Whether a numbered option and its wrapped continuation contain `marker`.
@@ -135,8 +436,61 @@ fn squash(text: &str) -> String {
 /// Public because the manager needs it for the bell: a bell that arrives while
 /// the harness is plainly working is a progress chime, not a request.
 pub fn is_working(screen: &str) -> bool {
-    let squashed = squash(screen);
-    WORKING.iter().any(|marker| squashed.contains(marker))
+    has_live_working_marker(screen) || has_live_progress_line(screen)
+}
+
+/// Whether the live tail has returned to an ordinary input composer.
+///
+/// This is the explicit idle signal that balances [`is_working`]. Lifecycle
+/// hooks and terminal paints are asynchronous: after `Stop`, a new spinner can
+/// appear before `UserPromptSubmit` arrives, and after the composer returns the
+/// previous mid-turn hook can still be last in the log. A live screen wins at
+/// either edge; hooks fill the otherwise opaque middle of the turn.
+pub fn is_idle(screen: &str) -> bool {
+    screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(PROGRESS_TAIL_LINES)
+        .any(is_composer)
+}
+
+/// Whether a known working footer remains in the live bottom-of-screen region.
+///
+/// A completed turn can leave its old interrupt hint in scrollback. An ordinary
+/// composer below that hint establishes that control has returned to the user.
+fn has_live_working_marker(screen: &str) -> bool {
+    let lines: Vec<&str> = screen
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail_start = lines.len().saturating_sub(PROGRESS_TAIL_LINES);
+    let mut composer_below = false;
+    for line in lines[tail_start..].iter().rev() {
+        let squashed = squash(line);
+        if WORKING.iter().any(|marker| squashed.contains(marker)) {
+            // A composer row is operator input, not a harness footer — except
+            // Claude's working placeholder, whose *whole* text is a marker
+            // ("Press up to edit queued messages"). A draft that merely echoes
+            // a footer phrase ("document esc to interrupt behavior") must not
+            // spin the row or veto real attention cues until the draft clears.
+            if is_composer(line) && !WORKING.iter().any(|marker| squashed == *marker) {
+                composer_below = true;
+                continue;
+            }
+            // A working footer above a composer is stale only when it is bare.
+            // Codex keeps its composer on screen while it works, so its active
+            // footer — `• Working (8s • esc to interrupt)` — carries a live
+            // elapsed counter, and Claude's progress line (`✻ Reticulating
+            // splines… (12s · esc to interrupt)`) is shaped the same way. A
+            // retained interrupt hint in scrollback has no counter at all.
+            return !composer_below || has_elapsed_timer(line);
+        }
+        if is_composer(line) {
+            composer_below = true;
+        }
+    }
+    false
 }
 
 /// Whether a line is a *numbered* option with the cursor resting on it.
@@ -200,7 +554,7 @@ fn active_selected_option_index(lines: &[&str]) -> Option<usize> {
 }
 
 /// Whether `line` is an idle input composer rather than a numbered option.
-fn is_composer(line: &str) -> bool {
+pub(super) fn is_composer(line: &str) -> bool {
     let trimmed = line.trim_start_matches([' ', '│', '┃', '|']).trim_start();
     trimmed
         .chars()
@@ -272,6 +626,43 @@ fn has_yes_no(screen: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// The permission-marker cue when the menu carrying the marker is still live.
+///
+/// The markers are the option labels of each harness's permission menu, matched
+/// on squashed text so a wrap in a narrow pane cannot hide them. But a menu the
+/// operator already answered stays in scrollback above the restored composer,
+/// and a whole-screen search alone would keep matching its labels — recreating
+/// the approval cue after acknowledgement and leaving the row pulsing
+/// indefinitely. Binding the match to the live region below the last composer
+/// rejects those retained labels while keeping the wrap-tolerant whole-screen
+/// match for a menu with no composer beneath it (the active case).
+/// The squashed text of the live region: everything below the last composer, or
+/// the whole screen when there is none.
+///
+/// A composer is the current idle prompt; anything below it is its own chrome,
+/// and everything above it is history that must not re-raise a cue the operator
+/// already answered. A harness mid-menu draws no composer, so the whole screen
+/// is live then. Both the marker cue and the OpenCode permission menu search
+/// this region so a menu answered and left in scrollback stops recreating its
+/// approval cue on every poll.
+fn live_region_squash(screen: &str) -> String {
+    let lines: Vec<&str> = screen.lines().collect();
+    let live = match lines.iter().rposition(|line| is_composer(line)) {
+        None => &lines[..],
+        Some(index) => &lines[index + 1..],
+    };
+    squash(&live.join("\n"))
+}
+
+fn marker_cue(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    let squashed = live_region_squash(screen);
+    MARKERS
+        .iter()
+        .filter(|(candidate, ..)| *candidate == provider)
+        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
+        .map(|(_, _, kind, what)| (*kind, (*what).to_string()))
+}
+
 /// What `screen` says this harness is waiting for, if anything.
 ///
 /// Returns the cue *and* its wording; the caller stamps it with a time and
@@ -279,28 +670,43 @@ fn has_yes_no(screen: &str) -> bool {
 /// screen shows no question we can recognise — which is the common case, and
 /// deliberately not the same as "the harness is busy".
 pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind, String)> {
+    // A shell is always waiting on the operator and never blocked on anything a
+    // cue could describe. Every heuristic below reads a *harness* screen, and a
+    // terminal shows whatever the last command printed — a `y/n` from `rm -i`,
+    // a bell from a finished build — so running them here would turn ordinary
+    // output into a blinking row nobody can clear.
+    if provider == HarnessProvider::Shell {
+        return None;
+    }
+    // Claude 2.1 leaves its tool line saying `Waiting…` above the permission
+    // menu. That word resembles active progress, so this narrow structural
+    // confirmation must outrank the generic working veto below it.
+    if provider == HarnessProvider::Claude && super::claude::has_permission_menu(screen) {
+        return Some((
+            AttentionKind::Approval,
+            "claude is asking permission".to_string(),
+        ));
+    }
+    // A harness that is plainly mid-turn wants nothing: retained prompts and
+    // error text must not outlive the active footer as a stale attention cue.
+    if is_working(screen) {
+        return None;
+    }
     // A recognised startup dialog outranks everything: it is the one case where
     // the harness will not take work at all, and it already has wording written
     // for an operator.
-    let dialog = (!is_working(screen) && has_active_dialog_context(screen))
+    let dialog = has_active_dialog_context(screen)
         .then(|| blocking_dialog_for(provider, screen))
         .flatten();
     if let Some(dialog) = dialog {
         return Some((AttentionKind::Dialog, dialog.what.to_string()));
     }
 
-    let squashed = squash(screen);
-    if let Some((_, _, kind, what)) = MARKERS
-        .iter()
-        .filter(|(candidate, ..)| *candidate == provider)
-        .find(|(_, markers, ..)| markers.iter().any(|marker| squashed.contains(marker)))
-    {
-        return Some((*kind, (*what).to_string()));
+    let squashed = live_region_squash(screen);
+    if let Some(cue) = marker_cue(provider, screen) {
+        return Some(cue);
     }
-    if provider == HarnessProvider::Claude
-        && !is_working(screen)
-        && has_claude_plan_exit_menu(screen)
-    {
+    if provider == HarnessProvider::Claude && has_claude_plan_exit_menu(screen) {
         return Some((
             AttentionKind::Approval,
             "claude finished planning and wants a decision".to_string(),
@@ -313,12 +719,18 @@ pub fn detect(provider: HarnessProvider, screen: &str) -> Option<(AttentionKind,
         ));
     }
 
-    // Unrecognised wording, recognisable shape. Vetoed while the harness is
-    // plainly mid-turn, because a caret can survive on a screen the harness is
-    // still painting over.
-    if is_working(screen) {
-        return None;
+    // A blocking error outranks the structural fallbacks below it and is checked
+    // after the prompts above: a harness can print "usage limit reached" and then
+    // ask what to do about it, and the question is the more useful thing to say.
+    //
+    if let Some(what) = blocking_error(screen) {
+        return Some((
+            AttentionKind::Error,
+            format!("{} stopped: {what}", provider.as_str()),
+        ));
     }
+
+    // Unrecognised wording, recognisable shape.
     if has_active_selected_option(screen) {
         return Some((
             AttentionKind::Choice,

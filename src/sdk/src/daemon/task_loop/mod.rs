@@ -2,14 +2,17 @@
 //! kind of frame asks for so no file exceeds the repo's 500-line ceiling:
 //! [`probe`] answers the cached capability probe, [`system_info`] reports cheap
 //! host capacity, [`control`] delivers mid-run input and stops a task the
-//! requester has given up on, and [`run`] executes a task with its slot limit,
-//! throttled status forwarding, and plain-text fallback.
+//! requester has given up on, [`register`] claims the per-task running record,
+//! [`plain`] runs a text DM through the default provider, and [`run`] executes a
+//! task frame with its slot limit and throttled status forwarding.
 //!
 //! Routing and provider selection stay here: they are the seam the three share.
 //! Lifecycle/dispatch/reply glue lives in [`super::runtime`].
 
 mod control;
+mod plain;
 mod probe;
+mod register;
 mod run;
 mod system_info;
 #[cfg(test)]
@@ -23,7 +26,19 @@ use super::types::DaemonRuntime;
 
 impl DaemonRuntime {
     /// Route a decoded task frame to its handler; responses are ignored.
-    pub(super) async fn handle_frame(&self, from: String, frame: TaskFrame) {
+    ///
+    /// `sender_device_local` is the receiver's own verdict on `from`, carried in
+    /// from the transport that delivered the frame (see
+    /// [`handle_message_from`](crate::daemon::DaemonRuntime::handle_message_from)).
+    /// It alone may let a plain task frame's `workflow_node` marker buy
+    /// [`RunTaskOrigin::Workflow`](crate::daemon::providers::RunTaskOrigin::Workflow);
+    /// [`run::handle_task`](Self::handle_task) is where that decision is gated.
+    pub(super) async fn handle_frame(
+        &self,
+        from: String,
+        frame: TaskFrame,
+        sender_device_local: bool,
+    ) {
         match frame.kind {
             // A frame naming a workflow runs that saved graph instead of
             // handing its text to a harness as an instruction.
@@ -51,7 +66,7 @@ impl DaemonRuntime {
                 )
                 .await
             }
-            TaskFrameKind::Task => self.handle_task(from, frame).await,
+            TaskFrameKind::Task => self.handle_task(from, frame, sender_device_local).await,
             TaskFrameKind::Input => self.handle_input(from, frame).await,
             TaskFrameKind::Abort => self.handle_abort(from, frame).await,
             TaskFrameKind::Capabilities => self.handle_capabilities(from, frame).await,
@@ -66,8 +81,31 @@ impl DaemonRuntime {
     fn select_provider(&self, requested: Option<HarnessProvider>) -> Option<HarnessProvider> {
         let providers = &self.inner.config.providers;
         match requested {
-            Some(requested) => providers.contains(&requested).then_some(requested),
+            Some(requested) => {
+                // A task that named the embedded core gets it, whether or not
+                // this worker "offers" it. `config.providers` is the list of
+                // coding CLIs found on PATH (see
+                // [`crate::daemon::providers::detect_providers`]), and
+                // OpenHuman is never on it — it has no binary to find.
+                // Rejecting it here would admit a direct `harness: "openhuman"`
+                // task on the control socket only to refuse it, and
+                // substituting a coding CLI would change what the task is for.
+                // Every other request must be offered: an uninstalled CLI named
+                // by a requester is a genuine "no available provider" failure.
+                if requested == HarnessProvider::Openhuman {
+                    return Some(requested);
+                }
+                providers.contains(&requested).then_some(requested)
+            }
             None => {
+                // An OpenHuman default is honoured the same way an explicit
+                // request for it is: the embedded core needs no binary to
+                // detect, so an operator who configured `openhuman` as the
+                // default means exactly that, even on a machine where no coding
+                // CLI was found.
+                if self.inner.config.default_provider == HarnessProvider::Openhuman {
+                    return Some(self.inner.config.default_provider);
+                }
                 if providers.contains(&self.inner.config.default_provider) {
                     Some(self.inner.config.default_provider)
                 } else {

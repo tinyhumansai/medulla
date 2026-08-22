@@ -43,6 +43,7 @@ fn options(
     );
     (
         RunTaskOptions {
+            origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
             provider: HarnessProvider::Codex,
             transport: HarnessTransport::AppServer,
             prompt: prompt.to_string(),
@@ -106,6 +107,35 @@ async fn runs_a_turn_and_reports_the_reply() {
         .collect();
     assert!(kinds.contains(&"agent_message"), "{kinds:?}");
     assert!(kinds.contains(&"status"), "{kinds:?}");
+}
+
+#[tokio::test]
+async fn resumed_turn_uses_the_worktree_as_its_runtime_cwd() {
+    let dir = TempDir::new();
+    let worktree = dir.path().join("worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let fake = fake_app_server(&dir, TurnScript::Reply("ok"));
+    let (mut options, _) = options(&fake, &home(&dir, "cwd"), "continue", 10_000);
+    options.cwd = dir.path().to_string_lossy().into_owned();
+    options.workspace_context.cwd = Some(worktree.to_string_lossy().into_owned());
+    options.resume_session_id = Some("thread-retained".to_string());
+
+    run_provider_task(options).await.expect("the turn runs");
+
+    let requests = fake.requests();
+    let resumed = requests
+        .iter()
+        .position(|request| request["method"] == "thread/resume")
+        .expect("thread/resume request");
+    let turn = requests
+        .iter()
+        .position(|request| request["method"] == "turn/start")
+        .expect("turn/start request");
+    assert!(resumed < turn, "thread/resume must precede turn/start");
+    assert_eq!(
+        requests[turn]["params"]["cwd"],
+        worktree.to_string_lossy().as_ref()
+    );
 }
 
 /// The whole point: several tasks, one process.

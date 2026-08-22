@@ -155,7 +155,7 @@ impl WorkflowRunObserver {
 
     /// The engine's own steps, in completion order.
     ///
-    /// What [`crate::workflows::run::diagnose::diagnose`] needs: it reads each
+    /// What [`crate::workflows::run::diagnose`] needs: it reads each
     /// step's `output` to find errors an `on_error` policy swallowed, and the
     /// graph to find nodes that never ran at all.
     pub fn execution_steps(&self) -> Vec<ExecutionStep> {
@@ -220,6 +220,11 @@ impl RunObserver for WorkflowRunObserver {
                 input: None,
                 output: Some(crate::workflows::bounded_evidence(&step.output)),
                 diagnostics: diagnostics.clone(),
+                // Filled by the same pass that fills `input`: both are Medulla's
+                // own evidence rather than anything the engine reports about a
+                // step, so both are attached from `AgentEvidence` once the run
+                // has settled. See [`crate::flow_engine::agent_evidence`].
+                transcript: Vec::new(),
             });
         self.raw.lock().expect("raw steps lock").push(step.clone());
         if let Some(snapshot) = &self.step_snapshot {

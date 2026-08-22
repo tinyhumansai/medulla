@@ -5,7 +5,7 @@ use medulla::workflows::RunStatus;
 use ratatui::style::Color;
 
 use super::super::super::workflows::WorkflowRailRow;
-use super::rail::{rail_label, run_color, run_glyph};
+use super::rail::{rail_hint, rail_label, run_color, run_glyph};
 
 fn row(label: &str, detail: &str) -> WorkflowRow {
     WorkflowRow {
@@ -42,4 +42,22 @@ fn runs_use_traffic_light_colours_and_state_glyphs() {
         assert_eq!(run_color(status), Color::Red);
         assert_eq!(run_glyph(status), "✗");
     }
+}
+
+#[test]
+fn delete_hint_only_appears_on_a_selected_workflow() {
+    let workflow = WorkflowRailRow::Workflow {
+        index: 0,
+        row: row("Nightly sweep", "manual"),
+    };
+    let run = WorkflowRailRow::Run {
+        index: 0,
+        status: RunStatus::Succeeded,
+        row: row("run-1", "succeeded"),
+    };
+
+    assert!(rail_hint(true, Some(&workflow)).contains("Del delete"));
+    assert!(!rail_hint(true, Some(&run)).contains("Del delete"));
+    assert!(!rail_hint(true, Some(&WorkflowRailRow::New)).contains("Del delete"));
+    assert!(!rail_hint(false, Some(&workflow)).contains("Del delete"));
 }

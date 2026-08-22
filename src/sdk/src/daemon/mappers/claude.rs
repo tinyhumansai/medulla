@@ -89,7 +89,7 @@ pub(super) fn claude_events_from_line(
     }
 
     if record_type == Some("assistant") && source_role == Some("assistant") {
-        return as_array(message.get("content"))
+        let mut events = as_array(message.get("content"))
             .iter()
             .flat_map(|block| {
                 claude_assistant_block(
@@ -102,7 +102,23 @@ pub(super) fn claude_events_from_line(
                     gh_repo_is_set,
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // Claude can make several assistant API calls within one operator turn.
+        // `tool_use` is the sole continuation reason; any other stated reason
+        // settles the turn. An absent reason remains inconclusive and is handled
+        // by the session's existing silence backstop.
+        let stop_reason = message.get("stop_reason").and_then(Value::as_str);
+        if stop_reason.is_some_and(|reason| reason != "tool_use") {
+            events.push(semantic(
+                line,
+                ts,
+                "assistant:end_turn",
+                "lifecycle",
+                "agent",
+                serde_json::json!({ "phase": "turn_end" }),
+            ));
+        }
+        return events;
     }
 
     Vec::new()

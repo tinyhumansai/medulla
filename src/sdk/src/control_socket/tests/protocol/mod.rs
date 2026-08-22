@@ -187,13 +187,35 @@ async fn an_unknown_op_is_a_bad_request() {
     assert_eq!(kind(&response), "badRequest");
 }
 
+/// The embedded core is a harness the control plane will dispatch to.
+///
+/// This asserted the opposite until OpenHuman gained a task executor of its
+/// own ([`crate::daemon::providers::openhuman`]). The refusal was never about
+/// the control plane — it was that nothing could *run* the task — so with a
+/// runner in place the dispatch is admitted like any other.
 #[tokio::test]
-async fn an_operator_only_harness_cannot_be_dispatched() {
+async fn the_embedded_core_can_be_dispatched_to() {
     let mut harness = Harness::new();
     let response = harness
         .call(
             "task.dispatch",
             json!({ "instruction": "do the thing", "harness": "openhuman" }),
+        )
+        .await;
+
+    assert_ne!(kind(&response), "badRequest", "{response}");
+    assert!(!harness.fake.dispatched.lock().unwrap().is_empty());
+}
+
+/// A name that is not a harness at all is still refused. Asserted beside the
+/// case above so "openhuman is accepted" cannot quietly become "anything is".
+#[tokio::test]
+async fn an_unknown_harness_cannot_be_dispatched() {
+    let mut harness = Harness::new();
+    let response = harness
+        .call(
+            "task.dispatch",
+            json!({ "instruction": "do the thing", "harness": "not-a-harness" }),
         )
         .await;
 

@@ -182,6 +182,7 @@ impl HarnessDispatch for ConcurrencyProbe {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }

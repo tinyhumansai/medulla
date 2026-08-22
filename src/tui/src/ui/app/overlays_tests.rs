@@ -18,10 +18,10 @@ use medulla::config::LoadedConfig;
 use medulla::runtime::mock::MockRuntime;
 
 use super::types::{
-    tab_pos, AgentPicker, AgentPickerStep, App, HandbackPrompt, Overlay, PromptKind, ResumePicker,
-    RP_TEMPLATES,
+    tab_pos, App, Overlay, PromptKind, ResumePicker, SessionPicker, SessionPickerStep,
+    WorkspaceChoice, RP_TEMPLATES,
 };
-use crate::ui::composer::{Draft, TextPrompt};
+use crate::ui::composer::TextPrompt;
 
 fn app() -> App {
     App::new(
@@ -39,12 +39,11 @@ fn raise(app: &mut App, overlay: Overlay) {
             app.tab_index = tab_pos("Hosts");
             app.routing_index = RP_TEMPLATES;
         }
-        Overlay::AgentPicker => {
-            app.agent_picker = Some(AgentPicker {
-                purpose: super::types::PickerPurpose::Spawn,
+        Overlay::SessionPicker => {
+            app.session_picker = Some(SessionPicker {
                 choices: Vec::new(),
                 index: 0,
-                step: AgentPickerStep::Harness,
+                step: SessionPickerStep::Harness,
                 cwd: "/".into(),
                 workspace_query: String::new(),
                 workspace_choices: Vec::new(),
@@ -52,15 +51,8 @@ fn raise(app: &mut App, overlay: Overlay) {
                 workspace_picked: false,
             })
         }
-        Overlay::HandbackPrompt => {
-            app.handback_prompt = Some(HandbackPrompt {
-                session: "s".into(),
-                took_control: false,
-                note: Draft::default(),
-                editing_note: false,
-                is_takeover: false,
-            })
-        }
+        Overlay::SessionKill => app.arm_harness_close("s".into()),
+        Overlay::WorkflowDelete => app.workflow_delete_armed = Some(("id".into(), "name".into())),
         Overlay::InlinePrompt => {
             app.prompt = Some(TextPrompt::new(PromptKind::HostAdd, "Add a host"))
         }
@@ -74,11 +66,12 @@ fn raise(app: &mut App, overlay: Overlay) {
 }
 
 /// Every variant, so a new one cannot be added without appearing here.
-const EVERY_OVERLAY: [Overlay; 6] = [
+const EVERY_OVERLAY: [Overlay; 7] = [
     Overlay::Decisions,
     Overlay::TemplatePopup,
-    Overlay::AgentPicker,
-    Overlay::HandbackPrompt,
+    Overlay::SessionPicker,
+    Overlay::SessionKill,
+    Overlay::WorkflowDelete,
     Overlay::InlinePrompt,
     Overlay::ResumePicker,
 ];
@@ -114,27 +107,68 @@ fn every_overlay_is_reachable_and_owns_input_on_its_own() {
 }
 
 #[test]
-fn handback_prompt_swallows_clicks_behind_it() {
+fn inline_prompt_swallows_clicks_that_would_reach_the_picker_behind_it() {
+    // The favorite-add prompt opens *on top of* the workspace picker (Shift+F).
+    // Keyboard routing gives the prompt precedence over the picker, and the
+    // pointer must not come to disagree: a click on a picker row behind the
+    // prompt would replay Enter and start a harness while the favorite-name
+    // edit is still on screen.
     let mut app = app();
-    raise(&mut app, Overlay::HandbackPrompt);
-    app.hit_tabs_row = 1;
-    app.hit_tabs = vec![(0, 4), (5, 10)];
-    let original_tab = app.tab_index;
+    app.session_picker = Some(SessionPicker {
+        choices: Vec::new(),
+        index: 0,
+        step: SessionPickerStep::Workspace,
+        cwd: "/".into(),
+        workspace_query: "x".into(),
+        workspace_choices: vec![WorkspaceChoice {
+            path: "/tmp".into(),
+            source: "folder".into(),
+            label: None,
+        }],
+        workspace_index: 0,
+        workspace_picked: false,
+    });
+    app.prompt = Some(TextPrompt::new(
+        PromptKind::FavoriteWorkspaceAdd("/tmp".into()),
+        "Save favorite for /tmp",
+    ));
+    app.hit_session_picker = Some((
+        ratatui::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 18,
+        },
+        vec![(
+            ratatui::layout::Rect {
+                x: 0,
+                y: 5,
+                width: 60,
+                height: 1,
+            },
+            0,
+        )],
+    ));
 
     let _ = app.on_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: 6,
-        row: 1,
+        column: 10,
+        row: 5,
         modifiers: KeyModifiers::NONE,
     });
 
-    assert_eq!(
-        app.tab_index, original_tab,
-        "a handback prompt must not let a click navigate the UI behind it"
-    );
     assert!(
-        app.handback_prompt.is_some(),
-        "the click must leave the pending harness decision intact"
+        app.prompt.is_some(),
+        "the click must not dismiss the favorite prompt"
+    );
+    let picker = app.session_picker.as_ref().unwrap();
+    assert!(
+        !picker.workspace_picked,
+        "the click must not be read as choosing a workspace row"
+    );
+    assert_eq!(
+        picker.workspace_index, 0,
+        "the picker selection must be left where it was"
     );
 }
 
@@ -155,6 +189,52 @@ fn pointer_input_cancels_an_armed_harness_close() {
 }
 
 #[test]
+fn cancelling_a_session_kill_with_the_mouse_does_not_click_through_the_modal() {
+    let mut app = app();
+    app.arm_harness_close("session-a".into());
+    app.hit_tabs_row = 1;
+    app.hit_tabs = vec![(0, 4), (5, 10)];
+    let original_tab = app.tab_index;
+
+    let _ = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 6,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(app.harness_close_armed.is_none());
+    assert_eq!(
+        app.tab_index, original_tab,
+        "the cancellation click is consumed"
+    );
+}
+
+#[test]
+fn pointer_input_cancels_workflow_delete_without_clicking_through() {
+    let mut app = app();
+    app.workflow_delete_armed = Some(("nightly".into(), "Nightly sweep".into()));
+    app.hit_tabs_row = 1;
+    app.hit_tabs = vec![(0, 4), (5, 10)];
+    let original_tab = app.tab_index;
+
+    let result = app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 6,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    });
+
+    assert!(result.is_none());
+    assert!(app.workflow_delete_armed.is_none());
+    assert_eq!(app.status(), "Workflow deletion cancelled");
+    assert_eq!(
+        app.tab_index, original_tab,
+        "the cancellation click is consumed"
+    );
+}
+
+#[test]
 fn no_overlay_lets_a_paste_through_to_the_composer_behind_it() {
     // The whole point of deriving `overlay_owns_keys` from this list. Asserted
     // per overlay rather than once, because the failure mode is always a single
@@ -163,11 +243,11 @@ fn no_overlay_lets_a_paste_through_to_the_composer_behind_it() {
     // banking pastes to be submitted when it closed.
     //
     // The template popup is on Hosts by construction — it cannot coexist with
-    // the Agents composer, which is the fix — so the tab is set first and only
+    // the Sessions composer, which is the fix — so the tab is set first and only
     // where the overlay permits it.
     for overlay in EVERY_OVERLAY {
         let mut app = app();
-        app.tab_index = tab_pos("Agents");
+        app.tab_index = tab_pos("Sessions");
         raise(&mut app, overlay);
 
         app.on_event(crossterm::event::Event::Paste("stray text".into()));
@@ -189,7 +269,7 @@ fn the_template_popup_needs_the_page_that_can_dismiss_it() {
     raise(&mut app, Overlay::TemplatePopup);
     assert_eq!(app.visible_overlays(), vec![Overlay::TemplatePopup]);
 
-    app.tab_index = tab_pos("Agents");
+    app.tab_index = tab_pos("Sessions");
 
     assert!(
         app.visible_overlays().is_empty(),
@@ -207,23 +287,4 @@ fn the_inline_prompt_replaces_the_resume_picker_rather_than_stacking_on_it() {
     raise(&mut app, Overlay::InlinePrompt);
 
     assert_eq!(app.visible_overlays(), vec![Overlay::InlinePrompt]);
-}
-
-#[test]
-fn overlays_are_listed_back_to_front_in_the_order_the_render_paints_them() {
-    // The list is iterated to paint, so its order is the stacking order: the
-    // hand-back question is asked over the picker that may have opened it.
-    let mut app = app();
-    raise(&mut app, Overlay::AgentPicker);
-    raise(&mut app, Overlay::HandbackPrompt);
-    raise(&mut app, Overlay::Decisions);
-
-    assert_eq!(
-        app.visible_overlays(),
-        vec![
-            Overlay::Decisions,
-            Overlay::AgentPicker,
-            Overlay::HandbackPrompt
-        ]
-    );
 }

@@ -197,6 +197,38 @@ fn a_malformed_grid_diff_is_refused() {
     assert_eq!(receiver.rows(), [b"kept".to_vec()]);
 }
 
+/// A peer can declare any `u32` row count in eight bytes. Unbounded, the
+/// `resize` behind it asks the allocator for ~100 GB and aborts the process —
+/// a remote kill switch. The frame must be refused instead, leaving the grid as
+/// it was.
+#[test]
+fn a_grid_diff_declaring_an_absurd_row_count_is_refused() {
+    let mut receiver = RowGrid::new();
+    receiver.set_rows(vec![b"kept".to_vec()]);
+
+    // rows = 0xFFFFFFFF, changed = 0.
+    let hostile = vec![0xFFu8, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0];
+    assert!(matches!(
+        receiver.apply_diff(&hostile),
+        Err(StateError::Malformed(_))
+    ));
+    assert_eq!(receiver.rows(), [b"kept".to_vec()]);
+
+    // One row past the cap is still refused; the cap itself is accepted.
+    let mut just_over = ((super::MAX_GRID_ROWS + 1) as u32).to_be_bytes().to_vec();
+    just_over.extend_from_slice(&0u32.to_be_bytes());
+    assert!(matches!(
+        receiver.apply_diff(&just_over),
+        Err(StateError::Malformed(_))
+    ));
+    assert_eq!(receiver.rows(), [b"kept".to_vec()]);
+
+    let mut at_cap = (super::MAX_GRID_ROWS as u32).to_be_bytes().to_vec();
+    at_cap.extend_from_slice(&0u32.to_be_bytes());
+    assert!(receiver.apply_diff(&at_cap).is_ok());
+    assert_eq!(receiver.rows().len(), super::MAX_GRID_ROWS);
+}
+
 #[test]
 fn a_grid_ignores_the_throwaway_hint() {
     // Latest-wins holds no history, so there is nothing to release.

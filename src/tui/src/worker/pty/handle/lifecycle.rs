@@ -55,12 +55,18 @@ impl SessionHandle {
             operator_held: AtomicBool::new(control == SessionControl::User),
             // Nothing has run in it yet, so there is nothing finished to keep.
             retained: AtomicBool::new(false),
+            closed_by_request: AtomicBool::new(false),
             queued_bytes,
             cold: Mutex::new(ColdFields {
                 label,
                 session_id,
                 name,
                 thread_name: None,
+                index_thread_name: None,
+                // Filled in by the caller before the handle is published, and
+                // re-read on a timer from there on: see
+                // `PtyManager::spawn_checkout_poller`.
+                checkout: medulla::ui::checkout::Checkout::default(),
                 last_error: None,
             }),
             attention: Mutex::new(AttentionState {
@@ -70,6 +76,7 @@ impl SessionHandle {
                 pending_completion_bells: 0,
                 completion_deadline: None,
                 checked_at: started_at,
+                working: false,
             }),
             screen: Mutex::new(screen),
             modes: Mutex::new(TerminalModes::default()),
@@ -89,13 +96,24 @@ impl SessionHandle {
     ///
     /// What `close` does: the reader thread sees the pty close a moment later
     /// and [`reap`](SessionHandle::reap) settles the real status.
+    ///
+    /// Only the deliberate-close paths call this, so it is also where the
+    /// session records that its (likely signal-derived, nonzero) exit status is
+    /// the child obeying a request rather than a lifecycle failure.
     pub(in super::super) fn mark_closed(&self) {
+        self.closed_by_request.store(true, Ordering::Release);
         let _ = self.state.compare_exchange(
             STATE_RUNNING,
             STATE_EXITED,
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+    }
+
+    /// Whether this session's exit was deliberately requested — see
+    /// [`closed_by_request`](Self::closed_by_request).
+    pub(in super::super) fn is_closed_by_request(&self) -> bool {
+        self.closed_by_request.load(Ordering::Acquire)
     }
 
     /// Wait on the child, record its status, and release its resources.

@@ -109,12 +109,14 @@ impl App {
         // host's agents are declared on that machine — this end can watch them
         // and dispatch to them, and that is all (spec §2.4).
         let (note, style) = match host.kind {
+            // No "n declares one" any more: declaring is config-only, so this
+            // page reports the tree rather than offering a key to grow it.
             HostKind::Local if host.agents.is_empty() => (
-                "none declared here · n declares one".to_string(),
+                "none declared here".to_string(),
                 Style::default().fg(Color::Green),
             ),
             HostKind::Local => (
-                format!("{} declared here · n declares another", host.agents.len()),
+                format!("{} declared here", host.agents.len()),
                 Style::default().fg(Color::Green),
             ),
             HostKind::Remote if host.agents.is_empty() => (

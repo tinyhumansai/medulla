@@ -39,6 +39,7 @@ use crate::flow_engine::agent_evidence::AgentEvidence;
 use crate::flow_engine::harness_choice::{HarnessChoice, HarnessPreference};
 use crate::flow_engine::observability::NodeProgressSink;
 use crate::flow_engine::settings::CapabilitySettings;
+use crate::harness_transcript::TranscriptEntry;
 use crate::hub::{RunError, TaskRequest};
 
 use super::dispatch::HarnessDispatch;
@@ -260,6 +261,24 @@ impl HarnessAgentRunner {
         }
     }
 
+    /// Capture the harness's account of a finished dispatch, when the run is
+    /// recording evidence and the dispatch produced one.
+    ///
+    /// Only the workflow dispatch collects a transcript; every other
+    /// implementation returns an empty one and this is a no-op. That is the
+    /// intended shape — a dispatch that sends the task over a bridge to another
+    /// machine never sees the harness's stream and has nothing to offer here.
+    /// Keyed by `node_id` rather than by the request the prompt pass uses: by
+    /// the time a transcript exists the request has been consumed into a task
+    /// frame, and the node id is the part [`run_on_harness`](Self::run_on_harness)
+    /// still holds.
+    fn record_transcript(&self, node_id: Option<&str>, transcript: Vec<TranscriptEntry>) {
+        let (Some(evidence), Some(node_id)) = (&self.evidence, node_id) else {
+            return;
+        };
+        evidence.record_transcript(node_id, transcript);
+    }
+
     /// Build the task frame for one node.
     ///
     /// The task id carries the run and the route so a worker-side log, and an
@@ -408,12 +427,30 @@ impl HarnessAgentRunner {
                     .filter(|workspace| !workspace.trim().is_empty()),
             },
         );
-        let status = self.stream_for(node_id);
-        let outcome = self
-            .dispatch
-            .dispatch_with_status(request, status)
-            .await
-            .map_err(|err| dispatch_error("agent node", err))?;
+        let status = self.stream_for(node_id.clone());
+        let outcome = match self.dispatch.dispatch_with_status(request, status).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                // The engine records a failed dispatch as an Error step, so it
+                // occupies a transcript-queue slot like any other activation.
+                // The workflow dispatch folds its collector's account into the
+                // failure (`RunError::WorkerWithTranscript`), and a failed step
+                // is exactly the one whose tool calls and error line the run
+                // view wants; every other dispatch has no transcript to offer,
+                // so an empty placeholder keeps the Nth slot aligned either way.
+                let transcript = match &err {
+                    RunError::WorkerWithTranscript { transcript, .. } => transcript.clone(),
+                    _ => Vec::new(),
+                };
+                self.record_transcript(node_id.as_deref(), transcript);
+                return Err(dispatch_error("agent node", err));
+            }
+        };
+        // After the dispatch, never before: the transcript is what the harness
+        // said, and it does not exist until the harness has stopped saying it.
+        // An empty transcript still queues a placeholder so the Nth activation
+        // keeps its slot — see [`record_transcript`](Self::record_transcript).
+        self.record_transcript(node_id.as_deref(), outcome.transcript);
         Ok(reply_to_value(&outcome.reply, &worker))
     }
 }

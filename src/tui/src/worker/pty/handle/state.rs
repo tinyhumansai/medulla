@@ -119,6 +119,21 @@ impl SessionHandle {
         lock(&self.cold).name = name.filter(|name| !name.trim().is_empty());
     }
 
+    /// Record a freshly read checkout, reporting whether anything moved.
+    ///
+    /// The answer is compared rather than stored blindly so the poller can stay
+    /// silent while nothing changes: a redraw per session per tick, for four
+    /// sessions that are all still on the branch they started on, is a cost
+    /// paid for no new information.
+    pub(in super::super) fn set_checkout(&self, checkout: medulla::ui::checkout::Checkout) -> bool {
+        let mut cold = lock(&self.cold);
+        if cold.checkout == checkout {
+            return false;
+        }
+        cold.checkout = checkout;
+        true
+    }
+
     /// Record why a queued write never reached the child.
     ///
     /// The write half is drained by a thread (see the manager's `spawn_writer`),
@@ -126,13 +141,30 @@ impl SessionHandle {
     /// is kept instead. Last-one-wins: the interesting failure is the current
     /// one, and a session whose pty has stopped accepting bytes will not recover
     /// to produce a different one.
-    pub(in super::super) fn record_error(&self, error: String) {
+    ///
+    /// `now` also becomes the row's last-activity time. The failure cue stamps
+    /// itself with [`last_output_at`](Self::last_output_at), and a quiet session
+    /// may have produced no output for minutes before its writer failed — without
+    /// the stamp the brand-new failure would claim it had been waiting that whole
+    /// idle period, forever, if the child stayed alive.
+    pub(in super::super) fn record_error(&self, error: String, now: i64) {
         lock(&self.cold).last_error = Some(error);
+        self.last_output_at.store(now, Ordering::Release);
+    }
+
+    /// Record the thread name discovered outside the terminal stream.
+    ///
+    /// Codex persists renamed threads in its session index instead of emitting
+    /// an OSC window title, so the transcript executor supplies that value once
+    /// it has identified the session.
+    pub(in super::super) fn record_thread_name(&self, thread_name: String) {
+        lock(&self.cold).index_thread_name = Some(thread_name);
     }
 
     /// The operator-facing projection of this session, for the list pane.
     pub fn row(&self) -> SessionRow {
         let cold = lock(&self.cold);
+        let attention = lock(&self.attention);
         SessionRow {
             id: self.meta.id.clone(),
             label: cold.label.clone(),
@@ -140,12 +172,15 @@ impl SessionHandle {
             preset: self.meta.preset.clone(),
             state: self.state(),
             cwd: self.meta.cwd.clone(),
-            branch: self.meta.branch.clone(),
+            checkout: cold.checkout.clone(),
             launch_root: self.meta.launch_root.clone(),
             launch_commit: self.meta.launch_commit.clone(),
             launch_checkout_identity: self.meta.launch_checkout_identity.clone(),
             session_id: cold.session_id.clone(),
-            thread_name: cold.thread_name.clone(),
+            thread_name: cold
+                .index_thread_name
+                .clone()
+                .or_else(|| cold.thread_name.clone()),
             started_at: self.meta.started_at,
             last_output_at: self.last_output_at(),
             last_error: cold.last_error.clone(),
@@ -153,8 +188,14 @@ impl SessionHandle {
             control: self.control(),
             origin: self.meta.origin,
             retained: self.is_retained(),
+            closed_by_request: self.is_closed_by_request(),
             name: cold.name.clone(),
-            attention: lock(&self.attention).cue.clone(),
+            attention: attention.cue.clone(),
+            // Only meaningful while the child is alive: the last screen a dead
+            // session painted may still carry "esc to interrupt", and a row
+            // spinning forever after its harness exited is a lie the rail
+            // cannot recover from.
+            working: attention.working && self.is_running(),
             mcp_grant_session: self.meta.mcp_grant_session.clone(),
         }
     }

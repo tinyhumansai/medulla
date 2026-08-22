@@ -94,13 +94,28 @@ pub enum HarnessProvider {
     Codex,
     /// The `opencode` CLI harness.
     Opencode,
-    /// OpenHuman's native terminal UI.
+    /// The embedded OpenHuman core.
     ///
-    /// This is an operator-facing harness only. It is intentionally absent
-    /// from the daemon's dispatchable provider list: OpenHuman owns its agent
-    /// loop and shares the host's core state rather than accepting coding-task
-    /// frames.
+    /// The one provider with no binary behind it: it is linked into this
+    /// process, and a task dispatched to it runs as an in-process agent turn
+    /// rather than a spawned CLI — see
+    /// [`crate::daemon::providers::openhuman`].
+    ///
+    /// It is dispatchable, but never *auto-selected*: it is not
+    /// interchangeable with a coding CLI, so a task reaches it only by naming
+    /// it. See [`crate::daemon::providers::detect_providers`].
     Openhuman,
+    /// A plain interactive shell — `bash`, `zsh`, whatever `$SHELL` names.
+    ///
+    /// Not a coding agent, and deliberately kept out of every path that treats
+    /// one as interchangeable with another: it is never detected as an
+    /// available provider ([`crate::daemon::providers::DAEMON_PROVIDERS`]) and
+    /// never dispatchable ([`is_dispatchable`](Self::is_dispatchable)), so no
+    /// peer frame can reach a shell however it spells the harness name. It
+    /// exists so an operator can open a terminal beside their agents, in the
+    /// same pane, on the same host, with the same working directory — which
+    /// until now meant leaving the TUI.
+    Shell,
 }
 
 impl HarnessProvider {
@@ -111,6 +126,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "codex",
             HarnessProvider::Opencode => "opencode",
             HarnessProvider::Openhuman => "openhuman",
+            HarnessProvider::Shell => "shell",
         }
     }
 
@@ -124,6 +140,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "Codex",
             HarnessProvider::Opencode => "OpenCode",
             HarnessProvider::Openhuman => "OpenHuman",
+            HarnessProvider::Shell => "Shell",
         }
     }
 
@@ -140,6 +157,7 @@ impl HarnessProvider {
             HarnessProvider::Codex => "◆",
             HarnessProvider::Opencode => "◻",
             HarnessProvider::Openhuman => "○",
+            HarnessProvider::Shell => "$",
         }
     }
 
@@ -150,20 +168,45 @@ impl HarnessProvider {
             "codex" => Some(HarnessProvider::Codex),
             "opencode" => Some(HarnessProvider::Opencode),
             "openhuman" => Some(HarnessProvider::Openhuman),
+            "shell" => Some(HarnessProvider::Shell),
             _ => None,
         }
     }
 
     /// Parse a provider that may receive delegated coding tasks.
-    ///
-    /// OpenHuman is intentionally excluded: its native TUI owns its own agent
-    /// loop and is only launchable by the operator-facing harness picker.
     pub fn dispatchable_from_wire(value: &str) -> Option<Self> {
         Self::from_wire(value).filter(|provider| provider.is_dispatchable())
     }
 
     /// Whether this provider accepts delegated coding-task frames.
+    ///
+    /// Every coding agent does. The distinction this used to draw — OpenHuman
+    /// excluded because it "owns its own agent loop" — did not survive
+    /// contact with the fact that every harness here owns one; Claude Code's
+    /// simply sits behind a process boundary instead of a function call. What
+    /// is genuinely different about OpenHuman is that it is not
+    /// *interchangeable* with a coding CLI, and that is expressed where it
+    /// belongs: it is never auto-detected as an available provider, so a task
+    /// reaches it only by naming it.
+    ///
+    /// [`Shell`](Self::Shell) is the one that answers `false`, and it is the
+    /// reason this stayed a method. A shell reads no prompt and reports no
+    /// completion, so a task frame naming one would be a turn that never
+    /// answers — and a peer that could name one would have a way to run
+    /// arbitrary commands on this host without a harness in between. Both are
+    /// refused at the parse: [`dispatchable_from_wire`](Self::dispatchable_from_wire)
+    /// returns `None` for `"shell"`.
     pub fn is_dispatchable(self) -> bool {
+        !matches!(self, Self::Shell)
+    }
+
+    /// Whether running this provider means spawning an executable.
+    ///
+    /// True for every coding CLI, and the reason a host detects them by looking
+    /// on `PATH`. False for OpenHuman, which is linked into this process — so
+    /// asking `PATH` about it would answer `false` on a host that can run it
+    /// perfectly well.
+    pub fn needs_binary(self) -> bool {
         !matches!(self, Self::Openhuman)
     }
 
@@ -186,7 +229,12 @@ impl HarnessProvider {
             CODEX_SERVER_FLAVOR | "codex_server" => {
                 Some((HarnessProvider::Codex, HarnessTransport::AppServer))
             }
-            _ => Self::from_wire(value).map(|provider| (provider, HarnessTransport::Cli)),
+            // Dispatch-only, like every caller of this: a flavor is what a
+            // workflow node, a fleet tool, or a task frame names as the thing
+            // that should *run* something. `"shell"` parses nowhere there — see
+            // [`is_dispatchable`](Self::is_dispatchable).
+            _ => Self::dispatchable_from_wire(value)
+                .map(|provider| (provider, HarnessTransport::Cli)),
         }
     }
 
@@ -195,7 +243,24 @@ impl HarnessProvider {
     ///
     /// A default-transport pair is simply the provider name, so round-tripping
     /// an ordinary harness never invents a suffix nobody wrote.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// `self` must be [`is_dispatchable`](Self::is_dispatchable). `flavor_from_wire`
+    /// never *parses* a non-dispatchable provider's name back into a flavor —
+    /// `"shell"` returns `None` — so a caller that fed one in here would get a
+    /// string dispatch parsers reject, breaking the round trip this method
+    /// promises. Every caller in this codebase already sources `self` from a
+    /// dispatchable set (`dispatchable_flavors`, a parsed `TaskRequest`
+    /// provider, a resolved `HarnessChoice`), so this should never fire
+    /// outside a bug; the debug assertion catches that bug in tests rather
+    /// than emitting a wire-invalid flavor in release.
     pub fn flavor_name(self, transport: HarnessTransport) -> &'static str {
+        debug_assert!(
+            self.is_dispatchable(),
+            "flavor_name called on non-dispatchable provider {self:?}; \
+             flavor_from_wire cannot parse its name back, breaking the round trip"
+        );
         match (self, transport) {
             (HarnessProvider::Codex, HarnessTransport::AppServer) => CODEX_SERVER_FLAVOR,
             _ => self.as_str(),
@@ -533,6 +598,19 @@ pub struct TaskFrame {
     /// tools — which is the pre-existing behaviour, not a new hazard.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tool_mode: Option<String>,
+    /// Whether this task was emitted by a workflow's `agent` node.
+    ///
+    /// This is distinct from [`workflow`](Self::workflow), which asks the
+    /// receiving worker to start a whole saved graph. A workflow node instead
+    /// carries one instruction, but its OpenHuman turn needs the workflow
+    /// approval origin. Absent on older and ordinary frames, which remain
+    /// delegated tasks.
+    #[serde(
+        rename = "workflowNode",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub workflow_node: bool,
     /// Inbound-only: the continuity group this task belongs to, when the sender
     /// wants successive tasks to share one harness session.
     ///
@@ -874,9 +952,12 @@ where
     D: Deserializer<'de>,
 {
     let raw = de_string_array(deserializer)?;
+    // Dropped rather than trusted: this list is a *peer's* claim about what it
+    // can run, and the orchestrator picks a provider from it. A peer that
+    // advertised `"shell"` would be offering to take work on a terminal.
     Ok(raw
         .iter()
-        .filter_map(|s| HarnessProvider::from_wire(s))
+        .filter_map(|s| HarnessProvider::dispatchable_from_wire(s))
         .collect())
 }
 

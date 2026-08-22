@@ -14,7 +14,7 @@
 //! unreachable now; it is one keystroke away instead of permanently on screen.
 //!
 //! The sidebar is sized to the catalogue it holds, via the same
-//! [`crate::ui::multi_pane::sidebar_width`] the Agents rail uses.
+//! [`crate::ui::multi_pane::sidebar_width`] the Sessions rail uses.
 //!
 //! - [`rail`] — the catalogue and the selected workflow's runs.
 //! - [`canvas`] — the laid-out graph. [`paint`] is the character grid under it.
@@ -101,7 +101,7 @@ pub(in crate::ui::app) const BAND_GAP: usize = 0;
 
 /// The most content columns the workflow rail may claim.
 ///
-/// Mirrors the Agents rail: labels may influence the width up to this point,
+/// Mirrors the Sessions rail: labels may influence the width up to this point,
 /// but an unusually long workflow name or run detail is clipped instead of
 /// shrinking the graph, inspector, or copilot beside it.
 const RAIL_MAX_CONTENT: usize = 36;
@@ -110,7 +110,7 @@ impl App {
     /// Draw the Workflows tab.
     pub(super) fn draw_workflows_tab(&mut self, f: &mut Frame, area: Rect) {
         // Sized to the catalogue it holds rather than a fixed width, the same
-        // way the Agents rail is sized — so a machine with short workflow names
+        // way the Sessions rail is sized — so a machine with short workflow names
         // does not give a third of the screen to whitespace, and one with long
         // names can still read them.
         let rail = self.workflow_sidebar_width(area.width);
@@ -134,7 +134,7 @@ impl App {
         }
     }
 
-    /// Size the workflow rail from its content, bounded like the Agents rail.
+    /// Size the workflow rail from its content, bounded like the Sessions rail.
     pub(in crate::ui::app) fn workflow_sidebar_width(&self, total: u16) -> u16 {
         let widest = self
             .workflow_rail_rows()

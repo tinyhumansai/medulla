@@ -54,6 +54,7 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         config_path,
         credential_dir,
         agent_id,
+        only_providers,
         startup_status,
         transport,
         endpoint,
@@ -65,7 +66,11 @@ pub async fn run_worker_tui(config: WorkerTuiConfig) -> anyhow::Result<()> {
         attribution,
         hooks,
     } = config;
-    let providers = medulla::daemon::providers::detect_providers(&env, None, None);
+    // Restricted exactly as the headless daemon restricts it: `--providers` is
+    // the operator saying which coding agents this worker may run, and a screen
+    // that ignored it would offer — and settle on — one they excluded.
+    let providers =
+        medulla::daemon::providers::detect_providers(&env, only_providers.as_deref(), None);
     let sessions = PtyManager::new();
     let logs = LogBuffer::new();
     // Persist the daemon's narration. The screen only helps while someone is
@@ -280,7 +285,12 @@ pub(super) fn spawn_inbox_drain(
                     continue;
                 }
                 let frame = decode_task_frame(&message.text);
-                runtime.handle_message(message.from, message.text, frame);
+                // A worker-loop inbox only ever carries host-link traffic, i.e.
+                // remote peers, so a forged `workflowNode` marker must not buy
+                // workflow authority here. Ask the transport rather than
+                // hard-coding `false` so the verdict tracks the link.
+                let sender_device_local = transport.is_device_local(&message.from).await;
+                runtime.handle_message_from(message.from, message.text, frame, sender_device_local);
             }
             // Returns early when the link's pump delivers, so a subscribe is
             // acted on at about a round trip rather than up to a poll interval

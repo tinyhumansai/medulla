@@ -21,6 +21,14 @@ pub(super) struct AcpToolCall {
     pub(super) input: Value,
 }
 
+/// One ACP tool that reached a terminal state.
+pub(super) struct CompletedToolCall {
+    /// ACP's provider tool kind, used by lifecycle-hook matchers.
+    pub(super) tool_name: String,
+    /// The final structured input observed for the call.
+    pub(super) input: Value,
+}
+
 /// Mutable transcript and metadata accumulated from an ACP session stream.
 pub(in crate::daemon::providers) struct FoldState {
     /// Assistant response text accumulated across message chunks.

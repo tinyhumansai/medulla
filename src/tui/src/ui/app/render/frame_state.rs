@@ -14,8 +14,8 @@ impl App {
     pub(super) fn reset_frame_state(&mut self) {
         // The harness pane is resolved during the draw and read by the *next*
         // key press, so it has to be cleared here rather than left over: a
-        // `Ctrl-]` on the Settings tab must not attach to whatever the Agents
-        // tab was showing several frames ago. `draw_agents_pane` fills it back
+        // `Ctrl-]` on the Settings tab must not attach to whatever the Sessions
+        // tab was showing several frames ago. `draw_sessions_pane` fills it back
         // in when it resolves a session.
         self.pane_session = None;
         // Its counterpart, for the same reason: a remembered remote row would
@@ -25,18 +25,14 @@ impl App {
         // terminal that is no longer on screen.
         self.hit_session = None;
         self.hit_workflow_preview = None;
-        // Same again for the hand-back question's answers: a click must never
-        // reach a `[Y]` that was on screen two frames ago, least of all when
-        // what it now sits over is the session the operator went back to.
-        self.hit_handback.clear();
-        // Focus follows the pane, not the other way round. `agents_selection`
-        // (called only while drawing the Agents tab) is what notices the cursor
+        // Focus follows the pane, not the other way round. `sessions_selection`
+        // (called only while drawing the Sessions tab) is what notices the cursor
         // moving off the attached session; it has nothing to say once the
         // operator has left the tab entirely. Without this, `harness_focus`
         // stayed `Attached` after a click elsewhere, and the next keystroke —
         // meant for whatever tab was now on screen — was typed into a harness
         // pane the operator could no longer see.
-        if self.harness_focus.attached_to().is_some() && self.tab() != "Agents" {
+        if self.harness_focus.attached_to().is_some() && self.tab() != "Sessions" {
             self.release_session();
         }
     }

@@ -5,13 +5,38 @@
 //! credential. Secrets are referenced by environment-variable name and are never
 //! stored in the config document.
 //!
-//! All three harnesses are accepted. OpenCode was excluded while presets were
+//! Every harness is accepted. OpenCode was excluded while presets were
 //! purely an endpoint adapter — it has native OpenRouter provider configuration
 //! and needed no help reaching the API. That native path is precisely the one
 //! that bypasses [`crate::inference_proxy`], so an OpenCode run configured
 //! outside Medulla spends the operator's credit while crediting OpenCode for the
 //! traffic. Routing it through a preset is what brings it under Medulla's
 //! attribution.
+//!
+//! # OpenHuman presets
+//!
+//! OpenHuman was refused outright while it was not dispatchable at all. It is
+//! now — a workflow node may name the harness id `openhuman` and the turn runs
+//! in this process on the embedded core — so the refusal only stopped an
+//! operator naming the model that turn should use, which is the one thing a
+//! preset is for. A preset with `baseHarness = "openhuman"` therefore behaves
+//! like any other: its `model` reaches the turn (see
+//! [`crate::daemon::providers::openhuman::effective_model`] for where it sits
+//! among the other routes).
+//!
+//! `baseUrl` and `apiKeyEnv` are live here too, though they arrive by a
+//! different road. For a spawned CLI they are layered into the child's
+//! environment; an OpenHuman turn has no child, so Medulla resolves the key and
+//! passes the endpoint and the credential to the core as a **per-call** route
+//! that the core applies to that turn alone and never persists. An OpenRouter
+//! endpoint is exchanged for a loopback mount and a machine-local token at the
+//! attribution proxy first; any other endpoint is handed over as spelled. See
+//! [`crate::daemon::providers::openhuman::embedded_route`].
+//!
+//! A preset that leaves them at their defaults still works and still needs no
+//! OpenRouter key: with no key exported under `apiKeyEnv` the turn runs on the
+//! account's own OpenHuman configuration, which is what an operator who
+//! configured only a model is asking for.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -31,7 +56,7 @@ pub const OPENROUTER_OPENAI_URL: &str = "https://openrouter.ai/api/v1";
 /// The compact editor-line format, and the error shown when a line does not
 /// match it. Shared so the TUI's prompt and the parser's rejection cannot drift.
 pub const EDITOR_LINE_FORMAT: &str =
-    "expected: id | name | claude|codex|opencode | model | fast-model | host-id";
+    "expected: id | name | claude|codex|opencode|openhuman | model | fast-model | host-id";
 
 /// One named harness preset that runs an OpenRouter model through a coding CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +66,8 @@ pub struct CustomHarnessConfig {
     pub id: String,
     /// Operator-facing name.
     pub name: String,
-    /// Coding harness reused by this preset (`claude` or `codex`).
+    /// Harness this preset runs on: a coding CLI (`claude`, `codex`,
+    /// `opencode`) or the embedded core (`openhuman`).
     pub base_harness: HarnessProvider,
     /// OpenRouter model id used for the main turn.
     pub model: String,
@@ -73,6 +99,19 @@ pub struct CustomHarnessConfig {
     /// Reasoning effort declared to Codex when `codexOverrides` is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// OpenRouter serving providers this preset is restricted to, by slug
+    /// (`streamlake`, `novita`, …). Empty leaves the choice to OpenRouter.
+    ///
+    /// The same model is served by many providers at prices that differ by more
+    /// than an order of magnitude, and OpenRouter's own default weighs price
+    /// against uptime and throughput rather than pinning one. Naming the
+    /// provider here is the only way to *state* the choice: the preference
+    /// travels in the request body, so neither the model id nor the endpoint
+    /// override can carry it. [`crate::inference_proxy`] applies it.
+    ///
+    /// Inert for an `openhuman` preset, which has no proxied request to amend.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_only: Vec<String>,
 }
 
 fn default_key_env() -> String {
@@ -83,8 +122,8 @@ impl CustomHarnessConfig {
     /// Validate and normalize a preset before it is persisted or executed.
     ///
     /// IDs are deliberately shell- and wire-safe because they cross the fleet
-    /// protocol. Every built-in harness is accepted — see the module docs for why
-    /// OpenCode is no longer excluded.
+    /// protocol. Every built-in harness is accepted — see the module docs for
+    /// why neither OpenCode nor OpenHuman is excluded any longer.
     pub fn normalize(mut self) -> Result<Self, String> {
         self.id = self.id.trim().to_string();
         self.name = self.name.trim().to_string();
@@ -102,10 +141,20 @@ impl CustomHarnessConfig {
             .take()
             .map(|model| model.trim().to_string())
             .filter(|model| !model.is_empty());
-
-        if self.base_harness == HarnessProvider::Openhuman {
-            return Err("base harness must be claude, codex or opencode".into());
-        }
+        // Slugs are lowercased because OpenRouter matches them case-sensitively
+        // while its own documentation and dashboard present them capitalized
+        // ("StreamLake"). A pin that silently matched nothing would read as
+        // OpenRouter ignoring the setting rather than as a typo here. The first
+        // occurrence of each slug is kept, across the whole list rather than
+        // just adjacent entries: `dedup()` alone would leave a repeat that
+        // appears after a different slug.
+        let mut seen = std::collections::HashSet::new();
+        self.provider_only = std::mem::take(&mut self.provider_only)
+            .into_iter()
+            .map(|slug| slug.trim().to_ascii_lowercase())
+            .filter(|slug| !slug.is_empty())
+            .filter(|slug| seen.insert(slug.clone()))
+            .collect();
 
         if self.id.is_empty()
             || !self
@@ -127,6 +176,12 @@ impl CustomHarnessConfig {
         if self.api_key_env.is_empty() {
             return Err("API-key environment variable is required".into());
         }
+        // A preset is a model behind a CLI, and a shell has neither. Refused
+        // here rather than shrugged off later so the picker never offers a
+        // "custom harness" that cannot route anywhere.
+        if self.base_harness == HarnessProvider::Shell {
+            return Err("a shell cannot be used as a custom harness".into());
+        }
         Ok(self)
     }
 
@@ -137,9 +192,13 @@ impl CustomHarnessConfig {
         } else {
             match self.base_harness {
                 HarnessProvider::Claude => OPENROUTER_ANTHROPIC_URL,
-                HarnessProvider::Codex | HarnessProvider::Opencode | HarnessProvider::Openhuman => {
-                    OPENROUTER_OPENAI_URL
-                }
+                // Shell is rejected by `normalize`, so no preset reaches here
+                // with one; it shares the OpenAI-shaped default rather than
+                // being a fourth case nobody can produce.
+                HarnessProvider::Codex
+                | HarnessProvider::Opencode
+                | HarnessProvider::Openhuman
+                | HarnessProvider::Shell => OPENROUTER_OPENAI_URL,
             }
         }
     }
@@ -149,6 +208,7 @@ impl CustomHarnessConfig {
         RouterConfig {
             base_url: Some(self.effective_base_url().to_string()),
             api_key_env: Some(self.api_key_env.clone()),
+            provider_only: self.provider_only.clone(),
             ..RouterConfig::default()
         }
     }
@@ -157,7 +217,11 @@ impl CustomHarnessConfig {
     ///
     /// Claude Code has internal model tiers, so mapping all of them is what
     /// keeps sub-agents on OpenRouter too. OpenCode receives its model through an
-    /// existing argument (`-m`) and needs no additional variables.
+    /// existing argument (`-m`) and needs no additional variables, and OpenHuman
+    /// has no child process to hand an environment to at all — its model rides
+    /// down as
+    /// [`RunTaskOptions::model`](crate::daemon::providers::RunTaskOptions::model)
+    /// and becomes the core call's `model_override`.
     ///
     /// Codex takes its model the same way, but a preset with `codexOverrides`
     /// also carries its Codex knobs here, because the environment is what every
@@ -219,9 +283,32 @@ impl CustomHarnessConfig {
     }
 
     /// Whether the referenced OpenRouter key is present and non-blank.
+    ///
+    /// Always true for an OpenHuman preset. The key gates a preset because a
+    /// spawned CLI cannot reach the routed endpoint without it, and the
+    /// embedded core reaches no such endpoint: it authenticates its own turns
+    /// with the account the operator is already signed in as. Gating it on an
+    /// OpenRouter key would hide a perfectly usable preset on any machine that
+    /// never set one.
     pub fn key_present(&self, env: &HashMap<String, String>) -> bool {
+        if self.base_harness == HarnessProvider::Openhuman {
+            return true;
+        }
         env.get(&self.api_key_env)
             .is_some_and(|value| !value.trim().is_empty())
+    }
+
+    /// Whether a host offering `providers` can actually run this preset.
+    ///
+    /// `providers` is the list of coding CLIs found on `PATH`, and the embedded
+    /// core is never on it — it has no binary to detect. So an OpenHuman preset
+    /// is runnable wherever Medulla itself is running, matching the rule
+    /// `select_provider` already applies to a bare `openhuman` request. Without
+    /// this a configured OpenHuman preset would be filtered out of the fleet
+    /// advert and the TUI's harness list, and read as broken rather than as
+    /// unadvertised.
+    pub fn runnable_on(&self, providers: &[HarnessProvider]) -> bool {
+        self.base_harness == HarnessProvider::Openhuman || providers.contains(&self.base_harness)
     }
 
     /// Compact single-line editor representation used by the TUI.
@@ -240,16 +327,16 @@ impl CustomHarnessConfig {
     /// Parse the TUI's compact editor line.
     ///
     /// The format is
-    /// `id | name | claude|codex|opencode | model | fast-model | host-id`.
+    /// `id | name | claude|codex|opencode|openhuman | model | fast-model | host-id`.
     /// Empty fast-model falls back to the main model.
     pub fn from_editor_line(line: &str) -> Result<Self, String> {
         let fields: Vec<&str> = line.split('|').map(str::trim).collect();
         if fields.len() != 6 {
             return Err(EDITOR_LINE_FORMAT.into());
         }
-        let base_harness = HarnessProvider::from_wire(fields[2])
-            .filter(|provider| *provider != HarnessProvider::Openhuman)
-            .ok_or_else(|| "base harness must be claude, codex or opencode".to_string())?;
+        let base_harness = HarnessProvider::from_wire(fields[2]).ok_or_else(|| {
+            "base harness must be claude, codex, opencode or openhuman".to_string()
+        })?;
         Self {
             id: fields[0].into(),
             name: fields[1].into(),
@@ -263,9 +350,13 @@ impl CustomHarnessConfig {
             base_url: String::new(),
             // The compact line has no room for the Codex knobs; a preset that
             // wants them is written in the config file, which is also where the
-            // account-changing decision belongs.
+            // account-changing decision belongs. An upstream-provider pin is
+            // similarly absent from the line. Editing an existing preset through
+            // the TUI preserves both kinds of field for that reason — the editor
+            // save flow restores these alongside the other file-only fields.
             codex_overrides: false,
             reasoning_effort: None,
+            provider_only: Vec::new(),
         }
         .normalize()
     }

@@ -33,7 +33,8 @@ mod usage;
 mod work;
 mod workspace;
 pub(crate) use workspace::{
-    pull_request_command, workspace_event_from_output, PendingPullRequestCall,
+    pull_request_command, workspace_event_from_output, worktree_checkout_from_output,
+    PendingPullRequestCall,
 };
 
 #[cfg(test)]

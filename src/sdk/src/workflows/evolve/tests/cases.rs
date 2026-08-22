@@ -46,6 +46,7 @@ impl HarnessDispatch for StubReviewer {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }
@@ -99,6 +100,7 @@ pub(super) fn fixture(id: &str) -> (tempfile::TempDir, Arc<dyn WorkflowStore>, R
         input: None,
         output: None,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }];
     store.record_run(&run).expect("the run records");
 

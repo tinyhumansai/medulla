@@ -33,7 +33,10 @@ impl ThreadEventLog {
 }
 
 /// Drop the oldest entries when a bounded log exceeds its retention limit.
-fn trim_to_cap(events: &mut Vec<EventEnvelope>, cap: usize) {
+///
+/// Shared with the live runtime's snapshot cell, which keeps its own vectors
+/// rather than a [`ThreadEventLog`] but must honour the same retention.
+pub(crate) fn trim_to_cap(events: &mut Vec<EventEnvelope>, cap: usize) {
     if events.len() > cap {
         events.drain(0..events.len() - cap);
     }

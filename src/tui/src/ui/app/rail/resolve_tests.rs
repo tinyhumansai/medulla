@@ -15,7 +15,7 @@ fn session(provider: HarnessProvider, cwd: &str) -> SessionRow {
         preset: None,
         state: PtyState::Running,
         cwd: cwd.into(),
-        branch: None,
+        checkout: Default::default(),
         launch_root: None,
         launch_commit: None,
         launch_checkout_identity: None,
@@ -28,8 +28,10 @@ fn session(provider: HarnessProvider, cwd: &str) -> SessionRow {
         control: SessionControl::User,
         origin: SessionOrigin::User,
         retained: false,
+        closed_by_request: false,
         name: None,
         attention: None,
+        working: false,
     }
 }
 

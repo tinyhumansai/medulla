@@ -31,16 +31,42 @@ contains four things that each exist for a reason:
   `false`, `{}`) rather than plausible-looking invented values, because a model
   that copies an invented value ships it to a real run. Inputs with defaults
   show the default, so the example is runnable as written.
-- **A "while it runs" paragraph.** `workflow_run` starts the run and answers at
-  once with a run id; the run continues without the call. Saying so is what
+- **The signature**, one line per input: name, `*` if required, type, default,
+  and a condensed note.
+- **A closing pair of paragraphs.** `workflow_run` starts the run and answers at
+  once with a run id; the run continues without the call, so saying so is what
   stops a model reporting a started run as a finished one, or calling it again a
-  minute later — and the paragraph names `workflow_run_get`, because starting a
-  run and reading it are two calls.
-- **A fallback paragraph.** Skills are copied into user-scope directories that
-  outlive any MCP configuration, so the tool being absent is a normal state. The
-  body says: do not claim the run started, run `medulla workflow run` from the
-  shell, or attach the server with `medulla skills install --with-mcp`. A skill
-  that dead-ends when the server is missing is worse than no skill.
+  minute later — and `workflow_run_get` is named, because starting a run and
+  reading it are two calls. Then the fallback: skills are copied into user-scope
+  directories that outlive any MCP configuration, so the tool being absent is a
+  normal state, and a skill that dead-ends there is worse than no skill.
+
+## Length is a feature
+
+A harness loads every installed skill's frontmatter `description` into *every*
+session, and a skill's body whenever it fires. Ten saved workflows used to cost
+the operator thousands of tokens before they typed anything, and each body ran
+past a thousand more. The template is therefore written to say each thing once,
+as briefly as it can still be said:
+
+- The frontmatter carries the workflow's own words condensed to ~220 characters,
+  because that is the part charged unconditionally. Longer descriptions are cut
+  at a sentence boundary where one fits and a word boundary otherwise, so the
+  result still reads as prose rather than as damage.
+- Input notes are condensed the same way, and laid out as a list rather than the
+  markdown table this used to render — the table spent five header cells and a
+  rule row per workflow, plus pipes and padding per input, on what one line says.
+- Section headings are gone. A heading earns its tokens in a document long enough
+  to navigate, and this one is four paragraphs.
+- **Nothing is dropped, only relocated.** Wherever this rendering shortened the
+  author's words, the body names `workflow_get`, which serves them whole. The
+  skill is an index into the workflow, not a copy of it — so the cost is paid
+  only by a model that actually needs the full text.
+
+`render_tests.rs` asserts the resulting size budget against a workflow with four
+thoroughly documented inputs. That guard is deliberate: a template grows one
+well-meant clarifying sentence at a time, and every one of them is charged to
+every operator on every session.
 
 ## The marker discipline
 
@@ -225,6 +251,10 @@ nobody.
 A skill without the MCP server attached is inert, so `--with-mcp` registers
 `medulla mcp` with the same harnesses the skills went to. That registration is a
 config-file merge we perform ourselves, never a `claude mcp add` subprocess.
+This describes the `medulla skills` command specifically. Interactive app
+startup also reconciles the user scope; because Claude exposes no stable
+user-registry file, that separate app-side path uses Claude's supported
+`claude mcp add` command while Codex still uses this module's preserving merge.
 
 Shelling out makes the result depend on which CLI version happens to be on
 `PATH`, cannot be tested offline, and cannot honour `--dry-run` — a dry run that

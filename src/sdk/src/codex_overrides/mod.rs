@@ -30,6 +30,7 @@
 //! interactive pane, the PTY executor, the headless daemon — already carries
 //! from the preset to the child unchanged.
 
+mod acp;
 mod catalog;
 #[cfg(test)]
 mod tests;
@@ -37,6 +38,7 @@ mod types;
 
 use std::collections::HashMap;
 
+pub use acp::{acp_env, CONFIG_ENV, MODEL_PROVIDER_ENV};
 pub use catalog::{catalog_path, write_catalog};
 pub use types::CodexOverridesError;
 
@@ -93,6 +95,29 @@ pub fn launch_args(
     model: Option<&str>,
     env: &HashMap<String, String>,
 ) -> Result<Vec<String>, CodexOverridesError> {
+    let mut args = Vec::new();
+    for (key, value) in overrides(provider, model, env)? {
+        args.push("-c".to_string());
+        args.push(format!("{key}={}", toml_string(&value)));
+    }
+    Ok(args)
+}
+
+/// The Codex config overrides a routed spawn needs, as `(key, value)` pairs.
+///
+/// Dotted keys, exactly as they appear in `config.toml` — the two renderers
+/// (`-c` argv for the CLI, a JSON document for ACP) each turn them into what
+/// their transport reads. Kept as one list because a routed run must reach the
+/// same provider whichever transport carried it; two hand-written copies drifted
+/// once already.
+///
+/// Empty when this does not apply: a non-Codex provider, a preset that did not
+/// opt in, or no routed endpoint to point a provider block at.
+pub fn overrides(
+    provider: HarnessProvider,
+    model: Option<&str>,
+    env: &HashMap<String, String>,
+) -> Result<Vec<(String, String)>, CodexOverridesError> {
     if provider != HarnessProvider::Codex || !enabled(env) {
         return Ok(Vec::new());
     }
@@ -104,44 +129,44 @@ pub fn launch_args(
         return Ok(Vec::new());
     };
 
-    let mut args = Vec::new();
-    push_override(&mut args, "model_provider", PROVIDER_ID);
-    push_override(
-        &mut args,
-        &format!("model_providers.{PROVIDER_ID}.name"),
-        "Medulla",
-    );
-    push_override(
-        &mut args,
-        &format!("model_providers.{PROVIDER_ID}.base_url"),
-        base_url,
-    );
-    // The key itself is never on the command line: Codex resolves this variable
-    // from the child environment the router already populated.
-    push_override(
-        &mut args,
-        &format!("model_providers.{PROVIDER_ID}.env_key"),
-        "OPENAI_API_KEY",
-    );
-    // Codex dropped the chat-completions wire in 0.146, and the endpoints a
-    // preset routes to (OpenRouter, or Medulla's proxy in front of it) serve the
-    // Responses API.
-    push_override(
-        &mut args,
-        &format!("model_providers.{PROVIDER_ID}.wire_api"),
-        "responses",
-    );
-    // Without this a signed-in ChatGPT account wins over the routed key and the
-    // whole provider block is ignored.
-    push_override(&mut args, "preferred_auth_method", "apikey");
-    push_override(&mut args, "model_reasoning_effort", &effort(env));
+    let mut overrides = vec![
+        ("model_provider".to_string(), PROVIDER_ID.to_string()),
+        (
+            format!("model_providers.{PROVIDER_ID}.name"),
+            "Medulla".to_string(),
+        ),
+        (
+            format!("model_providers.{PROVIDER_ID}.base_url"),
+            base_url.to_string(),
+        ),
+        // The key itself is never carried here: Codex resolves this variable
+        // from the child environment the router already populated.
+        (
+            format!("model_providers.{PROVIDER_ID}.env_key"),
+            "OPENAI_API_KEY".to_string(),
+        ),
+        // Codex dropped the chat-completions wire in 0.146, and the endpoints a
+        // preset routes to (OpenRouter, or Medulla's proxy in front of it) serve
+        // the Responses API.
+        (
+            format!("model_providers.{PROVIDER_ID}.wire_api"),
+            "responses".to_string(),
+        ),
+        // Without this a signed-in ChatGPT account wins over the routed key and
+        // the whole provider block is ignored.
+        ("preferred_auth_method".to_string(), "apikey".to_string()),
+        ("model_reasoning_effort".to_string(), effort(env)),
+    ];
 
     let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
-        return Ok(args);
+        return Ok(overrides);
     };
     let catalog = write_catalog(model, display_name(env, model), context_window(env), env)?;
-    push_override(&mut args, "model_catalog_json", &catalog.to_string_lossy());
-    Ok(args)
+    overrides.push((
+        "model_catalog_json".to_string(),
+        catalog.to_string_lossy().into_owned(),
+    ));
+    Ok(overrides)
 }
 
 /// Whether the run's environment opts into these overrides.
@@ -177,16 +202,6 @@ fn display_name<'a>(env: &'a HashMap<String, String>, model: &'a str) -> &'a str
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .unwrap_or(model)
-}
-
-/// Append one `-c key=value` override as the two argv entries Codex expects.
-///
-/// Values are quoted as TOML strings: Codex parses the right-hand side as TOML,
-/// and an unquoted OpenRouter slug (`deepseek/deepseek-v4-flash-0731`) is not a
-/// valid bare value.
-fn push_override(args: &mut Vec<String>, key: &str, value: &str) {
-    args.push("-c".to_string());
-    args.push(format!("{key}={}", toml_string(value)));
 }
 
 /// A TOML basic string, with the two characters that can break out escaped.

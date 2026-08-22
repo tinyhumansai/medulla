@@ -53,8 +53,7 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 
 use crate::protocol::HarnessProvider;
-use crate::workflows::store::FileWorkflowStore;
-use crate::workflows::types::WorkflowRecord;
+use crate::workflows::WorkflowRecord;
 
 use super::install::sync;
 use super::targets::{legacy_managed_root, managed_root, spawn_args};
@@ -157,7 +156,7 @@ pub fn sync_managed(
     let root = managed_root(env, cwd);
     let _guard = RefreshLock::acquire(&root)?;
 
-    let report = FileWorkflowStore::discover(env, cwd).load();
+    let report = crate::workflows::store::discover(env, cwd).load();
     let workflows: Vec<_> = report
         .workflows
         .iter()

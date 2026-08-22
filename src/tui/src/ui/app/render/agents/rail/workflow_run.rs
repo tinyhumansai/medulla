@@ -41,17 +41,18 @@ impl App {
         } else {
             Style::default()
         };
-        let status_style = if active {
-            style
-        } else {
-            Style::default().fg(color(row.run.status.color()))
-        };
+        // The gear is the status surface: colour distinguishes each lifecycle
+        // state, while blinking distinguishes a parked or moving run from one
+        // that has settled. Keeping the signal on one glyph avoids repeating a
+        // status word down every child row.
+        let mut indicator_style = style.fg(color(row.run.status.color()));
+        if !row.run.status.is_terminal() {
+            indicator_style = indicator_style.add_modifier(Modifier::SLOW_BLINK);
+        }
         TLine::from(vec![
-            Span::styled(
-                format!("   {branch} ⚙ {} · ", self.workflow_run_title(&row.run)),
-                style,
-            ),
-            Span::styled(row.run.status.label().to_string(), status_style),
+            Span::styled(format!("   {branch} "), style),
+            Span::styled("⚙", indicator_style),
+            Span::styled(format!(" {}", self.workflow_run_title(&row.run)), style),
             Span::styled(
                 format!(" · {}", workflow_run_elapsed(&row.run, now)),
                 if active {

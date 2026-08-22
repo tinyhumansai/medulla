@@ -1,5 +1,7 @@
 //! Tests for Agents rail workflow-run entries.
 
+use ratatui::style::Modifier;
+
 use super::super::super::super::color;
 use super::super::workflow_run_elapsed;
 use super::{app, lane, none_waiting, NOW};
@@ -31,7 +33,7 @@ fn row(
 }
 
 #[test]
-fn a_workflow_run_row_names_its_workflow_status_and_elapsed_time() {
+fn a_workflow_run_row_names_its_workflow_and_elapsed_time_without_status_text() {
     let text = app()
         .rail_row_line(
             &row(medulla::control_socket::HarnessRunStatus::Running, true),
@@ -41,10 +43,7 @@ fn a_workflow_run_row_names_its_workflow_status_and_elapsed_time() {
             NOW,
         )
         .to_string();
-    assert!(text.contains("review-and-fix"));
-    assert!(text.contains("running"));
-    assert!(text.contains("9s"));
-    assert!(text.starts_with("   └"));
+    assert_eq!(text, "   └ ⚙ review-and-fix · 9s");
 }
 
 #[test]
@@ -100,18 +99,30 @@ fn clock_clamps_a_settled_run_reported_before_it_started_to_zero() {
 }
 
 #[test]
-fn a_failed_run_row_is_coloured_by_its_status_rather_than_by_the_row() {
-    let line = app().rail_row_line(
-        &row(medulla::control_socket::HarnessRunStatus::Failed, false),
-        &[lane()],
-        false,
-        &none_waiting(),
-        NOW,
-    );
-    let status = line
-        .spans
-        .iter()
-        .find(|span| span.content.contains("failed"))
-        .expect("a status span");
-    assert_eq!(status.style.fg, Some(color("red")));
+fn the_indicator_colours_every_status_and_only_unsettled_runs_blink() {
+    use medulla::control_socket::HarnessRunStatus::{AwaitingApproval, Failed, Running, Succeeded};
+
+    for (status, expected_color, blinking) in [
+        (Running, "yellow", true),
+        (AwaitingApproval, "cyan", true),
+        (Succeeded, "green", false),
+        (Failed, "red", false),
+    ] {
+        let line = app().rail_row_line(&row(status, false), &[lane()], false, &none_waiting(), NOW);
+        let indicator = line
+            .spans
+            .iter()
+            .find(|span| span.content == "⚙")
+            .expect("a status indicator");
+        assert_eq!(indicator.style.fg, Some(color(expected_color)));
+        assert_eq!(
+            indicator.style.add_modifier.contains(Modifier::SLOW_BLINK),
+            blinking,
+            "{status:?}"
+        );
+        assert!(
+            !line.to_string().contains(status.label()),
+            "status should be visual, not text: {line}"
+        );
+    }
 }

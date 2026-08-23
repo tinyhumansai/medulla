@@ -2150,7 +2150,7 @@ dependencies = [
 
 [[package]]
 name = "medulla"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-link"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "chacha20poly1305",
  "fs2",
@@ -2203,7 +2203,7 @@ dependencies = [
 
 [[package]]
 name = "medulla-tui"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

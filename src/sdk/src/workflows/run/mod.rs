@@ -131,6 +131,41 @@ impl Drop for RunFinalizer {
     }
 }
 
+/// How often a running workflow re-reads its own record for a cancel request.
+///
+/// A compromise between a cancel from another process feeling immediate and not
+/// re-reading a file on a tight loop for the whole life of a run that may last
+/// hours. A workflow step is a harness session; two seconds is noise against it.
+const CANCEL_POLL: Duration = Duration::from_secs(2);
+
+/// Resolve when someone marks this run cancelled from outside this process.
+///
+/// Polls rather than watches the file: the store is a trait with no change
+/// notification, and a filesystem watcher would be a platform-specific
+/// dependency for something a two-second poll answers well enough.
+///
+/// A read that fails is ignored rather than treated as a cancel. The record is
+/// rewritten as the run progresses, so a transient failure to read it — a
+/// half-written file, a momentary permission problem — must not be what stops
+/// a healthy run.
+async fn watch_cancel_request(store: Arc<dyn WorkflowStore>, run_id: String) {
+    loop {
+        tokio::time::sleep(CANCEL_POLL).await;
+        let requested = {
+            let store = store.clone();
+            let run_id = run_id.clone();
+            tokio::task::spawn_blocking(move || {
+                matches!(store.get_run(&run_id), Ok(Some(record)) if record.cancel_requested)
+            })
+            .await
+            .unwrap_or(false)
+        };
+        if requested {
+            return;
+        }
+    }
+}
+
 /// Run the workflow `workflow_id` to completion, an approval gate, or a failure.
 ///
 /// `run_id` doubles as the engine checkpointer's thread id and as the
@@ -268,12 +303,20 @@ async fn run_workflow_inner(
     let bounded = tokio::time::timeout(Duration::from_secs(settings.run_timeout_secs), engine_run);
     tokio::pin!(bounded);
 
+    // A cancel aimed at this run from another process cannot reach the
+    // in-memory registry, so it is written to the record instead. Watching for
+    // it here is what makes `medulla workflow cancel` work from any shell
+    // rather than only from the one that happens to be executing the run.
+    let watch = watch_cancel_request(context.store.clone(), run_id.to_string());
+    tokio::pin!(watch);
+
     // `biased` so a cancel that lands in the same poll as the run settling wins
     // deterministically, rather than depending on which future the runtime
     // happened to look at first.
     let settled = tokio::select! {
         biased;
         _ = cancelled.cancelled() => Err(Settle::Cancelled),
+        _ = &mut watch => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),

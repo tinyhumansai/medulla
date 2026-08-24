@@ -28,6 +28,10 @@ jobs:
 
       - uses: ./.github/actions/native-deps
 
+      # `cargo build --all-targets` over this workspace does not fit in a stock
+      # runner's free space alongside the caches.
+      - uses: ./.github/actions/free-disk
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -95,18 +99,9 @@ jobs:
       - uses: ./.github/actions/native-deps
 
       # `-C instrument-coverage` builds a second, larger copy of the whole
-      # workspace into target/llvm-cov-target, on top of the sccache disk cache
-      # and the restored rust-cache. That has already exhausted a stock runner
-      # once: ld died with SIGBUS mid-link at 37 MB free, which reads as a
-      # compiler crash rather than as a full disk. Reclaim the toolchains this
-      # job cannot use before the build rather than after the confusing failure.
-      - name: Reclaim runner disk
-        run: |
-          set -euo pipefail
-          df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h /
+      # workspace into target/llvm-cov-target, so this is the lane with the
+      # least headroom of any.
+      - uses: ./.github/actions/free-disk
 
       - uses: dtolnay/rust-toolchain@stable
         with:

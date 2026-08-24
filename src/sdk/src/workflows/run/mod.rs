@@ -476,6 +476,13 @@ pub async fn resume_workflow(
     };
     record.status = RunStatus::Running;
     record.finished_at = None;
+    // Restamped on every resume, just as the fresh-run path stamps it on
+    // admission: the record's executor from before the approval gate names a
+    // process that has since exited (the CLI that reached the gate returns
+    // and its process ends), so leaving it in place would make a cancel
+    // aimed at this run believe it is owned by a dead process — see
+    // `reconcile::is_alive` and the cross-process poll below.
+    record.executor = Some(reconcile::current_executor().clone());
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 

@@ -263,3 +263,55 @@ fn the_sweep_spans_every_workflow_in_the_scope() {
 
     assert_eq!(reconciled.len(), 2, "{reconciled:?}");
 }
+
+#[test]
+fn a_run_that_settles_between_the_snapshot_and_the_write_is_not_overwritten() {
+    // The window this guards: `unsettled_runs` snapshots a `Running` record,
+    // and before the liveness check finishes the owner writes a *successful*
+    // terminal record and exits — which is exactly why its pid then reads as
+    // dead. Writing the snapshot back would replace a finished run, and every
+    // step and diagnosis it collected, with `Interrupted`.
+    //
+    // Simulated by settling the record after it is on disk as `Running` but
+    // before the sweep runs, which is the same ordering from the sweep's point
+    // of view: what it holds is stale, and re-reading is what catches that.
+    let (_root, store) = store();
+    store
+        .record_run(&running("run-finished", Some(dead_executor())))
+        .unwrap();
+    let mut settled = store.get_run("run-finished").unwrap().unwrap();
+    settled.status = RunStatus::Succeeded;
+    settled.finished_at = Some(4242);
+    settled.summary = Some("did the thing".to_string());
+    store.record_run(&settled).unwrap();
+
+    let reconciled = reconcile_orphans(&store).unwrap();
+
+    assert!(reconciled.is_empty(), "{reconciled:?}");
+    let record = store.get_run("run-finished").unwrap().unwrap();
+    assert_eq!(record.status, RunStatus::Succeeded);
+    assert_eq!(record.finished_at, Some(4242));
+    assert_eq!(record.summary.as_deref(), Some("did the thing"));
+}
+
+#[test]
+fn a_run_picked_up_by_another_process_is_not_reconciled_on_the_old_verdict() {
+    // A resume hands the run to a live process after the snapshot. The dead
+    // executor the sweep inspected belongs to the previous owner and says
+    // nothing about the new one, so the record must be left alone.
+    let (_root, store) = store();
+    store
+        .record_run(&running("run-handed-over", Some(dead_executor())))
+        .unwrap();
+    let mut resumed = store.get_run("run-handed-over").unwrap().unwrap();
+    resumed.executor = Some(current_executor().clone());
+    store.record_run(&resumed).unwrap();
+
+    let reconciled = reconcile_orphans(&store).unwrap();
+
+    assert!(reconciled.is_empty(), "{reconciled:?}");
+    assert_eq!(
+        store.get_run("run-handed-over").unwrap().unwrap().status,
+        RunStatus::Running
+    );
+}

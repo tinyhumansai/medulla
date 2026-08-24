@@ -234,7 +234,12 @@ async fn run_workflow_inner(
     // was asked to do.
     let record = new_run_record(run_id, workflow_id, crate::clock::now_millis() as u64)
         .with_inputs(&resolved_inputs, &input)
-        .with_origin(context.origin.clone());
+        .with_origin(context.origin.clone())
+        // Stamped before the first write, so there is no window in which a
+        // record claims to be running without saying who is running it. A
+        // record in that window would look like an orphan to a sweep in
+        // another process.
+        .with_executor(Some(reconcile::current_executor().clone()));
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 

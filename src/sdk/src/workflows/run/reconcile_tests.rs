@@ -165,21 +165,25 @@ fn a_settled_run_is_never_rewritten() {
 }
 
 #[test]
-fn a_run_parked_on_approval_is_settled_when_its_process_dies() {
-    // `pending_approval` is not settled: a parked run whose host is gone can
-    // never be resumed, so leaving it parked is the same lie as leaving it
-    // running.
+fn a_run_parked_on_approval_is_left_alone_even_when_its_process_died() {
+    // `PendingApproval` is not settled, but it is not an orphan either: the
+    // one-shot CLI process that reached the gate exits normally right after
+    // writing this status, so a dead executor here is the expected shape of
+    // a parked run, not evidence of a crash. Reconciling it to `Interrupted`
+    // would make the next `medulla workflow resume` reject it as no longer
+    // awaiting approval, destroying a run nobody has gotten to yet.
     let (_root, store) = store();
     let mut record = running("run-parked", Some(dead_executor()));
     record.status = RunStatus::PendingApproval;
     record.pending_approvals = vec!["review".to_string()];
     store.record_run(&record).unwrap();
 
-    reconcile_orphans(&store).unwrap();
+    let reconciled = reconcile_orphans(&store).unwrap();
 
+    assert!(reconciled.is_empty(), "{reconciled:?}");
     assert_eq!(
         store.get_run("run-parked").unwrap().unwrap().status,
-        RunStatus::Interrupted
+        RunStatus::PendingApproval
     );
 }
 

@@ -215,7 +215,9 @@ pub fn reconcile_once(store: &Arc<dyn WorkflowStore>, scope: &str) {
         std::sync::OnceLock::new();
     let seen = DONE.get_or_init(Default::default);
     {
-        let mut seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut seen = seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !seen.insert(scope.to_string()) {
             return;
         }

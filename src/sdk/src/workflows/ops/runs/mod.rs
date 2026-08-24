@@ -18,7 +18,9 @@ use serde_json::{json, Map, Value};
 
 use super::record_value;
 use crate::workflows::local::LocalRun;
-use crate::workflows::{StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowStore};
+use crate::workflows::{
+    RunStatus, StoreWorkflowResolver, WorkflowError, WorkflowId, WorkflowStore,
+};
 
 pub use types::Wait;
 pub use view::StepDetail;
@@ -211,26 +213,96 @@ pub fn get_run(
     view::project(&record, detail)
 }
 
-/// Cancel a run executing in *this* process.
+/// Stop a run, wherever it is executing.
 ///
-/// The registry is process-local, so a `medulla workflow cancel` typed in one
-/// shell cannot reach a run started in another: there is no control channel
-/// between two CLI invocations. Rather than report a bare `false` that reads as
-/// "cancelled nothing, all good", the result says which case it was, so a
-/// caller can tell "already finished" from "not mine to cancel".
+/// Four cases, because "cancel" means something different in each and a caller
+/// that cannot tell them apart cannot act on the answer:
 ///
-/// The paths that *can* always cancel are the ones that own the running
-/// process: the TUI cancels the run it started, and an orchestrator's abort
-/// frame reaches the daemon that is executing it.
-pub fn cancel_run(run_id: &str) -> Value {
+/// 1. **Executing here.** The process-local registry has it; signal it and the
+///    run winds down as it always has.
+/// 2. **Already settled.** Nothing to stop. Reported as not-cancelled with the
+///    status it settled at, so "already finished" does not read as a failure.
+/// 3. **Orphaned.** The record says it is running, but the process that was
+///    running it is gone — killed, crashed, or the machine was rebooted. There
+///    is nothing to signal, so the cancel is honoured by settling the record
+///    itself. This is the case that used to be refused, and it is the one an
+///    operator hits after a host restart.
+/// 4. **Executing in another live process.** A durable cancel request is written
+///    onto the record; the process that owns the run notices it within a poll
+///    interval and cancels itself. Reported as `requested` rather than done,
+///    because it has not stopped yet.
+///
+/// Only case 4 is asynchronous. The rest are settled by the time this returns.
+pub fn cancel_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Value {
     if crate::workflows::run::cancel(run_id) {
         return json!({ "cancelled": true, "runId": run_id });
     }
-    json!({
-        "cancelled": false,
-        "runId": run_id,
-        "reason": "no run with this id is executing in this process; a run started by another \
-                   process must be cancelled where it runs (the TUI that started it, or an \
-                   orchestrator abort to the daemon executing it)",
-    })
+
+    let mut record = match store.get_run(run_id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            return json!({
+                "cancelled": false,
+                "runId": run_id,
+                "reason": "no run with this id exists in this workspace's history",
+            })
+        }
+        Err(err) => {
+            return json!({
+                "cancelled": false,
+                "runId": run_id,
+                "reason": format!("could not read the run record: {err}"),
+            })
+        }
+    };
+
+    if record.status.is_settled() {
+        return json!({
+            "cancelled": false,
+            "runId": run_id,
+            "status": record.status,
+            "reason": "this run has already settled, so there is nothing to cancel",
+        });
+    }
+
+    let alive = record
+        .executor
+        .as_ref()
+        .is_some_and(crate::workflows::run::reconcile::is_alive);
+    if alive {
+        record.cancel_requested = true;
+        return match store.record_run(&record) {
+            Ok(()) => json!({
+                "cancelled": true,
+                "requested": true,
+                "runId": run_id,
+                "reason": "the process executing this run has been asked to stop it; it will \
+                           settle as cancelled within a few seconds",
+            }),
+            Err(err) => json!({
+                "cancelled": false,
+                "runId": run_id,
+                "reason": format!("could not record the cancel request: {err}"),
+            }),
+        };
+    }
+
+    // Nothing is executing this run anywhere. Settle the record rather than
+    // refusing: the operator asked for it to stop, and it already has.
+    record.status = RunStatus::Cancelled;
+    record.finished_at = Some(crate::clock::now_millis() as u64);
+    match store.record_run(&record) {
+        Ok(()) => json!({
+            "cancelled": true,
+            "reconciled": true,
+            "runId": run_id,
+            "reason": "the process executing this run was already gone; its record has been \
+                       settled as cancelled",
+        }),
+        Err(err) => json!({
+            "cancelled": false,
+            "runId": run_id,
+            "reason": format!("could not settle the orphaned run record: {err}"),
+        }),
+    }
 }

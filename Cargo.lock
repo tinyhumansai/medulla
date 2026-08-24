@@ -2222,6 +2222,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sysinfo 0.37.2",
  "tempfile",
  "thiserror 2.0.19",
  "tinyflows",

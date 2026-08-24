@@ -51,7 +51,7 @@ Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and 
 
 ```sh
 git clone https://github.com/tinyhumansai/medulla-src
-cd medulla
+cd medulla-src
 make init                       # submodules, rustfmt/clippy, locked deps, pre-push hook
 cargo run                       # debug build, starts the TUI (mock runtime)
 cargo run --release             # optimized build

@@ -117,7 +117,7 @@ unicode-width = "0.2"
 # Vendored code stays out of `members` via `exclude`, so it keeps its own lints
 # and tests instead of joining this workspace's CI gates.
 [patch."https://github.com/tinyhumansai/tinymemory"]
-tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/api" }
+tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/crates/tinymemory-api" }
 
 [patch.crates-io]
 tinyagents = { path = "vendor/openhuman/vendor/tinyagents" }

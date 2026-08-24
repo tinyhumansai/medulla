@@ -225,32 +225,57 @@ pub fn reconcile_orphans(store: &Arc<dyn WorkflowStore>) -> Result<Vec<Reconcile
     Ok(reconciled)
 }
 
-/// Run [`reconcile_orphans`] at most once per process, for the workspace scope
-/// named by `scope`.
+/// How long a scope stays swept before [`reconcile_once`] will sweep it again.
+///
+/// A throttle, not a schedule: nothing wakes up to sweep, so a scope is only
+/// re-swept when something discovers its store again. In a short-lived CLI that
+/// means once and never; in a long-lived TUI or MCP server it means about this
+/// often, as commands come in.
+const SWEEP_INTERVAL_MS: u64 = 60_000;
+
+/// Run [`reconcile_orphans`] for the workspace scope named by `scope`, at most
+/// once per [`SWEEP_INTERVAL_MS`].
 ///
 /// The sweep hangs off store discovery, which happens many times in one process
-/// — the TUI rediscovers per command. Sweeping every time would re-read the runs
-/// directory on every keystroke-driven command for no benefit: once a process
-/// has settled the tombstones it can see, new ones can only come from processes
-/// that are still alive.
+/// — the TUI rediscovers per command. Sweeping on every one of those would
+/// re-read the runs directory on every keystroke-driven command.
 ///
-/// Keyed by `scope` rather than a single global flag: a process that discovers
-/// stores for more than one workspace — a different `cwd`, a different
-/// `MEDULLA_HOME` — must still sweep each of them once, not just the first one
-/// it happens to see. The caller derives `scope` from whatever determines the
-/// store's on-disk location, so two discoveries of the *same* workspace share a
-/// key even though each call builds a fresh store object.
+/// But a once-per-process guard is wrong in the other direction, and wrong in a
+/// way that quietly disables this feature exactly where it matters most. A TUI
+/// or MCP server that starts, sweeps, and then runs for hours would never sweep
+/// again — so a peer CLI that was alive during that first sweep and is killed
+/// ten minutes later leaves a record stuck at `Running` until the long-lived
+/// process itself restarts. The orphans this exists to clear are mostly created
+/// *after* startup, not before it.
+///
+/// So: throttle rather than latch. A short-lived process still sweeps once and
+/// pays nothing more; a long-lived one keeps catching up on peers that die
+/// during its lifetime.
+///
+/// Keyed by `scope` rather than a single global timestamp: a process that
+/// discovers stores for more than one workspace — a different `cwd`, a
+/// different `MEDULLA_HOME` — must sweep each of them, not just whichever it
+/// saw first. The caller derives `scope` from whatever determines the store's
+/// on-disk location, so two discoveries of the *same* workspace share a key
+/// even though each call builds a fresh store object.
 pub fn reconcile_once(store: &Arc<dyn WorkflowStore>, scope: &str) {
-    static DONE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    static SWEPT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
         std::sync::OnceLock::new();
-    let seen = DONE.get_or_init(Default::default);
+    let swept = SWEPT.get_or_init(Default::default);
+    let now = crate::clock::now_millis() as u64;
     {
-        let mut seen = seen
+        let mut swept = swept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !seen.insert(scope.to_string()) {
+        // Stamped before the sweep runs, not after: two threads discovering the
+        // same scope at once must not both sweep, and the loser should skip
+        // rather than wait on the winner.
+        if let Some(last) = swept.get(scope)
+            && now.saturating_sub(*last) < SWEEP_INTERVAL_MS
+        {
             return;
         }
+        swept.insert(scope.to_string(), now);
     }
     match reconcile_orphans(store) {
         Ok(reconciled) if !reconciled.is_empty() => {

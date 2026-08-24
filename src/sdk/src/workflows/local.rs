@@ -454,7 +454,18 @@ impl LocalRun<'_> {
         // is the thing this change exists to remove.
         let admitted = crate::workflows::new_run_record(&run_id, workflow_id, started_at)
             .with_inputs(&resolved_inputs, &input.trigger)
-            .with_origin(origin.clone());
+            .with_origin(origin.clone())
+            // Stamped on the admission write itself, not only on the later
+            // write inside `run_workflow_inner`: another process's orphan
+            // sweep can observe this record in the window between this write
+            // and the spawned run being polled for the first time. Without an
+            // executor here that record has `status: Running` and
+            // `executor: None`, which is exactly what a genuinely abandoned
+            // record looks like, so a concurrent sweep would reconcile a run
+            // that has merely not started executing yet.
+            .with_executor(Some(
+                crate::workflows::run::reconcile::current_executor().clone(),
+            ));
         store.record_run(&admitted)?;
         let snapshot_store = store.clone();
         let snapshot_run_id = run_id.clone();

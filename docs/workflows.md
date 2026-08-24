@@ -217,10 +217,14 @@ dozens of them, and every listing reported them as live work.
 Each record now names the process executing it: host, pid, and that process's own
 start time, the last of which is what stops a recycled pid from looking like a
 live executor. On startup a host settles every unsettled record whose executor is
-gone, as `interrupted` — or as `cancelled`, when someone had asked it to stop. The
-sweep runs once per process and is deliberately conservative: a record from
-another host, or a live pid whose start time cannot be read, is left alone. A
-stale row that survives is cosmetic; a live run settled out from under its
+gone, as `interrupted` — or as `cancelled`, when someone had asked it to stop. A
+run parked on an approval gate is left alone even though it is unsettled and its
+CLI process has exited: that process was always going to exit once it reached the
+gate, so a dead executor there is expected, not a crash, and reconciling it away
+would make the next `resume` reject it as no longer awaiting approval. The sweep
+runs once per process per workspace and is deliberately conservative: a record
+from another host, or a live pid whose start time cannot be read, is left alone.
+A stale row that survives is cosmetic; a live run settled out from under its
 executor is a lost run.
 
 `dry-run` is the one to reach for while authoring. Validation catches a malformed

@@ -33,6 +33,8 @@ mod registry;
 mod summary;
 
 #[cfg(test)]
+mod reconcile_tests;
+#[cfg(test)]
 mod tests;
 
 pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};

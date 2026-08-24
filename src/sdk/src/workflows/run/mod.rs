@@ -312,6 +312,13 @@ async fn run_workflow_inner(
         // record in that window would look like an orphan to a sweep in
         // another process.
         .with_executor(Some(reconcile::current_executor().clone()));
+    let mut record = record;
+    // `LocalRun::start` already wrote an admitted record for this id, and a
+    // cancel aimed at it between that write and this one would be sitting on
+    // disk. This record is freshly built, so it says `false` — carry the
+    // request forward instead of writing over it, or the run proceeds having
+    // told the caller it was cancelled.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 

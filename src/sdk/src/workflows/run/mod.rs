@@ -18,7 +18,12 @@
 //! **The run record is reconciled on drop.** A run that is cancelled, panics, or
 //! dies with the process would otherwise leave a record claiming to be
 //! `running` forever. `RunFinalizer` writes a terminal status on drop unless a
-//! settled path already did.
+//! settled path already did. A kill that runs no destructors at all is caught
+//! one level up, by the startup sweep in [`reconcile`].
+//!
+//! **A cancel can arrive from another process.** The registry is in-memory, so
+//! a cancel aimed at a run this process is not executing is written onto the
+//! record instead; [`watch_cancel_request`] is the half that notices.
 //!
 //! **Resume checks the host's record, not just the engine's.** The engine treats
 //! a resume call as approval; that is too generous. [`resume_workflow`] requires

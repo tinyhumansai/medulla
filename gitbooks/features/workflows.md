@@ -8,8 +8,8 @@ description: >-
 
 A Medulla task is one instruction handed to one harness. A **workflow** is a
 saved, multi-step plan: a directed acyclic graph whose `agent` steps each run as
-a real coding-harness session — Claude Code, Codex, or OpenCode — in the order
-and with the parallelism the graph declares.
+a real coding-harness session (Claude Code, Codex, or OpenCode) in the order and
+with the parallelism the graph declares.
 
 That is the distinction worth holding on to. Plenty of tools let you chain model
 calls. Here an `agent` node is a *dispatched task*: a harness, with your
@@ -18,7 +18,7 @@ what each step is given, and where a human has to say yes.
 
 ## Where they live
 
-Workflows are JSON documents, one graph per file, in two layered directories —
+Workflows are JSON documents, one graph per file, in two layered directories,
 lowest precedence first:
 
 ```
@@ -32,7 +32,7 @@ rest of the catalogue still loads and the failure is reported rather than
 swallowed.
 
 Run records live under `<medulla home>/state/workflows/runs/`, and the engine's
-checkpoints — what lets a paused run survive a restart — under
+checkpoints, which are what let a paused run survive a restart, under
 `state/workflows/checkpoints/`.
 
 ## In the TUI
@@ -46,7 +46,7 @@ Workflows is a top-level tab with three parts:
   distance from the trigger, a lane per concurrent branch, and each branch's port
   name written on the wire that carries it. `←→` follows edges, `↑↓` walks the
   lanes, and `i` expands the selected node's whole declaration. Selecting a run
-  overlays it — each box recoloured by how that run left it, unreached steps
+  overlays it: each box recoloured by how that run left it, unreached steps
   dimmed, and durations and diagnostics in the inspector.
 * **The copilot** (`c`) is a conversation that edits the graph. Ask for a change
   in plain words; a real harness session makes it, and the graph is re-read from
@@ -80,8 +80,8 @@ medulla workflow cancel <run-id>
 ```
 
 `dry-run` is the one to reach for while authoring. Validation catches a malformed
-graph; a dry run catches a *well-formed* graph that is wired wrong — every
-expression resolved and every declared output shape satisfied, against capability
+graph; a dry run catches a *well-formed* graph that is wired wrong, resolving
+every expression and checking every declared output shape against capability
 stand-ins, with nothing dispatched.
 
 `cancel` is process-local. A run started by `medulla workflow run` in one shell
@@ -102,30 +102,30 @@ to sit and watch the run.
 ## Agents author them too
 
 Medulla drives Claude Code and Codex over [ACP](https://github.com/tinyhumansai/medulla/blob/main/docs/acp-harnesses.md)
-as a *client*, so it cannot hand them tools directly — it offers them. Every ACP
+as a *client*, so it cannot hand them tools directly; it offers them. Every ACP
 session gets an MCP server (`medulla workflow mcp`, the same binary) exposing the
 catalogue, `workflow_create`, `workflow_apply_ops` / `workflow_preview_ops`,
 `workflow_validate`, `workflow_dry_run`, `workflow_run`, and `workflow_runs`.
 
 `workflow_run` starts the run and answers with its id rather than waiting for
-it. A real workflow outlives any client's idle ceiling — a measured three-pass
-babysit ran 35 minutes, one step of it 20 — so a call that waits is reported as
-a failure while the run carries on succeeding. `workflow_run_get` says how far
-it has got and, once it settles, what it did. `wait: true` and `waitMs` are
-there for the short ones.
+it. A real workflow outlives any client's idle ceiling. In one of our own runs a
+three-pass babysit took 35 minutes, with a single step of it taking 20, so a call
+that waits is reported as a failure while the run carries on succeeding.
+`workflow_run_get` says how far it has got and, once it settles, what it did.
+`wait: true` and `waitMs` are there for the short ones.
 
-Two verbs go with it. `workflow_run_detail` answers the question the run record
-cannot: a step is written only once it has *finished*, so an `agent` node twenty
-minutes into a coding session is invisible to `workflow_run_get` — this joins
-the run to the harness sessions in flight for it, and says which worker each one
-is on. It looks in two places: the sessions this server dispatched itself, and
-the fleet roster, which is the only view of a run executing somewhere else.
+`workflow_run_detail` answers the question the run record cannot. A step is
+written only once it has *finished*, so an `agent` node twenty minutes into a
+coding session is invisible to `workflow_run_get`. This verb joins the run to the
+harness sessions in flight for it, and says which worker each one is on. It looks
+in two places: the sessions this server dispatched itself, and the fleet roster,
+which is the only view of a run executing somewhere else.
 
 And `workflow_run_cancel` stops a run, because a model that started one over MCP
 and answered with the id had no way to stop it and nobody was watching it in the
 pane. Cancellation is *process-local*: it reaches the runs the serving process
 is executing, which for a session that started its own run is the case that
-matters. A run started elsewhere — the TUI, another MCP server, a daemon —
+matters. A run started elsewhere (the TUI, another MCP server, a daemon)
 answers `cancelled: false` with a reason rather than an error, and stopping it
 means going to the process that owns it. `workflow_run_detail`'s
 `live.executingHere` is the same fact read ahead of time: true there means a
@@ -137,7 +137,8 @@ a batch that fails anywhere leaves the workflow untouched.
 
 ## Read next
 
-The full authoring reference — the node-kind catalogue, `agent` node config, jq
-expressions, and how the orchestrator dispatches a workflow to a worker — is in
+The full authoring reference, covering the node-kind catalogue, `agent` node
+config, jq expressions, and how the orchestrator dispatches a workflow to a
+worker, is in
 [`docs/workflows.md`](https://github.com/tinyhumansai/medulla/blob/main/docs/workflows.md)
 in the repository.

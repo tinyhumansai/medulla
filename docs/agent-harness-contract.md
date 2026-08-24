@@ -7,9 +7,9 @@ harness, its JSON crosses the wire to this client. The SDK represents those
 public wire shapes as serde types so the SDK and TUI can decode them consistently.
 
 The mirrors live in [`medulla::harness_contract`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/).
-Field names match the public JSON contract — every struct is
-`#[serde(rename_all = "camelCase")]` and the status/state enums are lowercase —
-and round-trip tests in `harness_contract/tests.rs` assert those names against
+Field names match the public JSON contract: every struct is
+`#[serde(rename_all = "camelCase")]` and the status/state enums are lowercase.
+Round-trip tests in `harness_contract/tests.rs` assert those names against
 hand-written JSON literals. The format is versioned as a wire contract so clients
 can validate compatibility independently of any implementation.
 
@@ -36,11 +36,12 @@ them losslessly without coupling the client to their internals.
 Both describe seat headroom, but the public contract formats their timestamps
 differently:
 
-- **`SeatHeadroom`** carries **epoch-milliseconds numbers** throughout
-  (`primaryResetsAt`, `throttledUntil`, and each window's `resetsAt`).
-- **`AgentBudgetMetadata`** — the roster-facing stamp the backend writes onto a
-  descriptor — carries **`primaryResetsAt` as an ISO-8601 string**, formatted at
-  the roster boundary.
+`SeatHeadroom` carries epoch-milliseconds numbers throughout
+(`primaryResetsAt`, `throttledUntil`, and each window's `resetsAt`).
+
+`AgentBudgetMetadata`, the roster-facing stamp the backend writes onto a
+descriptor, carries `primaryResetsAt` as an ISO-8601 string, formatted at the
+roster boundary.
 
 ## Reserved tool names
 
@@ -58,17 +59,19 @@ These names are part of the public harness contract.
 
 ## TUI rendering (read-only)
 
-The Agents tab renders two harness surfaces, both additive and both degrading to
-nothing when their payload is absent:
+The Sessions tab renders two harness surfaces, both additive and both degrading to
+nothing when their payload is absent.
 
-- **Task board.** When the backend runtime surfaces a `HarnessStatus`
-  (`RuntimeSnapshot::harness`), the Agents transcript header shows a compact board
-  — a per-status count summary (`tasks · open 2 · active 1 · done 3`) followed by
-  one `glyph title` row per task. The pure helpers live in
-  [`medulla::ui::harness`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/harness.rs).
-- **Seat budget.** When a selected lane's agent descriptor carries a
-  `metadata.budget` stamp (`AgentBudgetMetadata`), the header shows a one-line note
-  — `seat Claude Max 5× · 1.2M left`, or `… · exhausted` when the seat is spent.
+The task board appears when the backend runtime surfaces a `HarnessStatus`
+(`RuntimeSnapshot::harness`). The Sessions transcript header then shows a compact
+board: a per-status count summary (`tasks · open 2 · active 1 · done 3`) followed
+by one `glyph title` row per task. The pure helpers live in
+[`medulla::ui::harness`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/harness.rs).
+
+The seat budget appears when a selected lane's agent descriptor carries a
+`metadata.budget` stamp (`AgentBudgetMetadata`). The header then shows a one-line
+note, `seat Claude Max 5× · 1.2M left`, or `… · exhausted` when the seat is
+spent.
 
 **Budget display is strictly read-only.** Seat CRUD (connecting, enabling, or
 removing a user's BYO subscription seat) stays a backend REST concern and is not

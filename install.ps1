@@ -46,10 +46,6 @@ $ErrorActionPreference = 'Stop'
 # ---- Constants ---------------------------------------------------------------
 
 $Repo = 'tinyhumansai/medulla'
-# The source lives in a separate, private repository; releases are published
-# to $Repo above. Only the cargo fallback below reaches for it, and only for
-# someone who already has access.
-$SourceRepo = if ($env:MEDULLA_SOURCE_REPO) { $env:MEDULLA_SOURCE_REPO } else { 'tinyhumansai/medulla-src' }
 $DefaultManifest = "https://github.com/$Repo/releases/latest/download/latest.json"
 $BinName = 'medulla.exe'
 
@@ -93,14 +89,8 @@ function Install-FromSource {
         Write-Info 'building from the local checkout (cargo install --path src/tui)'
         cargo install --path src/tui --root $Prefix --locked
     } else {
-        Write-Info "building from git (cargo install --git https://github.com/$SourceRepo)"
-        # The source repository is private; without credentials git would sit at
-        # an interactive prompt, so refuse it and fail with something actionable.
-        $env:GIT_TERMINAL_PROMPT = '0'
-        cargo install --git "https://github.com/$SourceRepo" medulla-tui --root $Prefix --locked
-        if ($LASTEXITCODE -ne 0) {
-            Die "could not build from source: https://github.com/$SourceRepo needs access. Install a prebuilt release on a supported platform instead"
-        }
+        Write-Info "building from git (cargo install --git https://github.com/$Repo)"
+        cargo install --git "https://github.com/$Repo" medulla-tui --root $Prefix --locked
     }
     if ($LASTEXITCODE -ne 0) { Die 'cargo install failed' }
 }

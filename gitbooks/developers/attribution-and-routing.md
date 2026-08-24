@@ -1,9 +1,16 @@
-# OpenRouter attribution proxy
+---
+description: >-
+  The loopback inference proxy that rewrites OpenRouter attribution headers and
+  keeps the provider key out of the harness.
+---
 
-When Medulla runs a harness against OpenRouter, the traffic is routed through a
-loopback proxy Medulla owns rather than going to `openrouter.ai` directly.
+# Attribution and routing
 
-## Why
+When Medulla runs a harness against [OpenRouter](https://openrouter.ai/), the
+traffic is routed through a loopback proxy Medulla owns rather than going to
+`openrouter.ai` directly.
+
+## Why the proxy exists
 
 OpenRouter decides which application to credit by reading two request headers:
 
@@ -19,9 +26,9 @@ claim and substitutes Medulla's.
 
 ## What the harness sees
 
-Nothing about the harness changes except where it points. Medulla already
-injects `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` at the spawn seam; those now
-name a loopback port:
+Nothing about the harness changes except where it points. Medulla already injects
+`ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` at the spawn seam; those now name a
+loopback port:
 
 ```
 ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/anthropic     # Claude Code
@@ -41,11 +48,10 @@ from its environment entirely: both the variable your preset names in
 the selected harness's inherited credential (`ANTHROPIC_AUTH_TOKEN` or
 `OPENAI_API_KEY`) is used as the upstream key and scrubbed too.
 
-Withholding the key is what makes the rewrite hold. A harness
-holding the real key could ignore the base URL and call OpenRouter itself; a
-harness holding only a loopback token has nothing to call it with. The token
-authenticates against this process, on this machine, and is worthless anywhere
-else.
+Withholding the key is what makes the rewrite hold. A harness holding the real
+key could ignore the base URL and call OpenRouter itself; a harness holding only
+a loopback token has nothing to call it with. The token authenticates against
+this process, on this machine, and is worthless anywhere else.
 
 ## On the wire
 
@@ -57,8 +63,8 @@ else.
 | `x-openrouter-*`, `x-app-*` | whatever it set | dropped |
 | `anthropic-version`, `anthropic-beta`, `content-type`, `accept`, `user-agent` | as sent | forwarded unchanged |
 
-`User-Agent` is deliberately left alone: attribution is the referer/title pair,
-and rewriting the UA would misreport the client to the upstream.
+`User-Agent` is deliberately left alone: attribution is the referer and title
+pair, and rewriting the UA would misreport the client to the upstream.
 
 Responses stream straight back. A harness turn is an SSE token stream, and the
 proxy relays chunks as they arrive rather than collecting the response first.
@@ -71,31 +77,21 @@ One listener serves every harness, and credentials are separated by token rather
 than by port, so two presets sharing an `apiKeyEnv` share a token and two with
 different keys do not.
 
-Nothing is exposed off the machine: non-loopback peers are dropped at accept,
-and an unrecognized token is refused with a 401 before any upstream request is
-made.
+Nothing is exposed off the machine: non-loopback peers are dropped at accept, and
+an unrecognized token is refused with a 401 before any upstream request is made.
 
 ## Coverage
 
 Routing applies to every Medulla-launched run that resolves to an OpenRouter
 endpoint:
 
-- headless daemon tasks, including the ACP transport;
-- watched PTY sessions on the local host;
-- harnesses an operator opens by hand in the TUI.
+* headless daemon tasks, including the [ACP transport](harness-integration.md#the-acp-transport);
+* watched PTY sessions on the local host;
+* harnesses an operator opens by hand in the TUI.
 
-All three spawned harnesses are covered. OpenCode is accepted as a
+All three built-in harnesses are covered. OpenCode is accepted as a
 `customHarnesses` base even though it can reach OpenRouter natively, because that
 native path is exactly the one this proxy needs to take over.
-
-The embedded OpenHuman core is covered too, by a different mechanism. It is not a
-child process, so there is no environment to inject into and nothing to scrub:
-Medulla resolves the preset's key, exchanges it for a loopback token, and hands
-the core the mount and the token as a *per-call* route on
-`inference_agent_chat`. The core applies that route to the turn's own in-memory
-configuration and never persists it, so borrowing an endpoint for one node does
-not repoint the account's own inference. As with a spawned harness, the core is
-given the token and never the OpenRouter key.
 
 One limitation applies. Medulla injects environment variables at the spawn seam
 and never writes a harness's own configuration file. A harness you have
@@ -104,17 +100,23 @@ this proxy, and that traffic will be attributed to the harness.
 
 ## Configuration and troubleshooting
 
-There is nothing to turn on. Any `[router]` block or `[[customHarnesses]]`
-preset whose endpoint resolves to `openrouter.ai` is routed; anything else (a
-private gateway, a self-hosted endpoint) is left exactly as configured.
+There is nothing to turn on. Any `[router]` block or `[[customHarnesses]]` preset
+whose endpoint resolves to `openrouter.ai` is routed; anything else (a private
+gateway, a self-hosted endpoint) is left exactly as configured.
 
 Routing is skipped, with no error, when the key variable is unset or blank: a
 proxy with no upstream credential could only turn a working run into a 401.
 
-`MEDULLA_OPENROUTER_URL` overrides the upstream root. It exists so the test
-suite can run offline against a mock; operators should not normally set it.
+`MEDULLA_OPENROUTER_URL` overrides the upstream root. It exists so the test suite
+can run offline against a mock; operators should not normally set it.
 
 If the proxy cannot bind a loopback socket, the spawn fails with
-`could not start the local attribution proxy: …` rather than falling back to a
-direct connection. A silent fallback would send unattributed traffic and put
-the key back in the child, undoing both things this exists to do.
+`could not start the local attribution proxy: ...` rather than falling back to a
+direct connection. A silent fallback would send unattributed traffic and put the
+key back in the child, undoing both things this exists to do.
+
+## Read next
+
+* [Configuration](configuration.md): the `[router]` section and custom harness presets.
+* [Orchestrator routing](../features/routing.md): why work is sent to one model rather than another.
+* [Environment variables](environment-variables.md): `MEDULLA_PROXY_TOKEN` and `MEDULLA_OPENROUTER_URL`.

@@ -550,7 +550,12 @@ pub async fn resume_workflow(
                 RunStatus::PendingApproval
             };
         }
-        Err(Settle::Cancelled) => record.status = RunStatus::Cancelled,
+        Err(Settle::Cancelled) => {
+            record.status = RunStatus::Cancelled;
+            // Same carry-forward as the fresh-run path: the disk observation
+            // predates this in-memory copy.
+            record.cancel_requested = true;
+        }
         Err(Settle::TimedOut(secs)) => {
             record.status = RunStatus::Failed;
             record.error = Some(format!("run exceeded its {secs}s limit"));

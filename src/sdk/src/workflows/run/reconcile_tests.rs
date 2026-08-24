@@ -55,16 +55,45 @@ fn a_record_from_another_host_is_left_alone() {
     assert!(is_alive(&executor));
 }
 
+/// Spawn a child that stays alive long enough to be inspected.
+///
+/// Every platform spells "sleep" differently and none of it is in `std`, so the
+/// command is chosen per target rather than assuming a Unix host. Returns
+/// `None` when nothing could be spawned — a sandbox that forbids it should skip
+/// the test that needs a child, not fail it.
+fn spawn_idle_child() -> Option<std::process::Child> {
+    #[cfg(unix)]
+    let mut command = {
+        let mut c = std::process::Command::new("sleep");
+        c.arg("30");
+        c
+    };
+    // `ping` rather than `timeout`: `timeout` refuses to run when stdin is
+    // redirected, which is exactly how a test harness spawns it.
+    #[cfg(windows)]
+    let mut command = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "ping", "-n", "31", "127.0.0.1"]);
+        c
+    };
+    command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()
+}
+
 #[test]
 fn a_live_pid_whose_start_time_disagrees_is_pid_reuse() {
     // A live pid this test controls — a spawned child — claimed to have
     // started at the epoch. The pid resolves, so the comparison this test
     // exists to exercise (`reconcile::is_alive`'s foreign-pid branch) is
     // actually reached, rather than short-circuiting on an unused neighbour.
-    let mut child = std::process::Command::new("sleep")
-        .arg("30")
-        .spawn()
-        .expect("spawn a process to name");
+    let Some(mut child) = spawn_idle_child() else {
+        // No child process available here. The branch stays covered on every
+        // host that can spawn one; failing would only report the sandbox.
+        return;
+    };
     let executor = RunExecutor {
         host: current_executor().host.clone(),
         pid: child.id(),

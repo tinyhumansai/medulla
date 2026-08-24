@@ -123,6 +123,21 @@ pub trait WorkflowStore: Send + Sync {
     /// Every recorded run for a workflow, newest first.
     fn list_runs(&self, workflow_id: &str) -> Result<Vec<RunRecord>, WorkflowError>;
 
+    /// Every recorded run that has not settled, across all workflows.
+    ///
+    /// What the reconciliation sweep reads. It deliberately does not go through
+    /// [`list_runs`](Self::list_runs): a sweep asks "which records still claim
+    /// to be live", a question that spans every workflow in the scope, and
+    /// answering it by listing each workflow in turn would re-read the whole
+    /// runs directory once per workflow.
+    ///
+    /// The default returns nothing, which makes a store that cannot enumerate
+    /// its runs a store the sweep leaves alone rather than one that fails to
+    /// compile.
+    fn unsettled_runs(&self) -> Result<Vec<RunRecord>, WorkflowError> {
+        Ok(Vec::new())
+    }
+
     /// Every superseded copy of a workflow, newest first.
     ///
     /// A workflow that has never been written over has no revisions, which is

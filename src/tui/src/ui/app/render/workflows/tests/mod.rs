@@ -291,6 +291,8 @@ fn the_selected_workflows_runs_are_listed_under_it_in_the_rail() {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     };
@@ -332,6 +334,8 @@ fn selecting_a_run_overlays_it_on_the_graph() {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     };

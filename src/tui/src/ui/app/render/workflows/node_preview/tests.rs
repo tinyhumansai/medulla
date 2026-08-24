@@ -366,6 +366,8 @@ fn agent_run_detail_shows_the_resolved_prompt_and_plain_reply() {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     };
@@ -404,6 +406,8 @@ fn older_agent_run_labels_missing_evidence_as_output() {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     };

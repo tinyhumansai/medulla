@@ -608,6 +608,7 @@ pub async fn resume_workflow(
     // Written before disarming, for the same reason as `run_workflow`: a
     // terminal write that fails must leave the drop guard armed to reconcile
     // the record rather than leaving a resumed run stuck at `Running`.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     finalizer.disarm();
     remember_failure(&context.store, &record);

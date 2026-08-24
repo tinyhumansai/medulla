@@ -44,6 +44,14 @@ git submodule update --init --depth 1 vendor/openhuman
 # later OpenHuman bump reintroduced both the submodule and `tinyjuice-bus` as
 # a dependency, so it is cloned again here (see the root `[patch.crates-io]`
 # table for the matching redirect).
+#
+# `vendor/tinymcp` arrived the same way: OpenHuman extracted its Model Context
+# Protocol client into its own repository and now takes a path dependency on
+# `vendor/tinymcp/crates/tinymcp`. Because this list is an allowlist rather than
+# a recursive init, an OpenHuman bump that adds a path dependency fails here
+# *at resolution* — `cargo metadata` cannot read the missing manifest, so every
+# lane dies before it compiles a line. When a bump breaks with "failed to load
+# source for dependency <name>", the fix is almost always a new entry here.
 git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyagents \
   vendor/tinybus \
@@ -52,6 +60,7 @@ git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyflows \
   vendor/tinyhumans-sdk \
   vendor/tinyjuice \
+  vendor/tinymcp \
   vendor/tinymemory \
   vendor/tinyplace
 
@@ -63,4 +72,4 @@ git -C vendor/openhuman submodule update --init --depth 1 \
 # megabytes that nothing links, and would put two checkouts of one crate on
 # disk for anyone reading the tree.
 
-echo "Submodules initialized (OpenHuman core + its nine vendored crates)."
+echo "Submodules initialized (OpenHuman core + its ten vendored crates)."

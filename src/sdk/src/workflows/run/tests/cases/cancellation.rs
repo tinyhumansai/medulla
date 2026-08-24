@@ -95,7 +95,7 @@ async fn a_cancel_landing_before_the_run_is_polled_still_stops_it() {
         Default::default(),
     );
 
-    let answer = crate::workflows::ops::cancel_run("run-cancel-first");
+    let answer = crate::workflows::ops::cancel_run(&harness.dyn_store(), "run-cancel-first");
     assert_eq!(
         answer["cancelled"],
         json!(true),

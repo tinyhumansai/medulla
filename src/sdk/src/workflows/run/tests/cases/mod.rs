@@ -111,6 +111,11 @@ impl Harness {
         }
     }
 
+    /// The same store behind the trait object the ops layer takes.
+    pub(super) fn dyn_store(&self) -> Arc<dyn crate::workflows::WorkflowStore> {
+        self.store.clone()
+    }
+
     /// Parse and save one workflow fixture under `id`.
     pub(super) fn install(&self, document: &str, id: &str) {
         let record = parse_workflow(document, id).expect("valid fixture");
@@ -374,7 +379,7 @@ async fn the_cancel_tool_stops_a_run_that_is_genuinely_mid_harness_session() {
         "{live:?}"
     );
 
-    let answer = crate::workflows::ops::cancel_run("run-tool-cancel");
+    let answer = crate::workflows::ops::cancel_run(&harness.dyn_store(), "run-tool-cancel");
 
     assert_eq!(answer["cancelled"], json!(true), "{answer}");
     assert_eq!(answer["runId"], json!("run-tool-cancel"), "{answer}");

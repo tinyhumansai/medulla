@@ -286,11 +286,10 @@ pub(crate) async fn call(
         )
         .await
         .map_err(to_rpc),
-        // No store read first to check the id exists. Cancelling is a race with
-        // the run finishing by definition, and `cancel_run` already answers
-        // "nothing here was executing that" in words — a preflight would only
-        // add a second way to say the same thing, one call earlier.
-        "workflow_run_cancel" => Ok(ops::cancel_run(arg(&arguments, "runId")?)),
+        // `cancel_run` reads the store itself: a run this process is not
+        // executing may still be stoppable, either by asking the process that
+        // owns it or by settling a record whose owner is gone.
+        "workflow_run_cancel" => Ok(ops::cancel_run(&session.store, arg(&arguments, "runId")?)),
         "workflow_defaults" => {
             let id = arg(&arguments, "id")?;
             let harness = arguments.get("harness").and_then(Value::as_str);

@@ -194,15 +194,38 @@ medulla workflow dry-run triage       # simulate: no harness, no network
 medulla workflow run triage           # for real, on this machine's CLIs
 medulla workflow list-runs triage     # history
 medulla workflow resume <run-id> --approve review
-medulla workflow cancel <run-id>   # only reaches runs in this process; see below
+medulla workflow cancel <run-id>   # reaches a run wherever it is executing
 ```
 
-`cancel` is process-local. A run started by `medulla workflow run` in one shell
-cannot be cancelled from another, because there is no control channel between two
-CLI invocations; the command says so rather than reporting a bare failure. The
-paths that can always cancel are the ones that own the running process: the TUI
-cancels the run it started, and an orchestrator's abort frame reaches the daemon
-executing it.
+`cancel` reaches a run in any process. There is still no control channel between
+two CLI invocations, so the run record is the channel: a cancel aimed at a run
+this process is not executing is written onto the record, and the process that
+owns the run picks it up within a couple of seconds and settles as `cancelled`.
+
+A run whose process is *gone* — killed, crashed, or lost to a reboot — is settled
+on the spot, because there is nothing left to ask. That answer carries
+`reconciled: true`. Only two cases answer `cancelled: false`: an id that names no
+run, and a run that has already settled.
+
+### Runs left behind by a dead process
+
+A run record is reconciled on drop, which covers every exit that runs
+destructors. A `SIGKILL`, an OOM kill, or a power loss runs none, and used to
+leave a record claiming `running` forever — a host killed a few times accumulated
+dozens of them, and every listing reported them as live work.
+
+Each record now names the process executing it: host, pid, and that process's own
+start time, the last of which is what stops a recycled pid from looking like a
+live executor. On startup a host settles every unsettled record whose executor is
+gone, as `interrupted` — or as `cancelled`, when someone had asked it to stop. A
+run parked on an approval gate is left alone even though it is unsettled and its
+CLI process has exited: that process was always going to exit once it reached the
+gate, so a dead executor there is expected, not a crash, and reconciling it away
+would make the next `resume` reject it as no longer awaiting approval. The sweep
+runs once per process per workspace and is deliberately conservative: a record
+from another host, or a live pid whose start time cannot be read, is left alone.
+A stale row that survives is cosmetic; a live run settled out from under its
+executor is a lost run.
 
 `dry-run` is the one to reach for while authoring. Validation catches a malformed
 graph; a dry run catches a *well-formed* graph that is wired wrong: every
@@ -542,7 +565,7 @@ them tools directly; it offers them. Every ACP session gets an MCP server
 | `workflow_run` | run it for real; answers with a run id |
 | `workflow_run_get` | one run, summarized or in full |
 | `workflow_run_detail` | one run, plus the harness sessions it has in flight |
-| `workflow_run_cancel` | stop a run this process is executing |
+| `workflow_run_cancel` | stop a run, wherever it is executing |
 | `workflow_runs` | run history |
 
 `workflow_run` starts the run and returns as soon as it is admitted, with the
@@ -572,11 +595,11 @@ carry is the harness's own transcript: no control-plane op exposes the hub's
 activity log, so the answer it can give is "this worker is still on this step"
 rather than a progress bar.
 
-`workflow_run_cancel` stops a run, and reaches only runs executing in the same
-process that serves the call. That is the process that served the `workflow_run`
-which started them, which is the case the verb exists for; a run started from
-the pane or another shell answers `cancelled: false` with the reason rather than
-erroring.
+`workflow_run_cancel` stops a run wherever it is executing. A run in the calling
+process stops immediately; a run owned by another live process answers
+`requested: true` and settles within a few seconds; a run whose process is gone
+answers `reconciled: true` and is settled on the spot. Only an unknown id or an
+already-settled run answers `cancelled: false`, and neither is an error.
 
 `workflow_apply_ops` is the one that matters for editing. Rewriting a whole
 document loses whatever the model misremembered; a patch is checked op by op, and

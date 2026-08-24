@@ -10,7 +10,9 @@ use serde_json::json;
 
 use super::*;
 use crate::workflows::authoring::GraphHandle;
-use crate::workflows::{fingerprint, FileWorkflowStore, ProposalStatus, WorkflowProposal};
+use crate::workflows::{
+    fingerprint, FileWorkflowStore, ProposalStatus, RunRecord, RunStatus, WorkflowProposal,
+};
 
 fn document(id: &str) -> String {
     json!({
@@ -203,11 +205,20 @@ fn run_history_is_empty_rather_than_missing_for_a_workflow_that_never_ran() {
 }
 
 #[test]
-fn cancelling_a_run_that_is_not_executing_reports_that_plainly() {
-    let result = cancel_run("never-started");
+fn cancelling_a_run_that_never_existed_says_so() {
+    let (_root, store) = store();
+
+    let result = cancel_run(&store, "never-started");
 
     assert_eq!(result["cancelled"], false);
     assert_eq!(result["runId"], "never-started");
+    assert!(
+        result["reason"]
+            .as_str()
+            .unwrap()
+            .contains("no run with this id exists"),
+        "{result}"
+    );
 }
 
 #[test]
@@ -512,4 +523,81 @@ fn a_proposal_is_made_stale_when_its_base_moves_during_verification() {
         .decision_reason
         .as_deref()
         .is_some_and(|reason| reason.contains("being verified")));
+}
+
+/// A record that claims to be running, owned by `executor`.
+fn running_record(id: &str, executor: Option<crate::workflows::RunExecutor>) -> RunRecord {
+    crate::workflows::store::new_run_record(id, "sweep", 1).with_executor(executor)
+}
+
+/// An executor naming a pid that cannot be running, on this host.
+fn dead_executor() -> crate::workflows::RunExecutor {
+    crate::workflows::RunExecutor {
+        host: crate::workflows::run::reconcile::current_executor()
+            .host
+            .clone(),
+        pid: 0,
+        started_at_secs: Some(1),
+    }
+}
+
+#[test]
+fn cancelling_an_orphaned_run_settles_it_rather_than_refusing() {
+    // The case an operator hits after a host restart: the record says running,
+    // the process that was running it is gone. Refusing here is what left a
+    // backlog of rows nothing could ever clear.
+    let (_root, store) = store();
+    store
+        .record_run(&running_record("run-orphan", Some(dead_executor())))
+        .unwrap();
+
+    let result = cancel_run(&store, "run-orphan");
+
+    assert_eq!(result["cancelled"], true, "{result}");
+    assert_eq!(result["reconciled"], true, "{result}");
+    assert_eq!(
+        store.get_run("run-orphan").unwrap().unwrap().status,
+        RunStatus::Cancelled
+    );
+}
+
+#[test]
+fn cancelling_a_run_owned_by_a_live_process_records_the_request() {
+    // Nothing to signal from here — the owning process has the registry entry —
+    // so the cancel is written where that process will read it.
+    let (_root, store) = store();
+    let executor = crate::workflows::run::reconcile::current_executor().clone();
+    store
+        .record_run(&running_record("run-elsewhere", Some(executor)))
+        .unwrap();
+
+    let result = cancel_run(&store, "run-elsewhere");
+
+    assert_eq!(result["cancelled"], true, "{result}");
+    assert_eq!(result["requested"], true, "{result}");
+    let record = store.get_run("run-elsewhere").unwrap().unwrap();
+    assert!(record.cancel_requested, "{record:?}");
+    assert_eq!(
+        record.status,
+        RunStatus::Running,
+        "the owning process settles it, not us"
+    );
+}
+
+#[test]
+fn cancelling_a_settled_run_says_it_already_finished() {
+    let (_root, store) = store();
+    let mut record = running_record("run-done", Some(dead_executor()));
+    record.status = RunStatus::Succeeded;
+    store.record_run(&record).unwrap();
+
+    let result = cancel_run(&store, "run-done");
+
+    assert_eq!(result["cancelled"], false, "{result}");
+    assert_eq!(result["status"], json!("succeeded"), "{result}");
+    assert_eq!(
+        store.get_run("run-done").unwrap().unwrap().status,
+        RunStatus::Succeeded,
+        "a settled record must not be rewritten by a late cancel"
+    );
 }

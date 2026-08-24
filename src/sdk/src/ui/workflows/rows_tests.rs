@@ -36,6 +36,8 @@ fn run(id: &str, status: RunStatus) -> RunRecord {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     }

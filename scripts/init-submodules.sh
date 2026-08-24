@@ -40,18 +40,48 @@ git submodule update --init --depth 1 vendor/openhuman
 #
 # `vendor/motosan-ai-oauth` is NOT in this list: OpenHuman vendors it as a
 # plain tracked directory rather than a submodule, so it comes along for free
-# with the `vendor/openhuman` checkout above. `vendor/tinyjuice` is gone
-# entirely — OpenHuman dropped the submodule outright (no code in the graph
-# depends on it any more).
+# with the `vendor/openhuman` checkout above. `vendor/tinyjuice` came back: a
+# later OpenHuman bump reintroduced both the submodule and `tinyjuice-bus` as
+# a dependency, so it is cloned again here (see the root `[patch.crates-io]`
+# table for the matching redirect).
+#
+# This list must contain **every** `vendor/<name>` submodule that OpenHuman's
+# manifest declares a path dependency on — optional ones included. Cargo reads
+# the manifest of every declared path dependency while resolving, so a missing
+# one fails at *resolution*: every lane dies before compiling a line, with
+# "failed to load source for dependency <name>". Cargo reports only the first
+# missing entry, so fixing them one error at a time takes a CI round trip each.
+#
+# Derive the list instead. From `vendor/openhuman`:
+#
+#   grep -oE 'path = "vendor/[a-z0-9-]+' Cargo.toml | sed 's|.*vendor/||' | sort -u
+#
+# then drop the entries that are plain tracked directories rather than
+# submodules (check against `.gitmodules`) — `motosan-ai-oauth` is one.
+#
+# Beware verifying a bump only against a local checkout: a developer tree that
+# has ever run `git submodule update --init --recursive` already has these, so
+# `cargo check` passes locally while CI, which has only this allowlist, fails.
+# To reproduce CI, deinit first:
+#
+#   git -C vendor/openhuman submodule deinit --all -f
+#   bash scripts/init-submodules.sh && cargo metadata >/dev/null
 git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyagents \
   vendor/tinybus \
   vendor/tinychannels \
   vendor/tinycortex \
+  vendor/tinydocs \
   vendor/tinyflows \
+  vendor/tinyhosts \
   vendor/tinyhumans-sdk \
+  vendor/tinyjuice \
+  vendor/tinymcp \
   vendor/tinymemory \
-  vendor/tinyplace
+  vendor/tinyplace \
+  vendor/tinyruntime \
+  vendor/tinyvoice \
+  vendor/tinywallet
 
 # Deliberately NOT recursive. Three of these vendor crates of their own —
 # tinyflows has its own `tinyagents`, tinymemory its own `tinyagents`, `tinybus`
@@ -61,4 +91,4 @@ git -C vendor/openhuman submodule update --init --depth 1 \
 # megabytes that nothing links, and would put two checkouts of one crate on
 # disk for anyone reading the tree.
 
-echo "Submodules initialized (OpenHuman core + its eight vendored crates)."
+echo "Submodules initialized (OpenHuman core + its vendored path dependencies)."

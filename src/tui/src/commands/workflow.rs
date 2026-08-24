@@ -70,7 +70,7 @@ pub(crate) async fn run_workflow_cmd(args: &[String]) -> anyhow::Result<()> {
         // terminal and `jq`, not a model with a context window.
         WorkflowAction::ListRuns(id) => ops::list_runs(&store, id, ops::StepDetail::Full)?,
         WorkflowAction::GetRun(run_id) => ops::get_run(&store, run_id, ops::StepDetail::Full)?,
-        WorkflowAction::Cancel(run_id) => ops::cancel_run(run_id),
+        WorkflowAction::Cancel(run_id) => ops::cancel_run(&store, run_id),
         WorkflowAction::Catalog(kind) => ops::catalog(kind.as_deref())?,
         WorkflowAction::Run(id) => execute(&parsed, &store, &env, &cwd, id).await?,
         WorkflowAction::Resume(run_id) => resume(&parsed, &store, &env, &cwd, run_id).await?,

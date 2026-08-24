@@ -18,7 +18,12 @@
 //! **The run record is reconciled on drop.** A run that is cancelled, panics, or
 //! dies with the process would otherwise leave a record claiming to be
 //! `running` forever. `RunFinalizer` writes a terminal status on drop unless a
-//! settled path already did.
+//! settled path already did. A kill that runs no destructors at all is caught
+//! one level up, by the startup sweep in [`reconcile`].
+//!
+//! **A cancel can arrive from another process.** The registry is in-memory, so
+//! a cancel aimed at a run this process is not executing is written onto the
+//! record instead; [`watch_cancel_request`] is the half that notices.
 //!
 //! **Resume checks the host's record, not just the engine's.** The engine treats
 //! a resume call as approval; that is too generous. [`resume_workflow`] requires
@@ -27,9 +32,12 @@
 
 pub mod dispatches;
 mod preflight;
+pub mod reconcile;
 mod registry;
 mod summary;
 
+#[cfg(test)]
+mod reconcile_tests;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +45,7 @@ mod tests;
 // Aliased as well as re-exported, so `diagnose::Diagnosis` still resolves here.
 pub use dispatches::{in_flight, InFlightDispatch};
 pub(crate) use preflight::clamp_loop_iterations;
+pub use reconcile::{reconcile_once, reconcile_orphans, Reconciled};
 pub use registry::{cancel, is_running, CancelSignal, RunClaim, RunGuard};
 pub use summary::summarize;
 use tinyflows::diagnostics as diagnose;
@@ -129,6 +138,67 @@ impl Drop for RunFinalizer {
         // destructor because the disk is full.
         if let Err(err) = self.store.record_run(&self.record) {
             tracing::warn!(run = %self.record.id, "could not reconcile run record: {err}");
+        }
+    }
+}
+
+/// Carry a durable cancel request from disk onto `record` before it is written.
+///
+/// Every write of a run record from this process is a read-modify-write against
+/// an in-memory copy taken earlier, and `cancel_requested` is the one field
+/// another process sets. Three windows lose it without this:
+///
+/// - A cancel that lands less than [`CANCEL_POLL`] before the engine finishes.
+///   The watcher is still asleep, so the engine outcome wins the `select!` and
+///   the terminal write puts `false` back over a request that was accepted.
+/// - The transition from the admitted record to `Running`, which
+///   [`crate::workflows::local::LocalRun::start`] wrote before this run began.
+/// - The same two, one level up, on the resume path.
+///
+/// The flag is only ever turned on, never off, so this merges rather than
+/// overwrites: whichever copy has seen the request wins. A read that fails is
+/// ignored — a run must not fail to record its outcome because the old copy of
+/// its record could not be re-read.
+fn preserve_cancel_request(store: &Arc<dyn WorkflowStore>, record: &mut RunRecord) {
+    if record.cancel_requested {
+        return;
+    }
+    if let Ok(Some(current)) = store.get_run(&record.id) {
+        record.cancel_requested = current.cancel_requested;
+    }
+}
+
+/// How often a running workflow re-reads its own record for a cancel request.
+///
+/// A compromise between a cancel from another process feeling immediate and not
+/// re-reading a file on a tight loop for the whole life of a run that may last
+/// hours. A workflow step is a harness session; two seconds is noise against it.
+const CANCEL_POLL: Duration = Duration::from_secs(2);
+
+/// Resolve when someone marks this run cancelled from outside this process.
+///
+/// Polls rather than watches the file: the store is a trait with no change
+/// notification, and a filesystem watcher would be a platform-specific
+/// dependency for something a two-second poll answers well enough.
+///
+/// A read that fails is ignored rather than treated as a cancel. The record is
+/// rewritten as the run progresses, so a transient failure to read it — a
+/// half-written file, a momentary permission problem — must not be what stops
+/// a healthy run.
+async fn watch_cancel_request(store: Arc<dyn WorkflowStore>, run_id: String) {
+    loop {
+        tokio::time::sleep(CANCEL_POLL).await;
+        let requested = {
+            let store = store.clone();
+            let run_id = run_id.clone();
+            tokio::task::spawn_blocking(move || {
+                matches!(store.get_run(&run_id), Ok(Some(record)) if record.cancel_requested)
+            })
+            .await
+            .unwrap_or(false)
+        };
+        if requested {
+            return;
         }
     }
 }
@@ -236,7 +306,19 @@ async fn run_workflow_inner(
     // was asked to do.
     let record = new_run_record(run_id, workflow_id, crate::clock::now_millis() as u64)
         .with_inputs(&resolved_inputs, &input)
-        .with_origin(context.origin.clone());
+        .with_origin(context.origin.clone())
+        // Stamped before the first write, so there is no window in which a
+        // record claims to be running without saying who is running it. A
+        // record in that window would look like an orphan to a sweep in
+        // another process.
+        .with_executor(Some(reconcile::current_executor().clone()));
+    let mut record = record;
+    // `LocalRun::start` already wrote an admitted record for this id, and a
+    // cancel aimed at it between that write and this one would be sitting on
+    // disk. This record is freshly built, so it says `false` — carry the
+    // request forward instead of writing over it, or the run proceeds having
+    // told the caller it was cancelled.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 
@@ -265,12 +347,20 @@ async fn run_workflow_inner(
     let bounded = tokio::time::timeout(Duration::from_secs(settings.run_timeout_secs), engine_run);
     tokio::pin!(bounded);
 
+    // A cancel aimed at this run from another process cannot reach the
+    // in-memory registry, so it is written to the record instead. Watching for
+    // it here is what makes `medulla workflow cancel` work from any shell
+    // rather than only from the one that happens to be executing the run.
+    let watch = watch_cancel_request(context.store.clone(), run_id.to_string());
+    tokio::pin!(watch);
+
     // `biased` so a cancel that lands in the same poll as the run settling wins
     // deterministically, rather than depending on which future the runtime
     // happened to look at first.
     let settled = tokio::select! {
         biased;
         _ = cancelled.cancelled() => Err(Settle::Cancelled),
+        _ = &mut watch => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),
@@ -294,7 +384,14 @@ async fn run_workflow_inner(
                 RunStatus::PendingApproval
             };
         }
-        Err(Settle::Cancelled) => record.status = RunStatus::Cancelled,
+        Err(Settle::Cancelled) => {
+            record.status = RunStatus::Cancelled;
+            // `watch_cancel_request` observed this on disk, not on `record`,
+            // which was cloned before the cross-process request landed and
+            // still says `false`. Carry the observation forward rather than
+            // writing it away: a cancelled run must still say it was asked.
+            record.cancel_requested = true;
+        }
         Err(Settle::TimedOut(secs)) => {
             record.status = RunStatus::Failed;
             record.error = Some(format!("run exceeded its {secs}s limit"));
@@ -314,6 +411,7 @@ async fn run_workflow_inner(
     // Written *before* disarming: if this terminal write fails, the guard must
     // still be armed so its drop reconciles the record to `Interrupted`.
     // Disarming first would strand the run at `Running` forever.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     finalizer.disarm();
     remember_failure(&context.store, &record);
@@ -412,6 +510,13 @@ pub async fn resume_workflow(
     };
     record.status = RunStatus::Running;
     record.finished_at = None;
+    // Restamped on every resume, just as the fresh-run path stamps it on
+    // admission: the record's executor from before the approval gate names a
+    // process that has since exited (the CLI that reached the gate returns
+    // and its process ends), so leaving it in place would make a cancel
+    // aimed at this run believe it is owned by a dead process — see
+    // `reconcile::is_alive` and the cross-process poll below.
+    record.executor = Some(reconcile::current_executor().clone());
     context.store.record_run(&record)?;
     let mut finalizer = RunFinalizer::new(context.store.clone(), record.clone());
 
@@ -441,9 +546,18 @@ pub async fn resume_workflow(
     let bounded = tokio::time::timeout(Duration::from_secs(settings.run_timeout_secs), engine_run);
     tokio::pin!(bounded);
 
+    // Same reasoning as the fresh-run path: a cancel aimed at this run from
+    // another process cannot reach this process's in-memory registry, so it
+    // is written to the record instead, and only this poll notices it.
+    // Without it, a resumed run ignores a cross-process cancel for its entire
+    // remaining lifetime.
+    let watch = watch_cancel_request(context.store.clone(), run_id.to_string());
+    tokio::pin!(watch);
+
     let settled = tokio::select! {
         biased;
         _ = cancelled.cancelled() => Err(Settle::Cancelled),
+        _ = &mut watch => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),
@@ -470,7 +584,12 @@ pub async fn resume_workflow(
                 RunStatus::PendingApproval
             };
         }
-        Err(Settle::Cancelled) => record.status = RunStatus::Cancelled,
+        Err(Settle::Cancelled) => {
+            record.status = RunStatus::Cancelled;
+            // Same carry-forward as the fresh-run path: the disk observation
+            // predates this in-memory copy.
+            record.cancel_requested = true;
+        }
         Err(Settle::TimedOut(secs)) => {
             record.status = RunStatus::Failed;
             record.error = Some(format!("run exceeded its {secs}s limit"));
@@ -496,6 +615,7 @@ pub async fn resume_workflow(
     // Written before disarming, for the same reason as `run_workflow`: a
     // terminal write that fails must leave the drop guard armed to reconcile
     // the record rather than leaving a resumed run stuck at `Running`.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     finalizer.disarm();
     remember_failure(&context.store, &record);

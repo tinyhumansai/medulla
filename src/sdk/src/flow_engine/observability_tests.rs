@@ -36,6 +36,7 @@ fn step(node_id: &str, status: StepStatus) -> ExecutionStep {
         output: json!({}),
         duration_ms: 5,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }
 }
 

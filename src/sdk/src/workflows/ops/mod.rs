@@ -46,8 +46,26 @@ pub use runs::{
 };
 
 /// The store every operation reads and writes, discovered for this environment.
+///
+/// Discovery is also where this process settles run records left behind by one
+/// that went away — see [`crate::workflows::run::reconcile`]. It happens here
+/// because this is the one call every door into the workflow system makes: the
+/// MCP server, the CLI, and the TUI all reach a store through it, so a host that
+/// starts at all sweeps at all. The sweep runs once per process and skips any
+/// run a live process is still executing.
 pub fn discover_store(env: &HashMap<String, String>, cwd: &Path) -> Arc<dyn WorkflowStore> {
-    Arc::new(crate::workflows::store::discover(env, cwd))
+    let store: Arc<dyn WorkflowStore> = Arc::new(crate::workflows::store::discover(env, cwd));
+    // Same inputs `store::discover` derives the on-disk location from, so two
+    // discoveries of the same workspace share a sweep even though each call
+    // builds a fresh store object (an object-pointer-keyed guard would not:
+    // see `reconcile_once`).
+    let scope = format!(
+        "{}|{}",
+        crate::home::medulla_home(env).display(),
+        cwd.display()
+    );
+    crate::workflows::run::reconcile_once(&store, &scope);
+    store
 }
 
 /// A record as the document an author sees: the graph, with the host fields

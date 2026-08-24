@@ -361,6 +361,12 @@ impl RunRecord {
         self
     }
 
+    /// Record the process executing this run.
+    pub fn with_executor(mut self, executor: Option<RunExecutor>) -> Self {
+        self.executor = executor;
+        self
+    }
+
     /// How long the run took, once it has settled.
     pub fn duration_ms(&self) -> Option<u64> {
         self.finished_at

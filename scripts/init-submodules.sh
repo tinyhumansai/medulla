@@ -40,9 +40,10 @@ git submodule update --init --depth 1 vendor/openhuman
 #
 # `vendor/motosan-ai-oauth` is NOT in this list: OpenHuman vendors it as a
 # plain tracked directory rather than a submodule, so it comes along for free
-# with the `vendor/openhuman` checkout above. `vendor/tinyjuice` is gone
-# entirely — OpenHuman dropped the submodule outright (no code in the graph
-# depends on it any more).
+# with the `vendor/openhuman` checkout above. `vendor/tinyjuice` came back: a
+# later OpenHuman bump reintroduced both the submodule and `tinyjuice-bus` as
+# a dependency, so it is cloned again here (see the root `[patch.crates-io]`
+# table for the matching redirect).
 git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinyagents \
   vendor/tinybus \
@@ -50,6 +51,7 @@ git -C vendor/openhuman submodule update --init --depth 1 \
   vendor/tinycortex \
   vendor/tinyflows \
   vendor/tinyhumans-sdk \
+  vendor/tinyjuice \
   vendor/tinymemory \
   vendor/tinyplace
 

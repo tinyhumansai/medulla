@@ -62,7 +62,7 @@ Every section is optional; with no file anywhere, all defaults apply. Sections: 
 
 There is no `memory` section: the persona-memory layer is out of this build, and its config schema went with it.
 
-See [`config.example.toml`](https://github.com/tinyhumansai/medulla/blob/main/config.example.toml) for a commented reference and [`src/sdk/src/config.rs`](../../src/sdk/src/config/) for the full schema — fields are camelCase.
+See [`config.example.toml`](https://github.com/tinyhumansai/medulla/blob/main/config.example.toml) for a commented reference and [`src/sdk/src/config.rs`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/config/) for the full schema — fields are camelCase.
 
 ## Endpoints
 

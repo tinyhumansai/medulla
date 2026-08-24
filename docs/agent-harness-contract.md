@@ -6,7 +6,7 @@ surfaces a status snapshot plus an event stream. When a backend fronts that
 harness, its JSON crosses the wire to this client. The SDK represents those
 public wire shapes as serde types so the SDK and TUI can decode them consistently.
 
-The mirrors live in [`medulla::harness_contract`](../src/sdk/src/harness_contract/).
+The mirrors live in [`medulla::harness_contract`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/).
 Field names match the public JSON contract — every struct is
 `#[serde(rename_all = "camelCase")]` and the status/state enums are lowercase —
 and round-trip tests in `harness_contract/tests.rs` assert those names against
@@ -65,7 +65,7 @@ nothing when their payload is absent:
   (`RuntimeSnapshot::harness`), the Agents transcript header shows a compact board
   — a per-status count summary (`tasks · open 2 · active 1 · done 3`) followed by
   one `glyph title` row per task. The pure helpers live in
-  [`medulla::ui::harness`](../src/sdk/src/ui/harness.rs).
+  [`medulla::ui::harness`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/harness.rs).
 - **Seat budget.** When a selected lane's agent descriptor carries a
   `metadata.budget` stamp (`AgentBudgetMetadata`), the header shows a one-line note
   — `seat Claude Max 5× · 1.2M left`, or `… · exhausted` when the seat is spent.

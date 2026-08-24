@@ -512,9 +512,18 @@ pub async fn resume_workflow(
     let bounded = tokio::time::timeout(Duration::from_secs(settings.run_timeout_secs), engine_run);
     tokio::pin!(bounded);
 
+    // Same reasoning as the fresh-run path: a cancel aimed at this run from
+    // another process cannot reach this process's in-memory registry, so it
+    // is written to the record instead, and only this poll notices it.
+    // Without it, a resumed run ignores a cross-process cancel for its entire
+    // remaining lifetime.
+    let watch = watch_cancel_request(context.store.clone(), run_id.to_string());
+    tokio::pin!(watch);
+
     let settled = tokio::select! {
         biased;
         _ = cancelled.cancelled() => Err(Settle::Cancelled),
+        _ = &mut watch => Err(Settle::Cancelled),
         result = &mut bounded => match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(err)) => Err(Settle::Failed(err)),

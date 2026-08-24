@@ -35,7 +35,7 @@ pub use proposal::{
     fingerprint, ProposalId, ProposalStatus, ProposalVerification, WorkflowProposal,
 };
 pub(crate) use run::{bounded_evidence, bounded_within};
-pub use run::{RunId, RunOrigin, RunRecord, RunStatus, RunStep};
+pub use run::{RunExecutor, RunId, RunOrigin, RunRecord, RunStatus, RunStep};
 pub use workflow::{
     record_fingerprint, WorkflowDefaults, WorkflowId, WorkflowRecord, WorkflowRevision,
     WorkflowSummary,

@@ -31,6 +31,8 @@ fn record(steps: Vec<RunStep>, pending: Vec<String>) -> RunRecord {
         inputs: Default::default(),
         trigger: None,
         origin: None,
+        executor: None,
+        cancel_requested: false,
         summary: None,
         diagnosis: None,
     }

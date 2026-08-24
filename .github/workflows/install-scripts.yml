@@ -1,0 +1,253 @@
+name: Install scripts
+
+# Exercises the published installers end to end on every platform we tell
+# people to run them on. They download the real release asset, verify its
+# SHA-256 against `latest.json`, and the job then runs the installed binary —
+# so a broken manifest key, a changed archive layout, or a missing prerequisite
+# on a given distro fails here rather than in a user's terminal.
+#
+# `medulla version` is the assertion: it proves the binary was extracted to the
+# expected path, is executable, and links against what the OS actually has.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/install-scripts.yml'
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/install-scripts.yml'
+  # The installers resolve the *latest release*, so they can break without this
+  # repository changing at all. Catch that on a schedule too.
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Native runners: macOS (aarch64) and the two Linux architectures.
+  unix:
+    name: install.sh (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: ubuntu x86_64
+          - os: ubuntu-24.04-arm
+            label: ubuntu aarch64
+          - os: macos-latest
+            label: macos aarch64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Install
+        env:
+          # Keep the run self-contained: a scratch prefix, and no shell-profile
+          # edits (the runner's profile is not what we are testing).
+          MEDULLA_HOME: ${{ runner.temp }}/medulla
+          MEDULLA_NO_MODIFY_PATH: '1'
+        run: sh ./install.sh
+
+      - name: Verify
+        env:
+          MEDULLA_HOME: ${{ runner.temp }}/medulla
+        run: |
+          set -eu
+          bin="${MEDULLA_HOME}/bin/medulla"
+          test -x "$bin" || { echo "::error::${bin} is missing or not executable"; exit 1; }
+          "$bin" version
+          # `help` exercises argument parsing rather than just the entry point.
+          "$bin" help > /dev/null
+
+  # Distro coverage beyond the runner image: these differ in libc version and
+  # in which of curl/wget/tar/unzip ship by default, which is exactly what the
+  # script's dependency detection has to cope with.
+  linux-distros:
+    name: install.sh (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:latest
+            label: fedora
+            # Fedora's base image has no tar or a usable download client.
+            # --allowerasing: these images ship curl-minimal, which conflicts
+            # with the full curl package rather than satisfying it.
+            deps: dnf install -y --allowerasing curl tar findutils
+          - image: debian:stable-slim
+            label: debian
+            deps: apt-get update && apt-get install -y curl tar findutils
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Install prerequisites
+        run: ${{ matrix.deps }}
+
+      # After the deps step: checkout needs tar/curl present in the container.
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Install
+        env:
+          MEDULLA_HOME: /tmp/medulla
+          MEDULLA_NO_MODIFY_PATH: '1'
+        run: sh ./install.sh
+
+      - name: Verify
+        run: |
+          set -eu
+          bin="/tmp/medulla/bin/medulla"
+          test -x "$bin" || { echo "::error::${bin} is missing or not executable"; exit 1; }
+          "$bin" version
+          "$bin" help > /dev/null
+
+  # Distributions whose C library is older than the one the release is built
+  # against (RHEL 9 and its rebuilds). The prebuilt binary cannot run there, so
+  # what is under test is the *diagnosis*: the installer must refuse to leave a
+  # binary that only fails later, and must say why. Asserting this keeps the
+  # failure mode honest — if the release ever starts targeting an older glibc,
+  # this job goes red and tells us to promote the distro to the matrix above.
+  linux-old-glibc:
+    name: install.sh (${{ matrix.label }}, unsupported libc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: rockylinux:9
+            label: rocky 9
+            # --allowerasing: these images ship curl-minimal, which conflicts
+            # with the full curl package rather than satisfying it.
+            deps: dnf install -y --allowerasing curl tar findutils
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Install prerequisites
+        run: ${{ matrix.deps }}
+
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: The installer diagnoses the incompatibility
+        env:
+          MEDULLA_HOME: /tmp/medulla
+          MEDULLA_NO_MODIFY_PATH: '1'
+        run: |
+          set -u
+          # No cargo in this image, so the source-build fallback cannot rescue
+          # it: the installer is expected to fail, loudly and specifically.
+          out="$(sh ./install.sh 2>&1)" && status=0 || status=$?
+          printf '%s\n' "$out"
+
+          if [ "$status" -eq 0 ]; then
+            echo "::error::install.sh reported success on a system the binary cannot run on"
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q 'does not run on this system'; then
+            echo "::error::install.sh failed without explaining that the binary cannot run here"
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q 'C library'; then
+            echo "::error::install.sh did not identify the C library as the cause"
+            exit 1
+          fi
+          # And it must not leave the unusable binary behind.
+          if [ -e /tmp/medulla/bin/medulla ]; then
+            echo "::error::install.sh left a binary that cannot run"
+            exit 1
+          fi
+          echo "installer correctly refused and explained why"
+
+  windows:
+    name: install.ps1 (windows x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      # PowerShell 7, the `pwsh` most users on a modern Windows box will have.
+      - name: Install (pwsh)
+        shell: pwsh
+        env:
+          MEDULLA_HOME: ${{ runner.temp }}\medulla
+          MEDULLA_NO_MODIFY_PATH: '1'
+        run: ./install.ps1
+
+      - name: Verify
+        shell: pwsh
+        env:
+          MEDULLA_HOME: ${{ runner.temp }}\medulla
+        run: |
+          $bin = Join-Path $env:MEDULLA_HOME 'bin\medulla.exe'
+          if (-not (Test-Path $bin)) { Write-Error "::error::$bin is missing"; exit 1 }
+          & $bin version
+          if ($LASTEXITCODE -ne 0) { Write-Error 'medulla version failed'; exit 1 }
+          & $bin help | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Error 'medulla help failed'; exit 1 }
+
+      # Windows PowerShell 5.1 still ships in the box and is what `powershell`
+      # resolves to, so the script has to work there too — it is the reason for
+      # the explicit TLS 1.2 opt-in.
+      - name: Install (Windows PowerShell 5.1)
+        shell: powershell
+        env:
+          MEDULLA_HOME: ${{ runner.temp }}\medulla51
+          MEDULLA_NO_MODIFY_PATH: '1'
+        run: ./install.ps1
+
+      - name: Verify (Windows PowerShell 5.1)
+        shell: powershell
+        env:
+          MEDULLA_HOME: ${{ runner.temp }}\medulla51
+        run: |
+          $bin = Join-Path $env:MEDULLA_HOME 'bin\medulla.exe'
+          if (-not (Test-Path $bin)) { Write-Error "$bin is missing"; exit 1 }
+          & $bin version
+          if ($LASTEXITCODE -ne 0) { Write-Error 'medulla version failed'; exit 1 }
+
+  # Static analysis, so an obvious portability slip is caught without waiting
+  # on the matrix above.
+  lint:
+    name: Lint installers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: ShellCheck install.sh
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck --shell=sh install.sh
+
+      - name: PSScriptAnalyzer install.ps1
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path ./install.ps1 -Severity Error,Warning
+          if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }
+          Write-Host 'PSScriptAnalyzer: clean'

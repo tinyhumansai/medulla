@@ -334,6 +334,31 @@ impl FileWorkflowStore {
             .join(format!("{}.json", safe_component(run_id)?)))
     }
 
+    /// Every parsable run record in the scope's runs directory, unordered.
+    ///
+    /// A missing directory is an empty listing, not an error: a scope that has
+    /// never run anything has nothing to read. A record this build cannot parse
+    /// is skipped rather than failing the whole listing — history is
+    /// diagnostic, and one corrupt file should not hide the rest of it.
+    fn read_run_dir(&self) -> Result<Vec<RunRecord>, WorkflowError> {
+        let entries = match std::fs::read_dir(&self.runs_dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(WorkflowError::Io {
+                    path: self.runs_dir.clone(),
+                    source,
+                })
+            }
+        };
+        Ok(entries
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| is_json(path))
+            .filter_map(|path| std::fs::read(&path).ok())
+            .filter_map(|body| serde_json::from_slice::<RunRecord>(&body).ok())
+            .collect())
+    }
+
     /// Run one workflow definition mutation while holding its filesystem lock.
     fn with_definition_lock<T>(
         &self,

@@ -57,18 +57,41 @@ fn a_record_from_another_host_is_left_alone() {
 
 #[test]
 fn a_live_pid_whose_start_time_disagrees_is_pid_reuse() {
-    // Our own pid, but claimed to have started at the epoch. The pid is live;
-    // the process that wrote the record is not the one holding it now.
+    // A live pid this test controls — a spawned child — claimed to have
+    // started at the epoch. The pid resolves, so the comparison this test
+    // exists to exercise (`reconcile::is_alive`'s foreign-pid branch) is
+    // actually reached, rather than short-circuiting on an unused neighbour.
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn a process to name");
     let executor = RunExecutor {
         host: current_executor().host.clone(),
-        pid: std::process::id() + 1,
+        pid: child.id(),
         started_at_secs: Some(1),
     };
 
-    // Either the neighbouring pid is unused (not alive) or it is a different
-    // process than the record describes (also not alive). What must never
-    // happen is this reading as the record's own executor.
-    assert!(!is_alive(&executor) || current_executor().started_at_secs == Some(1));
+    assert!(!is_alive(&executor), "a disagreeing start time is pid reuse");
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn a_self_pid_whose_start_time_disagrees_is_also_pid_reuse() {
+    // The record names this process's own pid, but claims a start time this
+    // process does not have — the shape a reboot or ordinary pid reuse
+    // leaves behind: a stale record from a dead process whose pid the kernel
+    // has since handed to the process running this test. Trusting a bare pid
+    // match here (as opposed to the foreign-pid branch, which already
+    // compares) would leave such a tombstone alive forever.
+    let executor = RunExecutor {
+        host: current_executor().host.clone(),
+        pid: current_executor().pid,
+        started_at_secs: current_executor().started_at_secs.map(|secs| secs + 1),
+    };
+
+    assert!(!is_alive(&executor));
 }
 
 #[test]

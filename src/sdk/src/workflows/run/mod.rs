@@ -28,6 +28,7 @@
 pub mod diagnose;
 pub mod dispatches;
 mod preflight;
+pub mod reconcile;
 mod registry;
 mod summary;
 
@@ -37,6 +38,7 @@ mod tests;
 pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
 pub use dispatches::{in_flight, InFlightDispatch};
 pub(crate) use preflight::clamp_loop_iterations;
+pub use reconcile::{reconcile_once, reconcile_orphans, Reconciled};
 pub use registry::{cancel, is_running, CancelSignal, RunClaim, RunGuard};
 pub use summary::summarize;
 

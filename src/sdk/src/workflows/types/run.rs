@@ -277,6 +277,27 @@ pub struct RunRecord {
     /// caller could not say anything about itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<RunOrigin>,
+    /// The process executing this run, while one is.
+    ///
+    /// Written when the run is admitted and left in place when it settles: a
+    /// finished run's executor is history, not a claim. What reads it is the
+    /// reconciliation sweep, which only consults it for a record that still
+    /// says [`RunStatus::Running`].
+    ///
+    /// Absent on records written before this field existed, which the sweep
+    /// treats as unowned — an old record claiming to run is exactly the kind
+    /// this exists to clean up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<RunExecutor>,
+    /// Whether someone has asked this run to stop.
+    ///
+    /// The durable half of cancellation. The in-process registry can only reach
+    /// a run this process is executing, so a cancel aimed at a run owned by
+    /// another live medulla is written here instead; that process notices the
+    /// flag on its next poll and cancels itself. Never cleared — a run that was
+    /// asked to stop and then settled should still say it was asked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancel_requested: bool,
     /// Steps in completion order.
     #[serde(default)]
     pub steps: Vec<RunStep>,

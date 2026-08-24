@@ -60,9 +60,7 @@ fn hostname() -> String {
     std::env::var("HOSTNAME")
         .ok()
         .filter(|name| !name.trim().is_empty())
-        .or_else(|| {
-            sysinfo::System::host_name().filter(|name: &String| !name.trim().is_empty())
-        })
+        .or_else(|| sysinfo::System::host_name().filter(|name: &String| !name.trim().is_empty()))
         .unwrap_or_else(|| "unknown".to_string())
 }
 

@@ -1,9 +1,15 @@
 name: Release
 
 # One-click release: pick a semver bump, and this workflow updates
-# Cargo.toml/Cargo.lock, commits, pushes a matching vX.Y.Z tag, builds the
-# `medulla` binary for each supported target, and publishes a GitHub Release
-# with the packaged binaries attached.
+# Cargo.toml/Cargo.lock, commits, pushes a matching vX.Y.Z tag *here*, builds
+# the `medulla` binary for each supported target, and publishes a GitHub
+# Release with the packaged binaries attached to the public distribution
+# repository (tinyhumansai/medulla) — not to this one.
+#
+# The split: this repository is the source; tinyhumansai/medulla is the public
+# docs and distribution surface, where `install.sh`, `install.ps1`, the GitBook
+# sources, and every release artifact live. Only build output crosses that
+# boundary — no source is ever pushed there.
 #
 # Always releases from main (checks out and pushes back to main regardless of
 # where it is dispatched). The release is created in this same workflow, so the
@@ -16,6 +22,11 @@ name: Release
 # mints a short-lived installation token, and pushes with that. The app must be
 # allowed to bypass the protection rule (admin permission on the repo, or an
 # explicit bypass entry).
+#
+# The publish job mints a second token from the same app, scoped to the
+# distribution repository instead (`owner` + `repositories` on
+# create-github-app-token). That is what makes the cross-repository release
+# possible with no PAT anywhere.
 
 on:
   workflow_dispatch:
@@ -32,6 +43,14 @@ on:
 
 permissions:
   contents: write
+
+env:
+  # Where releases are published. Actions variables, so the target can be
+  # repointed without editing this workflow; the literals are the fallback.
+  # Kept as two halves because `create-github-app-token` scopes by bare repo
+  # name while everything else wants the full `owner/name` slug.
+  RELEASE_REPO_OWNER: ${{ vars.RELEASE_REPO_OWNER || 'tinyhumansai' }}
+  RELEASE_REPO_NAME: ${{ vars.RELEASE_REPO_NAME || 'medulla' }}
 
 jobs:
   # No e2e gate here any more: the docker/tmux harness suites moved back to CI,
@@ -159,7 +178,7 @@ jobs:
           pkg="medulla-${{ needs.tag.outputs.tag }}-${{ matrix.target }}"
           mkdir "${pkg}"
           cp "target/${{ matrix.target }}/release/medulla" "${pkg}/"
-          cp README.md DEVELOPING.md config.example.toml "${pkg}/"
+          cp README.md config.example.toml "${pkg}/"
           tar -czf "${pkg}.tar.gz" "${pkg}"
           shasum -a 256 "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
 
@@ -172,7 +191,7 @@ jobs:
           $pkg = "medulla-${{ needs.tag.outputs.tag }}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $pkg | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/medulla.exe" "$pkg/"
-          Copy-Item README.md,DEVELOPING.md,config.example.toml "$pkg/"
+          Copy-Item README.md,config.example.toml "$pkg/"
           Compress-Archive -Path $pkg -DestinationPath "$pkg.zip"
           $hash = (Get-FileHash "$pkg.zip" -Algorithm SHA256).Hash.ToLower()
           # Single LF-terminated `<hex>  <name>` line, matching shasum's format.
@@ -188,10 +207,28 @@ jobs:
             medulla-*.zip.sha256
           if-no-files-found: error
 
+  # Publishes to the public distribution repository. Nothing from this job's
+  # workspace but `dist/` (downloaded build artifacts) is uploaded, so that repo
+  # receives binaries, checksums, and a manifest — never source.
   release:
     needs: [tag, build]
     runs-on: ubuntu-latest
+    # Grants access to the environment-scoped GitHub App secrets.
+    environment: Production
     steps:
+      # Scoped to the distribution repository rather than this one: `owner` +
+      # `repositories` narrows the installation token to exactly the repo the
+      # release is created in. The app is installed org-wide, so nothing beyond
+      # `contents: write` there is needed.
+      - name: Mint GitHub App token for ${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.XGITHUB_APP_ID }}
+          private-key: ${{ secrets.XGITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ env.RELEASE_REPO_OWNER }}
+          repositories: ${{ env.RELEASE_REPO_NAME }}
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -200,17 +237,21 @@ jobs:
       # Build the update manifest from the packaged assets' `.sha256` files.
       # Attached to the release so `releases/latest/download/latest.json` always
       # serves the newest version's manifest (consumed by `medulla update`).
+      # The download URLs point at the distribution repository, which is where
+      # the assets are about to land.
       - name: Generate latest.json
         env:
           TAG: ${{ needs.tag.outputs.tag }}
           VERSION: ${{ needs.tag.outputs.version }}
+          RELEASE_REPO: ${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}
         run: |
           python3 - <<'EOF'
           import datetime, glob, json, os
 
           tag = os.environ["TAG"]
           version = os.environ["VERSION"]
-          base = f"https://github.com/tinyhumansai/medulla/releases/download/{tag}"
+          repo = os.environ["RELEASE_REPO"]
+          base = f"https://github.com/{repo}/releases/download/{tag}"
           prefix = f"medulla-{tag}-"
 
           platforms = {}
@@ -230,7 +271,7 @@ jobs:
               "tag": tag,
               "pubDate": datetime.datetime.now(datetime.timezone.utc)
               .strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "notes": f"https://github.com/tinyhumansai/medulla/releases/tag/{tag}",
+              "notes": f"https://github.com/{repo}/releases/tag/{tag}",
               "platforms": platforms,
           }
           with open("dist/latest.json", "w") as f:
@@ -238,12 +279,35 @@ jobs:
           print(json.dumps(manifest, indent=2))
           EOF
 
-      - name: Publish GitHub Release
+      # `repository` + `token` send the release to the distribution repo. The
+      # tag is created there against its default branch; auto-generated notes
+      # are off because that repo's history is documentation, not the changes
+      # being shipped — the body points at the docs instead.
+      - name: Publish GitHub Release to ${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}
         uses: softprops/action-gh-release@v2
         with:
+          repository: ${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}
+          token: ${{ steps.app-token.outputs.token }}
           tag_name: ${{ needs.tag.outputs.tag }}
+          target_commitish: main
           name: medulla ${{ needs.tag.outputs.tag }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            Medulla ${{ needs.tag.outputs.version }}
+
+            **Install**
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}/main/install.sh | sh
+            ```
+
+            ```powershell
+            irm https://raw.githubusercontent.com/${{ env.RELEASE_REPO_OWNER }}/${{ env.RELEASE_REPO_NAME }}/main/install.ps1 | iex
+            ```
+
+            Already installed? `medulla update`.
+
+            Documentation: https://tinyhumans.gitbook.io/medulla
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256

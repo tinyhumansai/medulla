@@ -1,5 +1,22 @@
 # Repository Guidelines
 
+## Where things live
+
+This repository (`tinyhumansai/medulla-src`) is **source only**. The public
+repository [`tinyhumansai/medulla`](https://github.com/tinyhumansai/medulla)
+owns everything user-facing:
+
+- `docs/` — engineering specs (`host-link-protocol.md`, `workflows.md`,
+  `vendoring.md`, `workspace-profiles.md`, …), plans, and screenshots.
+- `gitbooks/` — the GitBook sources published at tinyhumans.gitbook.io/medulla.
+- `install.sh` / `install.ps1` — the published installers and their CI.
+- **Releases** — every tagged release and its binaries.
+
+A bare `docs/…` path in a comment here refers to a file in that repository, not
+to one in this tree. Documentation changes go there; this repository's `Release`
+workflow builds the binaries and publishes them there too, and nothing but
+build output ever crosses that boundary.
+
 ## Project Structure & Module Organization
 
 This repository is a two-crate Cargo workspace: the `medulla` SDK library at `src/sdk/` and the `medulla-tui` app crate at `src/tui/` (which ships the `medulla` binary). Keep reusable APIs in the SDK; keep rendering and process wiring in the app crate.

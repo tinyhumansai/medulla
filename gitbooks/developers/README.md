@@ -8,7 +8,7 @@ description: >-
 
 This is the developer home for Medulla: how to install and run the terminal app, how to embed the SDK in your own Rust code, how it is put together, and how to build the repository from source.
 
-The [product overview](../) is the high-level story; these pages are the hands-on detail. Everything here tracks the public [`tinyhumansai/medulla`](https://github.com/tinyhumansai/medulla) repository, a two-crate Cargo workspace: the [`medulla`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/) app crate, which ships the `medulla` binary.
+The [product overview](../) is the high-level story; these pages are the hands-on detail. Everything here tracks the [`tinyhumansai/medulla-src`](https://github.com/tinyhumansai/medulla-src) repository, a two-crate Cargo workspace: the [`medulla`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) SDK library and the [`medulla-tui`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/) app crate, which ships the `medulla` binary.
 
 ## Read next
 

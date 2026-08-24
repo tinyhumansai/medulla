@@ -21,6 +21,9 @@ set -eu
 # ---- Constants ---------------------------------------------------------------
 
 REPO="tinyhumansai/medulla"
+# Releases are published to REPO above; the source lives in a separate
+# repository. Only the cargo fallback below reaches for it.
+SOURCE_REPO="${MEDULLA_SOURCE_REPO:-tinyhumansai/medulla-src}"
 DEFAULT_MANIFEST="https://github.com/${REPO}/releases/latest/download/latest.json"
 BIN_NAME="medulla"
 
@@ -153,8 +156,13 @@ build_from_source() {
         info "building from the local checkout (cargo install --path src/tui)"
         cargo install --path src/tui --root "$MEDULLA_HOME" --locked
     else
-        info "building from git (cargo install --git https://github.com/${REPO})"
-        cargo install --git "https://github.com/${REPO}" medulla-tui --root "$MEDULLA_HOME" --locked
+        info "building from git (cargo install --git https://github.com/${SOURCE_REPO})"
+        # Without credentials git would sit at an interactive prompt inside a
+        # piped installer, so refuse the prompt and fail with something a reader
+        # can act on.
+        GIT_TERMINAL_PROMPT=0 cargo install --git "https://github.com/${SOURCE_REPO}" \
+            medulla-tui --root "$MEDULLA_HOME" --locked \
+            || die "could not build from source: https://github.com/${SOURCE_REPO} is not reachable with your credentials. Install a prebuilt release on a supported platform instead"
     fi
     ok "built and installed medulla to ${BIN_DIR}/${BIN_NAME}"
 }

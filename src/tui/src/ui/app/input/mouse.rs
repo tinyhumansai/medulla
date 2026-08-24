@@ -45,11 +45,24 @@ fn pointer_report(
 impl App {
     /// Handle scroll and left-click mouse events for the active tab.
     pub(in crate::ui::app) fn on_mouse(&mut self, m: crossterm::event::MouseEvent) -> Option<Cmd> {
-        if self.kill_armed.take().is_some() {
+        let kill_cancelled = self.kill_armed.take().is_some();
+        if kill_cancelled {
             self.set_status("Session kill cancelled");
         }
-        if self.harness_close_armed.take().is_some() {
+        let harness_close_cancelled = self.harness_close_armed.take().is_some();
+        if harness_close_cancelled {
             self.set_status("Harness close cancelled");
+        }
+        let workflow_delete_cancelled = self.workflow_delete_armed.take().is_some();
+        if workflow_delete_cancelled {
+            self.set_status("Workflow deletion cancelled");
+        }
+        // The cancellation click is the modal's answer, not a second click on
+        // the content it covered. Returning here also prevents a captured
+        // harness pointer gesture from receiving a stray release after a
+        // destructive confirmation is dismissed.
+        if kill_cancelled || harness_close_cancelled || workflow_delete_cancelled {
+            return None;
         }
         // Ahead of every other rule, including the modal one below: a button
         // that went down in a harness has to come back up in it. The grab is
@@ -58,45 +71,28 @@ impl App {
         if self.deliver_pointer_grab(&m) {
             return None;
         }
-        // The hand-back question's answers are click targets. It is the one
-        // overlay a click can raise, so it is the one an operator arrives at
-        // with their hand already on the mouse — being made to reach for the
-        // keyboard to answer a question the pointer just asked is the friction
-        // that makes the modal feel broken.
-        if self.handback_prompt.is_some() {
-            if let MouseEventKind::Down(MouseButton::Left) = m.kind {
-                if let Some(key) = self
-                    .hit_handback
-                    .iter()
-                    .find(|(rect, _)| rect.contains((m.column, m.row).into()))
-                    .map(|(_, key)| *key)
-                {
-                    self.handle_handback_key(key);
-                    // Returned from here rather than falling through: answering
-                    // can close the question, and the swallow below would then
-                    // see no modal and let the very same click carry on into
-                    // the rail underneath it.
-                    return None;
-                }
-            }
-            // Everything else the question is over is still swallowed, below.
+        // The inline prompt owns the pointer over the picker exactly as it owns
+        // the keyboard (see `on_key`, which routes the prompt before the picker):
+        // it is an edit on top of a modal, and a click that replayed Enter on a
+        // picker row behind it would start a harness while the favorite-name
+        // prompt was still on screen. The prompt itself is a text entry with no
+        // click targets, so every pointer event is swallowed while it is open.
+        if self.prompt.is_some() {
+            return None;
         }
         // The picker's rows are click targets too, and its list takes the wheel.
         // Same reasoning as the question above: it is opened from a rail row the
         // operator clicked (`+ New session`) or from `Ctrl-T`, so they arrive
         // with a hand on the mouse — and a modal that then refuses the pointer
         // entirely reads as a frozen screen rather than as a keyboard-only step.
-        if self.agent_picker.is_some() && self.route_agent_picker_pointer(&m) {
+        if self.session_picker.is_some() && self.route_session_picker_pointer(&m) {
             return None;
         }
         // A modal swallows the mouse, the same way it swallows the keyboard.
-        // Pickers and the hand-back question are modal: a click that navigated
-        // the rail behind one would leave an overlay describing a row nobody
-        // was pointing at. In particular, do not let a second session click
-        // replace the session named by an already-visible hand-back prompt.
         if self.resume_picker.is_some()
-            || self.agent_picker.is_some()
-            || self.handback_prompt.is_some()
+            || self.session_picker.is_some()
+            || self.kill_armed.is_some()
+            || self.harness_close_armed.is_some()
         {
             return None;
         }
@@ -122,26 +118,12 @@ impl App {
                     // Only the attached harness's own rail row is not a
                     // destination away from it: clicking the row you are
                     // already typing in should move nothing and ask nothing.
-                    // Every other row is a departure, and used not to be
-                    // treated as one — the rail was waved through wholesale, so
-                    // a click on the lane next door skipped the hand-back
-                    // policy here and was then released silently by the next
-                    // draw, which notices the cursor has left the attached
-                    // session. Worse, a click on *another harness's* row opened
-                    // the handover question about that harness while detaching
-                    // this one, so answering it handed back a session the
-                    // operator had never typed in and left the one they had
-                    // held forever.
+                    // Every other row is a departure. Release the current
+                    // attachment before moving the rail cursor so input cannot
+                    // remain routed to a pane the operator has left.
                     let on_own_rail_row =
                         self.rail_session_at(m.column, m.row).as_deref() == Some(session.as_str());
                     if !inside_attached_pane && !on_own_rail_row {
-                        // A click that navigates away releases the same keyboard
-                        // focus as Ctrl-]. Settle the configured hand-back policy
-                        // before changing the selected tab or rail row; otherwise
-                        // an Ask prompt would refer to a pane already hidden.
-                        if !self.begin_session_release(&session) {
-                            return None;
-                        }
                         self.release_session();
                     }
                 }
@@ -175,10 +157,10 @@ impl App {
     /// an arrow, so the pointer cannot come to disagree with the keyboard about
     /// what selecting a row does — and the workspace step's Enter *starts a
     /// session*, which is exactly the divergence worth designing out.
-    fn route_agent_picker_pointer(&mut self, m: &crossterm::event::MouseEvent) -> bool {
+    fn route_session_picker_pointer(&mut self, m: &crossterm::event::MouseEvent) -> bool {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-        let Some((area, rows)) = self.hit_agent_picker.clone() else {
+        let Some((area, rows)) = self.hit_session_picker.clone() else {
             return false;
         };
         let at = (m.column, m.row).into();
@@ -188,11 +170,11 @@ impl App {
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
         match m.kind {
             MouseEventKind::ScrollUp => {
-                self.handle_agent_picker_key(key(KeyCode::Up));
+                self.handle_session_picker_key(key(KeyCode::Up));
                 true
             }
             MouseEventKind::ScrollDown => {
-                self.handle_agent_picker_key(key(KeyCode::Down));
+                self.handle_session_picker_key(key(KeyCode::Down));
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -206,12 +188,12 @@ impl App {
                     // but it selects nothing.
                     return true;
                 };
-                let Some(picker) = self.agent_picker.as_mut() else {
+                let Some(picker) = self.session_picker.as_mut() else {
                     return true;
                 };
                 match picker.step {
-                    super::super::types::AgentPickerStep::Harness => picker.index = index,
-                    super::super::types::AgentPickerStep::Workspace => {
+                    super::super::types::SessionPickerStep::Harness => picker.index = index,
+                    super::super::types::SessionPickerStep::Workspace => {
                         picker.workspace_index = index;
                         // The click *is* the operator choosing this completion
                         // over whatever they had typed, which is precisely what
@@ -219,7 +201,7 @@ impl App {
                         picker.workspace_picked = true;
                     }
                 }
-                self.handle_agent_picker_key(key(KeyCode::Enter));
+                self.handle_session_picker_key(key(KeyCode::Enter));
                 true
             }
             _ => false,
@@ -379,13 +361,13 @@ impl App {
         match self.tab() {
             // Over the rail, the wheel walks the cursor over the lanes and
             // their tasks; anywhere else on the tab it scrolls the transcript.
-            "Agents" => {
+            "Sessions" => {
                 let over_rail = self
                     .hit_agents
                     .as_ref()
                     .is_some_and(|(rail, _)| rail.contains((x, y).into()));
                 if over_rail {
-                    self.move_agent_index(up);
+                    self.move_rail_index(up);
                 } else {
                     #[cfg(feature = "workflows")]
                     if self
@@ -508,7 +490,7 @@ impl App {
             }
             return None;
         }
-        if tab == "Agents" {
+        if tab == "Sessions" {
             // §A7: clicking an entry of the orchestrator's "sessions started"
             // block opens that session — the rail selection follows, which is
             // what makes the pane show its conversation. Checked before the rail
@@ -535,7 +517,6 @@ impl App {
                     if let Some(t) = self.snapshot.threads.get(idx) {
                         let id = t.id.clone();
                         self.runtime.set_active_thread(id);
-                        self.chat_scroll = 0;
                         self.agent_scroll = 0;
                         self.refresh_snapshot();
                     }
@@ -547,7 +528,7 @@ impl App {
                     // click on the second line of a wrapped harness row selects
                     // that harness rather than whatever follows it. The map
                     // covers the unselectable rows too — the `── functions ──`
-                    // separator — because `agent_index` indexes all of them.
+                    // separator — because `rail_index` indexes all of them.
                     let rel = (y - rect.y) as usize;
                     if let Some(hit) = owners.get(rel) {
                         if hit.selectable() {
@@ -562,13 +543,9 @@ impl App {
                                 return None;
                             }
                             self.agent_scroll = 0;
-                            self.chat_scroll = 0;
                             self.set_rendered_rail_cursor(hit);
                             #[cfg(feature = "workflows")]
                             self.sync_selected_workflow_run();
-                            // A click is a focus gesture: the arrows should now
-                            // continue from the row that was just picked.
-                            self.focus_agents_rail();
                             // The action row acts on the click that lands on it;
                             // requiring a second keystroke to confirm what was
                             // already aimed at is the friction it exists to
@@ -580,16 +557,9 @@ impl App {
                             // no task, so a click arriving from one that did has
                             // to stop that stream — and neither open method
                             // clears `watching` on its own.
-                            if matches!(&hit.target, super::super::types::RailHitTarget::NewAgent) {
-                                self.open_new_agent_picker();
-                                return self.retarget_watch();
-                            }
-                            // Same rule for the per-agent action: a click on
-                            // `+ new session` opens the flow it names.
-                            if let super::super::types::RailHitTarget::NewSession(agent_id) =
-                                &hit.target
+                            if matches!(&hit.target, super::super::types::RailHitTarget::NewSession)
                             {
-                                self.open_new_session(agent_id);
+                                self.open_session_picker();
                                 return self.retarget_watch();
                             }
                             if let super::super::types::RailHitTarget::WorkflowRun {
@@ -624,17 +594,8 @@ impl App {
                                     self.pane_session = Some(session.to_string());
                                     return None;
                                 }
-                                // Point the prompt at the row that was clicked,
-                                // not at whatever the last render left behind.
-                                // `pane_session` is written during the
-                                // draw, and no draw happens between the cursor
-                                // move above and this call — so without this the
-                                // prompt would offer to hand over the previously
-                                // visible harness, and confirming it would
-                                // transfer control of one the operator never
-                                // pointed at.
                                 self.pane_session = Some(session.to_string());
-                                self.open_session_enter_prompt();
+                                self.attach_to_pane_session();
                                 // Drop whatever task the previous row was
                                 // watching, exactly as the fall-through below
                                 // does for every other row. This branch returns
@@ -656,18 +617,12 @@ impl App {
             // changes rows is a navigation, not an attach to whatever the last
             // frame showed.
             //
-            // Routed through the same entry point Enter uses rather than
-            // attaching outright, because the pointer and the keyboard must not
-            // disagree about who ends up holding a session. Clicking straight
-            // into an orchestrator-held pane used to take it silently — the very
-            // thing the Enter question exists to prevent, reachable by the
-            // gesture an operator is most likely to make first.
             if let Some((rect, session)) = self.hit_session.clone() {
                 if rect.contains((x, y).into())
                     && self.pane_session.as_deref() == Some(session.as_str())
                     && !self.harness_focus.is_attached_to(&session)
                 {
-                    self.open_session_enter_prompt();
+                    self.attach_to_pane_session();
                 }
             }
         } else if tab == "Settings" && self.settings_subpage() == "Context" {
@@ -676,8 +631,19 @@ impl App {
             if let Some(rect) = self.hit_context {
                 if rect.contains((x, y).into()) {
                     let rel = (y - rect.y) as usize;
-                    if rel < self.contexts.len() {
-                        self.context_index = rel;
+                    // The list is windowed on the selection (see `draw_context`),
+                    // so a clicked row names `start + rel`, not `rel`. Recomputed
+                    // from the same inputs the draw used — the rect it recorded
+                    // and the selection, neither of which can have moved since.
+                    let vis = (rect.height as usize).max(1);
+                    let start = crate::ui::selection::viewport_start(
+                        crate::ui::selection::clamp(self.context_index, self.contexts.len()),
+                        self.contexts.len(),
+                        vis,
+                    );
+                    let clicked = start + rel;
+                    if rel < vis && clicked < self.contexts.len() {
+                        self.context_index = clicked;
                     }
                 }
             }

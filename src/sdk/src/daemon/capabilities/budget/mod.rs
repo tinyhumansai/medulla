@@ -225,7 +225,9 @@ fn auth_env_vars(provider: HarnessProvider) -> &'static [&'static str] {
         ],
         HarnessProvider::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
         HarnessProvider::Opencode => &["OPENCODE_API_KEY"],
-        HarnessProvider::Openhuman => &[],
+        // Neither authenticates against a coding provider: OpenHuman uses the
+        // core's own session, and a shell has no account to hold.
+        HarnessProvider::Openhuman | HarnessProvider::Shell => &[],
     }
 }
 
@@ -244,7 +246,7 @@ fn auth_files(provider: HarnessProvider) -> Vec<PathBuf> {
             home.join(".local/share/opencode/auth.json"),
             home.join(".config/opencode/auth.json"),
         ],
-        HarnessProvider::Openhuman => Vec::new(),
+        HarnessProvider::Openhuman | HarnessProvider::Shell => Vec::new(),
     }
 }
 

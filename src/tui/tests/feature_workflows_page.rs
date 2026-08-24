@@ -253,6 +253,7 @@ fn selecting_a_run_overlays_it_on_the_graph() {
         input: None,
         output: None,
         diagnostics: Vec::new(),
+        transcript: Vec::new(),
     }];
     store(home.path()).record_run(&record).expect("records");
     let mut app = workflows_app(home.path());

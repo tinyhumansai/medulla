@@ -39,6 +39,7 @@ fn done(reply: &str) -> Result<TaskOutcome, RunError> {
         },
         harness: None,
         session_id: None,
+        transcript: Vec::new(),
     })
 }
 

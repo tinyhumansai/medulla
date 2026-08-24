@@ -2,5 +2,6 @@
 
 mod capabilities;
 mod codec;
+mod shell_provider;
 mod tool_mode;
 mod work_snapshot;

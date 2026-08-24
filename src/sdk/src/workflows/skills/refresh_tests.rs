@@ -449,12 +449,10 @@ fn the_unscoped_managed_root_is_retired() {
     // What the old layout wrote: the same install, at the Medulla home itself.
     let legacy = crate::home::medulla_home(&env).join("claude-skills");
     install(
-        &[
-            crate::workflows::store::FileWorkflowStore::discover(&env, cwd.path())
-                .load()
-                .workflows[0]
-                .summary(),
-        ],
+        &[crate::workflows::store::discover(&env, cwd.path())
+            .load()
+            .workflows[0]
+            .summary()],
         &InstallOptions {
             targets: vec![SkillTarget::Claude],
             scope: SkillScope::Project,

@@ -16,7 +16,7 @@ fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
 
     let _ = app.on_event(ctrl('t'));
     let out = render(&mut app, 140, 44);
-    assert!(out.contains("Choose a harness type"), "{out}");
+    assert!(out.contains("Choose a session type"), "{out}");
     assert!(
         out.contains("the orchestrator will not dispatch into it"),
         "the picker must say what unmanaged means: {out}"
@@ -38,7 +38,7 @@ fn ctrl_t_opens_the_picker_and_two_enters_start_an_unmanaged_harness() {
     assert_eq!(row.control, SessionControl::User);
     assert!(!row.busy, "nothing is running in it yet");
     assert!(
-        app.status().contains("unmanaged"),
+        app.status().contains("local session"),
         "the operator is told what they just started: {}",
         app.status()
     );
@@ -136,7 +136,7 @@ fn the_wheel_walks_the_picker_and_a_click_off_a_row_starts_nothing() {
     let (column, row) = label_at(&lines, "Choose workspace");
     let _ = app.on_event(click(column, row));
     assert!(
-        app.agent_picker_open_for_test(),
+        app.session_picker_open_for_test(),
         "a click off a row leaves the picker up: {}",
         app.status()
     );
@@ -179,7 +179,7 @@ fn the_picker_cancels_without_starting_anything() {
     let _ = app.on_event(key(KeyCode::Esc));
 
     let out = render(&mut app, 140, 44);
-    assert!(!out.contains("Choose a harness type"), "{out}");
+    assert!(!out.contains("Choose a session type"), "{out}");
     assert!(sessions.rows().is_empty(), "Esc must not start a harness");
 }
 

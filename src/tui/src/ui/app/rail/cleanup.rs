@@ -1,4 +1,4 @@
-//! Retiring finished work from the Agents rail.
+//! Retiring finished work from the Sessions rail.
 //!
 //! The rail is a picture of what is happening on this device, and everything on
 //! it eventually stops happening: a harness exits, a workflow run settles. Kept
@@ -7,8 +7,8 @@
 //! dozen entries is still doing something.
 //!
 //! So a session whose child is gone leaves the rail, and with it the screen and
-//! scrollback it was holding. Two things pin one anyway, because both would be
-//! taken away from someone mid-use:
+//! scrollback it was holding. Three things pin one anyway, because each needs
+//! to remain visible to an operator:
 //!
 //! - the session the keyboard is attached to — the operator is reading that
 //!   screen right now, exit code and all, and it is often *why* they attached;
@@ -16,6 +16,8 @@
 //!   parent harness by design ([`medulla::control_socket::runs`]), and its rows
 //!   are drawn under the session that started it, so sweeping the session would
 //!   take the run's own progress off screen with it.
+//! - a failed child, whose exit cue explains why the dispatch stopped and lets
+//!   the operator inspect or dismiss its retained record.
 //!
 //! Settled runs are dropped from under a session the same way, by
 //! [`run_rows_under`](super::run_rows_under). The durable account of every run
@@ -29,10 +31,18 @@ use super::super::types::App;
 impl App {
     /// Whether a session whose child has exited still belongs on the rail.
     ///
-    /// See the module doc for the two cases. Everything else is history the
+    /// See the module doc for the three cases. Everything else is history the
     /// rail no longer shows.
     pub(in crate::ui::app) fn keeps_finished_session(&self, row: &SessionRow) -> bool {
         if self.harness_focus.is_attached_to(&row.id) {
+            return true;
+        }
+        // A failed child has lifecycle information the operator needs to see.
+        // Keeping it also prevents the frame sweep from deleting its cue before
+        // the rail has rendered even once.
+        if crate::worker::pty::lifecycle_cue(row, medulla::clock::now_millis())
+            .is_some_and(|cue| cue.kind.is_failure())
+        {
             return true;
         }
         row.mcp_grant_session

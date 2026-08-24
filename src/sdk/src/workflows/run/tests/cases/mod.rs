@@ -6,6 +6,7 @@
 
 mod cancellation;
 mod continuation;
+mod finalize;
 mod loops;
 
 use std::collections::HashMap;
@@ -43,6 +44,7 @@ impl HarnessDispatch for StubDispatch {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }
@@ -78,6 +80,7 @@ impl HarnessDispatch for ErrorThenHangDispatch {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         })
     }
 }

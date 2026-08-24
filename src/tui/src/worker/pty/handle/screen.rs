@@ -95,7 +95,13 @@ impl SessionHandle {
             let title = parser.screen().title().trim().to_string();
             (!title.is_empty()).then_some(title)
         };
-        lock(&self.cold).thread_name = thread_name;
+        // An empty OSC title (ordinary harness output that happens to include
+        // no title escape) must not erase a name the session already carries —
+        // discovered from the Codex session index or from a prior non-empty
+        // title. Only a real title replaces it.
+        if thread_name.is_some() {
+            lock(&self.cold).thread_name = thread_name;
+        }
     }
 
     /// Move the emulator's scrollback by `rows`, towards the history when `up`.

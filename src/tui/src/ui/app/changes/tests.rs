@@ -406,3 +406,54 @@ fn following_a_harness_uses_its_launch_commit_until_operator_selects_another() {
     assert_eq!(state.baseline.as_deref(), Some(launch.as_str()));
     assert_eq!(state.harness_baseline.as_deref(), Some(launch.as_str()));
 }
+
+#[test]
+fn a_refresh_attributes_the_diff_to_the_worktree_it_was_read_from() {
+    // Which checkout a diff describes cannot be read off the patch text, and
+    // two worktrees of one repository disagree about it while agreeing about
+    // almost everything else.
+    let directory = tempdir().expect("temp repo");
+    let repository_path = directory.path().join("medulla-public");
+    fs::create_dir(&repository_path).expect("repository directory");
+    git(&repository_path, &["init", "--initial-branch", "main"]);
+    git(
+        &repository_path,
+        &["config", "user.email", "test@example.com"],
+    );
+    git(&repository_path, &["config", "user.name", "Test"]);
+    fs::write(repository_path.join("tracked.txt"), "one\n").expect("write tracked");
+    git(&repository_path, &["add", "tracked.txt"]);
+    git(&repository_path, &["commit", "-m", "baseline"]);
+    let linked = directory.path().join("fix-login");
+    git(
+        &repository_path,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "fix/login",
+            linked.to_string_lossy().as_ref(),
+        ],
+    );
+
+    let mut state = GitChangesState {
+        root: Some(linked.clone()),
+        baseline: Some(output(&linked, &["rev-parse", "HEAD"]).trim().to_owned()),
+        ..GitChangesState::default()
+    };
+    state.refresh();
+
+    assert_eq!(
+        state.checkout_label().as_deref(),
+        Some("medulla-public ⑂ fix-login · fix/login")
+    );
+
+    // Pointed at the primary checkout instead, the same repository name is
+    // reported with no worktree to qualify it.
+    state.root = Some(repository_path.clone());
+    state.refresh();
+    assert_eq!(
+        state.checkout_label().as_deref(),
+        Some("medulla-public · main")
+    );
+}

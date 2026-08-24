@@ -22,9 +22,9 @@
 //! The store is behind the [`WorkflowStore`] trait, so a remote catalog is a new
 //! implementation rather than a rewrite.
 
-pub mod authoring;
 pub mod bridge;
 pub mod copilot;
+mod dispatch_error;
 pub mod evolve;
 pub mod gates;
 pub mod local;
@@ -36,15 +36,16 @@ pub mod report;
 pub mod run;
 pub mod skills;
 pub mod store;
-mod types;
+pub mod workspace;
 
+#[cfg(test)]
+#[path = "authoring_tests.rs"]
+mod authoring_tests;
 #[cfg(test)]
 mod tests;
 
-pub use authoring::{
-    apply_workflow_ops, apply_workflow_ops_if_unchanged, create_workflow, preview_workflow_ops,
-    validate_handle, GraphHandle,
-};
+// Patch-based editing moved to the engine crate with the store it writes to;
+// the gates an edit is judged by ride along on the store's own policy.
 pub use bridge::{cancel_task_workflow, run_task_workflow, StoreWorkflowBridge};
 pub use copilot::{CopilotOutcome, CopilotRequest, CopilotSession, FailedRun};
 pub use local::{LocalCopilotDispatch, LocalWorkflowHost, LOCAL_WORKER_ADDRESS};
@@ -54,9 +55,13 @@ pub use registry::StoreWorkflowResolver;
 pub use report::RunReporter;
 pub use run::{dry_run, resume_workflow, run_workflow, run_workflow_versioned, RunContext};
 pub use store::{
-    current_notes, mint_note_id, mint_proposal_id, new_run_record, parse_workflow, require,
-    require_proposal, require_run, rollback, undo_last, validate_graph, FileWorkflowStore,
-    LoadReport, WorkflowStore, MAX_NOTES, MAX_REVISIONS,
+    bounded_evidence, bounded_within, current_notes, mint_note_id, mint_proposal_id,
+    new_run_record, parse_workflow, require, require_proposal, require_run, rollback, undo_last,
+    validate_graph, LoadReport, WorkflowStore, MAX_NOTES, MAX_REVISIONS,
+};
+pub use tinyflows::store::{
+    apply_workflow_ops, apply_workflow_ops_if_unchanged, create_workflow, preview_workflow_ops,
+    validate_handle, GraphHandle,
 };
 // The engine's own graph model, re-exported so hosts above this crate (the TUI)
 // can name a workflow's graph without taking a direct dependency on the engine.
@@ -66,10 +71,19 @@ pub use store::{
 // input, and a second declaration of that shape would be free to disagree with
 // the engine's about what a `number` accepts.
 pub use tinyflows::model::{InputType, WorkflowGraph, WorkflowInput};
-pub(crate) use types::bounded_evidence;
-pub use types::{
-    fingerprint, record_fingerprint, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus,
+// The stored model moved to the engine crate with the store that persists it.
+// Re-exported unchanged so a call site in this crate — and the TUI above it —
+// still writes `crate::workflows::WorkflowRecord`.
+pub use gates::MedullaPolicy;
+pub use store::{fingerprint, record_fingerprint};
+pub use store::{preference as defaults_preference, with_medulla_policy};
+// Aliased as well as re-exported, so `workflows::authoring::…` — the path this
+// crate already used everywhere — keeps resolving after the move.
+pub use tinyflows::store::authoring;
+pub use tinyflows::store::{
+    Diagnosis, FileWorkflowStore, NoteId, NoteKind, NoteSource, ProposalId, ProposalStatus,
     ProposalVerification, RunExecutor, RunId, RunOrigin, RunRecord, RunStatus, RunStep,
+    TranscriptEntry,
     WorkflowDefaults, WorkflowError, WorkflowId, WorkflowNote, WorkflowProposal, WorkflowRecord,
     WorkflowRevision, WorkflowSummary,
 };

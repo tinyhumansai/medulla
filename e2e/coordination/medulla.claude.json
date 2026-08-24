@@ -1,0 +1,19 @@
+{
+  "_comment": "Daemon config for the Claude Code leg of the coordination e2e. The single custom harness preset is marked default, so an untargeted task frame runs on it; Medulla then injects ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN at the spawn seam. `baseUrl` carries no /v1 suffix because Claude Code appends /v1/messages itself. The top-level [router] is the same endpoint by another route: the capability probe spawns with the daemon's router rather than with a preset (src/sdk/src/daemon/task_loop/probe.rs), so without it the probe would reach the real api.anthropic.com with no credential and report facts only. The port placeholder is substituted by write_harness_config.",
+  "router": {
+    "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT",
+    "apiKeyEnv": "MOCK_LLM_API_KEY"
+  },
+  "customHarnesses": [
+    {
+      "id": "mock-harness",
+      "name": "Mock Claude",
+      "baseHarness": "claude",
+      "model": "mock-model",
+      "hostId": "e2e",
+      "default": true,
+      "apiKeyEnv": "MOCK_LLM_API_KEY",
+      "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT"
+    }
+  ]
+}

@@ -30,7 +30,6 @@
 //! the caller to name at least one node the persisted record actually lists as
 //! pending, so a stale or invented resume cannot walk a run past its gate.
 
-pub mod diagnose;
 pub mod dispatches;
 mod preflight;
 pub mod reconcile;
@@ -42,12 +41,17 @@ mod reconcile_tests;
 #[cfg(test)]
 mod tests;
 
-pub use diagnose::{diagnose, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding};
+// Run diagnosis moved to the engine crate with the run record it explains.
+// Aliased as well as re-exported, so `diagnose::Diagnosis` still resolves here.
 pub use dispatches::{in_flight, InFlightDispatch};
 pub(crate) use preflight::clamp_loop_iterations;
 pub use reconcile::{reconcile_once, reconcile_orphans, Reconciled};
 pub use registry::{cancel, is_running, CancelSignal, RunClaim, RunGuard};
 pub use summary::summarize;
+use tinyflows::diagnostics as diagnose;
+pub use tinyflows::diagnostics::{
+    capturing, diagnose, CapturingObserver, Diagnosis, DryRun, HiddenError, NeverRan, NullBinding,
+};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -364,8 +368,11 @@ async fn run_workflow_inner(
         terminal_engine_error,
     );
 
-    finalizer.disarm();
+    // Written *before* disarming: if this terminal write fails, the guard must
+    // still be armed so its drop reconciles the record to `Interrupted`.
+    // Disarming first would strand the run at `Running` forever.
     context.store.record_run(&record)?;
+    finalizer.disarm();
     remember_failure(&context.store, &record);
     Ok(record)
 }
@@ -543,8 +550,11 @@ pub async fn resume_workflow(
     // pre-gate and post-gate history.
     record.summary = Some(summary::summarize(&record));
 
-    finalizer.disarm();
+    // Written before disarming, for the same reason as `run_workflow`: a
+    // terminal write that fails must leave the drop guard armed to reconcile
+    // the record rather than leaving a resumed run stuck at `Running`.
     context.store.record_run(&record)?;
+    finalizer.disarm();
     remember_failure(&context.store, &record);
     Ok(record)
 }

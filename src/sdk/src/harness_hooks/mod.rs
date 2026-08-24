@@ -46,14 +46,23 @@
 //! - **OpenCode** exposes hooks as a scripted plugin API rather than a
 //!   declarative command hook, and is not adapted yet; its hooks are reported as
 //!   [`DroppedHook`]s rather than silently ignored.
-//! - **OpenHuman** runs in-process and has no external harness to configure.
+//! - **OpenHuman** runs in-process and has no external harness to configure; its
+//!   `PreToolUse`, `PostToolUse`, and `Stop` hooks are instead routed to the
+//!   embedded core's embedder hooks at boot (see [`crate::core_host::hooks`]),
+//!   so `hook_injection` here carries no argv for it.
 //!
 //! Both delivery paths were verified end-to-end against the versions named
 //! above: a `SessionStart` hook injected this way fires on Claude Code, and on
 //! Codex fires alongside the operator's own once trusted.
+//!
+//! All of that assumes Medulla spawns the harness CLI itself. Under ACP
+//! dispatch it spawns an ACP *server* which spawns the harness, so there is no
+//! argv to add to and these two paths deliver nothing at all — see [`acp`],
+//! which carries the same document over that transport's own channels.
 
 use crate::protocol::HarnessProvider;
 
+pub mod acp;
 pub mod builtin;
 mod claude;
 mod codex;
@@ -65,6 +74,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use acp::{delivery as acp_delivery, AcpDelivery};
 pub use grant::{seed_hook_grant, HookGrantGuard};
 pub use report::{HookEventLog, HookReport};
 pub use types::{
@@ -99,7 +109,7 @@ pub fn hook_injection(provider: HarnessProvider, hooks: &HooksConfig) -> HookInj
     match provider {
         HarnessProvider::Claude => injection.args = claude::settings_args(&document),
         HarnessProvider::Codex => injection.args = codex::config_args(&document),
-        HarnessProvider::Opencode | HarnessProvider::Openhuman => {}
+        HarnessProvider::Opencode | HarnessProvider::Openhuman | HarnessProvider::Shell => {}
     }
     injection
 }
@@ -197,9 +207,10 @@ fn unsupported_reason(provider: HarnessProvider, event: HookEvent) -> String {
                 .to_string()
         }
         HarnessProvider::Openhuman => {
-            "OpenHuman runs in-process and has no external harness config to install hooks into"
+            "OpenHuman's embedded runner currently raises PreToolUse, PostToolUse, and Stop"
                 .to_string()
         }
+        HarnessProvider::Shell => "a shell raises no hook events".to_string(),
         HarnessProvider::Claude | HarnessProvider::Codex => {
             format!(
                 "{} does not raise the {} event",

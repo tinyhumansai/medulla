@@ -26,6 +26,15 @@ pub struct ThemeConfig {
     /// Whether operator-attention cues blink.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attention_blink: Option<bool>,
+    /// How long one attention pulse takes, in seconds.
+    ///
+    /// A full cycle: the cue is bright for half of it and dim for the other
+    /// half. Expressed in seconds because that is the unit the effect is judged
+    /// in — "blink about once a second" is a thing an operator can ask for,
+    /// "eleven frames" is not. Values outside the sane range are clamped rather
+    /// than rejected, so a typo slows the pulse instead of disabling the config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attention_blink_seconds: Option<f64>,
 }
 
 /// Onboarding state: what the welcome flow has already shown this user.

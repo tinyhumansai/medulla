@@ -724,6 +724,14 @@ pub fn attach_cli(
     if !supports_cli_attach(provider) {
         return None;
     }
+    // A launch serving a workflow `agent` node gets no Medulla tools at all —
+    // see [`crate::harness_tools`] for why a step of a running graph must not
+    // be able to start another one or dispatch into the pool its own run is
+    // competing for. Checked before anything is minted so no grant is created
+    // for a session that will not carry one.
+    if crate::harness_tools::withheld(env) {
+        return None;
+    }
     let workflows_on = workflows_enabled(env);
     let tool_mode = env.get(super::TOOL_MODE_ENV).cloned();
     // The binary the caller is *actually about to launch*, not one re-derived

@@ -13,9 +13,6 @@
 //! are re-exported here so callers use `crate::ui::app::*`.
 
 mod account;
-mod agent_control;
-#[cfg(test)]
-mod agent_control_tests;
 mod appearance;
 mod changes;
 mod commands;
@@ -37,15 +34,8 @@ mod rail;
 mod render;
 mod routing_options;
 mod session_control;
-#[cfg(test)]
-mod session_control_tests;
-mod session_focus;
-#[cfg(test)]
-mod session_focus_tests;
 mod settings_edit;
 mod state;
-#[cfg(test)]
-mod state_tests;
 mod status_line;
 mod templates;
 mod types;

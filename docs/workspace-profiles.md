@@ -1,7 +1,7 @@
 # Workspace profiles (`MEDULLA.md`)
 
 A `MEDULLA.md` at a repository root tells the orchestrator what that directory
-**is** and how to route work over it. It is short by design — the orchestrator
+**is** and how to route work over it. It is short by design: the orchestrator
 reads it on every cycle, so it carries a ~100-200 token summary rather than the
 full contents of `AGENTS.md`.
 
@@ -28,7 +28,7 @@ own task.
 
 The frontmatter preferences are **advisory**. medulla renders them into the
 orchestrator's context as guidance; it never gates delegation or model selection
-on them. Everything is optional — a profile that is only prose is valid.
+on them. Everything is optional, and a profile that is only prose is valid.
 
 `layout` is scanned from the directory rather than drafted: the summary says what
 the workspace *is*, the layout says which paths it is made of, so the
@@ -54,8 +54,8 @@ and place work there. Registration writes two config lists:
 | `[fleet].workspaces` | The declared `Host → Harness → Workspace` chain the orchestrator places work onto. Without an entry here there is nowhere to *put* the work. |
 
 Both are written to a single file: the explicit `--config` path, else the
-highest-precedence file in the layered load, else `<medulla home>/config.toml` —
-the same file the TUI writes, so the CLI and the running app agree on one
+highest-precedence file in the layered load, else `<medulla home>/config.toml`.
+That is the same file the TUI writes, so the CLI and the running app agree on one
 registry.
 
 `add` is idempotent, and safe on a directory that already has a profile: an
@@ -66,8 +66,8 @@ to redraft the `MEDULLA.md` as well.
 
 If the workspace's harness is not already declared, `add` declares it and its
 host too. A workspace whose `harnessId` names nothing resolves to no harness and
-no host, which is not a placement chain — so registering one without completing
-it would not deliver what the command promises.
+no host, which cannot form a placement chain, so registering one without
+completing it would not deliver what the command promises.
 
 The registry is written as TOML. `--config` pointed at a `.json` file is refused
 before anything is written, rather than leaving TOML at a path the next load
@@ -91,18 +91,18 @@ Drafts a profile for `dir` (default: the current directory) and writes
 3. Asks the configured model to distil them into a summary plus routing hints.
 4. Writes the result for you to review and edit.
 
-The draft is a starting point, not the final word — the summary is what the
-orchestrator actually reads, so it is worth a pass by hand.
+The draft is a starting point. The summary is what the orchestrator actually
+reads, so it is worth a pass by hand.
 
 `init` authors the file and stops there; it does **not** register the workspace.
 Use `medulla workspace add` for both.
 
 The scaffold `init` fills in lives at `src/sdk/src/init/MEDULLA.md.tmpl`. It sits
 inside the crate (rather than here under `docs/`) because it is embedded with
-`include_str!` and the release image only copies `src/` and `vendor/` — a
+`include_str!` and the release image only copies `src/` and `vendor/`, so a
 template outside the crate root fails that build.
 
-**Flags**
+### Flags
 
 | Flag | Effect |
 | --- | --- |
@@ -110,10 +110,12 @@ template outside the crate root fails that build.
 | `--offline` | Skip the model call and write the editable stub. |
 | `--config <path>` | Explicit config file for the backend/model settings. |
 
-**Model resolution** takes one order: an explicit
-`OPENROUTER_API_KEY` wins, otherwise the backend's inference surface is used with
-the JWT from `medulla login`. With neither — or if the model call fails — `init`
-writes the stub and says so, so it always leaves you a usable file.
+### Model resolution
+
+Resolution takes one order: an explicit `OPENROUTER_API_KEY` wins, otherwise the
+backend's inference surface is used with the JWT from `medulla login`. With
+neither, or if the model call fails, `init` writes the stub and says so, so it
+always leaves you a usable file.
 
 ## How a profile reaches the orchestrator
 

@@ -54,7 +54,7 @@ fn open_picker(app: &mut App) {
         KeyModifiers::CONTROL,
     )));
     assert!(
-        rendered(app).contains("Choose a harness type"),
+        rendered(app).contains("Choose a session type"),
         "the picker is open on its first step"
     );
 }

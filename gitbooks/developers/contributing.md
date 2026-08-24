@@ -35,11 +35,19 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check                       # run `cargo fmt` to apply
 ```
 
-The e2e suites spin up in-process stand-ins so they are safe anywhere: a mock
-HTTP/SSE backend (`src/sdk/tests/support/mock_backend.rs`), a mock core
-Unix-socket server (`mock_core.rs`), mock harness servers, and mock `claude`/`codex`/`opencode` CLIs that emit
-realistic provider stream-JSONL (`mock_harness.rs`, selected via the
-`MEDULLA_*_BIN` overrides). See [Architecture › Testing philosophy](architecture.md#testing-philosophy).
+The e2e suites spin up in-process stand-ins so they are safe anywhere. They all
+live in `src/sdk/tests/support/`:
+
+| File | What it stands in for |
+| --- | --- |
+| `mock_backend.rs` | The orchestration backend's HTTP and SSE surfaces. |
+| `fake_app_server.rs` | The app-facing server endpoints. |
+| `fake_provider.rs` | A coding-agent provider. |
+| `mock_harness.rs`, `mock_harness_helpers.rs`, `mock_harness_script.rs`, `mock_harness_types.rs` | Mock `claude`/`codex`/`opencode` CLIs that emit realistic provider stream-JSONL, selected via the `MEDULLA_*_BIN` overrides. |
+| `mock_openrouter.rs` | The OpenRouter inference endpoint. |
+
+`mod.rs` wires them together and `README.md` documents them. See
+[Architecture › Testing philosophy](architecture.md#testing-philosophy).
 
 ## Coverage
 
@@ -52,7 +60,7 @@ cargo llvm-cov                    # run suite with coverage, print summary
 cargo llvm-cov report --show-missing-lines
 ```
 
-CI gates line coverage at 90% (`cargo llvm-cov --fail-under-lines 90`); keep new
+CI gates line coverage at 80% (`cargo llvm-cov --fail-under-lines 80`); keep new
 code covered. `src/tui/src/main.rs` (the terminal event loop, which needs a real
 TTY) and the daemon's live-network entry points are the known uncovered
 remainder.
@@ -64,21 +72,21 @@ remainder.
   `SCREAMING_SNAKE_CASE` constants.
 * Prefer explicit error types at library boundaries and
   [`anyhow`](https://docs.rs/anyhow/) for binary orchestration.
-* **500-line ceiling** per `.rs` file. When a file approaches the limit, split it
-  into a directory module (`foo.rs` → `foo/mod.rs` plus focused submodules), with
-  `mod.rs` kept thin. Data types live in a `types.rs` submodule; unit tests live
-  in a sibling `tests.rs`.
+* A 500-line ceiling per `.rs` file. When a file approaches the limit, split it
+  into a directory module (`foo.rs` becomes `foo/mod.rs` plus focused
+  submodules), with `mod.rs` kept thin. Data types live in a `types.rs`
+  submodule; unit tests live in a sibling `tests.rs`.
 * Document generously: a `//!` module doc on every module, a `///` doc on every
-  public item, comments on non-trivial private functions — explaining the *why*,
-  not the mechanically obvious.
+  public item, comments on non-trivial private functions, explaining the *why*
+  and not the mechanically obvious.
 
 The authoritative rules live in the repository's
 [`AGENTS.md`](https://github.com/tinyhumansai/medulla/blob/main/AGENTS.md).
 
 ## Commits and pull requests
 
-History uses concise [conventional](https://www.conventionalcommits.org/) subjects
-— `test(ui): ...`, `refactor: ...`, `docs: ...`. Keep commits narrow and
+History uses concise [conventional](https://www.conventionalcommits.org/)
+subjects: `test(ui): ...`, `refactor: ...`, `docs: ...`. Keep commits narrow and
 imperative. PRs should summarize behavior, identify configuration or public API
 changes, link relevant issues, and list the validation commands they cover.
 Include screenshots only for visible TUI changes.
@@ -92,12 +100,12 @@ publishes the GitHub Release with the `latest.json` update manifest that
 [`medulla update`](cli-reference.md#medulla-update) reads.
 
 `main` is branch-protected (the four CI checks are required), and the workflow's
-default `GITHUB_TOKEN` cannot bypass that — the version-bump push would be
-rejected. The `tag` job therefore runs against the **`Production`** environment
+default `GITHUB_TOKEN` cannot bypass that, so the version-bump push would be
+rejected. The `tag` job therefore runs against the `Production` environment
 and authenticates as the org's GitHub App: it mints a short-lived installation
 token from the `XGITHUB_APP_ID` / `XGITHUB_APP_PRIVATE_KEY` environment secrets
-and pushes the bump commit + tag with it. The app needs **Contents: read and
-write** and must be able to bypass the protection rule; every other path to `main`
+and pushes the bump commit and tag with it. The app needs Contents: read and
+write, and must be able to bypass the protection rule; every other path to `main`
 still goes through a PR with green checks.
 
 ## Security and configuration

@@ -29,7 +29,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tinyflows::graph_ops::GraphOp;
 
-use crate::workflows::{FileWorkflowStore, WorkflowError, WorkflowRecord, WorkflowStore};
+use crate::workflows::{WorkflowError, WorkflowRecord, WorkflowStore};
 
 pub use evolve::{
     accept_proposal, add_note, author, evolve, notes, proposals, propose, reject_proposal,
@@ -54,7 +54,7 @@ pub use runs::{
 /// starts at all sweeps at all. The sweep runs once per process and skips any
 /// run a live process is still executing.
 pub fn discover_store(env: &HashMap<String, String>, cwd: &Path) -> Arc<dyn WorkflowStore> {
-    let store: Arc<dyn WorkflowStore> = Arc::new(FileWorkflowStore::discover(env, cwd));
+    let store: Arc<dyn WorkflowStore> = Arc::new(crate::workflows::store::discover(env, cwd));
     crate::workflows::run::reconcile_once(&store);
     store
 }

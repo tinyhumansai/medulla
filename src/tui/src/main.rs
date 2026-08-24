@@ -28,6 +28,10 @@ mod run;
 mod sign_in;
 #[cfg(test)]
 mod sign_in_tests;
+#[cfg(feature = "workflows")]
+mod startup_skills;
+#[cfg(all(test, feature = "workflows"))]
+mod startup_skills_tests;
 mod terminal;
 mod worker_loop;
 
@@ -344,6 +348,9 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
         config_path,
         credential_dir: std::path::PathBuf::from(&link_config.state_dir),
         agent_id,
+        // Same flag the headless daemon reads, parsed the same way, so the two
+        // launch modes cannot disagree about which agents this worker may run.
+        only_providers: parse_providers_flag(args),
         startup_status,
         transport,
         endpoint: Some(reported_endpoint),
@@ -387,6 +394,25 @@ fn flag_value(args: &[String], name: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The `--providers a,b` restriction, or `None` when the flag is absent.
+///
+/// Unknown names are dropped rather than fatal: the headless daemon rejects them
+/// with a message, and this path has already printed a screen by the time it
+/// could. A restriction that named nothing usable would leave the worker with no
+/// agents at all, which the screen reports for itself — so an empty result is
+/// returned as `None`, meaning "unrestricted", only when the flag was never
+/// given.
+fn parse_providers_flag(args: &[String]) -> Option<Vec<medulla::protocol::HarnessProvider>> {
+    let raw = flag_value(args, "--providers")?;
+    Some(
+        raw.split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .filter_map(medulla::protocol::HarnessProvider::from_wire)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

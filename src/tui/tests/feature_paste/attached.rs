@@ -77,14 +77,6 @@ fn attached_app(sessions: PtyManager, id: &str) -> App {
         let _ = app.on_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
     }
     draw(&mut app);
-    // Under the orchestrator for the instant before the chord, so that attaching
-    // *takes* the session — which is what makes releasing it raise the hand-back
-    // question these tests paste into. A session the operator started themselves
-    // is released without one.
-    app.local_sessions()
-        .expect("sessions")
-        .clone()
-        .set_control(id, medulla_tui::worker::pty::SessionControl::Orchestrator);
     let _ = app.on_event(Event::Key(KeyEvent::new(
         KeyCode::Char(']'),
         KeyModifiers::CONTROL,
@@ -173,92 +165,6 @@ fn a_child_that_asked_for_bracketed_paste_gets_the_markers() {
     assert!(
         screen.contains("BRACKETED"),
         "a child in the mode must see the paste wrapped: {screen}"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn the_handback_question_swallows_the_paste_instead_of_typing_it() {
-    let sessions = PtyManager::new();
-    let id = shell_session(&sessions, READ_A_LINE);
-    let mut app = attached_app(sessions.clone(), &id);
-
-    // Releasing asks who keeps the harness, and asks it while still
-    // attached. The chrome holds the keyboard until that is answered, so a
-    // paste in the meantime belongs to neither the harness nor the composer.
-    let _ = app.on_event(Event::Key(KeyEvent::new(
-        KeyCode::Char(']'),
-        KeyModifiers::CONTROL,
-    )));
-    assert_eq!(
-        app.attached_session(),
-        Some(id.as_str()),
-        "the question is asked with the pane still attached"
-    );
-
-    assert!(paste(&mut app, "stray text\n").is_none());
-
-    // Answering keeps the harness but returns the keyboard; the shell is
-    // still waiting on its `read`, which is how we know nothing was typed
-    // into it, and the composer is untouched.
-    let _ = app.on_event(key(KeyCode::Char('n')));
-    assert_eq!(app.attached_session(), None, "{}", app.status());
-    let mut screen = String::new();
-    sessions.screen_text_into(&id, &mut screen);
-    assert!(
-        !screen.contains("typed:"),
-        "the harness was not typed into: {screen}"
-    );
-    assert_eq!(
-        app.draft_text(),
-        "",
-        "and the composer behind the question stayed empty"
-    );
-
-    sessions.shutdown();
-}
-
-#[test]
-fn the_handback_note_takes_a_paste_once_it_is_being_typed() {
-    let sessions = PtyManager::new();
-    let id = shell_session(&sessions, READ_A_LINE);
-    let mut app = attached_app(sessions.clone(), &id);
-    let _ = app.on_event(Event::Key(KeyEvent::new(
-        KeyCode::Char(']'),
-        KeyModifiers::CONTROL,
-    )));
-
-    // `E` turns the note into a text input — every key is text from here,
-    // which is why `y` and `n` stop answering the question. A paste is text
-    // too, and pasting what you were doing into the brief is exactly what
-    // the note is for.
-    let _ = app.on_event(key(KeyCode::Char('E')));
-    assert!(paste(&mut app, "was mid-migration\non the auth tables\n").is_none());
-
-    let mut terminal = Terminal::new(TestBackend::new(140, 44)).expect("test terminal");
-    terminal.draw(|f| app.draw(f)).expect("draws");
-    let screen: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
-    // One line, so the breaks flatten to spaces: the note row has no second
-    // row to draw them on.
-    assert!(
-        screen.contains("Note: was mid-migration on the auth tables"),
-        "the pasted note is in the field: {screen}"
-    );
-
-    // And it is the note that was pasted into, not the harness behind it:
-    // the shell is still waiting on its `read`.
-    let mut pane = String::new();
-    sessions.screen_text_into(&id, &mut pane);
-    assert!(
-        !pane.contains("typed:"),
-        "the harness was untouched: {pane}"
     );
 
     sessions.shutdown();

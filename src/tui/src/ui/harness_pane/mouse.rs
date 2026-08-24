@@ -144,6 +144,21 @@ fn sgr(button: u8, col: u16, row: u16, press: bool) -> Vec<u8> {
     .into_bytes()
 }
 
+/// Encode a location-aware SGR wheel report without relying on negotiated mode.
+///
+/// Codex accepts crossterm mouse events but does not currently ask its terminal
+/// to enable mouse reporting. The provider-specific fallback uses this after
+/// its input layer is known to be ready, preserving the pointer coordinates
+/// that cursor-key emulation necessarily loses.
+pub(super) fn sgr_wheel(col: u16, row: u16, up: bool) -> Vec<u8> {
+    let button = if up {
+        BUTTON_WHEEL_UP
+    } else {
+        BUTTON_WHEEL_DOWN
+    };
+    sgr(button, col, row, true)
+}
+
 /// A normal (X10) report: `ESC [ M Cb Cx Cy`, every field a byte offset by 32.
 fn normal(button: u8, col: u16, row: u16) -> Vec<u8> {
     // Widened before the `+ 1`, not after. The clamp below bounds the *result*,
@@ -194,7 +209,7 @@ pub fn wheel(
     Some(match encoding {
         // A wheel notch has no release, so there is no matching `m` report to
         // send after it — it is always encoded as a press.
-        MouseProtocolEncoding::Sgr => sgr(button, col, row, true),
+        MouseProtocolEncoding::Sgr => sgr_wheel(col, row, up),
         // UTF-8 encoding (DECSET 1005) is a dead end almost nothing negotiates,
         // and its multi-byte coordinates decode ambiguously. Treating it as the
         // normal encoding is what xterm-compatible terminals do for the low

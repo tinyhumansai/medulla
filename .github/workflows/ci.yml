@@ -202,46 +202,6 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  e2e-docker:
-    name: E2E (docker + tmux + opencode)
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          submodules: false
-
-      - name: Initialize submodules
-        run: bash scripts/init-submodules.sh
-
-      - uses: docker/setup-buildx-action@v3
-
-      # Build the harness image once with a GHA layer cache (the Rust build
-      # stage is the expensive layer; warm runs skip it entirely), then run the
-      # suites in fully network-isolated containers via run-docker.sh.
-      - name: Build harness image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: e2e/coordination/Dockerfile
-          tags: medulla-e2e:latest
-          load: true
-          provenance: false
-          cache-from: type=gha
-          # A transient GHA cache-service failure must not discard a successfully
-          # built and loaded image or prevent the offline scenarios from running.
-          cache-to: type=gha,mode=max,ignore-error=true
-
-      - name: Coordination round trip (run.sh, --network none)
-        run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
-
-      - name: Functional scenarios (tests.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests.sh
-
-      - name: Multi-agent scenarios (tests_multi.sh, --network none)
-        run: docker run --rm --network none medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
-
   rust-sdk-windows:
     name: Rust SDK (Windows)
     runs-on: windows-latest
@@ -282,3 +242,146 @@ jobs:
       - name: Compiler cache stats
         if: always()
         run: sccache --show-stats
+
+  # ── end-to-end harness ─────────────────────────────────────────────────────
+  # Does this change need the docker/tmux harness run at all?
+  #
+  # The suites are the most expensive thing in this workflow, and most pull
+  # requests cannot affect them. Rather than gate the whole workflow on paths —
+  # every other job here must run unconditionally — this job answers the
+  # question once and the e2e matrix reads its verdict.
+  #
+  # A push to main always runs them: main is what the release builds from, so it
+  # is the branch that has to be known good at all times.
+  e2e-relevant:
+    name: E2E relevance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+          # Needed to diff against the base branch, which a shallow clone of the
+          # merge commit alone cannot reach.
+          fetch-depth: 0
+
+      - id: decide
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request — running the harness"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --prune origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          changed="$(git diff --name-only "origin/$BASE_REF...HEAD")"
+          printf 'changed files:\n%s\n' "$changed"
+          # Anything that can change what the harness observes: the crates it
+          # compiles, the vendored core they link, the harness itself, and this
+          # workflow. Documentation and the other workflows cannot.
+          if printf '%s\n' "$changed" | grep -Eq \
+              '^(src/|e2e/|vendor/|scripts/|Cargo\.(toml|lock)$|\.gitmodules$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no harness-relevant paths changed — skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The docker/tmux end-to-end suites, once per coding CLI.
+  #
+  # These used to live here, moved to the release gate when they were by far the
+  # slowest check, and are back because the reason they were slow is gone: the
+  # coding CLIs are pulled with a pinned tools base image
+  # (e2e/coordination/Dockerfile.base) instead of being downloaded per build, so
+  # a run now pays for the Rust stage and nothing else. Gating a release on them
+  # meant a harness regression was found at release time, by which point it was
+  # blocking a ship rather than a pull request.
+  e2e-docker:
+    name: E2E (docker + tmux + ${{ matrix.harness }})
+    needs: e2e-relevant
+    if: needs.e2e-relevant.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      # One leg per coding CLI. The image is the same for all three — only
+      # `E2E_HARNESS` differs — so a claude or codex regression cannot hide
+      # behind a green opencode run. `fail-fast: false` so one broken harness
+      # still reports whether the others are healthy.
+      fail-fast: false
+      matrix:
+        harness: [opencode, claude, codex]
+    env:
+      E2E_HARNESS: ${{ matrix.harness }}
+    # Read-only, and `packages` so the harness image can pull its tools base
+    # (ghcr.io/tinyhumansai/medulla_e2e_base) rather than re-downloading every
+    # coding CLI on a cold layer cache.
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the harness image once with a GHA layer cache. Only the Rust stage
+      # is built here — tmux, node and all three coding CLIs arrive with the
+      # pinned tools base. Then run the suites in fully network-isolated
+      # containers.
+      - name: Build harness image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: e2e/coordination/Dockerfile
+          tags: medulla-e2e:latest
+          load: true
+          provenance: false
+          cache-from: type=gha
+          # A transient GHA cache-service failure must not discard a successfully
+          # built and loaded image or prevent the offline scenarios from running.
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      - name: Coordination round trip (run.sh, --network none)
+        run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
+
+      - name: Functional scenarios (tests.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests.sh
+
+      - name: Multi-agent scenarios (tests_multi.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
+
+      # The other transport: the daemon spawns an ACP server, which spawns the
+      # harness. Everything the CLI seam does at spawn time has to be redone by
+      # other means there, and twice it silently was not.
+      - name: ACP transport scenarios (tests_acp.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_acp.sh
+
+      # The surfaces an operator looks at: the `medulla <harness>` wrapper and
+      # the `medulla daemon --tui` screen, both full-screen TUIs on a real pty.
+      - name: Terminal scenarios (tests_tui.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_tui.sh

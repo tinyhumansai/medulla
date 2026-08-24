@@ -115,6 +115,25 @@ pub async fn resume(
     .map_err(|err| err.to_string())
 }
 
+/// Run `compiled` to completion off the caller's super-step.
+///
+/// The entry point for a child graph a `spawn` node started. It is deliberately
+/// neither checkpointed nor observed: a spawned child has no thread id of its
+/// own, so there is nothing for a resume to address and nothing watching it but
+/// the `gate` that will collect its ticket. A child that parks on an approval
+/// therefore returns with `pending_approvals` set rather than waiting for one —
+/// the honest answer, since nobody can approve a run they cannot name.
+pub async fn run_detached(
+    compiled: &Compiled,
+    input: impl Into<tinyflows::engine::RunInput>,
+    capabilities: &tinyflows::caps::Capabilities,
+) -> Result<Outcome, String> {
+    tinyflows::engine::run(&compiled.0, input, capabilities)
+        .await
+        .map(Outcome::from)
+        .map_err(|err| err.to_string())
+}
+
 /// Run `compiled` against capabilities that touch nothing.
 ///
 /// Not checkpointed: a simulation has no state worth keeping.

@@ -34,6 +34,7 @@ fn recorded(store: &Arc<dyn WorkflowStore>, run_id: &str, output_bytes: usize) {
         input: Some(json!("a very long prompt")),
         output: Some(json!("o".repeat(output_bytes))),
         diagnostics: vec!["$.missing resolved to null".to_string()],
+        transcript: Vec::new(),
     }];
     store.record_run(&record).expect("records the run");
 }
@@ -66,7 +67,7 @@ fn a_summary_bounds_an_output_that_would_swamp_the_reply() {
     let run = get_run(&store, "run-1", StepDetail::Summary).unwrap();
 
     let output = &run["steps"][0]["output"];
-    assert_eq!(output["_medullaTruncated"], true);
+    assert!(tinyflows::store::is_truncated(output));
     assert!(output["preview"].as_str().unwrap().starts_with("\"oo"));
     // The point of the level: whatever the step emitted, the projection is
     // small enough that a caller can hold a hundred of them.

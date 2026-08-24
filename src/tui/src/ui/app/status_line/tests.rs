@@ -115,6 +115,10 @@ fn the_legacy_appearance_toggles_are_read_as_placements() {
     let derived = StatusLineConfig::from_appearance(&hidden);
 
     assert_eq!(derived.branch, FieldPlacement::Hidden);
+    // The worktree follows the branch: the old switch turned the Git detail
+    // off, and a worktree name appearing in its place would read as the setting
+    // having stopped working.
+    assert_eq!(derived.worktree, FieldPlacement::Hidden);
     assert_eq!(derived.path, FieldPlacement::Line1);
     assert_eq!(
         derived.state,
@@ -193,4 +197,96 @@ fn an_explicit_status_line_section_wins_over_the_legacy_keys() {
     });
 
     assert_eq!(config.status_line().path, FieldPlacement::Line2);
+}
+
+#[test]
+fn every_row_explains_itself_and_every_field_is_headed_once() {
+    for row in STATUS_LINE_ROWS {
+        assert!(
+            !row.help.trim().is_empty(),
+            "{} has no footer explanation",
+            row.field.name()
+        );
+        assert!(
+            matches!(row.label, "position" | "shown" | "spelled"),
+            "a row label names the question it asks, not the field: {}",
+            row.label
+        );
+    }
+
+    let headings: Vec<&str> = STATUS_LINE_ROWS
+        .iter()
+        .filter_map(|row| row.group.map(|group| group.title))
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            "State glyph",
+            "Harness name",
+            "Managed / unmanaged",
+            "Thread name",
+            "Git branch",
+            "Worktree",
+            "Working path",
+        ],
+        "each field is headed exactly once, in page order"
+    );
+    for row in STATUS_LINE_ROWS {
+        if let Some(group) = row.group {
+            assert!(
+                !group.description.trim().is_empty(),
+                "{} has no description",
+                group.title
+            );
+        }
+    }
+}
+
+#[test]
+fn the_advertised_choices_are_the_ones_cycling_visits() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    for row in STATUS_LINE_ROWS {
+        let mut app = app(&path);
+        app.status_line_index = row_of(row.field);
+
+        // Walk the cycle once from wherever it starts, collecting each value it
+        // lands on. The advertised list is the same set, so the footer cannot
+        // offer a value ←/→ never reaches — or hide one it does.
+        let choices = row.field.choices();
+        let mut visited = Vec::new();
+        for _ in 0..choices.len() {
+            app.cycle_status_line_row(true);
+            let (label, _) = row.field.value(&app.status_line_config());
+            visited.push(label);
+        }
+        visited.sort_unstable();
+        let mut advertised = choices.clone();
+        advertised.sort_unstable();
+        assert_eq!(
+            visited,
+            advertised,
+            "{} advertises {:?} but cycles through {:?}",
+            row.field.name(),
+            choices,
+            visited
+        );
+    }
+}
+
+#[test]
+fn the_worktree_row_moves_and_persists_on_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = app(&path);
+
+    app.status_line_index = row_of(StatusLineField::Worktree);
+    app.cycle_status_line_row(true);
+
+    assert_eq!(app.status_line_config().worktree, FieldPlacement::Line2);
+    assert_eq!(saved(&path).status_line().worktree, FieldPlacement::Line2);
+    // Its neighbour is untouched: the two are separate facts and separate keys.
+    assert_eq!(saved(&path).status_line().branch, FieldPlacement::Line1);
+    assert!(app.status().contains("worktree"));
 }

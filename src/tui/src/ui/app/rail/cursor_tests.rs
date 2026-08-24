@@ -1,15 +1,17 @@
-//! Stable cursor identity tests for the Agents rail.
+//! Stable cursor identity tests for the Sessions rail.
 
-use super::{rail_anchor, resolve_rail_cursor, AgentRailRow, RailAnchor, RailRow, SessionRailRow};
-use crate::ui::agents::{AgentLane, AgentRole, AgentRow, TaskState, TaskStatus};
+use super::{rail_anchor, resolve_rail_cursor, RailAnchor, RailRow, SessionRailRow};
+use crate::ui::agents::{AgentLane, AgentRole, TaskState, TaskStatus};
 
-fn agent(id: &str) -> RailRow {
-    RailRow::Agent(AgentRailRow {
-        agent_id: id.to_string(),
-        host_id: String::new(),
-        agent: None,
+/// A local session row, keyed by the PTY id its anchor is built from.
+fn session(id: &str) -> RailRow {
+    RailRow::Session(Box::new(SessionRailRow {
+        agent_id: None,
         lane_index: None,
-    })
+        task: None,
+        local: Some(super::tests::stub_session(id)),
+        last: true,
+    }))
 }
 
 fn lane(key: &str) -> AgentLane {
@@ -33,11 +35,11 @@ fn lane(key: &str) -> AgentLane {
 }
 
 #[test]
-fn an_anchored_agent_follows_rows_inserted_ahead_of_it() {
-    let anchor = RailAnchor::Agent("builder".to_string());
+fn an_anchored_session_follows_rows_inserted_ahead_of_it() {
+    let anchor = RailAnchor::Session("w_2".to_string());
     assert_eq!(
         resolve_rail_cursor(
-            &[RailRow::NewAgent, agent("scout"), agent("builder")],
+            &[RailRow::NewSession, session("w_1"), session("w_2")],
             &[],
             Some(&anchor),
             0
@@ -48,12 +50,12 @@ fn an_anchored_agent_follows_rows_inserted_ahead_of_it() {
 
 #[test]
 fn a_missing_anchor_uses_the_clamped_previous_offset() {
-    let rows = vec![RailRow::NewAgent, agent("builder")];
+    let rows = vec![RailRow::NewSession, session("w_1")];
     assert_eq!(
         resolve_rail_cursor(
             &rows,
             &[],
-            Some(&RailAnchor::Agent("removed".to_string())),
+            Some(&RailAnchor::Session("removed".to_string())),
             99
         ),
         1
@@ -63,20 +65,53 @@ fn a_missing_anchor_uses_the_clamped_previous_offset() {
 #[test]
 fn an_overflow_anchor_uses_its_lanes_stable_key() {
     let lanes = vec![lane("builder")];
-    let overflow = RailRow::Lane(AgentRow::More {
+    let overflow = RailRow::Overflow {
         lane_index: 0,
         hidden: 3,
-    });
+    };
     let anchor = rail_anchor(&overflow, &lanes);
     assert_eq!(anchor, Some(RailAnchor::Overflow("builder".to_string())));
     assert_eq!(
         resolve_rail_cursor(
-            &[RailRow::NewAgent, agent("new"), overflow],
+            &[RailRow::NewSession, session("w_1"), overflow],
             &lanes,
             anchor.as_ref(),
             0
         ),
         2
+    );
+}
+
+#[test]
+fn a_removed_overflow_anchor_relocates_to_its_lanes_first_session() {
+    let lanes = vec![lane("builder")];
+    let task = |id: &str| {
+        RailRow::Session(Box::new(SessionRailRow {
+            agent_id: Some("builder".to_string()),
+            lane_index: Some(0),
+            task: Some(TaskState {
+                task_id: id.to_string(),
+                status: TaskStatus::Running,
+                turns: 0,
+                last_at: 0,
+                turn_blocks: Vec::new(),
+                attention: None,
+                question_id: None,
+                work: None,
+            }),
+            local: None,
+            last: false,
+        }))
+    };
+
+    assert_eq!(
+        resolve_rail_cursor(
+            &[RailRow::NewSession, task("first"), task("retained")],
+            &lanes,
+            Some(&RailAnchor::Overflow("builder".to_string())),
+            2,
+        ),
+        1,
     );
 }
 
@@ -110,7 +145,7 @@ fn a_task_anchor_survives_local_pty_enrichment() {
     }));
     assert_eq!(rail_anchor(&after, &lanes), anchor);
     assert_eq!(
-        resolve_rail_cursor(&[RailRow::NewAgent, after], &lanes, anchor.as_ref(), 0),
+        resolve_rail_cursor(&[RailRow::NewSession, after], &lanes, anchor.as_ref(), 0),
         1
     );
 }

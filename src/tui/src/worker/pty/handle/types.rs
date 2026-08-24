@@ -109,8 +109,28 @@ pub(crate) struct ColdFields {
     /// operator owns and may change, where provenance is a fact about how the
     /// session came to exist. `None` until somebody names it.
     pub(super) name: Option<String>,
+    /// The thread name discovered from the harness provider own session
+    /// state rather than from the terminal stream.
+    ///
+    /// Codex persists renamed threads in its session index instead of emitting
+    /// an OSC window title, so the executor supplies this separately.  When
+    /// set, it takes precedence over [[thread_name]] so that ordinary PTY
+    /// output (which may carry an empty title) cannot erase the index-backed
+    /// name.
+    pub(super) index_thread_name: Option<String>,
     /// The non-empty terminal title last advertised by the harness.
     pub(super) thread_name: Option<String>,
+    /// Which repository, worktree, and branch the working directory sits in.
+    ///
+    /// Mutable, and the reason this is not in [`SessionMeta`] beside the
+    /// working directory it is read from: a harness that creates a branch, or
+    /// an operator who switches one under it, changes the answer while the
+    /// session runs, and a launch-time snapshot went on naming the branch the
+    /// work started from for as long as the session lived. Refreshed by
+    /// `PtyManager::spawn_checkout_poller`; the checkout *identity* that pins
+    /// the diff baseline is a different, deliberately immutable fact — see
+    /// [`SessionMeta::launch_checkout_identity`].
+    pub(super) checkout: medulla::ui::checkout::Checkout,
     /// Why the session failed, when it did.
     pub(super) last_error: Option<String>,
 }
@@ -132,6 +152,15 @@ pub(crate) struct AttentionState {
     pub(crate) completion_deadline: Option<std::time::Instant>,
     /// Epoch ms of the last classification attempt.
     pub(crate) checked_at: i64,
+    /// Whether the last classified screen said the harness was mid-turn.
+    ///
+    /// The complement of [`cue`](Self::cue) and just as unobtainable from
+    /// anywhere else: a harness thinking hard writes nothing, so `busy`,
+    /// `last_output_at`, and `state` cannot tell it apart from one sitting at an
+    /// idle composer. The classifier already computes this to veto vague cues,
+    /// so keeping it is free and is what lets the rail animate a working row
+    /// instead of drawing every live session the same static dot.
+    pub(crate) working: bool,
 }
 
 /// The parts of a session that never change after it is opened.
@@ -149,11 +178,6 @@ pub(crate) struct SessionMeta {
     pub(crate) preset: Option<String>,
     /// The working directory the child runs in.
     pub(crate) cwd: String,
-    /// Git branch resolved from the working directory when the session opened.
-    ///
-    /// `None` means the directory is not in a repository or has a detached
-    /// `HEAD`.
-    pub(crate) branch: Option<String>,
     /// Whether the child environment contains a GitHub repository override.
     pub(crate) gh_repo_is_set: bool,
     /// Repository root captured immediately before the harness was spawned.
@@ -214,6 +238,10 @@ pub struct SessionHandle {
     /// The exit status, or [`NO_EXIT_CODE`].
     pub(super) exit_code: AtomicI64,
     /// Epoch ms of the last output byte — the liveness signal the list shows.
+    ///
+    /// Also stamped when a queued write fails, so the failure cue it produces
+    /// carries the moment the write failed rather than the last (possibly
+    /// minutes-old) output. See [`SessionHandle::record_error`].
     pub(super) last_output_at: AtomicI64,
     /// Bumped every time the emulator consumes input.
     ///
@@ -251,6 +279,16 @@ pub struct SessionHandle {
     /// are: [`try_claim`](super::SessionHandle::try_claim) tests it per session
     /// on every dispatch.
     pub(super) retained: AtomicBool,
+    /// Whether the child was deliberately asked to exit rather than dying on
+    /// its own.
+    ///
+    /// Set by [`mark_closed`](SessionHandle::mark_closed), which only the
+    /// deliberate-close paths call — an operator closing the harness, the
+    /// executor finishing a bounded turn that never answered, an orchestrator
+    /// interrupting a session it owns. The signal-derived exit status such a
+    /// kill leaves behind is the harness obeying the request, not a lifecycle
+    /// failure, so the lifecycle cue must not read it as one.
+    pub(super) closed_by_request: AtomicBool,
     /// How many bytes sit in [`SessionIo::writes`] still unwritten.
     ///
     /// The budget a caller is admitted against, so a child that never drains its

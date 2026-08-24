@@ -140,6 +140,7 @@ async fn admitting_a_replacement_preserves_a_settled_result_with_a_waiter() {
             },
             harness: None,
             session_id: None,
+            transcript: Vec::new(),
         }));
         tracked.entry.finished_at = Some(crate::clock::now_millis());
         tracked.settled.subscribe()

@@ -218,7 +218,7 @@ impl App {
     /// `LocalSessions` (the seam `open_unmanaged` reads — see
     /// `harness_pane::spawn`) is handed its own clone of the resolved hooks
     /// once at startup, so an edit here previously updated the config the
-    /// *next restart* would read while a session opened from the Agents pane
+    /// *next restart* would read while a session opened from the Sessions pane
     /// before that restart kept launching with the hook set from before the
     /// edit: a hook just added would not run, and one just removed still
     /// would, even though the status line claimed "applies to harnesses

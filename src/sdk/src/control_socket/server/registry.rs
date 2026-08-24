@@ -61,6 +61,10 @@ fn state_from_error(error: RunError) -> TaskState {
             false,
         ),
         RunError::Worker(message) => ("failed", message, false),
+        // The transcript is the step's own account, not part of the wire state:
+        // a worker that fails over the bridge never produces one anyway, and
+        // the workflow dispatch surfaces its failure through the run record.
+        RunError::WorkerWithTranscript { message, .. } => ("failed", message, false),
         RunError::Busy(message) => (
             "busy",
             format!("{message} — nothing was attempted, so this is worth retrying"),

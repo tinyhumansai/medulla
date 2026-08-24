@@ -2,6 +2,8 @@
 //! header toggle shows, and the composer/slash-command dispatch behaves.
 
 mod harness_pane;
+#[cfg(unix)]
+mod session_access;
 
 use super::*;
 use std::sync::Arc;
@@ -111,61 +113,41 @@ fn harnesses_page_renders_custom_openrouter_presets_and_editor_controls() {
 }
 
 #[test]
-fn slash_help_switches_tab() {
+fn harnesses_page_marks_openhuman_presets_as_embedded_without_a_router_key() {
     let mut a = app();
-    a.tab_index = 1;
-    let _ = a.execute("/help".into());
-    assert_eq!(a.tab(), "Settings");
-    assert_eq!(a.settings_subpage(), "Help");
-}
+    a.tab_index = tab("Hosts");
+    a.routing_index = RP_HARNESSES;
+    a.routing_focused = true;
+    a.custom_harnesses = vec![medulla::config::CustomHarnessConfig::from_editor_line(
+        "openhuman | OpenHuman | openhuman | some/model | | this-device",
+    )
+    .expect("valid OpenHuman custom harness")];
 
-#[test]
-fn unknown_command_sets_status() {
-    let mut a = app();
-    let _ = a.execute("/bogus".into());
-    assert!(a.status.contains("Unknown command"));
-}
+    let out = render(&mut a);
 
-#[test]
-fn plain_text_returns_submit_cmd() {
-    let mut a = app();
-    a.tab_index = 1;
-    let cmd = a.execute("hello world".into());
-    assert!(matches!(cmd, Some(Cmd::Submit(s)) if s == "hello world"));
-    assert_eq!(a.status, "Cycle running…");
-}
-
-#[test]
-fn typing_inserts_into_draft() {
-    let mut a = app();
-    a.tab_index = 1;
-    for ch in "hi".chars() {
-        a.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    assert_eq!(a.draft.text, "hi");
-    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
-    assert_eq!(a.draft.text, "hi\n");
+    assert!(out.contains("OpenHuman"));
+    assert!(out.contains("embedded core"));
+    assert!(!out.contains("key missing"));
 }
 
 #[test]
 fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
-    use super::types::{AgentPicker, AgentPickerStep, WorkspaceChoice};
+    use super::types::{SessionPicker, SessionPickerStep, WorkspaceChoice};
     use crate::ui::harness_pane::HarnessChoice;
 
     let mut a = app();
-    a.tab_index = tab("Agents");
+    a.tab_index = tab("Sessions");
     // The cursor is on a harness row, so the last frame recorded a session for
     // it — the state the attach shortcut reads. Opening the picker on top of
     // that used to lose the very next Enter to the pane underneath, which
     // attached instead of advancing to the workspace step.
     a.pane_session = Some("already-running".to_string());
-    a.agent_picker = Some(AgentPicker {
-        purpose: super::types::PickerPurpose::Spawn,
+    a.session_picker = Some(SessionPicker {
         choices: vec![HarnessChoice::native(
             medulla::protocol::HarnessProvider::Claude,
         )],
         index: 0,
-        step: AgentPickerStep::Harness,
+        step: SessionPickerStep::Harness,
         cwd: ".".into(),
         workspace_query: String::new(),
         workspace_choices: Vec::new(),
@@ -180,18 +162,19 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
     assert!(cmd.is_none());
     assert_eq!(a.attached_session(), None, "must not attach behind a modal");
     assert_eq!(
-        a.agent_picker.as_ref().map(|picker| picker.step),
-        Some(AgentPickerStep::Workspace),
+        a.session_picker.as_ref().map(|picker| picker.step),
+        Some(SessionPickerStep::Workspace),
         "the picker should have advanced to its workspace step"
     );
 
     // This app has no local harnesses, so nothing completes the empty query.
     // Stand a choice in for the completion pass, which is what the workspace
     // step's Enter reads.
-    if let Some(picker) = &mut a.agent_picker {
+    if let Some(picker) = &mut a.session_picker {
         picker.workspace_choices = vec![WorkspaceChoice {
             path: ".".into(),
-            source: "recent",
+            source: "recent".into(),
+            label: None,
         }];
         picker.workspace_index = 0;
     }
@@ -203,44 +186,26 @@ fn enter_answers_the_harness_picker_not_the_harness_behind_it() {
 
     assert!(cmd.is_none());
     assert!(
-        a.agent_picker.is_none(),
+        a.session_picker.is_none(),
         "the workspace step is the last one, so Enter must close the picker"
     );
     assert_eq!(a.attached_session(), None, "must not attach behind a modal");
 }
 
 #[test]
-fn enter_on_a_harness_asks_before_taking_it() {
-    let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
-    // The render pass records the harness behind the visible pane. This app
-    // hosts nothing, so the handover question has nothing to ask about and says
-    // so — the point being that Enter is consumed by the harness path rather
-    // than returning to the composer or submitting a turn, and that it never
-    // attaches on its own.
-    a.pane_session = Some("just-exited".to_string());
-
-    let cmd = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert!(cmd.is_none());
-    assert!(a.agents_rail_focused());
-    assert!(a.status().contains("not hosting"), "{}", a.status());
-    assert!(a.handback_prompt.is_none());
-    assert_eq!(a.attached_session(), None);
-}
-
-#[test]
 fn d_on_a_selected_harness_swaps_the_pane_for_its_diff() {
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
 
     let cmd = a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
     assert!(cmd.is_none());
-    assert_eq!(a.tab(), "Agents", "the diff replaces the pane, not the tab");
+    assert_eq!(
+        a.tab(),
+        "Sessions",
+        "the diff replaces the pane, not the tab"
+    );
     assert_eq!(a.pane_view, PaneView::Diff);
     assert_eq!(a.rail_session.as_deref(), Some("selected-harness"));
     assert_eq!(a.draft.text, "", "the shortcut must not type into chat");
@@ -249,8 +214,7 @@ fn d_on_a_selected_harness_swaps_the_pane_for_its_diff() {
 #[test]
 fn d_again_puts_the_harness_back_in_the_pane() {
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
 
     a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
@@ -263,8 +227,7 @@ fn d_again_puts_the_harness_back_in_the_pane() {
 #[test]
 fn esc_closes_the_pane_diff() {
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
     a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
@@ -276,8 +239,7 @@ fn esc_closes_the_pane_diff() {
 #[test]
 fn esc_cancels_the_open_diff_baseline_picker_before_closing_the_diff() {
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
     a.pane_view = PaneView::Diff;
     a.open_change_baseline_picker();
@@ -295,8 +257,7 @@ fn the_open_diff_owns_its_own_navigation_keys() {
     // left the pane's bindings in place would kill a session on a keypress the
     // operator meant as "move down one line".
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
     a.on_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 
@@ -310,8 +271,7 @@ fn the_open_diff_owns_its_own_navigation_keys() {
 #[test]
 fn enter_applies_the_open_diff_baseline_picker() {
     let mut a = app();
-    a.tab_index = tab("Agents");
-    a.focus_agents_rail();
+    a.tab_index = tab("Sessions");
     a.pane_session = Some("selected-harness".to_owned());
     a.pane_view = PaneView::Diff;
     a.open_change_baseline_picker();
@@ -319,7 +279,6 @@ fn enter_applies_the_open_diff_baseline_picker() {
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(a.changes.picking_baseline);
-    assert!(a.handback_prompt.is_none());
     assert_eq!(a.attached_session(), None);
     assert!(
         a.status().contains("No session Git repository"),
@@ -364,6 +323,66 @@ fn clicking_a_context_chunk_selects_it() {
     // A click outside the rect is ignored entirely.
     let _ = a.handle_click(3, 40);
     assert_eq!(a.context_index, 1);
+}
+
+/// Forty chunks, more than any Context viewport shows at once.
+fn many_contexts() -> Vec<medulla::runtime::ContextItem> {
+    (0..40)
+        .map(|index| medulla::runtime::ContextItem {
+            ref_: format!("chunk-{index:02}"),
+            kind: "file".into(),
+            bytes: index,
+            content: format!("body {index}"),
+        })
+        .collect()
+}
+
+#[test]
+fn the_context_list_scrolls_to_keep_the_selection_visible() {
+    // Regression: the list always drew from index 0, while the keyboard and the
+    // wheel clamp `context_index` to the last chunk. Past the first page the
+    // selection was off-screen — no row highlighted, and the chunks below the
+    // fold impossible to read.
+    let mut a = app();
+    let _ = a.focus_settings_subpage("Context");
+    a.contexts = many_contexts();
+    a.context_index = 39;
+
+    let screen = render(&mut a);
+
+    assert!(screen.contains("chunk-39"), "the selection is drawn");
+    assert!(
+        !screen.contains("chunk-00"),
+        "and the list has scrolled past the first page"
+    );
+}
+
+#[test]
+fn clicking_a_windowed_context_row_selects_the_chunk_that_is_drawn() {
+    // The click path maps a pane-relative row onto the list, so it has to apply
+    // the same viewport offset the draw did — otherwise clicking the top row of
+    // a scrolled list jumped back to the first chunk.
+    let mut a = app();
+    let _ = a.focus_settings_subpage("Context");
+    a.contexts = many_contexts();
+    a.context_index = 39;
+    // Ten visible rows, so the draw starts at 40 - 10 = 30.
+    a.hit_context = Some(ratatui::layout::Rect::new(0, 5, 40, 10));
+
+    let _ = a.handle_click(3, 5);
+    assert_eq!(a.context_index, 30, "the first drawn row is chunk 30");
+
+    // An unscrolled list still maps a row straight onto its index.
+    a.context_index = 0;
+    let _ = a.handle_click(3, 14);
+    assert_eq!(
+        a.context_index, 9,
+        "the tenth drawn row of an unscrolled list"
+    );
+
+    // A click outside the list rect changes nothing.
+    let _ = a.handle_click(3, 40);
+    assert_eq!(a.context_index, 9);
 }
 
 #[cfg(feature = "workflows")]
@@ -431,7 +450,7 @@ fn subscription_strategy_navigation_persists_and_emits_its_own_operation() {
 /// Put the cursor on the first task sublane in the rail, returning the command
 /// that produced.
 fn select_first_task(app: &mut App) -> Option<Cmd> {
-    app.tab_index = tab("Agents");
+    app.tab_index = tab("Sessions");
     let rows = app.rail_rows();
     let idx = rows.iter().position(|r| {
         // A dispatched task is a *session* of its agent now, not a sublane of
@@ -459,7 +478,6 @@ fn selecting_a_task_asks_to_watch_it() {
 fn killing_a_watched_harness_requires_confirmation() {
     let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
-    app.focus_agents_rail();
 
     let armed = app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
     assert!(armed.is_none(), "arming must not kill the harness");
@@ -477,7 +495,6 @@ fn killing_resolves_the_current_rail_selection_instead_of_the_cached_watch() {
     select_first_task(&mut app).expect("the fixture has a selectable task");
     let selected = app.watch_target().expect("the selected task is watchable");
     app.watching = Some(("stale-worker".into(), "stale-task".into()));
-    app.focus_agents_rail();
 
     app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
     assert_eq!(app.kill_armed.as_ref(), Some(&selected));
@@ -497,7 +514,7 @@ fn a_paste_cancels_a_harness_kill_instead_of_slipping_past_it() {
     // question stayed armed for whatever key came next.
     let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
-    app.focus_agents_rail();
+
     app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
     assert!(app.kill_armed.is_some(), "the question is up");
 
@@ -514,15 +531,9 @@ fn a_paste_cancels_a_harness_kill_instead_of_slipping_past_it() {
         !matches!(after, Some(Cmd::KillTask { .. })),
         "a paste must not leave the kill armed for the next keypress"
     );
-    // That `y` is now an ordinary keystroke, and an ordinary keystroke on any
-    // rail row reaches the conversation — the cursor moves to the orchestrator
-    // lane and the character is kept. It landing in the composer is the proof
-    // the prompt is gone: while the question was up, `on_key` consumed the key
-    // ahead of every other target and nothing reached a draft at all.
-    assert_eq!(
-        app.draft_text(),
-        "y",
-        "the keystroke after the prompt is an ordinary one again"
+    assert!(
+        app.kill_armed.is_none(),
+        "and the prompt is gone rather than waiting for another key"
     );
 }
 
@@ -530,7 +541,7 @@ fn a_paste_cancels_a_harness_kill_instead_of_slipping_past_it() {
 fn any_other_key_cancels_a_harness_kill() {
     let mut app = app_with_running_task();
     select_first_task(&mut app).expect("the fixture has a selectable task");
-    app.focus_agents_rail();
+
     app.on_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
 
     let cmd = app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
@@ -569,16 +580,19 @@ fn leaving_the_agents_tab_releases_the_subscription() {
 }
 
 #[test]
-fn selecting_a_lane_rather_than_a_task_watches_nothing() {
-    // Streams are addressed by task. A lane names none, and guessing one of its
-    // tasks would watch work the operator did not point at.
+fn selecting_an_action_row_rather_than_a_task_watches_nothing() {
+    // Streams are addressed by task. The action row names none, and guessing one
+    // would watch work the operator did not point at.
     let mut app = app();
-    app.tab_index = tab("Agents");
+    app.set_local_sessions(super::rail::tests::shell_harnesses(
+        crate::worker::pty::PtyManager::new(),
+    ));
+    app.tab_index = tab("Sessions");
     let rows = app.rail_rows();
     let idx = rows
         .iter()
-        .position(|r| matches!(r, super::rail::RailRow::Agent(_)))
-        .expect("the fixture has a lane row");
+        .position(|r| matches!(r, super::rail::RailRow::NewSession))
+        .expect("a hosting fixture offers the action row");
     app.set_rail_cursor(idx);
     assert!(app.retarget_watch().is_none());
     assert!(app.watching.is_none());

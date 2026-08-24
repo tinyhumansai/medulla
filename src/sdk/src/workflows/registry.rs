@@ -129,7 +129,7 @@ fn apply_defaults(graph: &mut WorkflowGraph, defaults: &WorkflowDefaults) {
     if defaults.is_empty() {
         return;
     }
-    let Ok(workflow_layer) = defaults.preference() else {
+    let Ok(workflow_layer) = crate::workflows::defaults_preference(defaults) else {
         // Cannot happen for a record that passed authoring validation, but a
         // resolver has no business panicking over a corrupted document.
         return;

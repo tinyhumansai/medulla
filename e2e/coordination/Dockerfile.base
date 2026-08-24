@@ -1,0 +1,130 @@
+# The coordination e2e harness's tools image: every coding CLI, pinned.
+#
+# Published to GHCR and consumed by `Dockerfile` as its runtime base, the same
+# way OpenHuman's CI pulls `ghcr.io/tinyhumansai/openhuman_ci` instead of
+# rebuilding its toolchain per run:
+#
+#   ghcr.io/tinyhumansai/medulla_e2e_base:latest
+#   ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22
+#
+# It exists because these downloads are ~600 MB and they do not change when the
+# source does. Baking them into the harness image meant every CI run whose layer
+# cache had been evicted re-fetched all of them before it could compile a line of
+# Rust. Here they are fetched when a *version* changes and pulled the rest of the
+# time.
+#
+# Rebuild with `PUSH=1 bash e2e/coordination/build-image.sh --base`, or the
+# "Build E2E Image" workflow. Bumping a CLI means bumping the ARG, rebuilding,
+# and pointing `Dockerfile`'s `BASE_IMAGE` at the new tag — deliberately three
+# steps, because a silently-moving CLI version is a harness that tests something
+# other than what its tag says.
+FROM debian:bookworm-slim
+
+# Pinned CLI versions. The version tag above is derived from these.
+#
+#   opencode  sst/opencode, published under anomalyco/opencode. glibc tarball to
+#             match the debian runtime.
+#   claude    Anthropic's own release channel. The version is resolved against
+#             the published manifest, whose checksum is then verified — the same
+#             thing `claude.ai/install.sh` does, without piping a script whose
+#             content is not pinned.
+#   codex     openai/codex. The musl build, which is static and therefore
+#             indifferent to the runtime's glibc.
+#   node      only for the ACP transport, which reaches claude and codex through
+#             `npx @agentclientprotocol/…-acp`. 22 is the floor
+#             claude-agent-acp declares.
+ARG OPENCODE_VERSION=1.17.18
+ARG CLAUDE_VERSION=2.1.226
+ARG CODEX_VERSION=0.147.0
+ARG NODE_VERSION=22.22.0
+# BuildKit sets TARGETARCH only when --platform is passed; otherwise fall back to
+# the native dpkg architecture (never default it — a wrong-arch binary surfaces
+# as an "Exec format error" far from here).
+ARG TARGETARCH
+
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        tmux python3 curl bash ca-certificates git xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
+    ARCH="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$ARCH" in \
+        arm64) OC_ARCH=arm64; CLAUDE_PLATFORM=linux-arm64; CODEX_TRIPLE=aarch64-unknown-linux-musl; NODE_ARCH=arm64 ;; \
+        amd64) OC_ARCH=x64;   CLAUDE_PLATFORM=linux-x64;   CODEX_TRIPLE=x86_64-unknown-linux-musl;  NODE_ARCH=x64 ;; \
+        *) echo "unsupported arch=$ARCH" >&2; exit 1 ;; \
+    esac; \
+    DL="curl -fsSL --http1.1 --retry 5 --retry-delay 3 --retry-all-errors"; \
+    \
+    $DL -o /tmp/node.tar.xz \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+        --exclude CHANGELOG.md --exclude LICENSE --exclude README.md; \
+    rm /tmp/node.tar.xz; \
+    node --version; npm --version; \
+    \
+    $DL -o /tmp/opencode.tar.gz \
+        "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz"; \
+    tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin; \
+    rm /tmp/opencode.tar.gz; \
+    chmod +x /usr/local/bin/opencode; \
+    /usr/local/bin/opencode --version; \
+    \
+    CLAUDE_BASE="https://downloads.claude.ai/claude-code-releases"; \
+    $DL -o /tmp/claude-manifest.json "${CLAUDE_BASE}/${CLAUDE_VERSION}/manifest.json"; \
+    CLAUDE_SUM="$(python3 -c "import json,sys; print(json.load(open('/tmp/claude-manifest.json'))['platforms']['${CLAUDE_PLATFORM}']['checksum'])")"; \
+    $DL -o /usr/local/bin/claude "${CLAUDE_BASE}/${CLAUDE_VERSION}/${CLAUDE_PLATFORM}/claude"; \
+    echo "${CLAUDE_SUM}  /usr/local/bin/claude" | sha256sum -c -; \
+    rm /tmp/claude-manifest.json; \
+    chmod +x /usr/local/bin/claude; \
+    /usr/local/bin/claude --version; \
+    \
+    $DL -o /tmp/codex.tar.gz \
+        "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${CODEX_TRIPLE}.tar.gz"; \
+    tar -xzf /tmp/codex.tar.gz -C /tmp; \
+    mv "/tmp/codex-${CODEX_TRIPLE}" /usr/local/bin/codex; \
+    rm /tmp/codex.tar.gz; \
+    chmod +x /usr/local/bin/codex; \
+    /usr/local/bin/codex --version
+
+# Every coding CLI by absolute path, so PATH order can never pick a different
+# one than the harness thinks it is driving.
+ENV OPENCODE_BIN=/usr/local/bin/opencode \
+    CLAUDE_BIN=/usr/local/bin/claude \
+    CODEX_BIN=/usr/local/bin/codex \
+    OPENCODE_DISABLE_AUTOUPDATE=1 \
+    DISABLE_AUTOUPDATER=1 \
+    TERM=xterm-256color
+
+# Prime the npm cache with the two ACP servers.
+#
+# The ACP transport spawns them as `npx -y <pkg>@latest`, which normally means a
+# registry round trip — and the harness runs with `--network none`. npm's cache
+# holds the packument as well as the tarball, so with `NPM_CONFIG_OFFLINE=true`
+# even the `@latest` tag resolves out of it. The versions baked here are whatever
+# was current when this image was built, which is the same freshness contract the
+# production spawn has; rebuild to move them.
+#
+# `harness.sh` points a run at this directory (`ACP_NPM_CACHE`) and turns offline
+# mode on; without it npx behaves normally, which is what a developer's box
+# wants.
+ENV ACP_NPM_CACHE=/opt/npm-cache
+RUN set -eux; \
+    NPM_CONFIG_CACHE=/opt/npm-cache NPM_CONFIG_UPDATE_NOTIFIER=false \
+        npx -y @agentclientprotocol/claude-agent-acp@latest --version; \
+    NPM_CONFIG_CACHE=/opt/npm-cache NPM_CONFIG_UPDATE_NOTIFIER=false \
+        npx -y @agentclientprotocol/codex-acp@latest --version; \
+    # Readable by the unprivileged user the harness runs as, and writable because
+    # npx still opens the cache for write even when it reads everything it needs
+    # out of it.
+    chmod -R a+rwX /opt/npm-cache
+
+# The unprivileged account the harness runs as. Created here so the uid is a
+# property of the base rather than of whichever image layers on top; `USER` is
+# left as root so a derived image can still COPY into system paths, and
+# `Dockerfile` switches to it last.
+#
+# Claude Code refuses `--dangerously-skip-permissions` under root or sudo, which
+# is exactly the flag a fleet host runs its harness with — so a root container
+# would either fail the claude leg or force it to be tested with a flag
+# combination no real host uses.
+RUN useradd --create-home --shell /bin/bash e2e

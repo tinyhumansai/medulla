@@ -15,12 +15,7 @@ use medulla::ui::git_review::CommentAnchor;
 use super::super::types::App;
 
 impl App {
-    /// Draw the session-start summary/file rail and selected unified patch.
-    pub(super) fn draw_changes(&mut self, frame: &mut Frame, area: Rect) {
-        self.draw_changes_into(frame, area, " Git changes · b baseline ");
-    }
-
-    /// The same two panes, drawn over the Agents harness pane.
+    /// The same two panes, drawn over the Sessions harness pane.
     ///
     /// Same state, same bindings, different real estate: `d` on a harness row
     /// swaps its terminal for this, so the hint has to say how to get the
@@ -44,10 +39,24 @@ impl App {
         self.note_pane(panes[0]);
         self.note_pane(panes[1]);
 
-        let mut rows = vec![ListItem::new(Line::from(Span::styled(
+        // The checkout rides *inside* the first item rather than as an item of
+        // its own: every selection index below counts items, and a row that
+        // appears only inside a repository would shift them all by one exactly
+        // when it is present.
+        let mut header = vec![Line::from(Span::styled(
             format!("From {}", self.changes.baseline_label()),
             Style::default().add_modifier(Modifier::BOLD),
-        )))];
+        ))];
+        // Repeated under the title rather than only in it, because a narrow
+        // pane clips a title and this is the fact that decides whether the
+        // operator is reading the checkout they think they are.
+        if let Some(checkout) = self.changes.checkout_label() {
+            header.push(Line::from(Span::styled(
+                format!("In {checkout}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        let mut rows = vec![ListItem::new(header)];
         if self.changes.picking_baseline {
             let launch = self
                 .changes
@@ -108,10 +117,15 @@ impl App {
         frame.render_stateful_widget(list, panes[0], &mut state);
 
         let (detail, cursor_row) = self.change_detail_lines();
-        let title = self
-            .changes
-            .selected_path()
-            .map_or_else(|| " Diff ".into(), |path| path.display().to_string());
+        // The patch pane, not the rail, is where the checkout is named: it is
+        // the wide half, and it is the only title here with no keybinding hint
+        // that a long repository name could push off the edge.
+        let title = match (self.changes.selected_path(), self.changes.checkout_label()) {
+            (Some(path), Some(checkout)) => format!("{} · {checkout}", path.display()),
+            (Some(path), None) => path.display().to_string(),
+            (None, Some(checkout)) => format!("Diff · {checkout}"),
+            (None, None) => "Diff".to_owned(),
+        };
         let content_width = panes[1].width.saturating_sub(2);
         let viewport_height = panes[1].height.saturating_sub(2) as usize;
         // Measure every row the way the widget will wrap it, so the scroll

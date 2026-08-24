@@ -1,0 +1,74 @@
+//! Data model for the Sessions tab's render pass: what the rail cursor is on, and
+//! the panes that fall out of it.
+
+use ratatui::layout::Rect;
+
+use crate::ui::agents::{AgentLane, TaskState};
+
+use super::super::super::rail::RailRow;
+
+/// What the rail cursor is pointing at, resolved once per draw.
+///
+/// The rail and the transcript both need this and must agree: the pane titled
+/// `harness · claude-code` has to be the row the cursor is on, and computing it
+/// twice is how the two drift apart on an edge case. So it is derived once, at
+/// the top of the draw, and handed to both.
+pub(super) struct Selection {
+    /// Every rail row, in display order.
+    pub(super) rows: Vec<RailRow>,
+    /// The clamped cursor index into `rows`.
+    pub(super) active: usize,
+    /// Every lane the fold produced, in display order.
+    pub(super) lanes: Vec<AgentLane>,
+    /// The lane whose transcript the pane shows, when the cursor is on one.
+    ///
+    /// `None` for a row that has no lane of its own — a host header or the
+    /// action row. Deliberately an `Option` rather than a defaulted index: this
+    /// used to fall back to lane **0**, which is the orchestrator's, so
+    /// selecting an action row rendered the orchestrator's own thinking as if it
+    /// belonged to that row. A row with no lane now has no lane, and the caller
+    /// renders what the row actually is.
+    pub(super) lane_index: Option<usize>,
+    /// The task sublane under the cursor, if the cursor is on one.
+    pub(super) task: Option<TaskState>,
+    /// The live local session this row resolves to, when it resolves to one.
+    ///
+    /// Decided here rather than at draw time because it changes the *layout*,
+    /// not just the contents: a session paints its own composer, so ours has no
+    /// rows and the work panel no columns. Resolving it after the split would
+    /// mean laying out for a transcript and then drawing a terminal into it.
+    pub(super) session: Option<String>,
+    /// The workflow run under the cursor, when the cursor is on a run row.
+    ///
+    /// Resolved alongside the session, and for the same reason: a run takes the
+    /// whole content column — it draws the graph and the streamed output of the
+    /// step that is working — so the composer and the work panel have to be laid
+    /// out knowing that before anything is drawn into it.
+    pub(super) workflow_run: Option<super::super::super::rail::WorkflowRunRailRow>,
+}
+
+impl Selection {
+    /// The lane the pane describes, if any.
+    ///
+    /// `None` is a real answer — the row under the cursor has no transcript —
+    /// and never a stand-in for lane 0.
+    pub(super) fn lane(&self) -> Option<&AgentLane> {
+        self.lanes.get(self.lane_index?)
+    }
+
+    /// The rail row under the cursor, if the rail has one.
+    pub(super) fn row(&self) -> Option<&RailRow> {
+        self.rows.get(self.active)
+    }
+}
+
+/// Where each pane of the Sessions tab landed this draw.
+pub(super) struct SessionsPanes {
+    /// The rail: the sessions and their runs.
+    pub(super) rail: Rect,
+    /// The transcript, or the watched worker screen when one is streaming.
+    pub(super) pane: Rect,
+    /// The work panel beside the transcript; `None` when the selection has no
+    /// work to show or the terminal is too narrow to spare the columns.
+    pub(super) work: Option<Rect>,
+}

@@ -221,27 +221,43 @@ fn installed_fingerprint(home: &std::path::Path, id: &str) -> String {
     medulla::workflows::record_fingerprint(&record)
 }
 
-/// Drain the peer's inbox until a frame of `kind` shows up.
-async fn wait_for(peer: &LocalBridge, kind: TaskFrameKind) -> TaskFrame {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut seen: Vec<TaskFrame> = Vec::new();
-    loop {
-        for message in peer.drain_inbox(50).await {
-            if let Some(frame) = decode_task_frame(&message.text) {
-                seen.push(frame);
+/// The frames drained from a peer so far.
+///
+/// The buffer has to outlive one wait, because `drain_inbox` is destructive: a
+/// frame pulled off the queue while waiting for a *different* kind is gone. A
+/// helper that kept its matches in a local vector therefore discarded them, and
+/// that is not hypothetical — an `Ack` and the `Reply` that follows it commonly
+/// land in the same drain window, so waiting for the Ack consumed the Reply and
+/// the next wait timed out having seen nothing.
+#[derive(Default)]
+struct Inbox {
+    seen: Vec<TaskFrame>,
+}
+
+impl Inbox {
+    /// Drain the peer's inbox until a frame of `kind` shows up.
+    async fn wait_for(&mut self, peer: &LocalBridge, kind: TaskFrameKind) -> TaskFrame {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            for message in peer.drain_inbox(50).await {
+                if let Some(frame) = decode_task_frame(&message.text) {
+                    self.seen.push(frame);
+                }
             }
+            let found = self.seen.iter().position(|frame| frame.kind == kind);
+            if let Some(index) = found {
+                return self.seen.remove(index);
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no {kind:?} frame within the deadline; saw {:?}",
+                self.seen
+                    .iter()
+                    .map(|f| (f.kind, f.text.clone()))
+                    .collect::<Vec<_>>()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        if let Some(frame) = seen.iter().find(|frame| frame.kind == kind) {
-            return frame.clone();
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "no {kind:?} frame within the deadline; saw {:?}",
-            seen.iter()
-                .map(|f| (f.kind, f.text.clone()))
-                .collect::<Vec<_>>()
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
 
@@ -251,6 +267,7 @@ async fn a_frame_naming_a_workflow_runs_the_whole_graph_on_the_worker() {
     install_workflow(home.path(), "two-step");
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    let mut inbox = Inbox::default();
 
     let fingerprint = installed_fingerprint(home.path(), "two-step");
     peer.send(
@@ -260,11 +277,11 @@ async fn a_frame_naming_a_workflow_runs_the_whole_graph_on_the_worker() {
     .await
     .unwrap();
 
-    let ack = wait_for(&peer, TaskFrameKind::Ack).await;
+    let ack = inbox.wait_for(&peer, TaskFrameKind::Ack).await;
     assert_eq!(ack.task_id, "w1");
     assert_eq!(ack.text, "workflow accepted");
 
-    let reply = wait_for(&peer, TaskFrameKind::Reply).await;
+    let reply = inbox.wait_for(&peer, TaskFrameKind::Reply).await;
     assert_eq!(reply.correlation_id.as_deref(), Some("corr-w1"));
     assert!(
         reply.text.contains("completed 2 steps"),
@@ -287,6 +304,7 @@ async fn a_frame_supplies_the_selected_workflows_declared_inputs() {
     install_parameterized_workflow(home.path(), "parameterized");
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    let mut inbox = Inbox::default();
     let inputs = json!({ "repo": "acme/api" }).as_object().unwrap().clone();
     let fingerprint = installed_fingerprint(home.path(), "parameterized");
 
@@ -303,7 +321,7 @@ async fn a_frame_supplies_the_selected_workflows_declared_inputs() {
     .await
     .unwrap();
 
-    let reply = wait_for(&peer, TaskFrameKind::Reply).await;
+    let reply = inbox.wait_for(&peer, TaskFrameKind::Reply).await;
     assert!(reply.text.contains("completed 1 step"), "{}", reply.text);
     assert_eq!(prompts.lock().unwrap().as_slice(), ["acme/api"]);
 }
@@ -325,6 +343,7 @@ async fn a_worker_refuses_a_workflow_changed_after_capability_discovery() {
 
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    let mut inbox = Inbox::default();
     peer.send(
         "host",
         &frame("w-stale", "", Some("two-step"), Some(&selected_fingerprint)),
@@ -332,7 +351,7 @@ async fn a_worker_refuses_a_workflow_changed_after_capability_discovery() {
     .await
     .unwrap();
 
-    let error = wait_for(&peer, TaskFrameKind::Error).await;
+    let error = inbox.wait_for(&peer, TaskFrameKind::Error).await;
     assert!(
         error.text.contains("changed after it was selected"),
         "{error:?}"
@@ -348,6 +367,7 @@ async fn the_reply_carries_the_run_as_a_work_snapshot_the_orchestrator_can_rende
         home.path(),
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
     );
+    let mut inbox = Inbox::default();
 
     let fingerprint = installed_fingerprint(home.path(), "two-step");
     peer.send(
@@ -356,7 +376,7 @@ async fn the_reply_carries_the_run_as_a_work_snapshot_the_orchestrator_can_rende
     )
     .await
     .unwrap();
-    let reply = wait_for(&peer, TaskFrameKind::Reply).await;
+    let reply = inbox.wait_for(&peer, TaskFrameKind::Reply).await;
 
     // The same attachment an ordinary task's reply carries, so the existing
     // master-terminal rendering shows a workflow with no new code.
@@ -377,6 +397,7 @@ async fn naming_a_workflow_the_worker_does_not_have_says_what_it_does_have() {
         home.path(),
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
     );
+    let mut inbox = Inbox::default();
 
     let fingerprint = installed_fingerprint(home.path(), "two-step");
     peer.send(
@@ -386,7 +407,7 @@ async fn naming_a_workflow_the_worker_does_not_have_says_what_it_does_have() {
     .await
     .unwrap();
 
-    let error = wait_for(&peer, TaskFrameKind::Error).await;
+    let error = inbox.wait_for(&peer, TaskFrameKind::Error).await;
     assert!(
         error.text.contains("nonexistent") && error.text.contains("two-step"),
         "an orchestrator should be able to correct itself from this: {}",
@@ -404,6 +425,7 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
         home.path(),
         recording_executor(Arc::new(Mutex::new(Vec::new()))),
     );
+    let mut inbox = Inbox::default();
 
     peer.send(
         "host",
@@ -429,7 +451,9 @@ async fn a_worker_advertises_the_workflows_it_has_installed() {
     .await
     .unwrap();
 
-    let result = wait_for(&peer, TaskFrameKind::CapabilitiesResult).await;
+    let result = inbox
+        .wait_for(&peer, TaskFrameKind::CapabilitiesResult)
+        .await;
     let capabilities = parse_agent_capabilities(&result.text).expect("a capabilities payload");
 
     // This is how the orchestrator learns a worker can do more than take an
@@ -461,11 +485,12 @@ async fn an_ordinary_instruction_still_goes_straight_to_a_harness() {
     let home = tempfile::tempdir().unwrap();
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let (_host, peer) = worker(home.path(), recording_executor(prompts.clone()));
+    let mut inbox = Inbox::default();
 
     peer.send("host", &frame("t1", "just do this", None, None))
         .await
         .unwrap();
-    let reply = wait_for(&peer, TaskFrameKind::Reply).await;
+    let reply = inbox.wait_for(&peer, TaskFrameKind::Reply).await;
 
     assert_eq!(reply.text, "ran: just do this");
     assert_eq!(prompts.lock().unwrap().clone(), vec!["just do this"]);

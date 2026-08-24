@@ -58,22 +58,22 @@ fn select_overflow_row(app: &mut App) {
     let index = app
         .rail_rows()
         .iter()
-        .position(|row| matches!(row, RailRow::Lane(AgentRow::More { .. })))
+        .position(|row| matches!(row, RailRow::Overflow { .. }))
         .expect("a lane with hidden sublanes has an overflow row");
-    app.agent_index = index;
+    app.rail_index = index;
 }
 
 /// Whether the cursor is on an overflow row right now.
 fn on_overflow_row(app: &App) -> bool {
     matches!(
-        app.rail_rows().get(app.agent_index),
-        Some(RailRow::Lane(AgentRow::More { .. }))
+        app.rail_rows().get(app.rail_index),
+        Some(RailRow::Overflow { .. })
     )
 }
 
-/// Draw the Agents tab, which is what populates the rail's click map.
+/// Draw the Sessions tab, which is what populates the rail's click map.
 fn draw(app: &mut App) {
-    app.tab_index = tab_pos("Agents");
+    app.tab_index = tab_pos("Sessions");
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     terminal.draw(|f| app.draw(f)).unwrap();
 }
@@ -87,7 +87,7 @@ fn click_overflow_row(app: &mut App) -> Option<Cmd> {
     let (rect, owners) = app.hit_agents.clone().expect("the rail was drawn");
     let line = owners
         .iter()
-        .position(|hit| matches!(hit.row, RailRow::Lane(AgentRow::More { .. })))
+        .position(|hit| matches!(hit.row, RailRow::Overflow { .. }))
         .expect("the overflow row is on screen");
     app.handle_click(rect.x, rect.y + line as u16)
 }
@@ -126,18 +126,18 @@ fn a_fully_revealed_lane_folds_back_to_one_page() {
 fn paging_elsewhere_leaves_other_rows_alone() {
     let mut app = app_with_tasks("dev", 25);
     // Row 0 is a lane header, not an overflow row.
-    app.agent_index = 0;
+    app.rail_index = 0;
     assert!(!app.page_subtasks());
     assert_eq!(shown_subtasks(&app), SUBTASK_PAGE);
     // The cursor is left where it was, so Enter can fall through to its
     // ordinary meaning.
-    assert_eq!(app.agent_index, 0);
+    assert_eq!(app.rail_index, 0);
 }
 
 #[test]
 fn enter_on_the_overflow_row_pages_it_open() {
     let mut app = app_with_tasks("dev", 25);
-    app.tab_index = tab_pos("Agents");
+    app.tab_index = tab_pos("Sessions");
     select_overflow_row(&mut app);
 
     // Through the real key path, not the helper underneath it: the row is not
@@ -149,7 +149,7 @@ fn enter_on_the_overflow_row_pages_it_open() {
 
     assert_eq!(shown_subtasks(&app), SUBTASK_PAGE * 2);
     // Enter paged the lane instead of handing the keyboard back to the composer.
-    assert!(app.agents_rail_focused());
+    assert!(app.sessions_rail_focused());
 }
 
 #[test]
@@ -194,35 +194,30 @@ fn click_row(app: &mut App, want: impl Fn(&RailRow) -> bool) -> Option<Cmd> {
 
 #[test]
 fn clicking_an_action_row_stops_a_task_stream_it_left_behind() {
-    // `+ New agent` and `+ new session` are controls, not conversations: neither
-    // watches a task, and neither open method clears `watching`. A click that
-    // arrives from a task row therefore has to release that stream on its way,
-    // or a worker keeps sampling and sending a screen nobody is looking at.
-    for want in [
-        &(|row: &RailRow| row.is_new_agent()) as &dyn Fn(&RailRow) -> bool,
-        &|row: &RailRow| row.new_session_agent().is_some(),
-    ] {
-        let mut app = app_with_tasks("dev", 3);
-        app.set_local_sessions(super::super::rail::tests::shell_harnesses(
-            crate::worker::pty::PtyManager::new(),
-        ));
-        app.loaded.config.fleet.agent_declarations = vec![medulla::runtime::AgentDeclaration::new(
-            "dev",
-            "",
-            "codex",
-            "/work/dev",
-        )];
-        let watched = ("worker-1".to_string(), "dev-t1".to_string());
-        app.watching = Some(watched.clone());
+    // `+ New session` is a control, not a conversation: it watches no task, and
+    // opening the picker does not clear `watching`. A click that arrives from a
+    // task row therefore has to release that stream on its way, or a worker
+    // keeps sampling and sending a screen nobody is looking at.
+    let mut app = app_with_tasks("dev", 3);
+    app.set_local_sessions(super::super::rail::tests::shell_harnesses(
+        crate::worker::pty::PtyManager::new(),
+    ));
+    app.loaded.config.fleet.agent_declarations = vec![medulla::runtime::AgentDeclaration::new(
+        "dev",
+        "",
+        "codex",
+        "/work/dev",
+    )];
+    let watched = ("worker-1".to_string(), "dev-t1".to_string());
+    app.watching = Some(watched.clone());
 
-        let cmd = click_row(&mut app, want);
+    let cmd = click_row(&mut app, |row: &RailRow| row.is_new_session());
 
-        assert!(
-            matches!(&cmd, Some(Cmd::WatchTask { stop, start: None }) if stop.as_ref() == Some(&watched)),
-            "expected the click to stop the previous watch, got {cmd:?}"
-        );
-        assert_eq!(app.watching, None);
-    }
+    assert!(
+        matches!(&cmd, Some(Cmd::WatchTask { stop, start: None }) if stop.as_ref() == Some(&watched)),
+        "expected the click to stop the previous watch, got {cmd:?}"
+    );
+    assert_eq!(app.watching, None);
 }
 
 #[test]

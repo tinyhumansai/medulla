@@ -195,16 +195,32 @@ pub fn reconcile_orphans(store: &Arc<dyn WorkflowStore>) -> Result<Vec<Reconcile
     Ok(reconciled)
 }
 
-/// Run [`reconcile_orphans`] at most once per process, for this store.
+/// Run [`reconcile_orphans`] at most once per process, for the workspace scope
+/// named by `scope`.
 ///
 /// The sweep hangs off store discovery, which happens many times in one process
 /// — the TUI rediscovers per command. Sweeping every time would re-read the runs
 /// directory on every keystroke-driven command for no benefit: once a process
 /// has settled the tombstones it can see, new ones can only come from processes
 /// that are still alive.
-pub fn reconcile_once(store: &Arc<dyn WorkflowStore>) {
-    static DONE: std::sync::Once = std::sync::Once::new();
-    DONE.call_once(|| match reconcile_orphans(store) {
+///
+/// Keyed by `scope` rather than a single global flag: a process that discovers
+/// stores for more than one workspace — a different `cwd`, a different
+/// `MEDULLA_HOME` — must still sweep each of them once, not just the first one
+/// it happens to see. The caller derives `scope` from whatever determines the
+/// store's on-disk location, so two discoveries of the *same* workspace share a
+/// key even though each call builds a fresh store object.
+pub fn reconcile_once(store: &Arc<dyn WorkflowStore>, scope: &str) {
+    static DONE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let seen = DONE.get_or_init(Default::default);
+    {
+        let mut seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !seen.insert(scope.to_string()) {
+            return;
+        }
+    }
+    match reconcile_orphans(store) {
         Ok(reconciled) if !reconciled.is_empty() => {
             tracing::info!(
                 count = reconciled.len(),
@@ -213,5 +229,5 @@ pub fn reconcile_once(store: &Arc<dyn WorkflowStore>) {
         }
         Ok(_) => {}
         Err(err) => tracing::warn!("could not sweep orphaned run records: {err}"),
-    });
+    }
 }

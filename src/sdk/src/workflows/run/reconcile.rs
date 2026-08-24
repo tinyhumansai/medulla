@@ -132,6 +132,15 @@ fn is_orphaned(record: &RunRecord) -> bool {
     if record.status.is_settled() {
         return false;
     }
+    if record.status == RunStatus::PendingApproval {
+        // Deliberately parked, not abandoned: the CLI process that reached the
+        // gate exits normally after writing this status, so the record having
+        // no live executor is expected, not evidence of a crash. Reconciling
+        // it to `Interrupted` would make the next `resume` reject it as no
+        // longer awaiting approval, destroying a run a human simply has not
+        // gotten to yet.
+        return false;
+    }
     if super::is_running(&record.id) {
         return false;
     }

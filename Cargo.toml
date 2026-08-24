@@ -131,10 +131,12 @@ tinycortex = { path = "vendor/openhuman/vendor/tinycortex" }
 # root as well.
 tinycortex-api = { path = "vendor/openhuman/vendor/tinycortex/api" }
 tinyflows = { path = "vendor/openhuman/vendor/tinyflows" }
-# tinyjuice is deliberately absent: the vendored core dropped both the crate
-# from its dependency graph and the submodule itself
-# (`vendor/openhuman/vendor/tinyjuice` no longer exists), so a redirect here
-# would match nothing.
+# tinyjuice came back: a later OpenHuman bump reintroduced the submodule and
+# `tinyjuice-bus` as a dependency (see OpenHuman's own `[patch.crates-io]`,
+# which this table rebases). Same reasoning as `tinycortex-api` above — path
+# dependencies do not inherit their own patch tables, so this must be bound
+# here too, and `scripts/init-submodules.sh` must clone the submodule.
+tinyjuice-bus = { path = "vendor/openhuman/vendor/tinyjuice/crates/tinyjuice-bus" }
 # Load-bearing even though no crate in this workspace links tinyplace any more:
 # the vendored OpenHuman core still does, and without the redirect Cargo would
 # resolve the published crate instead of the vendored tree.

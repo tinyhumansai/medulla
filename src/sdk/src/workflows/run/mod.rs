@@ -351,7 +351,14 @@ async fn run_workflow_inner(
                 RunStatus::PendingApproval
             };
         }
-        Err(Settle::Cancelled) => record.status = RunStatus::Cancelled,
+        Err(Settle::Cancelled) => {
+            record.status = RunStatus::Cancelled;
+            // `watch_cancel_request` observed this on disk, not on `record`,
+            // which was cloned before the cross-process request landed and
+            // still says `false`. Carry the observation forward rather than
+            // writing it away: a cancelled run must still say it was asked.
+            record.cancel_requested = true;
+        }
         Err(Settle::TimedOut(secs)) => {
             record.status = RunStatus::Failed;
             record.error = Some(format!("run exceeded its {secs}s limit"));

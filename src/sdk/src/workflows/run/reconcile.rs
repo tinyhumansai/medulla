@@ -270,8 +270,9 @@ pub fn reconcile_once(store: &Arc<dyn WorkflowStore>, scope: &str) {
         // Stamped before the sweep runs, not after: two threads discovering the
         // same scope at once must not both sweep, and the loser should skip
         // rather than wait on the winner.
-        if let Some(last) = swept.get(scope)
-            && now.saturating_sub(*last) < SWEEP_INTERVAL_MS
+        if swept
+            .get(scope)
+            .is_some_and(|last| now.saturating_sub(*last) < SWEEP_INTERVAL_MS)
         {
             return;
         }

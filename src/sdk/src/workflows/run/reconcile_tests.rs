@@ -71,7 +71,10 @@ fn a_live_pid_whose_start_time_disagrees_is_pid_reuse() {
         started_at_secs: Some(1),
     };
 
-    assert!(!is_alive(&executor), "a disagreeing start time is pid reuse");
+    assert!(
+        !is_alive(&executor),
+        "a disagreeing start time is pid reuse"
+    );
 
     let _ = child.kill();
     let _ = child.wait();

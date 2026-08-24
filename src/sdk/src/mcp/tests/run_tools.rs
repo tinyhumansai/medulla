@@ -18,7 +18,7 @@ async fn a_run_can_be_started_followed_and_stopped_from_the_same_surface() {
 }
 
 #[tokio::test]
-async fn cancelling_a_run_no_process_is_executing_explains_itself_rather_than_failing() {
+async fn cancelling_a_run_that_does_not_exist_explains_itself_rather_than_failing() {
     let (_root, store) = store();
 
     let (result, is_error) = call(
@@ -28,14 +28,14 @@ async fn cancelling_a_run_no_process_is_executing_explains_itself_rather_than_fa
     )
     .await;
 
-    // Not an error: a run that already settled, or one started in another
-    // process, is a normal thing to aim a cancel at, and reporting it as a
-    // broken call would invite a retry that can never succeed.
+    // Not an error: a run that already settled, or one whose id was mistyped,
+    // is a normal thing to aim a cancel at, and reporting it as a broken call
+    // would invite a retry that can never succeed.
     assert!(!is_error, "{result}");
     assert_eq!(result["cancelled"], false);
     assert_eq!(result["runId"], "run-nobody-is-running");
     let reason = result["reason"].as_str().unwrap_or_default();
-    assert!(reason.contains("another process"), "{reason}");
+    assert!(reason.contains("no run with this id exists"), "{reason}");
 }
 
 #[tokio::test]

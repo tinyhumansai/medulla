@@ -262,13 +262,15 @@ pub(crate) fn definitions() -> Vec<Value> {
                 "Stop a run that is still going. Use it on a run you started and no longer want \
                  — the operator changed their mind, the inputs were wrong, it is looping — \
                  rather than leaving a harness session burning for another twenty minutes. Not \
-                 a tidy-up: a run someone else started is theirs, and a run you merely find in \
-                 the history is already over. Reaches a run wherever it is executing. A run in \
-                 this process stops immediately; a run owned by another live process is sent a \
-                 durable cancel request and answers requested:true, settling within a few \
-                 seconds; a run whose process is gone is settled on the spot and answers \
-                 reconciled:true. Only an id that names no run, or one that already settled, \
-                 answers cancelled:false — neither is an error to retry.",
+                 a tidy-up: a run whose status already shows it settled (succeeded, failed, \
+                 cancelled, interrupted) is already over and has nothing left to stop. A run \
+                 still marked as running or awaiting approval is fair game to cancel wherever \
+                 it is executing, whoever started it. A run in this process stops immediately; \
+                 a run owned by another live process is sent a durable cancel request and \
+                 answers requested:true, settling within a few seconds; a run whose process is \
+                 gone is settled on the spot and answers reconciled:true. Only an id that names \
+                 no run, or one that already settled, answers cancelled:false — neither is an \
+                 error to retry.",
             "inputSchema": schema(
                 json!({ "runId": { "type": "string", "description": "The run to stop." } }),
                 &["runId"],

@@ -7,7 +7,7 @@ description: >-
 # Environment variables
 
 Every variable listed here is read somewhere in
-[`src/`](https://github.com/tinyhumansai/medulla/tree/main/src). A `.env` file in
+[`src/`](https://github.com/tinyhumansai/medulla-src/tree/main/src). A `.env` file in
 the current directory is loaded at startup before anything reads the
 environment, and it never overrides a variable already set in the process, so
 these can be set either way. Truthy values are `1` and `true`, case-insensitive.

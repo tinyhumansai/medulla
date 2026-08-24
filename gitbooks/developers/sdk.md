@@ -19,7 +19,7 @@ setup:
 
 ```toml
 [dependencies]
-medulla = { git = "https://github.com/tinyhumansai/medulla", tag = "v0.3.0" }
+medulla = { git = "https://github.com/tinyhumansai/medulla-src", tag = "v0.3.0" }
 ```
 
 Building from a checkout requires the submodule init described in

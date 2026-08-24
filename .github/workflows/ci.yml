@@ -262,7 +262,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          persist-credentials: false
+          # Credentials are kept deliberately: the `decide` step fetches the base
+          # branch, and this repository is private, so an unauthenticated fetch
+          # fails with "could not read Username for https://github.com".
           submodules: false
           # Needed to diff against the base branch, which a shallow clone of the
           # merge commit alone cannot reach.

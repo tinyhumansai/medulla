@@ -238,7 +238,7 @@ pub fn cancel_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Value {
         return json!({ "cancelled": true, "runId": run_id });
     }
 
-    let mut record = match store.get_run(run_id) {
+    let record = match store.get_run(run_id) {
         Ok(Some(record)) => record,
         Ok(None) => {
             return json!({

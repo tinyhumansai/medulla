@@ -167,8 +167,38 @@ fn is_orphaned(record: &RunRecord) -> bool {
 /// tombstone in place.
 pub fn reconcile_orphans(store: &Arc<dyn WorkflowStore>) -> Result<Vec<Reconciled>, WorkflowError> {
     let mut reconciled = Vec::new();
-    for mut record in store.unsettled_runs()? {
-        if !is_orphaned(&record) {
+    for snapshot in store.unsettled_runs()? {
+        if !is_orphaned(&snapshot) {
+            continue;
+        }
+        // Re-read before writing. `unsettled_runs` handed back a snapshot, and
+        // between that read and the liveness check the owner can have written a
+        // *successful* terminal record and exited — which is precisely why the
+        // pid then looks dead. Writing the snapshot back would replace a
+        // finished run, and its steps and evidence, with `Interrupted`.
+        //
+        // The store offers no compare-and-set for run records, so this narrows
+        // the window rather than closing it: re-read, re-check, then write.
+        // What remains is the microseconds between this read and the write
+        // below, against the seconds the liveness check itself takes.
+        let mut record = match store.get_run(&snapshot.id) {
+            Ok(Some(current)) => current,
+            // Vanished under us. Nothing to reconcile.
+            Ok(None) => continue,
+            Err(err) => {
+                tracing::warn!(run = %snapshot.id, "could not re-read run before reconciling: {err}");
+                continue;
+            }
+        };
+        if record.status.is_settled() {
+            // It finished on its own between the snapshot and now. Its own
+            // outcome is the true one.
+            continue;
+        }
+        if record.executor != snapshot.executor {
+            // A different process picked it up — a resume, most likely — after
+            // the snapshot. The liveness verdict was about the old owner and
+            // says nothing about this one.
             continue;
         }
         record.status = if record.cancel_requested {

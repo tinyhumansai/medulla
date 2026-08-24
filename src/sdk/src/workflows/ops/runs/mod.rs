@@ -270,6 +270,29 @@ pub fn cancel_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Value {
         .as_ref()
         .is_some_and(crate::workflows::run::reconcile::is_alive);
     if alive {
+        // Re-read immediately before writing rather than reusing the copy
+        // read above: the owning process can settle the run at any point
+        // between that read and this write, and this store has no
+        // compare-and-set primitive for run records. Re-reading right at the
+        // write narrows, though it cannot close, that window — and checking
+        // the freshly observed status stops the one outcome that must never
+        // happen: writing `Running` back over a record that has already
+        // settled, which would make reconciliation relabel a finished run.
+        let mut record = match store.get_run(run_id) {
+            Ok(Some(latest)) => latest,
+            // Settled and then removed, or otherwise gone, between the two
+            // reads. Nothing left to request a cancel onto.
+            Ok(None) | Err(_) => record,
+        };
+        if record.status.is_settled() {
+            return json!({
+                "cancelled": false,
+                "runId": run_id,
+                "status": record.status,
+                "reason": "this run settled while the cancel request was being recorded, so \
+                           there is nothing left to cancel",
+            });
+        }
         record.cancel_requested = true;
         return match store.record_run(&record) {
             Ok(()) => json!({
@@ -289,6 +312,24 @@ pub fn cancel_run(store: &Arc<dyn WorkflowStore>, run_id: &str) -> Value {
 
     // Nothing is executing this run anywhere. Settle the record rather than
     // refusing: the operator asked for it to stop, and it already has.
+    //
+    // Re-read for the same reason as the `alive` branch above: the window
+    // between the first read and this write is where a process this host did
+    // not know about (started between the reads) could settle the run for
+    // real, and writing `Cancelled` over that would discard its true outcome.
+    let mut record = match store.get_run(run_id) {
+        Ok(Some(latest)) => latest,
+        Ok(None) | Err(_) => record,
+    };
+    if record.status.is_settled() {
+        return json!({
+            "cancelled": false,
+            "runId": run_id,
+            "status": record.status,
+            "reason": "this run settled while the cancel was being processed, so there is \
+                       nothing left to cancel",
+        });
+    }
     record.status = RunStatus::Cancelled;
     record.finished_at = Some(crate::clock::now_millis() as u64);
     match store.record_run(&record) {

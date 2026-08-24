@@ -99,10 +99,18 @@ pub fn is_alive(executor: &RunExecutor) -> bool {
         return true;
     }
     if executor.pid == current.pid {
-        // Ourselves. Whether this process still considers the run live is the
-        // registry's question, not the process table's, and the caller checks
-        // it first.
-        return true;
+        // A record naming this process's own pid. Ordinarily that means the
+        // caller's registry check (which runs first) already ruled the record
+        // in or out, and this branch never runs. But a reboot or ordinary pid
+        // reuse can hand a *new* process the same pid an old, dead one used,
+        // in which case the record's start time predates this process's own —
+        // so compare them exactly as the foreign-pid branch below does, rather
+        // than trusting a bare pid match.
+        return match (executor.started_at_secs, current.started_at_secs) {
+            (Some(recorded), Some(actual)) => recorded == actual,
+            // One side's start time is unreadable. Cannot disambiguate.
+            _ => true,
+        };
     }
     let Some(observed) = process_started_at(executor.pid) else {
         return false;

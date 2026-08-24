@@ -165,6 +165,13 @@ pub fn new_run_record(id: &str, workflow_id: &str, started_at: u64) -> RunRecord
         inputs: serde_json::Map::new(),
         trigger: None,
         origin: None,
+        // Stamped by the caller through `RunRecord::with_executor`. Left unset
+        // here so this factory stays usable in tests and tools that are not
+        // actually executing anything; an unstamped record is treated as
+        // unowned, which is the honest reading.
+        executor: None,
+        // Nobody has asked a run to stop before it has begun.
+        cancel_requested: false,
         // Both are evidence about a run that has ended, so a run that has only
         // just started has neither. They are filled in when it settles.
         summary: None,

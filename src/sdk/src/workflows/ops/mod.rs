@@ -55,7 +55,16 @@ pub use runs::{
 /// run a live process is still executing.
 pub fn discover_store(env: &HashMap<String, String>, cwd: &Path) -> Arc<dyn WorkflowStore> {
     let store: Arc<dyn WorkflowStore> = Arc::new(crate::workflows::store::discover(env, cwd));
-    crate::workflows::run::reconcile_once(&store);
+    // Same inputs `store::discover` derives the on-disk location from, so two
+    // discoveries of the same workspace share a sweep even though each call
+    // builds a fresh store object (an object-pointer-keyed guard would not:
+    // see `reconcile_once`).
+    let scope = format!(
+        "{}|{}",
+        crate::home::medulla_home(env).display(),
+        cwd.display()
+    );
+    crate::workflows::run::reconcile_once(&store, &scope);
     store
 }
 

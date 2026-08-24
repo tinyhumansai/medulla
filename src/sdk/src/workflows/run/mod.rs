@@ -142,6 +142,32 @@ impl Drop for RunFinalizer {
     }
 }
 
+/// Carry a durable cancel request from disk onto `record` before it is written.
+///
+/// Every write of a run record from this process is a read-modify-write against
+/// an in-memory copy taken earlier, and `cancel_requested` is the one field
+/// another process sets. Three windows lose it without this:
+///
+/// - A cancel that lands less than [`CANCEL_POLL`] before the engine finishes.
+///   The watcher is still asleep, so the engine outcome wins the `select!` and
+///   the terminal write puts `false` back over a request that was accepted.
+/// - The transition from the admitted record to `Running`, which
+///   [`crate::workflows::local::LocalRun::start`] wrote before this run began.
+/// - The same two, one level up, on the resume path.
+///
+/// The flag is only ever turned on, never off, so this merges rather than
+/// overwrites: whichever copy has seen the request wins. A read that fails is
+/// ignored — a run must not fail to record its outcome because the old copy of
+/// its record could not be re-read.
+fn preserve_cancel_request(store: &Arc<dyn WorkflowStore>, record: &mut RunRecord) {
+    if record.cancel_requested {
+        return;
+    }
+    if let Ok(Some(current)) = store.get_run(&record.id) {
+        record.cancel_requested = current.cancel_requested;
+    }
+}
+
 /// How often a running workflow re-reads its own record for a cancel request.
 ///
 /// A compromise between a cancel from another process feeling immediate and not
@@ -378,6 +404,7 @@ async fn run_workflow_inner(
     // Written *before* disarming: if this terminal write fails, the guard must
     // still be armed so its drop reconciles the record to `Interrupted`.
     // Disarming first would strand the run at `Running` forever.
+    preserve_cancel_request(&context.store, &mut record);
     context.store.record_run(&record)?;
     finalizer.disarm();
     remember_failure(&context.store, &record);

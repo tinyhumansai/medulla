@@ -1,0 +1,36 @@
+name: Reclaim runner disk
+description: >-
+  Delete the preinstalled toolchains no lane here can use, before a build that
+  would otherwise fill the runner. Every Linux lane that compiles the workspace
+  needs this.
+
+runs:
+  using: composite
+  steps:
+    # A stock ubuntu-latest runner ships ~25 GB of Android SDK, .NET, GHC and
+    # CodeQL that nothing in this repository touches, and leaves roughly 14 GB
+    # free. This workspace does not fit in that: the vendored OpenHuman core
+    # plus every member crate, built `--all-targets` with debuginfo, on top of
+    # a restored rust-cache and the sccache disk cache.
+    #
+    # The reason this is a shared step rather than a fix in one lane: running
+    # out of disk here does NOT report as running out of disk. The linker takes
+    # SIGBUS partway through writing its output and rustc reports
+    #
+    #   collect2: fatal error: ld terminated with signal 7 [Bus error]
+    #   note: PLEASE submit a bug report to https://github.com/llvm/llvm-project
+    #
+    # which reads as a compiler bug, sends you looking at the code that "broke",
+    # and is a coin flip between runs. Both the coverage lane and the Rust SDK
+    # lane hit it within an hour of each other. `df -h` on both sides so the
+    # next time the margin closes, the log says so plainly.
+    - name: Reclaim runner disk
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "before:"
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                    /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+        echo "after:"
+        df -h /

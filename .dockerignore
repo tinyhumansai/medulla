@@ -34,7 +34,3 @@ vendor/tinycortex/docs/
 vendor/tinycortex/paper/
 vendor/tinycortex/viewer/
 vendor/tinycortex/benchmarks/
-
-# Repo docs / books not needed to compile
-gitbooks/
-docs/

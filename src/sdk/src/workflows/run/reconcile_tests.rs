@@ -85,10 +85,18 @@ fn a_self_pid_whose_start_time_disagrees_is_also_pid_reuse() {
     // has since handed to the process running this test. Trusting a bare pid
     // match here (as opposed to the foreign-pid branch, which already
     // compares) would leave such a tombstone alive forever.
+    //
+    // Skipped when this platform or sandbox will not report our own start
+    // time: without one to disagree with, `is_alive` cannot disambiguate and
+    // conservatively answers `true`, which is a different (and already
+    // covered) case, not a failure of this one.
+    let Some(actual) = current_executor().started_at_secs else {
+        return;
+    };
     let executor = RunExecutor {
         host: current_executor().host.clone(),
         pid: current_executor().pid,
-        started_at_secs: current_executor().started_at_secs.map(|secs| secs + 1),
+        started_at_secs: Some(actual + 1),
     };
 
     assert!(!is_alive(&executor));

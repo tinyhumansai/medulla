@@ -1,0 +1,87 @@
+name: CI
+
+# Everything in this repository is published: the docs feed the GitBook site and
+# the installers are piped into strangers' shells. There is nothing to compile,
+# so CI is the two checks that actually protect that surface — the public
+# boundary guard, and a markdown-link check over the documentation tree.
+#
+# The installers have their own workflow (`install-scripts.yml`), which runs them
+# against the real published release on every supported platform.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  public-boundary:
+    name: Public boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/check-public-boundary.sh
+
+  links:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Relative links only. The source tree lives in another repository, so a
+      # `../../src/…` link here is always a mistake — this is what catches one
+      # before the GitBook site publishes it as a dead link.
+      - name: No links into a source tree that is not here
+        run: |
+          set -euo pipefail
+          if grep -rn -E '\]\(\.\./(\.\./)?src/' docs gitbooks; then
+            echo "::error::relative link into src/ — the source lives in tinyhumansai/medulla-src; link to it by URL"
+            exit 1
+          fi
+          echo "no source-tree links"
+
+      - name: Relative links resolve
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import os, re, sys, urllib.parse
+
+          # Markdown inline links whose target is not a URL, anchor, or mailto.
+          link = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
+          bad = []
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if d not in {'.git', '.github', 'node_modules'}]
+              for name in files:
+                  if not name.endswith('.md'):
+                      continue
+                  path = os.path.join(root, name)
+                  with open(path, encoding='utf-8') as fh:
+                      text = fh.read()
+                  for target in link.findall(text):
+                      target = target.split(' ')[0]
+                      if re.match(r'^(https?:|mailto:|#)', target):
+                          continue
+                      target = urllib.parse.unquote(target.split('#')[0])
+                      if not target:
+                          continue
+                      resolved = os.path.normpath(os.path.join(root, target))
+                      if os.path.exists(resolved):
+                          continue
+                      # GitBook resolves a directory link to its README.md.
+                      if os.path.exists(os.path.join(resolved, 'README.md')):
+                          continue
+                      bad.append(f"{path}: {target}")
+
+          for entry in bad:
+              print(f"::error::broken relative link {entry}")
+          print(f"{len(bad)} broken relative link(s)")
+          sys.exit(1 if bad else 0)
+          EOF

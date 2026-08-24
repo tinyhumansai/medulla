@@ -73,7 +73,7 @@ remainder.
   not the mechanically obvious.
 
 The authoritative rules live in the repository's
-[`AGENTS.md`](https://github.com/tinyhumansai/medulla/blob/main/AGENTS.md).
+[`AGENTS.md`](https://github.com/tinyhumansai/medulla-src/blob/main/AGENTS.md).
 
 ## Commits and pull requests
 

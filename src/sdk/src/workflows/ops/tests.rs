@@ -203,11 +203,20 @@ fn run_history_is_empty_rather_than_missing_for_a_workflow_that_never_ran() {
 }
 
 #[test]
-fn cancelling_a_run_that_is_not_executing_reports_that_plainly() {
-    let result = cancel_run("never-started");
+fn cancelling_a_run_that_never_existed_says_so() {
+    let (_root, store) = store();
+
+    let result = cancel_run(&store, "never-started");
 
     assert_eq!(result["cancelled"], false);
     assert_eq!(result["runId"], "never-started");
+    assert!(
+        result["reason"]
+            .as_str()
+            .unwrap()
+            .contains("no run with this id exists"),
+        "{result}"
+    );
 }
 
 #[test]

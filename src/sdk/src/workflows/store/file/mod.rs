@@ -552,26 +552,20 @@ impl WorkflowStore for FileWorkflowStore {
     }
 
     fn list_runs(&self, workflow_id: &str) -> Result<Vec<RunRecord>, WorkflowError> {
-        let entries = match std::fs::read_dir(&self.runs_dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(WorkflowError::Io {
-                    path: self.runs_dir.clone(),
-                    source,
-                })
-            }
-        };
-
-        let mut runs: Vec<RunRecord> = entries
-            .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .filter(|path| is_json(path))
-            // A run record this host cannot parse is skipped rather than
-            // failing the listing: history is diagnostic, and one corrupt file
-            // should not hide the rest of it.
-            .filter_map(|path| std::fs::read(&path).ok())
-            .filter_map(|body| serde_json::from_slice::<RunRecord>(&body).ok())
+        let mut runs: Vec<RunRecord> = self
+            .read_run_dir()?
+            .into_iter()
             .filter(|run| run.workflow_id == workflow_id)
+            .collect();
+        runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
+        Ok(runs)
+    }
+
+    fn unsettled_runs(&self) -> Result<Vec<RunRecord>, WorkflowError> {
+        let mut runs: Vec<RunRecord> = self
+            .read_run_dir()?
+            .into_iter()
+            .filter(|run| !run.status.is_settled())
             .collect();
         runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
         Ok(runs)

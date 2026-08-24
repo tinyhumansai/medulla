@@ -42,6 +42,10 @@ fn tool_context(tool_name: &str) -> ToolHookContext {
         arguments: serde_json::json!({}),
         success: None,
         duration_ms: None,
+        output: None,
+        error: None,
+        session_id: None,
+        agent_id: None,
     }
 }
 

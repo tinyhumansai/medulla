@@ -1,8 +1,16 @@
 # Why an Orchestrator
 
-Agent harnesses like [Claude Code](https://www.anthropic.com/claude-code) and [Codex](https://github.com/openai/codex) are very good at running one task deeply. Orchestration is a different job, and the usual way of reaching for it is to point a harness at other harnesses: one more chat session, driving the rest.
+Agent harnesses like [Claude Code](https://www.anthropic.com/claude-code) and [Codex](https://github.com/openai/codex) are very good at running one task deeply. Orchestration is a different job, and there are two usual ways of reaching for it. Split the terminal — tmux, a pane each — and drive them yourself. Or point a harness at other harnesses: one more chat session, driving the rest.
 
-That works for three or four. It stops working past that, and it stops working for reasons that have nothing to do with how capable the model is.
+Both work for three or four. Both stop working past that, and neither stops for reasons that have anything to do with how capable the model is.
+
+## The terminal multiplexer was never the answer
+
+tmux solves a real problem, and it is not this one. It gives you panes; it has no idea what is in them. Which agent is blocked on a permission prompt, which one died twenty minutes ago, which one is finished and waiting for you to look — a multiplexer cannot tell you, because to it they are all just bytes on a pseudo-terminal. You are the scheduler. You cycle the panes, you read them, you notice. That is a job that scales linearly with the number of agents and holds for about as long as your attention does.
+
+Medulla runs the same processes, on the same kind of PTY, and reads them. Every session it opens has its own terminal emulator kept live in the background whether or not you are looking at it, and Medulla watches all of them for the things that actually need you: a permission prompt, a startup dialog, a blocking error, a terminal bell, a session that died, a turn that finished and is waiting on review. Those roll up to one mark per row and one count in the rail's title — *`⚠ 3 waiting on you`* — so a fleet you are not watching still tells you when it needs you.
+
+That is the difference in one line. A multiplexer gives you N things to check. Medulla tells you which of the N to look at, and puts you there in a keystroke.
 
 ## The shape mismatch
 
@@ -49,6 +57,12 @@ Handed five repositories and a fleet of harnesses, a model with no other informa
 Medulla separates deciding from doing. The orchestrator tier holds the operation: it decides what happens next, reads the distilled picture of the fleet, funds and reviews delegations. It does not fan out itself. Each cycle it deploys 0..N concurrent managers, fixing each manager's host and workspace for that manager's whole run, and each manager then chooses the harness, targets or spawns agents, and delegates tasks to them.
 
 That split is what keeps the top of the stack narrow. The orchestrator tier is deliberately the smallest surface in the system: it never reads raw fleet traffic, and it does not even see the reasoning tier's scratch tools. Delegation is also detached, so a delegation returns immediately and the operation continues rather than blocking until the fan-out drains.
+
+## Neither, then
+
+The two workarounds fail from opposite ends. The multiplexer knows nothing about the work, so you supply all the judgement. The chat-shaped orchestrator supplies judgement but drowns in the traffic, because every agent it manages writes into the one transcript it thinks with.
+
+Medulla is the third option: a process built to hold an operation — a registry of live sessions with no fixed ceiling, a ledger that makes every task settle, explicit caps on fan-out and spend, and a reasoning surface deliberately kept small enough to stay accurate while the fleet grows. You open another agent with `Ctrl-T`. Nothing about the twentieth is different from the second.
 
 ## Read next
 

@@ -16,6 +16,30 @@ are independent of each other:
 * `codex-server`, a Codex flavor that runs tasks as threads on one long-lived
   `codex app-server` process instead of forking a CLI per task.
 
+## Providers
+
+Five [`HarnessProvider`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/protocol/frames/types.rs)
+values exist, and only three of them are CLIs the daemon can detect and
+auto-select: `claude`, `codex`, and `opencode` (`daemon::providers::DAEMON_PROVIDERS`).
+The other two are named explicitly or not reached at all.
+
+`openhuman` is the in-process provider (`daemon::providers::local`). It has no
+binary behind it — a task dispatched to it runs as a bounded model/tool loop
+directly in this process, on the vendored `tinyagents` harness plus Medulla's
+own filesystem, shell, and guard tools, rather than a spawned and JSONL-folded
+CLI. It is dispatchable, but never auto-selected: a task reaches it only by
+naming it. Because there is no child process, it has no hooks, no managed
+skills, and no MCP tools — all three install onto a child's command line — and
+no approval gate: the harness runs what the model asks for rather than parking
+an external-effect tool call for approval.
+
+`shell` is a plain interactive shell (`bash`, `zsh`, whatever `$SHELL` names),
+not a coding agent. It is never detected as an available provider and never
+dispatchable — `HarnessProvider::is_dispatchable` answers `false` for it alone
+— so a task frame naming `shell` is refused at the parse before it reaches a
+host. It exists only so an operator can open a terminal beside their agents in
+the TUI, in the same pane and working directory.
+
 ## The wire contract
 
 An agent harness is a long-lived agent that accepts natural-language

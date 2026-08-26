@@ -171,7 +171,6 @@ one-line installer to paste into an SSH session on the machine you are adding.
 OSC 52 needs a terminal that accepts it: tmux wants `set -g set-clipboard on`,
 and some terminals disable it for security. The copy is also skipped when the
 daemon's output is piped. The address is printed on a line of its own either way.
-`--handle build-box` skips the copy entirely: type `@build-box` into Add Host.
 Pass `--no-pair` when the output is being parsed by a script.
 
 ## Harness wrappers

@@ -6,7 +6,7 @@ See [Why an Orchestrator](../why-an-orchestrator-model.md) for the product argum
 
 The public repository is a two-crate [Cargo](https://doc.rust-lang.org/cargo/) workspace with a strict separation between logic and rendering:
 
-* [`src/sdk/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is the `medulla` SDK crate, a UI-free logic library. It holds the backend HTTP/SSE client, the runtime adapters over the embedded core, sessions, workflows, and the host-link integration. It is reusable from any Rust program.
+* [`src/sdk/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is the `medulla` SDK crate, a UI-free logic library. It holds the backend HTTP/SSE client, the runtime adapters over it, the in-process agent loop, sessions, workflows, and the host-link integration. It is reusable from any Rust program.
 * [`src/tui/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/) is the `medulla-tui` crate, shipping the `medulla` binary: a [ratatui](https://ratatui.rs/) terminal UI over the SDK. It owns state, rendering, input, and theming, and re-exports the SDK's UI-facing data modules.
 
 Reusable APIs live in the SDK; rendering and process wiring live in the app crate. The SDK depends only on its own traits and types, never on the TUI.
@@ -15,8 +15,12 @@ Reusable APIs live in the SDK; rendering and process wiring live in the app crat
 
 The UI drives everything through one trait, `Runtime`, plus its snapshot contract. The UI depends only on that trait, not on any concrete implementation, which is what makes the runtimes interchangeable and the whole thing testable offline. Two implementations ship:
 
-* `openhuman`, the embedded OpenHuman core, which is what the product runs on. It boots inside the `medulla` process, so there is no socket and no attach handshake.
-* `mock`, a scripted runtime for tests and demos, with no network, reached with `--mock`.
+* [`cloud`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/), which is what the product runs on. It drives the orchestration backend directly through the `client` module below: HTTP for mutations, a polled event cursor for the live feed.
+* [`mock`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/mock/), a scripted runtime for tests and demos, with no network, reached with `--mock`.
+
+`cloud` reclaims a name it already had. Before v0.11.0 an OpenHuman core was embedded in front of the transport, so every backend call became an RPC hop onto that core's own client — against the same deployment, with a second wire-type set and an error-string decode in the middle. Sessions were never local state; they live on the backend, so nothing was gained by asking an in-process core to fetch them. Dropping the core removed the hop, not the transport.
+
+Inside `cloud` the split is deliberate: `fold.rs` is pure translation from backend wire types to a render snapshot, `cell.rs` holds that snapshot plus a broadcast channel and the echo/pending-turn bookkeeping, and `mod.rs` is the thin part that needs a client — minting a session lazily on first submit, refreshing the roster, and polling events from a sequence cursor (backing off between an active 120 ms and an idle 1 s). [`connect/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/connect/) builds the client and reports readiness as `Ready`, `SignedOut`, or `Unusable`; two of the three answers are decisions this host can make without a round trip, and it now makes them locally instead of asking a booted core and classifying the error it returned.
 
 Alongside them sit the pieces both share:
 
@@ -36,7 +40,24 @@ The [`client`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src
 * SSE event streaming: the live event feed the UI folds into agent lanes and traces.
 * One-shot orchestration (`/orchestration/v1`): fire-and-collect delegation.
 
+* The public feedback board (`/feedback`).
+
 Every response is wrapped in a `{ "success": true, "data": ... }` envelope; errors arrive as `{ "success": false, "error": ..., "errorCode": ... }` and are surfaced as a typed `ClientError::Api` that preserves the `errorCode`.
+
+`client` is a typed Medulla surface over the shared `tinyhumans-sdk` transport rather than a second HTTP client of its own. The transport owns credential headers, the envelope, and path percent-encoding; the typed routes, the not-exposed-route gate, and the error taxonomy live here. See [Vendoring](vendoring.md).
+
+## The `openhuman` provider runs in-process
+
+`openhuman` is a harness provider name you can still type — in a task frame, in `baseHarness`, in the TUI's harness picker — and it is the one provider with no binary to spawn. Every other provider shells out to a coding-agent CLI and reads its JSONL; this one runs the agent loop inside the `medulla` process.
+
+The name is now the only thing OpenHuman about it. What runs is [`agent/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agent/): a bounded model-and-tool loop on the vendored `tinyagents` harness, with Medulla's own tools (`fs`, `shell`, and the guard around them) and per-thread transcript history in `agent/history/`. The daemon side is [`daemon/providers/local/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/daemon/providers/local/), which builds the route and workspace, runs one turn, folds the harness event stream into Medulla's event vocabulary, and keeps a watchdog on a turn that is genuinely working.
+
+Two consequences are worth stating plainly, because both used to be the other way round:
+
+* **A turn carries no operator state.** It gets the checkout and the route, nothing else. There is no memory engine, no channel providers, no cron scheduler, and no access to an operator's credentials, because there is no core left to hold them. Dispatching a task no longer pulls a whole desktop product into the binary.
+* **There is no approval gate.** The embedded core refused external-effect tools from an unlabelled caller and parked them for a human to approve. The local harness runs what the model asks for, inside the workspace and the environment scrubbing described in [Environment Variables](environment-variables.md#what-an-agent-turn-cannot-see).
+
+Hooks, managed skills and MCP tools are deliberately absent here: those are installed onto a *child's* command line, and there is no child. The provider is also never auto-selected — detection only ever offers real CLIs, so a node reaches it by naming `openhuman` explicitly.
 
 ## Distillation is server-side
 
@@ -67,6 +88,12 @@ The rest splits by responsibility:
 [`workflows`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/) owns authored, durable, multi-step work, both definitions and their runs, and [`flow_engine`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/) is the adapter seam onto the vendored `tinyflows` engine. Engine coupling stays in the seam.
 
 What makes Medulla's use of that engine different from any other host embedding it is that an `agent` node is a *dispatched task*, not a model call. [`run/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/run/) executes and resumes, [`store/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/store/) is where workflows and run records live, [`authoring.rs`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/authoring.rs) edits a graph as a series of checked patches, [`ops/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/ops/) exposes the whole thing as one JSON-in/JSON-out surface, and [`mcp/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/mcp/) serves those same operations to a harness over MCP. The whole module sits behind the default `workflows` feature, so a slim build can drop the engine and its jq expression stack.
+
+## The workflow plane
+
+[`hub/plane/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/hub/plane/) is the workflow plane's contract with the orchestration backend, kept apart from the plumbing so the contract can be read on its own. `payloads.rs` is the Socket.IO wire shape — `RegisterWorkflows`, `WorkflowRequest`/`WorkflowResult` correlated by `request_id`, `WorkflowOp`, `CopilotOutcome`, and the `medulla:*` event names. `bridge.rs` is `WorkflowBridge`, the store-side trait an embedding host implements: reads are synchronous and dispatched on a blocking thread, `copilot` is async because it is a full agent turn rather than a read, and every method returns `Result<_, String>` because the error lands directly on a model's prompt surface as a tool result. The transport itself is in `hub::workflows` and `hub/socket/workflow.rs`, whose invariant is that every request is answered.
+
+Both halves used to be re-exported from the embedded core. That was sound while two hosts shared one socket implementation; with the core gone there is one host left, and sourcing a Medulla-to-Medulla-backend contract from a desktop product would have been the tail wagging the dog. The move was a relocation rather than a redefinition — field names, `rename_all`, and event strings are unchanged.
 
 ## Host-link integration
 

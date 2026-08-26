@@ -13,6 +13,7 @@ the host link, and self-updating.
 | `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to your orchestrator. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run multi-step plans. |
+| `medulla skills <cmd>` | [Harness skills](#medulla-skills): put harness-native skills that trigger saved workflows on disk (`list` / `install` / `sync` / `uninstall`). |
 | `medulla init [dir]` | [Draft a MEDULLA.md](#medulla-init) workspace profile. |
 | `medulla workspace <cmd>` | [Workspace registry](#medulla-workspace): `add [dir]` / `list` / `remove <dir\|id>`. |
 | `medulla hub` | [Relay hosted-backend tasks](#medulla-hub) to configured host-link workers. |
@@ -20,7 +21,10 @@ the host link, and self-updating.
 | `medulla version` / `help` | Version string; usage. |
 
 Unknown first arguments are treated as arguments to the main TUI rather than
-rejected as unknown subcommands.
+rejected as unknown subcommands. Two further subcommands exist but are not for
+a human to type: `medulla mcp` serves Medulla's own tools over MCP on
+stdin/stdout, and `medulla hook <Event>` is the shim Medulla installs as every
+launched harness's own lifecycle hook. Medulla spawns both itself.
 
 ## The TUI
 

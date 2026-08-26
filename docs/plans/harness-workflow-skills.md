@@ -26,7 +26,7 @@ Facts this plan rests on, each checked against the tree at `11351b34`:
 - **Declared inputs are already on the listing view.** `WorkflowSummary.inputs`
   (`src/sdk/src/workflows/types/workflow.rs:176`) carries `Vec<WorkflowInput>` —
   `name`, `type`, `description`, `required`, `default`
-  (`vendor/openhuman/vendor/tinyflows/src/model/inputs.rs:112`). Rendering a skill needs
+  (`vendor/tinyflows/src/model/inputs.rs:112`). Rendering a skill needs
   only `workflow_list`, not a graph fetch.
 - **Tool-surface gating already exists.** `ToolMode::{Full,Propose}` +
   `MEDULLA_WORKFLOW_TOOLS` (`src/sdk/src/workflows/mcp/evolve.rs`) withhold verbs from

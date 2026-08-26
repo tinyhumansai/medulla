@@ -273,6 +273,17 @@ account id, so everything else Medulla persists can be scoped to
 `<root>/<user id>`. It is written by the login flow and cleared by logout, the
 same layout the embedded OpenHuman core used for its own `~/.openhuman`.
 
+## tinyagents
+
+The vendored agent harness (`vendor/tinyagents`) that runs a [local provider](#local-provider)
+turn: the model/tool loop, the provider clients, and the `Tool` trait, but
+deliberately not a shell or a filesystem — what a tool is allowed to do depends
+on the host's threat model, so a crate that shipped one would be wrong for
+every host that disagreed. Medulla supplies those itself (`agent::tools`) and
+builds a configured `tinyagents::harness::runtime::AgentHarness` from a route
+and a checkout (`agent::harness`). Companion to `tinyflows` (see
+[Workflow](#workflow)), the same vendoring pattern for the workflow engine.
+
 ## Local provider
 
 The in-process daemon provider (`daemon::providers::local`): the one provider

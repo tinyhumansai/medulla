@@ -39,7 +39,6 @@ The [`client`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src
 * Durable sessions (`/medulla/v1`): persistent orchestration sessions.
 * SSE event streaming: the live event feed the UI folds into agent lanes and traces.
 * One-shot orchestration (`/orchestration/v1`): fire-and-collect delegation.
-
 * The public feedback board (`/feedback`).
 
 Every response is wrapped in a `{ "success": true, "data": ... }` envelope; errors arrive as `{ "success": false, "error": ..., "errorCode": ... }` and are surfaced as a typed `ClientError::Api` that preserves the `errorCode`.

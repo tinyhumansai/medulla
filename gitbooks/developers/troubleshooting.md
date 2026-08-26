@@ -91,9 +91,10 @@ own `baseUrl` and is only offered to a `backend.baseUrl` with a matching origin.
 If you have repointed the config at a different deployment, sign in again against
 that one.
 
-Older installs kept a separate `credentials.json` beside the runtime's store,
-which could report success while the runtime stayed signed out; `login` and
-`logout` now delete any such file left behind.
+Older installs kept a separate `credentials.json`, which could report success
+while the runtime stayed signed out. `login` now adopts that file — verifying its
+JWT and rewriting it as a proper session — and only `logout` deletes it. See
+[Authentication](authentication.md#upgrading-from-a-standalone-credentials-file).
 
 Check which account you are on. The active account is recorded in
 `<root>/active_user.toml`, and `MEDULLA_USER=<id>` selects a different one for a

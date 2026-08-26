@@ -2,9 +2,11 @@
 
 See [Why an Orchestrator](../why-an-orchestrator-model.md) for the product argument. This page is about the code: how the open-source SDK and TUI are put together, how they talk to the backend, and how the pieces named in the product story map onto modules you can read.
 
-## Two crates
+## Three crates
 
-The public repository is a two-crate [Cargo](https://doc.rust-lang.org/cargo/) workspace with a strict separation between logic and rendering:
+The public repository is a three-crate [Cargo](https://doc.rust-lang.org/cargo/) workspace with a strict separation between logic and rendering:
+
+* [`src/link/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/link/) is the `medulla-link` crate, the host-link transport on its own — no dependency on the SDK, so the wire can be read and tested without the rest.
 
 * [`src/sdk/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is the `medulla` SDK crate, a UI-free logic library. It holds the backend HTTP/SSE client, the runtime adapters over it, the in-process agent loop, sessions, workflows, and the host-link integration. It is reusable from any Rust program.
 * [`src/tui/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/) is the `medulla-tui` crate, shipping the `medulla` binary: a [ratatui](https://ratatui.rs/) terminal UI over the SDK. It owns state, rendering, input, and theming, and re-exports the SDK's UI-facing data modules.

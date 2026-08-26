@@ -89,7 +89,7 @@ Either way, `login` then:
    marker.
 5. Re-checks that the home it just wrote to is the home this process resolves,
    and fails loudly with the reason if not.
-6. Sweeps up any legacy `credentials.json` left by an older install.
+6. Adopts any legacy `credentials.json` left by an older install.
 
 The base URL comes from `backend.baseUrl` in the [config](configuration.md); pass
 `--config <path>` to point at a different one.
@@ -135,8 +135,8 @@ anything that would make it a lie:
 
 ## `medulla logout`
 
-`logout` clears `session.json` (running it twice is not an error), removes legacy
-credential files under the account home, and then re-checks the precedence chain
+`logout` clears `session.json` (running it twice is not an error), removes the
+retired credential files described below, and then re-checks the precedence chain
 as described above.
 
 It deliberately leaves the account marker and the account's directory alone.
@@ -146,11 +146,22 @@ belongs to; signing back in returns you to the same home, config and logs. See
 
 ### Upgrading from a standalone credentials file
 
-Older installs kept a `credentials.json` alongside the runtime's own store, which
-gave two independent answers to "am I signed in?" — `medulla login` could report
-success while the runtime stayed signed out and the TUI kept opening its login
-screen. `login` and `logout` both delete any such file they find, since nothing
-reads it now and it holds a bearer token no logout could invalidate.
+Two credential files predate the current store: a `credentials.json` under the
+Medulla home, and an older one under the OS config directory. Both held a real
+JWT back when Medulla owned its own credential file. While sessions lived
+elsewhere, `login` and `logout` simply deleted them — a bearer token in a file no
+code path can invalidate is strictly worse than one in use.
+
+Now that the store is Medulla's again, deleting is the wrong move on login: the
+token in that file is the same app session the new store wants, so an install
+that predates the change is signed in and should stay signed in. `login`
+therefore **adopts** it — the JWT is verified through the same path as any other
+and, only once the new `session.json` is written, the old file is removed.
+
+`logout` still deletes them, and that is exactly why. Adoption is a startup
+behaviour; leaving a retired file behind at logout would mean the next launch
+verified the retired bearer and signed the operator straight back in, having just
+been told they were logged out.
 
 ## Token via environment
 

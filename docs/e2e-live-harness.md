@@ -57,8 +57,8 @@ routed at the mock and which wire dialect it lands on.
 | `e2e/coordination/Dockerfile` | the harness image: a rust build stage layered onto that base |
 | `e2e/coordination/build-image.sh` | build (and optionally push) either image |
 | `e2e/coordination/run-docker.sh` | build + run the whole harness in a container |
-| `examples/mock_link_forwarder.rs` | blind UDP forwarder implementing protocol §5 rules 1-8 |
-| `examples/coordination_owner.rs` | owner-side driver: enrolls pairs, serves legs, prints terminal frame JSON |
+| `src/sdk/examples/mock_link_forwarder.rs` | blind UDP forwarder implementing protocol §5 rules 1-8 |
+| `src/sdk/examples/coordination_owner/main.rs` | owner-side driver: enrolls pairs, serves legs, prints terminal frame JSON |
 
 ## Running
 

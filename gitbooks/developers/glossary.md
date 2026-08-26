@@ -207,6 +207,114 @@ harness-agnostic wire protocol for coding agents. Medulla uses ACP v1 to talk to
 Claude Code, Codex, and OpenCode through one lifecycle and event stream, rather
 than teaching the orchestration layer each harness's private JSONL format.
 
+## Runtime
+
+The trait that abstracts what drives the TUI: submit an instruction, read back a
+render snapshot, and stream events. [`CloudRuntime`](#cloudruntime) is the
+runtime the product ships on; a scripted mock runtime backs `medulla --mock`
+and the test suites with no backend at all. `snapshot` and `subscribe` are the
+only two methods every surface actually depends on — a `RuntimeSnapshot` is a
+fold of an event stream, and that fold does not care where the events came
+from.
+
+## CloudRuntime
+
+The [runtime](#runtime) the product ships on. It drives the orchestration API
+directly over HTTP through `client::MedullaClient`, with a polled event cursor
+standing in for a live feed. Built with `CloudRuntime::new(client)` or
+`CloudRuntime::with_hub(client, hub)` when a host also relays a
+[hub](#hub) uplink, then configured further with `.with_backend(..)` and
+`.with_workspaces(..)`. It replaced a runtime that reached the backend by
+asking an embedded OpenHuman core to do it on this SDK's behalf — sessions
+were never local state, they live on the backend, so the core added a hop and
+nothing else.
+
+## `runtime::cloud::connect` and Readiness
+
+The module that decides whether a real launch gets a working `CloudRuntime`.
+`client_from_config` builds a `MedullaClient` from a loaded config and the
+process environment, resolving the bearer through the same
+`backend.token` → `backend.tokenEnv` → stored-session chain every
+backend-facing surface uses. `readiness` answers the question the client alone
+cannot: `Ready` (a backend is configured and a token was found), `SignedOut`
+(a backend is configured but nothing yields a token), or `Unusable` (no backend
+base URL is configured at all) — three states rather than two, because "run",
+"sign in", and "stop" each need a different response and collapsing any pair of
+them sends an operator down the wrong path.
+
+## Hub plane
+
+The workflow half of the [hub](#hub)'s contract with the Medulla orchestration
+backend: `hub::plane::payloads` is the Socket.IO wire shape (`WorkflowDescriptor`
+and friends) and `hub::plane::bridge::WorkflowBridge` is the trait an embedding
+host implements to answer it — listing its saved workflows, returning one's
+detail and run history, and running its authoring copilot. Both used to be
+re-exported from the embedded OpenHuman core; with the core gone, Medulla is
+the only host left that speaks them, so they are declared here directly instead
+of sourced from a desktop product.
+
+## App session and account marker
+
+The app session is Medulla's own record of a signed-in backend connection: a
+verified bearer token written to `<root>/<account id>/session.json` by
+`auth::session::store`, which checks a candidate token against `/auth/me`
+before persisting it so a bad paste fails at `medulla login` rather than on
+every later call. Reading it back is resolved through the same precedence as
+every other backend-facing call: an inline `backend.token`, then
+`backend.tokenEnv` (`MEDULLA_TOKEN` by default), then this stored session.
+There is no OS keychain involved. `medulla login` also *adopts* a legacy
+`credentials.json` left by an older store — verifying it and rewriting it as a
+session rather than discarding it — and only `medulla logout` deletes a stored
+session.
+
+The account marker, `active_user.toml` at the root of the Medulla home, is the
+one file a process can read before it knows who it is: it names the active
+account id, so everything else Medulla persists can be scoped to
+`<root>/<user id>`. It is written by the login flow and cleared by logout, the
+same layout the embedded OpenHuman core used for its own `~/.openhuman`.
+
+## Local provider
+
+The in-process daemon provider (`daemon::providers::local`): the one provider
+with no binary behind it. Every other provider is a CLI Medulla resolves,
+spawns, and folds JSONL from; this one runs a turn as a bounded model/tool loop
+directly in this process, on the vendored `tinyagents` harness plus Medulla's
+own tools (`agent::tools`: a path-owning filesystem tool, a supervised shell,
+and the containment guard both are rooted at). It replaced the RPC this used to
+make into an embedded OpenHuman core, which meant running a model in a loop
+with three tools pulled in a whole desktop product — memory engine, channel
+providers, cron scheduler — to get them.
+
+Selected by naming the `openhuman` [provider](#provider) — the id string is
+unchanged even though nothing is embedded any more. It is never
+auto-detected, so a task reaches it only by naming it explicitly. It has no
+access to an operator's OpenHuman memory, flows, or credentials (there is no
+core left to hold them), no hooks, managed skills, or MCP tools (all three
+install onto a *child's* command line, and there is no child here), and no
+approval gate — the embedded core used to park external-effect tools for
+approval from an unlabelled caller; this harness runs what the model asks for.
+
+## `HarnessProvider::Shell`
+
+A plain interactive shell — `bash`, `zsh`, whatever `$SHELL` names — not a
+coding agent. It exists so an operator can open a terminal beside their agents
+in the same pane, on the same host, with the same working directory. It is
+deliberately excluded from every path that treats providers as interchangeable:
+never detected as an available daemon provider, and the one
+[`HarnessProvider`](#provider) whose `is_dispatchable()` answers `false`, so a
+task frame naming `shell` is refused at the parse before it reaches a host. A
+shell reads no prompt and reports no completion, so a dispatched turn to one
+would never answer — and a peer able to name one would have a way to run
+arbitrary commands on the host with no harness in between.
+
+## Harness wrapper
+
+`Command::Wrapper(HarnessProvider)`, in the TUI's CLI: launching a coding-agent
+CLI as a transparent, host-link-bridged wrapper rather than the TUI itself.
+Reached by argv0 — running the binary as `claude`, `codex`, or `opencode`
+(typically a symlink to the `medulla` binary named after the provider) selects
+the matching wrapper instead of the ordinary subcommand parse.
+
 ## MEDULLA.md
 
 A workspace profile file at a repository root. It carries a short summary

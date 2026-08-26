@@ -117,14 +117,17 @@ An inline `"token"` field is also accepted, but keep secrets out of committed fi
 
 ## Runtimes
 
-Two runtimes ship:
+Two runtimes ship, both implementing the same `Runtime` trait (see
+[Architecture › The Runtime trait](architecture.md#the-runtime-trait)):
 
-1. The embedded OpenHuman core, which is the product runtime. It boots inside the `medulla` process, so there is no server to start, no socket to resolve, no attach handshake to fail, and no unix-only restriction.
+1. `cloud`, the product runtime. It drives the orchestration API directly —
+   HTTP for mutations, a polled event cursor for the live feed — so there is no
+   server to start, no socket to resolve, and no attach handshake to fail.
 2. Mock, a scripted offline runtime for demos and tests, reached with `--mock`.
 
-`--mock` is checked first and skips the token lookup and the login screen entirely, which makes it the only way to get a working runtime with no backend at all. Otherwise the core boots and the TUI runs on it.
+`--mock` is checked first and skips the token lookup and the login screen entirely, which makes it the only way to get a working runtime with no backend at all. Otherwise `cloud` builds its client and the TUI runs on it.
 
-A core that boots but has no Medulla backend to talk to (no configured URL, or nobody signed in) takes the offline demo exactly as `--mock` does. This is the documented credential-free start, not a misconfiguration to surface; every drive method would otherwise fail behind a UI that looks live. Before that point the TUI opens the [login screen](authentication.md#logging-in-from-the-tui); press `m` to continue offline.
+A `cloud` runtime with no Medulla backend to talk to (no configured URL, or nobody signed in) takes the offline demo exactly as `--mock` does. This is the documented credential-free start, not a misconfiguration to surface; every drive method would otherwise fail behind a UI that looks live. Before that point the TUI opens the [login screen](authentication.md#logging-in-from-the-tui); press `m` to continue offline.
 
 ### Mock (zero setup)
 
@@ -138,18 +141,18 @@ A scripted demo: no credentials, no network, and the fastest way to explore the 
 
 ```sh
 medulla login          # browser OAuth; stores a verified session
-medulla                # runs on the embedded core
+medulla                # runs on the cloud runtime
 ```
 
 `MEDULLA_TOKEN=<jwt> medulla` supplies a bearer directly instead. See [Authentication](authentication.md).
 
-### Upgrading from the external core socket
+### The retired `--core-socket` flag
 
-Versions before the embedded core attached to an external `medulla-serve` NDJSON
-Unix socket via `--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config
-section. The core now runs in-process. `medulla run` rejects `--core-socket` with
-that explanation instead of absorbing it into the instruction text, and a
-`[core]` section left in a config file is inert.
+Older versions attached to an external `medulla-serve` NDJSON Unix socket via
+`--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config section. `medulla
+run` rejects `--core-socket` outright, naming it retired, rather than absorbing
+it into the instruction text, and a `[core]` section left in a config file is
+inert.
 
 ## Hosting on this device
 

@@ -69,8 +69,11 @@ exact match keeps showing its description until you press Enter.
 ## `medulla run`
 
 A headless, scriptable path to a single instruction, and the one to drive from CI
-or a container, since it needs no TTY. It boots the same embedded core the TUI
-uses, submits one instruction, and streams the folded cycle events to stdout as
+or a container, since it needs no TTY. It resolves the same layered config the
+TUI does, builds a client against the configured backend with the same token
+precedence every backend-facing surface shares (an inline `backend.token`, then
+`backend.tokenEnv`, then the stored `medulla login` session), submits one
+instruction, and streams the folded cycle events to stdout as
 newline-delimited JSON:
 
 ```sh
@@ -80,9 +83,15 @@ medulla run --config ./medulla.toml "..."
 
 Everything that is not a flag is joined into one instruction; with no instruction
 it errors. It emits each folded event as a JSON line and returns when the cycle
-ends. It binds the core's state directory, action directory, and endpoints from
-the resolved config before booting, so a scripted run pointed at `MEDULLA_HOME`
-reads and writes that home rather than the developer's real one.
+ends. Because the resolved config and the stored login session both come out of
+the operator's Medulla home, a scripted run pointed at `MEDULLA_HOME` reads and
+writes that home rather than the developer's real one. It fails immediately when
+there is nothing to sign in with (`not signed in — run medulla login, or set
+MEDULLA_TOKEN`).
+
+`--core-socket` used to point this at an external `medulla-serve` process; it is
+gone, and passing it is a hard error rather than being folded into the
+instruction text.
 
 | Flag | Effect |
 | --- | --- |

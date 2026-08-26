@@ -227,7 +227,7 @@ of truth. `lib.rs` defines the public surface.
 | [`mcp/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/mcp/) | Medulla's own MCP server, offered to the harnesses it spawns (`workflows` feature). |
 | [`onboarding/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/onboarding/) | First-run worker registration orchestration. |
 | [`protocol/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/protocol/) | Medulla's own wire protocol for the TUI and daemon, plus the centralized environment-variable resolution both share. |
-| [`runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/) | The `Runtime` trait, its snapshot contract, and the `openhuman` and `mock` implementations. |
+| [`runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/) | The `Runtime` trait, its snapshot contract, and the `cloud` and `mock` implementations. |
 | [`session_history/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/session_history/) | Recent-session history for local harness sessions. |
 | [`sessions/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/sessions/) | Interactive coding-agent session management: the two lifetime classes, the two turn-source drivers, and the machinery that runs them. |
 | [`ui/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/) | The UI-facing data surface: `events`, `agents` lane folding, `stream` derivations, `chat_store`, the `work` panel, and `util`. Rendering lives in `medulla-tui`. |

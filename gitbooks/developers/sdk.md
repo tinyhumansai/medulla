@@ -37,8 +37,8 @@ The crate has one feature.
 `workflows::ops`. The `fleet_*` family beside it depends only on
 `control_socket`.
 
-The embedded OpenHuman core is not behind a feature. It is the runtime the SDK
-hosts, and a build without it would have nothing to offer but the offline mock.
+The `cloud` runtime is not behind a feature. It is the runtime the SDK hosts,
+and a build without it would have nothing to offer but the offline mock.
 
 ## The `Runtime` trait
 

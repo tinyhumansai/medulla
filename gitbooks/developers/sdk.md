@@ -7,8 +7,8 @@ description: >-
 # The Rust SDK
 
 `medulla` is the library crate at [`src/sdk/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/): a UI-free logic
-library holding the backend HTTP and SSE client, the runtime adapters over the
-embedded OpenHuman core, the coding-agent daemon, sessions, workflows, the
+library holding the backend HTTP and SSE client, the runtime adapters over it,
+the in-process agent loop, the coding-agent daemon, sessions, workflows, the
 host-link integration, and the UI-facing data surface the terminal app renders.
 The `medulla-tui` crate consumes it; nothing in the SDK depends on the TUI.
 

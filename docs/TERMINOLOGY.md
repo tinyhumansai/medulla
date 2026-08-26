@@ -46,6 +46,8 @@ that CLI:
 | Codex          | ACP over stdio                                                  |
 | `codex-server` | JSON-RPC over stdio to a shared, long-lived `codex app-server`  |
 | OpenCode       | ACP over stdio                                                  |
+| OpenHuman      | In-process: no binary spawned, no transport. The wire value is `HarnessProvider::Openhuman`; the agent turn runs inside the `medulla` process on the vendored `tinyagents` crate with Medulla's own tools ([`src/sdk/src/daemon/providers/local/mod.rs`](../src/sdk/src/daemon/providers/local/mod.rs)). Never auto-selected by provider detection — a node reaches it only by naming it. |
+| Shell          | None: a plain interactive shell (`bash`, `zsh`, whatever `$SHELL` names), not a coding agent. Never detected as an available provider and never dispatchable; it exists so an operator can open a terminal beside their agents in the same pane, host, and working directory. |
 
 `codex-server` is a **flavor** of Codex rather than a separate harness type: it
 authenticates, bills, and configures as Codex and differs only in that one

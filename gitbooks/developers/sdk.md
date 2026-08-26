@@ -64,19 +64,28 @@ Core methods:
 Two implementations ship, both under
 [`src/sdk/src/runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/):
 
-* `runtime::openhuman::OpenHumanRuntime` is what the product runs on. It wraps
-  the OpenHuman core booted in this process (`OpenHumanRuntime::new(core)`, or
-  `with_hub(core, hub)` when the outbound dispatch hub is wired in), so there is
-  no socket and no attach handshake.
+* [`runtime::cloud::CloudRuntime`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/)
+  is what the product runs on. It drives the orchestration API directly through
+  a [`MedullaClient`](#the-backend-client) (`CloudRuntime::new(client)`, or
+  `with_hub(client, hub)` when the outbound dispatch hub is wired in): HTTP for
+  submit/abort/new-session, and a polled event cursor — backing off between an
+  active 120 ms and an idle 1 s — for the live feed. There is no socket and no
+  attach handshake.
+  [`runtime::cloud::connect`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/connect/)
+  builds that client from config and the environment and reports whether it is
+  usable as `Readiness::Ready`, `Readiness::SignedOut`, or
+  `Readiness::Unusable(reason)`.
 * `runtime::mock::MockRuntime` is a scripted offline runtime for tests and demos.
   `MockRuntime::demo()` gives a populated snapshot (a roster, presence, a couple
   of turns, a completed delegated task); `MockRuntime::empty()` gives a bare one.
   It also exposes scripting seams: `script_event`, `set_workers`, `set_running`,
   `recorded_calls`, `recorded_handoffs`.
 
-Earlier versions carried an HTTP and SSE cloud-backend runtime and a
-`medulla-serve` unix-socket runtime. Both were removed once the core was
-embedded; the module docs in `lib.rs` still name them.
+`cloud` reclaims a name it already had. Before v0.11.0 an OpenHuman core was
+embedded in front of the transport, so every backend call became an RPC hop
+onto that core's own client — against the same deployment, with a second wire-
+type set and an error-string decode in the middle. Dropping the core removed
+the hop, not the transport.
 
 Beside the trait sit three supporting modules:
 

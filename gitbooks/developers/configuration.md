@@ -242,52 +242,47 @@ How the model reaches the CLI depends on the base harness. Claude Code takes it
 through the model-tier variables, with `model` on the Opus tier and `fastModel`
 on the Sonnet, Haiku, and small-fast tiers, so sub-agents stay on OpenRouter too.
 Codex and OpenCode take it through their own `-m` argument. OpenHuman takes it as
-the `model_override` on the core call — see below.
+the model id on the in-process turn's inference route — see below.
 
 ### Choosing the model an OpenHuman turn runs on
 
 A workflow step may name the harness id `openhuman`, and that turn runs in
-Medulla's own process on the embedded core rather than in a spawned CLI. Without
-a choice it runs on the core's `default_model`, the cloud alias a turn
-self-reports as `Chat V1 (Orchestrator)`. Three routes name a different one, and
-they resolve in this order, highest first:
+Medulla's own process, on the in-process local harness, rather than in a spawned
+CLI. Three routes name the model, and they resolve in this order, highest first:
 
 1. `MEDULLA_OPENHUMAN_MODEL` (deprecated spelling: `TINYPLACE_OPENHUMAN_MODEL`)
 2. `MEDULLA_HARNESS_MODEL` (deprecated spelling: `TINYPLACE_HARNESS_MODEL`)
 3. the step's own `config.model`, or the workflow's `defaults.model`
 4. the `[[customHarnesses]]` preset the step selected, through its `model`
 5. `medulla workflow run --model <name>`, then `[workflows] defaultModel`
-6. nothing — the core's own `default_model` answers
+
+Unlike a spawned CLI, which falls back to its own configured default when none
+of these name a model, the local harness has no default of its own: a turn with
+no model resolved fails outright rather than running on some ambient choice.
 
 The environment sits on top for the same reason `MEDULLA_<P>_BIN` does: it is the
 operator's override of what the configuration says, applied to the machine they
 are standing at, with no file to edit. An exported-but-blank value counts as
 unset.
 
-### Running an OpenHuman turn on OpenRouter
+### Running an OpenHuman turn on an inference route
 
-Naming a model is only half the answer: on its own the name is resolved against
-whatever providers the core already has, and one no configured provider serves is
-not an error — the agent loop falls through to its resolved default and records
-that it skipped the override.
+Naming a model is only half the answer, and for this harness it is the smaller
+half: unlike a spawned CLI, which can fall back to a coding tool's own
+configured provider, the local harness has no provider bindings of its own. It
+needs an explicit endpoint and credential for every call, and a turn that
+resolves a model but no route fails with "the local harness needs an inference
+route", not a quiet fallback.
 
-`baseUrl` and `apiKeyEnv` supply the other half, and they are live for
-`openhuman` presets. They reach the turn by a different road than they do for a
-spawned CLI, which has no child to hand an environment to: Medulla resolves the
-key named by `apiKeyEnv`, exchanges it at the loopback attribution proxy for a
-machine-local token, and passes the core the mount and that token as a
-**per-call** route. The core applies the route to that one turn's in-memory
-configuration and never writes it to disk, so pointing a workflow step at
-OpenRouter does not repoint the account's own OpenHuman inference — the next turn
-without a preset runs exactly where it did before.
+`baseUrl` and `apiKeyEnv` supply that route, and they reach the turn by a
+different road than they do for a spawned CLI, which has no child to hand an
+environment to: Medulla resolves the key named by `apiKeyEnv` and, for an
+OpenRouter endpoint, exchanges it at the loopback attribution proxy for a
+machine-local token, then passes the turn the mount and that token as a
+**per-call** route it uses for that turn alone.
 
-The route governs the four roles an agent turn runs on (chat, reasoning, agentic,
-coding). Background workloads — memory, embeddings, heartbeat, learning — stay
-where the account's configuration puts them, because they run tier-specific
-models a coding endpoint generally cannot serve.
-
-So a complete OpenHuman preset needs nothing installed and nothing pre-configured
-in the core:
+So a complete OpenHuman preset needs a model, an endpoint, and a key — nothing
+installed, but nothing implicit either:
 
 ```toml
 [[customHarnesses]]
@@ -299,19 +294,19 @@ hostId = "this-device"
 apiKeyEnv = "OPENROUTER_API_KEY"
 ```
 
-Routing is skipped, with no error, in three cases: no key exported under
-`apiKeyEnv`, a `baseUrl` that resolves somewhere other than `openrouter.ai`, and
-a turn with no model resolved. Each leaves the turn on the account's own
-OpenHuman configuration, which is why an `openhuman` preset that names only a
-model still works and is still advertised as capacity without an OpenRouter key —
-unlike every other base harness.
+The route is skipped in three cases: no key exported under `apiKeyEnv`, a
+`baseUrl` that resolves somewhere other than `openrouter.ai`, and a turn with no
+model resolved. Every one of those leaves the turn with no route to call, so it
+fails rather than running somewhere else — an `openhuman` preset with no key
+exported is not usable and, like every other base harness, is not advertised as
+capacity either.
 
 `apiKeyEnv` holds a variable name and never a value. The key stays in the process
 environment, and neither the config file nor the app's own state ever holds it. A
 host advertises a preset as capacity only when the named variable is set to
-something non-blank and the preset's base CLI is one that host runs. The key does
-not reach the harness either: an OpenRouter-bound run goes through a loopback
-proxy that hands the child a machine-local token instead. See
+something non-blank and the preset's base harness is one that host runs. The key
+does not reach the harness either: an OpenRouter-bound run goes through a
+loopback proxy that hands it a machine-local token instead. See
 [Attribution and routing](attribution-and-routing.md).
 
 Presets attach to a host by `hostId`, which must match the `address` of a

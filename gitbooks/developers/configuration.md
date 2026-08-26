@@ -80,6 +80,7 @@ has no config for them.
 | `fleet` | The declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog. |
 | `harness` | How harnesses the *operator* starts by hand behave: whether they launch with permissions bypassed (off by default, unlike a hosted task), and the manual launcher's recent/favorite workspace shortcuts. |
 | `attribution` | Whether commits made by a Medulla-launched harness carry the `Co-authored-by: Medulla` trailer. On by default. |
+| `hooks` | Operator-declared lifecycle hooks (`[[hooks]]`) for the harnesses Medulla launches, in the harness-native vocabulary (`PreToolUse`, `Stop`, …; camelCase spellings are also accepted). Empty by default. |
 | `hookDefaults` | Whether Medulla installs its own lifecycle reporting hooks into the harnesses it launches, alongside any operator-declared `[[hooks]]`. On by default. |
 | `router` | A custom OpenAI-compatible router the daemon spawns harnesses against. Absent leaves every harness unrouted. |
 | `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the in-process local (`openhuman`) harness. |

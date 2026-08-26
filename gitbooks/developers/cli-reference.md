@@ -131,14 +131,11 @@ Daemon flags:
 | `--providers <a,b>` | Restrict the accepted harnesses (default: all found on `PATH`). |
 | `--default-provider <name>` | Choose the default harness among those available. |
 | `--workspace <dir>` | Set the primary task working directory (default: cwd). |
-| `--handle <name>` | Register an `@handle` on startup. |
 | `--name <label>` | Override the worker's advertised display name. |
 | `--model <name>` | Supply a default model hint passed to the harness. |
 | `--opencode-agent <name>` | Agent name for the OpenCode provider. |
-| `--skills <a,b>` | Extra skills to advertise. |
 | `--concurrency <n>` | Cap simultaneous executions. |
 | `--once` | Drain the current inbox once and exit (a probe). |
-| `--no-onboard` | Skip key publishing and directory registration. |
 | `--reonboard` | Replace the stored worker registration. |
 | `--no-pair` | Do not print the pairing block or copy the address. |
 | `--dangerously-skip-permissions` | Headless path: pass the provider's unsafe permission switch. |

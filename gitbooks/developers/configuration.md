@@ -294,12 +294,15 @@ hostId = "this-device"
 apiKeyEnv = "OPENROUTER_API_KEY"
 ```
 
-The route is skipped in three cases: no key exported under `apiKeyEnv`, a
-`baseUrl` that resolves somewhere other than `openrouter.ai`, and a turn with no
-model resolved. Every one of those leaves the turn with no route to call, so it
-fails rather than running somewhere else — an `openhuman` preset with no key
-exported is not usable and, like every other base harness, is not advertised as
-capacity either.
+The route is skipped in three cases: the step names no router at all, no key is
+exported under `apiKeyEnv`, and a turn with no model resolved. Every one of
+those leaves the turn with no route to call, so it fails rather than running
+somewhere else — an `openhuman` preset with no key exported is not usable and,
+like every other base harness, is not advertised as capacity either. A
+non-OpenRouter `baseUrl` (a self-hosted gateway, a vendor's own OpenAI-compatible
+endpoint) is handed to the turn as spelled, with the key the preset named — only
+an OpenRouter endpoint is exchanged for a loopback mount and a machine-local
+token first.
 
 `apiKeyEnv` holds a variable name and never a value. The key stays in the process
 environment, and neither the config file nor the app's own state ever holds it. A

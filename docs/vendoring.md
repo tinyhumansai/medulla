@@ -36,7 +36,7 @@ the embedded core. The `sqlite` feature brings `tinyagents::session`, the durabl
 store behind `src/sdk/src/agent/history/`; `tools` brings the builtin tool family
 the loop dispatches. Neither is on by default in the crate.
 
-`tinyflows` is the DAG workflow engine behind the SDK's `flows` feature, reached
+`tinyflows` is the DAG workflow engine behind the SDK's `workflows` feature, reached
 through the adapter seam in `src/sdk/src/flow_engine/`. Its `mock` feature is a
 normal dependency feature rather than a dev-only one: the authoring surface
 dry-runs graphs against the engine's deterministic capability stand-ins in

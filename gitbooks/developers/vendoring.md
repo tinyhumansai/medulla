@@ -14,7 +14,7 @@ repository's CI gates.
 | Submodule | Upstream | What it is |
 | --- | --- | --- |
 | `vendor/tinyagents` | [`tinyhumansai/tinyagents`](https://github.com/tinyhumansai/tinyagents) | The agent harness: the model/tool loop behind the in-process `openhuman` provider |
-| `vendor/tinyflows` | [`tinyhumansai/tinyflows`](https://github.com/tinyhumansai/tinyflows) | The DAG workflow engine behind the SDK's `flows` feature |
+| `vendor/tinyflows` | [`tinyhumansai/tinyflows`](https://github.com/tinyhumansai/tinyflows) | The DAG workflow engine behind the SDK's `workflows` feature |
 | `vendor/tinyhumans-sdk` | [`tinyhumansai/sdk`](https://github.com/tinyhumansai/sdk) | The shared TinyHumans HTTP transport the direct backend client builds on |
 
 All three are self-contained: none declares a path or git dependency of its own,

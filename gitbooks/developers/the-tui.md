@@ -16,7 +16,7 @@ the offline demo runtime.
 | Subconscious | A placeholder for the layer under the work: what it filters on intake, what it learns from the gap between expectation and outcome, and what it escalates for a human to approve. Nothing here is live yet. |
 | Changes | The session's Git changes: a rail of changed files, commits, patches, and review comments, with the selected unified patch beside it. `b` sets the baseline. |
 | Hosts | What capacity exists: Hosts, Harness Types, Hooks, Agent Templates, Add Host, Strategies. |
-| Feedback | The feedback board for the active runtime, with the selected item's body and comments. A runtime with no board (the local and core runtimes, or a signed-out session) shows a single hint panel instead. |
+| Feedback | The feedback board for the active runtime, with the selected item's body and comments. The mock demo runtime always has a scripted board; a signed-out or unconfigured backend connection has none, and shows a single hint panel instead. |
 | Settings | Usage, Appearance, Status line, Config, Feedback, Trace, Context, Account, Help, grouped under General, Debug, and About. |
 
 `Tab` walks the top-level views. Within a tab, `↑↓` walk the left nav and `1`-`9`

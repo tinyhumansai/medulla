@@ -11,8 +11,8 @@ One end-to-end round trip over the **host link** (`docs/host-link-protocol.md`),
 with no real keys and no network egress:
 
 ```
-owner driver (examples/coordination_owner.rs; a real medulla-link endpoint)
-  → mock link forwarder (examples/mock_link_forwarder.rs; blind UDP, §5)
+owner driver (src/sdk/examples/coordination_owner/main.rs; a real medulla-link endpoint)
+  → mock link forwarder (src/sdk/examples/mock_link_forwarder.rs; blind UDP, §5)
     → medulla daemon (real binary, `--providers <harness>`, the host end)
       → the real coding CLI (spawned by the daemon as its provider)
         → mock LLM (e2e/coordination/mock_llm.py)

@@ -100,8 +100,8 @@ Beside the trait sit three supporting modules:
 
 `runtime::headless::drive_once` attaches a runtime, submits exactly one
 instruction, streams the folded events to a writer as NDJSON, and returns once
-the cycle result lands. It is generic over `Runtime`, so it works against the
-embedded core in production and against the mock in tests.
+the cycle result lands. It is generic over `Runtime`, so it works against
+`cloud` in production and against the mock in tests.
 
 ```rust
 use std::sync::Arc;

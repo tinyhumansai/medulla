@@ -11,7 +11,7 @@ belongs to one account. There are two levels:
   * Default: `~/.medulla`.
   * Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the root becomes `./.medulla` (relative to the cwd; gitignored).
   * Explicit: `MEDULLA_HOME=<path>` overrides both.
-* The **home** is `<root>/<account id>`, where config, state, logs, workflows, and the core's own workspace live.
+* The **home** is `<root>/<account id>`, where config, state, logs, and workflows live.
 
 The active account is recorded in `<root>/active_user.toml`, written by
 [`medulla login`](authentication.md). Before anyone signs in the account is

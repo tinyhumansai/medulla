@@ -301,7 +301,48 @@ executing it.
 
 `medulla workflow mcp` is not for a human to run. It is the command Medulla
 attaches to an ACP session so the harness on the other end can author workflows
-itself.
+itself. `medulla mcp` (no `workflow`) is the same server unrestricted to every
+tool family Medulla exposes, scoped by whatever grant the caller was handed.
+
+## `medulla skills`
+
+Put harness-native skills that trigger saved [workflows](../features/workflows.md)
+on disk, so an everyday Claude Code or Codex session run outside Medulla can
+still discover and start one:
+
+```sh
+medulla skills list                    # the managed skills currently on disk
+medulla skills install                 # write skills for every enabled workflow
+medulla skills sync                    # reconcile disk with the current workflow set
+medulla skills sync --prune            # additionally remove skills for workflows that are gone
+medulla skills uninstall <id...>       # remove skills for named workflows
+medulla skills uninstall --all         # remove every managed skill
+```
+
+With no verb it lists. `install`/`add` and `sync`/`refresh` take zero or more
+workflow ids (all enabled workflows when none are named); `uninstall`/`remove`/`rm`
+needs either explicit ids or `--all`.
+
+| Flag | Effect |
+| --- | --- |
+| `--harness <a,b>` | Restrict to `claude`, `codex`, `generic`, or `all` (repeatable and comma-joined; default: harnesses already set up). |
+| `--scope <user\|project\|managed>` | Install into `$HOME`, into this checkout, or into Medulla's own root that spawned harnesses are pointed at (default: `user`). |
+| `--dir <path>` | Explicit root, overriding `--scope`. |
+| `--with-mcp` | Also register `medulla mcp` with each harness. |
+| `--with-commands` | Also write the slash-command variant. |
+| `--tools <run\|full>` | Tool surface a skill-triggered session gets (default: `run`). |
+| `--prune` | Remove skills for workflows that no longer exist (`sync`, with no ids). |
+| `--all` | Remove every managed skill (`uninstall`, instead of naming ids). |
+| `--dry-run` | Report what would change and write nothing. |
+| `--json` | Emit JSON instead of the human summary. |
+
+Unlike the rest of the CLI, an unrecognised flag or a bad value here is a hard
+error rather than a silently ignored token: every flag decides where files get
+written, so a dropped `--dir` would retarget the whole operation at `$HOME`
+while still reporting success. `--prune` combined with explicit workflow ids is
+refused for the same reason — pruning decides what to remove by looking at
+every workflow, so restricting it to named ids would delete the skills for
+every workflow not named.
 
 ## `medulla init`
 

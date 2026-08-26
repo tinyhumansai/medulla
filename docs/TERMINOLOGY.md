@@ -222,9 +222,14 @@ with `medulla init` and registered with `medulla workspace add`.
 ## Provider
 
 A coding-assistant CLI: the same axis as an agent's **harness** type, seen from
-the process end. The three supported providers are `claude` (Claude Code),
+the process end. The three coding-CLI providers are `claude` (Claude Code),
 `codex` (OpenAI Codex), and `opencode`. The daemon spawns the CLI as a subprocess
 and communicates over ACP or legacy JSONL.
+
+Two more providers sit outside that coding-CLI set: `openhuman`, the in-process
+harness that runs an agent turn inside the `medulla` process instead of
+spawning one (see **Harness** above), and `shell`, a plain interactive shell
+that is never dispatchable or auto-detected.
 
 A provider is chosen together with a **transport**, and the pair is named by one
 word, a **flavor**. `codex` is Codex on its CLI; `codex-server` is the same

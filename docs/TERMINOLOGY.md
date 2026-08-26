@@ -99,6 +99,13 @@ wants work done, the **hub** delivers a `TaskRequest` (carrying a `task_id`,
 **worker** and collects the `TaskOutcome`. It is the outbound half of the
 daemon's task loop.
 
+The hub also carries the **workflow plane** (`src/sdk/src/hub/plane/`): the wire
+contract with the Medulla orchestration backend for saved workflow graphs —
+Socket.IO shapes and `medulla:*` event names (`payloads.rs`) — and the
+store-side `WorkflowBridge` trait (`bridge.rs`) an embedding host installs to
+answer them. It used to be re-exported from the embedded OpenHuman core; with
+that core removed, Medulla is the only host left that speaks it.
+
 ## Cycle
 
 One orchestrator turn: **user input → reasoning → tool calls → reply**. A cycle

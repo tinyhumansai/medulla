@@ -28,7 +28,7 @@ The [product overview](../) is the high-level story; these pages are the hands-o
 | [Attribution and Routing](attribution-and-routing.md) | The loopback proxy that rewrites OpenRouter attribution and keeps the provider key out of the harness. |
 | [Host Link Protocol](host-link-protocol.md) | The normative `medulla-link/1` wire specification, its forwarder rules, and its conformance tests. |
 | [Testing](testing.md) | Where tests live, the shared stand-ins, the offline and live suites, and the coverage gate. |
-| [Vendoring](vendoring.md) | The OpenHuman submodule, the patch table, and the rules a source build depends on. |
+| [Vendoring](vendoring.md) | The three vendored crates, the patch table, and the rules a source build depends on. |
 | [Contributing](contributing.md) | Build, test, lint, coverage, and the release process. |
 
 ## Install and run

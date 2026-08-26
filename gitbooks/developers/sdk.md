@@ -201,6 +201,7 @@ of truth. `lib.rs` defines the public surface.
 
 | Module | Responsibility |
 | --- | --- |
+| [`agent/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agent/) | Medulla's own local agent: a `tinyagents` harness, a tool surface (`fs`, `shell`, and the guard around them), and one turn driver. What the `openhuman` harness id runs on. |
 | [`agents/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agents/) | Where agent templates come from: the built-in coding catalog, the on-disk `.medulla/agents/*.toml` store that supersedes it, and the installer between them. |
 | [`attribution/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/attribution/) | Git commit attribution: the `Co-authored-by` trailer and the hook shims that carry it without disabling a repository's own hooks. |
 | [`auth/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/auth/) | An RFC 8252 loopback OAuth flow against the backend, plus the pure URL and query helpers the CLI and tests share. |

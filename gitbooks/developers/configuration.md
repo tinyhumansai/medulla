@@ -77,7 +77,7 @@ has no config for them.
 | `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. |
 | `fleet` | The declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog. |
 | `router` | A custom OpenAI-compatible router the daemon spawns harnesses against. Absent leaves every harness unrouted. |
-| `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the embedded OpenHuman core. |
+| `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the in-process local (`openhuman`) harness. |
 | `budget` | Operator-declared per-provider budgets. Absent leaves every harness advertising an estimate. |
 | `onboarding` | Welcome-flow completion state. |
 | `update` | `check = true`/`false` for the background release check. `MEDULLA_NO_UPDATE_CHECK` is the env kill-switch. |

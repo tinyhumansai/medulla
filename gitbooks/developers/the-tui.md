@@ -181,6 +181,14 @@ Most of it is recognised from what the harness paints, in order of specificity:
 5. **The terminal bell** — the universal fallback, in case a prompt is worded
    differently or not recognised.
 
+A sixth signal does not come from the screen at all: Claude Code raises a
+`Notification` lifecycle hook when it stops on a tool-use approval, an MCP
+elicitation form, or a background agent waiting on you, and Medulla treats a
+`Notification` in that harness's hook log as a wait. The screen scraper still
+wins when it can name something more specific; the hook is the fallback that
+catches a stop the screen paints nothing recognisable for. Codex never reports
+it, so this cue is Claude's alone.
+
 Two states cannot be read off a screen at all, and are taken from the session
 itself. A harness that **died** leaves its terminal frozen on whatever it last
 painted, which is often an ordinary composer — the row now goes red and says

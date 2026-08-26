@@ -25,10 +25,10 @@ rejected as unknown subcommands.
 ## The TUI
 
 A [ratatui](https://ratatui.rs/) terminal UI over the SDK: chat with the
-orchestrator and watch agent lanes, traces, and context live. It runs on an
-OpenHuman core embedded in the same process, so there is no server to start and
-no socket to attach to. See [Runtimes](configuration.md#runtimes) for what happens
-when nobody is signed in, and
+orchestrator and watch agent lanes, traces, and context live. It drives the
+Medulla backend directly over the network — there is no embedded core process
+to boot and no socket to attach to. See [Runtimes](configuration.md#runtimes)
+for what happens when nobody is signed in, and
 [Upgrading from the external core socket](configuration.md#upgrading-from-the-external-core-socket)
 if you are coming from a version that used `--core-socket`.
 

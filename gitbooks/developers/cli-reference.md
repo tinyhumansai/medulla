@@ -45,6 +45,27 @@ Feedback, and Settings. Workflows is present only in a build with the default
 `workflows` feature. See [The TUI](the-tui.md#the-tabs) for what each one holds and for the
 surfaces that are not in the tab bar of this build.
 
+### Slash commands
+
+Typed into the composer, `/` opens a peek of matching commands as you type; an
+exact match keeps showing its description until you press Enter.
+
+| Command | Description |
+| --- | --- |
+| `/new` | Open a new thread beside this one |
+| `/resume` | Pick up an earlier saved session |
+| `/session [harness] [path]` (alias `/harness`) | Start a local session |
+| `/abort` | Stop the running cycle |
+| `/clear` | Reset the view (history is kept) |
+| `/copy [all\|last]` | Copy the transcript to the clipboard |
+| `/usage` | Show account token usage |
+| `/settings` (alias `/theme`) | Open the appearance settings |
+| `/config` | Show the loaded configuration |
+| `/feedback` (alias `/fb`) | Open the feedback board |
+| `/mouse` | Toggle mouse capture (off to select text) |
+| `/help` | List the commands and keys |
+| `/quit` (aliases `/exit`, `/q`) | Exit medulla |
+
 ## `medulla run`
 
 A headless, scriptable path to a single instruction, and the one to drive from CI

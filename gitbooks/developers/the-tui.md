@@ -1,9 +1,10 @@
 # The TUI
 
 `medulla` with no arguments starts the terminal app: a [ratatui](https://ratatui.rs/)
-interface over an OpenHuman core embedded in the same process. There is no
-server to start and no socket to attach to. With nobody signed in it opens a
-login screen; `medulla --mock` skips straight to the offline demo runtime.
+interface driven by `CloudRuntime`, which talks straight to the Medulla
+backend over HTTP. There is no server to start and no socket to attach to. With
+nobody signed in it opens a login screen; `medulla --mock` skips straight to
+the offline demo runtime.
 
 ## The tabs
 

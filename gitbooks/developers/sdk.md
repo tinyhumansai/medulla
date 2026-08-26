@@ -212,7 +212,6 @@ of truth. `lib.rs` defines the public surface.
 | [`codex_overrides/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/codex_overrides/) | Codex `-c` config overrides that make a routed Codex run reach a non-OpenAI model. |
 | [`config/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/config/) | The `medulla.tui.json`-compatible config the TUI reads, plus the `backend` section. Permissive: missing fields take defaults, unknown fields are ignored. |
 | [`control_socket/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/control_socket/) | The local control socket a spawned harness reaches, and the grant tokens that scope it. |
-| [`core_host/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/core_host/) | Booting the embedded OpenHuman core in this process. |
 | [`daemon/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/daemon/) | The headless `medulla daemon`: offering this machine's coding-agent CLIs as an addressable agent, over plain prompts and the `medulla-task/1` protocol. |
 | [`flow_engine/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/) | The adapter seam between Medulla and the `tinyflows` workflow engine (`workflows` feature). |
 | [`harness_contract/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/) | The public agent-harness wire-contract types. See [Harness integration](harness-integration.md#the-wire-contract). |

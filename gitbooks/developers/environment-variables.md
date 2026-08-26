@@ -159,7 +159,7 @@ readable.
 
 | Variable | Status |
 | --- | --- |
-| `MEDULLA_CORE_SOCKET` | Named the external `medulla-serve` NDJSON socket before the core was embedded. `medulla run` rejects the matching `--core-socket` flag with that explanation, and a `[core]` config section is inert. |
+| `MEDULLA_CORE_SOCKET` | Named the external `medulla-serve` NDJSON socket, back when the runtime was reached over one. There is no such socket now — the client drives the backend over HTTP. `medulla run` rejects the matching `--core-socket` flag, and a `[core]` config section is inert. |
 | `TINYPLACE_*` | The deprecated spelling of the harness knobs above. Still read, directly behind the `MEDULLA_*` name in each tier. |
 
 ## What an agent turn cannot see

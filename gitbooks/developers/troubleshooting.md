@@ -79,26 +79,39 @@ peers, and bounds each connection with a 5 s read timeout and an 8 KiB buffer.
 
 ### The TUI opens a login screen even though `medulla login` said it worked
 
-The embedded core holds the only session. If the core cannot store or read it,
-the TUI has nothing to start on. Older installs kept a separate
-`credentials.json` beside the core's store, which could report success while the
-core stayed signed out; `login` and `logout` now delete any such file left
-behind.
+Something outranks the stored session, or the session was stored somewhere this
+process does not read. The credential chain is inline `backend.token`, then
+`backend.tokenEnv` (default `MEDULLA_TOKEN`), then `<home>/session.json` — and
+`medulla login` now refuses to store a session underneath one of the first two
+rather than saving one nothing would read, so a login that reports this is
+telling you which source to remove.
+
+A stored session is also scoped to the deployment that issued it: it records its
+own `baseUrl` and is only offered to a `backend.baseUrl` with a matching origin.
+If you have repointed the config at a different deployment, sign in again against
+that one.
+
+Older installs kept a separate `credentials.json` beside the runtime's store,
+which could report success while the runtime stayed signed out; `login` and
+`logout` now delete any such file left behind.
 
 Check which account you are on. The active account is recorded in
 `<root>/active_user.toml`, and `MEDULLA_USER=<id>` selects a different one for a
 single process ahead of that marker. `MEDULLA_USER=local` reaches the pre-login
 home. See [Medulla home](configuration.md#medulla-home).
 
-### A core with no backend stops instead of offering a login screen
+### No backend configured: it stops instead of offering a login screen
 
-A core that cannot reach Medulla at all (no backend URL configured, or the
-surface compiled out) reports that error rather than opening a login screen that
-could not fix it. Check `backend.baseUrl` in the config, or `MEDULLA_API_URL`,
-and whether `MEDULLA_STAGING` is pointing you somewhere you did not intend.
+Readiness is three states, not two, because a host answers each differently: run,
+sign in, or stop. Reachable but signed out opens the login flow. No backend URL
+at all reports that error instead, because a login screen cannot fix a missing
+base URL. Check `backend.baseUrl` in the config, or `MEDULLA_API_URL`, and
+whether `MEDULLA_STAGING` is pointing you somewhere you did not intend.
 
 To get a working interface with no backend at all, ask for the mock runtime:
-`medulla --mock`, or press `m` on the login screen.
+`medulla --mock`. The login screen deliberately does not offer it — a failed
+sign-in should not quietly land you in a scripted demo you might mistake for the
+product.
 
 ## Hosting and the daemon
 

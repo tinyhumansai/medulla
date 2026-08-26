@@ -94,11 +94,11 @@ Add the SDK as a git dependency (the repo vendors its path deps, so no extra set
 medulla = { git = "https://github.com/tinyhumansai/medulla-src", tag = "v0.3.0" }
 ```
 
-The [`medulla` SDK crate](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is a UI-free logic library: the HTTP/SSE client for the backend API, the runtime adapters over the embedded core, sessions, workflows, and the host-link integration. See [Architecture](architecture.md) for how the pieces fit together.
+The [`medulla` SDK crate](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is a UI-free logic library: the HTTP/SSE client for the backend API, the runtime adapters over it, the in-process agent loop, sessions, workflows, and the host-link integration. See [Architecture](architecture.md) for how the pieces fit together.
 
 ## Platform support
 
-Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64) all build and ship prebuilt binaries. The [daemon's](cli-reference.md#medulla-daemon) provider-spawn paths and the [harness wrappers](cli-reference.md#harness-wrappers) are unix-only. The interactive TUI, `medulla run`, and `medulla update` work everywhere, since the core is embedded rather than reached over a Unix socket.
+Linux (x86\_64, aarch64), macOS (Apple Silicon), and Windows (x86\_64) all build and ship prebuilt binaries. The [daemon's](cli-reference.md#medulla-daemon) provider-spawn paths and the [harness wrappers](cli-reference.md#harness-wrappers) are unix-only. The interactive TUI, `medulla run`, and `medulla update` work everywhere: they drive the backend over HTTP rather than attaching to a Unix socket.
 
 ### The Linux glibc floor
 

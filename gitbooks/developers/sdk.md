@@ -216,6 +216,7 @@ of truth. `lib.rs` defines the public surface.
 | [`flow_engine/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/) | The adapter seam between Medulla and the `tinyflows` workflow engine (`workflows` feature). |
 | [`harness_contract/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/) | The public agent-harness wire-contract types. See [Harness integration](harness-integration.md#the-wire-contract). |
 | [`harness_hooks/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_hooks/) | The hooks Medulla installs into a launched harness, and the launch policy around them. |
+| [`harness_transcript/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_transcript/) | What a harness actually said while it served one task, kept for replay. |
 | [`harness_work/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_work/) | What a coding-agent harness is working on, in one vocabulary. |
 | [`history_upload/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/history_upload/) | Sharing local coding-agent history to earn onboarding credit. |
 | [`home/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/home/) | The Medulla home directory and the early `.env` loader. |

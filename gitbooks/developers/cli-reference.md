@@ -33,7 +33,7 @@ orchestrator and watch agent lanes, traces, and context live. It drives the
 Medulla backend directly over the network — there is no embedded core process
 to boot and no socket to attach to. See [Runtimes](configuration.md#runtimes)
 for what happens when nobody is signed in, and
-[Upgrading from the external core socket](configuration.md#upgrading-from-the-external-core-socket)
+[The retired `--core-socket` flag](configuration.md#the-retired---core-socket-flag)
 if you are coming from a version that used `--core-socket`.
 
 TUI flags:

@@ -1,110 +1,77 @@
 # Vendored dependencies
 
-Some upstream crates are consumed as git submodules under `vendor/` rather than
-from crates.io. The workspace `exclude = ["vendor"]` keeps them out of `members`,
-so they carry their own lints and tests instead of joining this repository's CI
-gates.
+Three upstream crates are consumed as git submodules under `vendor/` rather than
+from crates.io. The workspace `exclude = ["vendor", "worktrees"]` keeps them out
+of `members`, so they carry their own lints and tests instead of joining this
+repository's CI gates.
 
 | Submodule | Upstream | Consumed as |
 | --- | --- | --- |
-| `vendor/tinyplace` | `tinyhumansai/tiny.place` | path dependency |
-| `vendor/tinycortex` | `tinyhumansai/tinycortex` | path dependency |
-| `vendor/tinyflows` | `tinyhumansai/tinyflows` | registry coordinate + `[patch.crates-io]` |
+| `vendor/tinyagents` | `tinyhumansai/tinyagents` | registry coordinate `2.1` + `[patch.crates-io]` |
+| `vendor/tinyflows` | `tinyhumansai/tinyflows` | registry coordinate `0.8` + `[patch.crates-io]` |
+| `vendor/tinyhumans-sdk` | `tinyhumansai/sdk` | path dependency (no registry coordinate) |
 
-Initialize everything with:
+Initialize with:
 
 ```sh
-git submodule update --init --recursive
+bash scripts/init-submodules.sh
 ```
 
-## tinyflows
+not `git submodule update --init --recursive`. `vendor/tinyagents` carries a
+`wiki` documentation submodule that nothing here compiles, and `--recursive`
+descends unconditionally. The script is also the one place the vendored set is
+written down, and must stay in lockstep with the root manifest's
+`[patch.crates-io]` table.
 
-`tinyflows` is the DAG workflow engine behind the `workflows` feature. It is
-declared in the root `Cargo.toml` as a *registry* dependency and redirected to
-the submodule:
+All three submodules are self-contained: none declares a path or git dependency
+of its own, and none carries code submodules of its own. `.gitmodules` uses
+HTTPS URLs so CI clones them without a deploy key.
 
-```toml
-[workspace.dependencies]
-tinyflows = { version = "0.5", features = ["mock"] }
+## What each one is for
 
-[patch.crates-io]
-tinyflows = { path = "vendor/tinyflows" }
-```
+`tinyagents` is the agent harness — the bounded model/tool loop that
+`src/sdk/src/daemon/providers/local/` runs in-process for the `openhuman`
+harness provider, replacing what used to be an `inference_agent_chat` RPC into
+the embedded core. The `sqlite` feature brings `tinyagents::session`, the durable
+store behind `src/sdk/src/agent/history/`; `tools` brings the builtin tool family
+the loop dispatches. Neither is on by default in the crate.
 
-This is the same shape the sibling `openhuman` host uses. The indirection exists
-because crates.io lags the branch we track (the published maximum is `0.3.0`
-while the pinned tree reports `0.5.1`), so a plain registry dependency would not
-resolve to the code we build against. Keeping the registry coordinate (rather
-than a bare path dependency) means the two hosts share one pin and one upgrade
-cadence.
+`tinyflows` is the DAG workflow engine behind the SDK's `flows` feature, reached
+through the adapter seam in `src/sdk/src/flow_engine/`. Its `mock` feature is a
+normal dependency feature rather than a dev-only one: the authoring surface
+dry-runs graphs against the engine's deterministic capability stand-ins in
+ordinary builds, not just in tests. `host-caps` and `store` supply the host
+capability set and the graph store.
 
-**Pinned commit:** `fb24363aea921f957958bc8f4aeb5b0a244e41c7` (`v0.3.0-37-gfb24363`),
-matching `openhuman`.
+`tinyhumans-sdk` is the shared TinyHumans HTTP transport (`TinyHumansClient`)
+that `src/sdk/src/client/` builds the typed Medulla surface on: auth, durable
+sessions, SSE event streaming, one-shot orchestration, and the public feedback
+board. It owns credential headers, the `{success, data}` envelope, and path
+percent-encoding.
 
-The `mock` feature is a normal dependency feature, not a dev-only one: the
-authoring surface dry-runs graphs against the engine's deterministic capability
-stand-ins in ordinary builds, not just in tests.
-
-### One `tinyagents`, and the patch entry is mandatory
-
-The graph must resolve exactly one `tinyagents`, and it must come from the
-vendored tree. OpenHuman's `vendor/tinycortex` requires `tinyagents = "2.1"`, so
-sourcing `tinycortex` from there collapses the graph to a single `tinyagents`,
-and the root `[patch.crates-io]` entry for `tinyagents` is **mandatory**.
-Omitting it does not fail loudly: `tinyagents 2.1.0` is published on crates.io,
-so the build silently resolves the registry copy instead of the vendored tree
-(~14 commits ahead).
-
-Verify with `cargo tree -i tinyagents`: the source must read `path+file://…`,
-never `registry+…`. `cargo tree -d` must report no duplicate `tiny*`.
-
-## Vendored OpenHuman core
-
-`vendor/openhuman` carries the OpenHuman core that medulla embeds. Several rules
-about it are load-bearing and easy to get wrong.
-
-Initialize it with `scripts/init-submodules.sh`, never with `--recursive`.
-`vendor/openhuman` has submodules of its own, two of which belong to the
-OpenHuman *desktop* app, including a Tauri fork that bundles CEF. `--recursive`
-clones both, and nothing in medulla's graph references either (the Cargo
-workspace excludes `vendor/`, so `app/src-tauri` is not a member). A git
-dependency would not help: Cargo updates git-dependency submodules recursively
-with no opt-out, which makes the CEF clone mandatory. The submodule plus an
-explicit init list is the only way to avoid it.
-
-The root `[patch.crates-io]` table is load-bearing. `[patch.crates-io]`
-applies only from the workspace root, so once OpenHuman is a path dependency
-*its* patch table is ignored, as is
-`vendor/openhuman/vendor/tinycortex/.cargo/config.toml`, which is CWD-scoped.
-This workspace's root manifest must therefore reproduce OpenHuman's entire table
-with paths rewritten to `vendor/openhuman/vendor/*`. Drop an entry and Cargo
-quietly resolves the published crate instead of the vendored tree.
+## One declaration style per crate
 
 Declare each vendored crate exactly one way: either as a direct path dependency
-or as a registry coordinate redirected by the patch table, and never both for the
-same crate. Mixing the two styles yields two `PackageId`s for one crate and an
-`E0308` where the types look identical, the first time a value crosses the
-medulla↔OpenHuman seam. Guard with `cargo tree -d`, which must report no
-duplicate `tiny*`.
+or as a registry coordinate redirected by the patch table, never both. Mixing the
+two yields two `PackageId`s for one crate and an `E0308` where the types look
+identical, the first time a value crosses the seam. `tinyhumans-sdk` is a path
+dependency because it has no registry coordinate to patch.
 
-When the two repos disagree on a shared pin, the newer pin wins and the bump
-lands in OpenHuman. Adopting an older OpenHuman pin wholesale is a hard compile
-break (for example, a `tinyplace` ancestor missing `signal::maintain`, which
-`src/sdk/src/daemon/transport/mod.rs` calls), so advance the pin *in OpenHuman*
-and let this gitlink follow rather than patching around it here.
+`[patch.crates-io]` applies only from the workspace root:
 
-OpenHuman must never depend on the `medulla` crate. Its default-ON
-`medulla-local` feature currently has an empty dependency list. The day someone
-gives it a real edge, `medulla-public → openhuman → medulla` becomes a Cargo
-dependency cycle and a hard failure.
+```toml
+[patch.crates-io]
+tinyagents = { path = "vendor/tinyagents" }
+tinyflows  = { path = "vendor/tinyflows" }
+```
 
-Coverage excludes the vendored tree. `vendor/` path deps are *local*
-packages under the workspace root, so `cargo-llvm-cov`'s default registry filter
-does not drop them; the gate's `--ignore-filename-regex` starts with
-`(^|/)vendor/` for that reason. Removing it sinks the 95% gate to roughly the
-first-party share of a very large tree.
+Dropping an entry does not fail loudly. Both crates are published, so Cargo
+silently resolves the registry copy instead of the vendored tree.
 
-### Updating the pin
+Verify with `cargo tree -i tinyagents` — the source must read `path+file://…`,
+never `registry+…` — and `cargo tree -d`, which must report no duplicate `tiny*`.
+
+## Updating a pin
 
 ```sh
 cd vendor/tinyflows
@@ -115,7 +82,27 @@ cargo build            # confirm the adapter seam still compiles
 cargo test
 ```
 
-Then update the pinned commit recorded above and commit the gitlink. Because
-`tinyflows` is pre-1.0 and still changing its `engine` entry points, expect the
-adapter seam in `src/sdk/src/tinyflows/` to need attention on an update; the rest
-of the SDK should not.
+Then commit the gitlink. Because `tinyflows` is pre-1.0 and still changing its
+`engine` entry points, expect `src/sdk/src/flow_engine/` to need attention on an
+update; the rest of the SDK should not.
+
+## Coverage
+
+Coverage excludes the vendored tree. `vendor/` path dependencies are local
+packages under the workspace root, so `cargo-llvm-cov`'s default registry filter
+does not drop them; the gate's `--ignore-filename-regex` starts with
+`(^|/)vendor/` for that reason.
+
+## History
+
+Until v0.11.0 the runtime was an embedded OpenHuman core vendored at
+`vendor/openhuman`. It carried sixteen submodules of its own — two belonging to
+the OpenHuman desktop app, including a Tauri fork bundling CEF — and because
+`[patch.crates-io]` applies only from the workspace root, this manifest had to
+reproduce that core's entire patch table rebased onto `vendor/openhuman/vendor/*`:
+ten entries, eight of them pinning a crate nothing here linked directly, each one
+silently resolving to a published crate if dropped. `scripts/init-submodules.sh`
+had to enumerate the same set by hand because Cargo reported one missing entry
+per resolution failure, costing a CI round trip each. Removing the core removed
+that whole class of failure; what is left is the three self-contained crates
+above.

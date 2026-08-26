@@ -98,11 +98,11 @@ failing the task, while surfacing every other failure immediately.
 ## Runtime selection
 
 Separately from model routing, the terminal app picks how it talks to an
-orchestrator at all, and reports in the status line why. It runs on an OpenHuman
-core embedded in the same process, so there is no server to reach and nothing to
-attach to. `--mock` selects a scripted offline runtime instead, and a core that
-boots with nobody signed in takes that same offline runtime rather than pretending
-to be live.
+orchestrator at all, and reports in the status line why. By default it drives the
+Medulla backend directly over the network, with no embedded core and no socket
+in between. `--mock` selects a scripted offline runtime instead, and a host with
+no backend configured or nobody signed in takes that same offline runtime rather
+than pretending to be live.
 
 [Configuration](../developers/configuration.md#runtimes) covers the selection
 rules and their edge cases.

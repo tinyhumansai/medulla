@@ -70,15 +70,22 @@ has no config for them.
 | --- | --- |
 | `backend` | The orchestration backend: base URL, token, and token env var name. |
 | `host` | Whether this device also runs the work it orchestrates, and the workspace and roots it advertises. |
+| `hosts` | Additional hosts on this same machine, each with its own working directory, device-local address, and agent registration. Additive: `host` keeps its meaning; a config with no `[[hosts]]` behaves exactly as before. |
 | `link` | Host-link identity, forwarder, and the peer roster for the daemon and the Overview panel. |
 | `hub` | The persisted worker roster and the selected default worker, so a fleet survives a restart. |
 | `stateDir` | Where local state is written. Default `<home>/state`; `MEDULLA_STATE_DIR` overrides. |
 | `opencode` | Worker display, model, agent, workspace, and concurrency for the OpenCode provider. |
-| `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. |
+| `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. Despite the name, unrelated to authored workflows — see `workflows` below. |
+| `workflows` | What authored workflows may do when they run: whether they may be listed and run at all, the default worker and harness/model hints a bare `agent` node dispatches to, and whether `code` nodes may execute (this host has no sandbox, so that grants a workflow author the daemon's own privileges). |
 | `fleet` | The declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog. |
+| `harness` | How harnesses the *operator* starts by hand behave: whether they launch with permissions bypassed (off by default, unlike a hosted task), and the manual launcher's recent/favorite workspace shortcuts. |
+| `attribution` | Whether commits made by a Medulla-launched harness carry the `Co-authored-by: Medulla` trailer. On by default. |
+| `hookDefaults` | Whether Medulla installs its own lifecycle reporting hooks into the harnesses it launches, alongside any operator-declared `[[hooks]]`. On by default. |
 | `router` | A custom OpenAI-compatible router the daemon spawns harnesses against. Absent leaves every harness unrouted. |
 | `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the in-process local (`openhuman`) harness. |
 | `budget` | Operator-declared per-provider budgets. Absent leaves every harness advertising an estimate. |
+| `routingStrategy` | The operator's persisted worker routing preference (`manual`, `balanced`, `cpuFirst`, `memoryFirst`) for choosing a host. Absent defaults to `manual` and is reconciled with the backend's own setting when present. |
+| `subscriptionRoutingStrategy` | How the orchestrator chooses among ready provider subscriptions after a host is selected (`manual`, `balanced`, `mostAvailableBudget`). Absent preserves the requested or host-default provider. |
 | `onboarding` | Welcome-flow completion state. |
 | `update` | `check = true`/`false` for the background release check. `MEDULLA_NO_UPDATE_CHECK` is the env kill-switch. |
 | `theme` | TUI colors: `primary`, `accent`, `selectionFg`, `dimBorder`, and `attention`, as [ratatui](https://ratatui.rs/) color names or `#rrggbb`. `attentionBlink` and `attentionBlinkSeconds` control whether and how quickly attention cues pulse. The Settings › Appearance subpage edits and persists these. |

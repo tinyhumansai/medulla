@@ -236,10 +236,11 @@ of truth. `lib.rs` defines the public surface.
 | [`workflows/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/) | Authored, durable, multi-step work: workflow definitions and their runs (`workflows` feature). |
 | [`wrapper/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/wrapper/) | The transparent harness wrapper behind `medulla codex`, `medulla claude`, and `medulla opencode`. |
 
-Three files sit at the top level beside them: `clock.rs` (wall-clock helpers),
-`persistence.rs` (shared atomic file persistence, crate-private), and
-`tokio_tuning.rs` (Tokio runtime tuning for any process that may host an agent
-turn).
+Four files sit at the top level beside them: `clock.rs` (wall-clock helpers),
+`harness_tools.rs` (whether a harness Medulla launches receives Medulla's own
+MCP tools), `persistence.rs` (shared atomic file persistence, crate-private),
+and `tokio_tuning.rs` (Tokio runtime tuning for any process that may host an
+agent turn).
 
 ## Read next
 

@@ -35,7 +35,7 @@ session minted on staging is never later verified against production.
 
 Under the home:
 
-* `workspace/` and `.openhuman/`: the embedded core's state and its config, including the app session `medulla login` stores.
+* `session.json`: the app session `medulla login` stores — the verified bearer, the account id, and the `baseUrl` that issued it. Owner-only (`0600`) on unix.
 * `config.toml`: the user-global config file.
 * `state/`: the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
 * `workflows/*.json`: your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.

@@ -48,10 +48,10 @@ another. A registered machine is also a host in the chain, so it appears on the
 default survives a restart.
 
 Fleet peer management and task steering require a runtime that exposes a worker
-surface, meaning the hosted backend wired to a live hub, or the local core
-runtime, covered in [Configuration](../developers/configuration.md#runtimes). Without one,
-worker management reports itself unavailable rather than silently mutating
-unrelated state.
+surface, meaning the hosted backend wired to a live hub — see
+[Configuration](../developers/configuration.md#runtimes). Without one, worker
+management reports itself unavailable rather than silently mutating unrelated
+state.
 
 ### Seeing the whole fleet
 
@@ -222,16 +222,11 @@ strip above the lane list shows them with their running-task and attention
 badges, `^↑↓` walks between them, and clicking one switches. `/resume` picks up
 an earlier session, and `/abort` stops the running cycle.
 
-Against a local orchestration server this is single-threaded by construction,
-because that wire is one session per connection, so `/new` clears the view rather
-than opening a second thread.
-
 ### What survives
 
-Sessions are durable, and how durable depends on how you run Medulla. Against the
-backend, sessions persist server-side, so history and the event record replay on
-reconnect and a live session streams over SSE. Against a local core runtime,
-session state is persisted on disk under the state directory.
+Sessions are durable. They persist server-side, so history and the event record
+replay on reconnect and a live session streams over SSE — a session was never
+local state, which is why the client fetches one rather than owning one.
 
 Medulla can also run detached from the terminal app, so an operation and its
 event log survive the TUI exiting or crashing. Reattaching picks the live session
@@ -276,6 +271,22 @@ cache share when the provider reports one. A reading that was never reported is
 omitted rather than drawn at zero, so an empty bar always means a real zero. The
 rail shows what is *running* and nothing else; the declared fleet lives on the
 Hosts tab. Under the transcript is the composer.
+
+Nothing caps how many sessions you keep open. Each one runs on its own
+pseudo-terminal with its own terminal-emulator state, maintained in the
+background whether or not it is the row you are looking at, so selecting a
+different row shows a screen that is already current rather than one that has to
+catch up. Background sessions paint; they just do not receive input.
+
+That is also why you do not have to watch them. Medulla reads every backgrounded
+session's own screen for the signals that mean it wants a human — a startup
+dialog, a permission prompt, a numbered menu or a bare `(y/n)`, a blocking error,
+a terminal bell, a session that has died, a turn that finished and is waiting on
+review, or a harness's own notification hook firing — and rolls them into one
+`⚠` on the row plus a count in the rail's title:
+`Sessions · 12 · 9 running · ⚠ 3 waiting on you`. A fleet you are not watching
+still tells you when it needs you, which is the part a terminal multiplexer
+cannot do for you.
 
 `Ctrl-T` opens a session from any row: pick what to start, pick a directory,
 and it is running. The list offers this machine's coding CLIs and any harness

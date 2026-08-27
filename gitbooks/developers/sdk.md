@@ -7,8 +7,8 @@ description: >-
 # The Rust SDK
 
 `medulla` is the library crate at [`src/sdk/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/): a UI-free logic
-library holding the backend HTTP and SSE client, the runtime adapters over the
-embedded OpenHuman core, the coding-agent daemon, sessions, workflows, the
+library holding the backend HTTP and SSE client, the runtime adapters over it,
+the in-process agent loop, the coding-agent daemon, sessions, workflows, the
 host-link integration, and the UI-facing data surface the terminal app renders.
 The `medulla-tui` crate consumes it; nothing in the SDK depends on the TUI.
 
@@ -37,8 +37,8 @@ The crate has one feature.
 `workflows::ops`. The `fleet_*` family beside it depends only on
 `control_socket`.
 
-The embedded OpenHuman core is not behind a feature. It is the runtime the SDK
-hosts, and a build without it would have nothing to offer but the offline mock.
+The `cloud` runtime is not behind a feature. It is the runtime the SDK hosts,
+and a build without it would have nothing to offer but the offline mock.
 
 ## The `Runtime` trait
 
@@ -64,19 +64,28 @@ Core methods:
 Two implementations ship, both under
 [`src/sdk/src/runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/):
 
-* `runtime::openhuman::OpenHumanRuntime` is what the product runs on. It wraps
-  the OpenHuman core booted in this process (`OpenHumanRuntime::new(core)`, or
-  `with_hub(core, hub)` when the outbound dispatch hub is wired in), so there is
-  no socket and no attach handshake.
+* [`runtime::cloud::CloudRuntime`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/)
+  is what the product runs on. It drives the orchestration API directly through
+  a [`MedullaClient`](#the-backend-client) (`CloudRuntime::new(client)`, or
+  `with_hub(client, hub)` when the outbound dispatch hub is wired in): HTTP for
+  submit/abort/new-session, and a polled event cursor — backing off between an
+  active 120 ms and an idle 1 s — for the live feed. There is no socket and no
+  attach handshake.
+  [`runtime::cloud::connect`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/connect/)
+  builds that client from config and the environment and reports whether it is
+  usable as `Readiness::Ready`, `Readiness::SignedOut`, or
+  `Readiness::Unusable(reason)`.
 * `runtime::mock::MockRuntime` is a scripted offline runtime for tests and demos.
   `MockRuntime::demo()` gives a populated snapshot (a roster, presence, a couple
   of turns, a completed delegated task); `MockRuntime::empty()` gives a bare one.
   It also exposes scripting seams: `script_event`, `set_workers`, `set_running`,
   `recorded_calls`, `recorded_handoffs`.
 
-Earlier versions carried an HTTP and SSE cloud-backend runtime and a
-`medulla-serve` unix-socket runtime. Both were removed once the core was
-embedded; the module docs in `lib.rs` still name them.
+`cloud` reclaims a name it already had. Before v0.11.0 an OpenHuman core was
+embedded in front of the transport, so every backend call became an RPC hop
+onto that core's own client — against the same deployment, with a second wire-
+type set and an error-string decode in the middle. Dropping the core removed
+the hop, not the transport.
 
 Beside the trait sit three supporting modules:
 
@@ -91,8 +100,8 @@ Beside the trait sit three supporting modules:
 
 `runtime::headless::drive_once` attaches a runtime, submits exactly one
 instruction, streams the folded events to a writer as NDJSON, and returns once
-the cycle result lands. It is generic over `Runtime`, so it works against the
-embedded core in production and against the mock in tests.
+the cycle result lands. It is generic over `Runtime`, so it works against
+`cloud` in production and against the mock in tests.
 
 ```rust
 use std::sync::Arc;
@@ -192,6 +201,7 @@ of truth. `lib.rs` defines the public surface.
 
 | Module | Responsibility |
 | --- | --- |
+| [`agent/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agent/) | Medulla's own local agent: a `tinyagents` harness, a tool surface (`fs`, `shell`, and the guard around them), and one turn driver. What the `openhuman` harness id runs on. |
 | [`agents/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agents/) | Where agent templates come from: the built-in coding catalog, the on-disk `.medulla/agents/*.toml` store that supersedes it, and the installer between them. |
 | [`attribution/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/attribution/) | Git commit attribution: the `Co-authored-by` trailer and the hook shims that carry it without disabling a repository's own hooks. |
 | [`auth/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/auth/) | An RFC 8252 loopback OAuth flow against the backend, plus the pure URL and query helpers the CLI and tests share. |
@@ -202,11 +212,11 @@ of truth. `lib.rs` defines the public surface.
 | [`codex_overrides/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/codex_overrides/) | Codex `-c` config overrides that make a routed Codex run reach a non-OpenAI model. |
 | [`config/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/config/) | The `medulla.tui.json`-compatible config the TUI reads, plus the `backend` section. Permissive: missing fields take defaults, unknown fields are ignored. |
 | [`control_socket/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/control_socket/) | The local control socket a spawned harness reaches, and the grant tokens that scope it. |
-| [`core_host/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/core_host/) | Booting the embedded OpenHuman core in this process. |
 | [`daemon/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/daemon/) | The headless `medulla daemon`: offering this machine's coding-agent CLIs as an addressable agent, over plain prompts and the `medulla-task/1` protocol. |
 | [`flow_engine/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/) | The adapter seam between Medulla and the `tinyflows` workflow engine (`workflows` feature). |
 | [`harness_contract/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/) | The public agent-harness wire-contract types. See [Harness integration](harness-integration.md#the-wire-contract). |
 | [`harness_hooks/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_hooks/) | The hooks Medulla installs into a launched harness, and the launch policy around them. |
+| [`harness_transcript/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_transcript/) | What a harness actually said while it served one task, kept for replay. |
 | [`harness_work/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_work/) | What a coding-agent harness is working on, in one vocabulary. |
 | [`history_upload/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/history_upload/) | Sharing local coding-agent history to earn onboarding credit. |
 | [`home/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/home/) | The Medulla home directory and the early `.env` loader. |
@@ -217,7 +227,7 @@ of truth. `lib.rs` defines the public surface.
 | [`mcp/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/mcp/) | Medulla's own MCP server, offered to the harnesses it spawns (`workflows` feature). |
 | [`onboarding/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/onboarding/) | First-run worker registration orchestration. |
 | [`protocol/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/protocol/) | Medulla's own wire protocol for the TUI and daemon, plus the centralized environment-variable resolution both share. |
-| [`runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/) | The `Runtime` trait, its snapshot contract, and the `openhuman` and `mock` implementations. |
+| [`runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/) | The `Runtime` trait, its snapshot contract, and the `cloud` and `mock` implementations. |
 | [`session_history/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/session_history/) | Recent-session history for local harness sessions. |
 | [`sessions/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/sessions/) | Interactive coding-agent session management: the two lifetime classes, the two turn-source drivers, and the machinery that runs them. |
 | [`ui/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/) | The UI-facing data surface: `events`, `agents` lane folding, `stream` derivations, `chat_store`, the `work` panel, and `util`. Rendering lives in `medulla-tui`. |
@@ -226,10 +236,11 @@ of truth. `lib.rs` defines the public surface.
 | [`workflows/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/) | Authored, durable, multi-step work: workflow definitions and their runs (`workflows` feature). |
 | [`wrapper/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/wrapper/) | The transparent harness wrapper behind `medulla codex`, `medulla claude`, and `medulla opencode`. |
 
-Three files sit at the top level beside them: `clock.rs` (wall-clock helpers),
-`persistence.rs` (shared atomic file persistence, crate-private), and
-`tokio_tuning.rs` (Tokio runtime tuning for any process that may host an agent
-turn).
+Four files sit at the top level beside them: `clock.rs` (wall-clock helpers),
+`harness_tools.rs` (whether a harness Medulla launches receives Medulla's own
+MCP tools), `persistence.rs` (shared atomic file persistence, crate-private),
+and `tokio_tuning.rs` (Tokio runtime tuning for any process that may host an
+agent turn).
 
 ## Read next
 

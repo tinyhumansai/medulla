@@ -46,6 +46,8 @@ that CLI:
 | Codex          | ACP over stdio                                                  |
 | `codex-server` | JSON-RPC over stdio to a shared, long-lived `codex app-server`  |
 | OpenCode       | ACP over stdio                                                  |
+| OpenHuman      | In-process: no binary spawned, no transport. The wire value is `HarnessProvider::Openhuman`; the agent turn runs inside the `medulla` process on the vendored `tinyagents` crate with Medulla's own tools (`src/sdk/src/daemon/providers/local/mod.rs`). Never auto-selected by provider detection — a node reaches it only by naming it. |
+| Shell          | None: a plain interactive shell (`bash`, `zsh`, whatever `$SHELL` names), not a coding agent. Never detected as an available provider and never dispatchable; it exists so an operator can open a terminal beside their agents in the same pane, host, and working directory. |
 
 `codex-server` is a **flavor** of Codex rather than a separate harness type: it
 authenticates, bills, and configures as Codex and differs only in that one
@@ -96,6 +98,13 @@ wants work done, the **hub** delivers a `TaskRequest` (carrying a `task_id`,
 `cycle_id`, `worker_address`, and optional `workflow` identifier) to the target
 **worker** and collects the `TaskOutcome`. It is the outbound half of the
 daemon's task loop.
+
+The hub also carries the **workflow plane** (`src/sdk/src/hub/plane/`): the wire
+contract with the Medulla orchestration backend for saved workflow graphs —
+Socket.IO shapes and `medulla:*` event names (`payloads.rs`) — and the
+store-side `WorkflowBridge` trait (`bridge.rs`) an embedding host installs to
+answer them. It used to be re-exported from the embedded OpenHuman core; with
+that core removed, Medulla is the only host left that speaks it.
 
 ## Cycle
 
@@ -220,9 +229,14 @@ with `medulla init` and registered with `medulla workspace add`.
 ## Provider
 
 A coding-assistant CLI: the same axis as an agent's **harness** type, seen from
-the process end. The three supported providers are `claude` (Claude Code),
+the process end. The three coding-CLI providers are `claude` (Claude Code),
 `codex` (OpenAI Codex), and `opencode`. The daemon spawns the CLI as a subprocess
 and communicates over ACP or legacy JSONL.
+
+Two more providers sit outside that coding-CLI set: `openhuman`, the in-process
+harness that runs an agent turn inside the `medulla` process instead of
+spawning one (see **Harness** above), and `shell`, a plain interactive shell
+that is never dispatchable or auto-detected.
 
 A provider is chosen together with a **transport**, and the pair is named by one
 word, a **flavor**. `codex` is Codex on its CLI; `codex-server` is the same

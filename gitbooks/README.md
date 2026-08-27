@@ -36,6 +36,16 @@ Medulla commands fleets of agent harnesses. Instead of driving [Claude Code](htt
 
 That differs from pointing a harness at other harnesses in two ways that matter. Every running harness streams its input back as it happens, so what the orchestrator knows about the fleet is current rather than assembled after the fact. And the orchestrator's own reasoning surface stays small, because the bulk of the fleet's output is distilled before it arrives instead of being read into one context window.
 
+## No tmux, no wrapper
+
+Running many agents at once has, until now, meant one of two workarounds. Split the terminal and manage the panes yourself, or wrap the harnesses in another agent and hope it can read everything they produce. Medulla replaces both.
+
+It is one process in one terminal. Opening another agent is `Ctrl-T`: pick a harness or a shell, pick a directory, and it is running. There is no ceiling on how many you keep open — each gets its own PTY and its own live terminal state, maintained in the background whether or not it is the one on screen. A rail lists every one of them; the pane beside it shows whichever you have selected, switching instantly because that session's screen was never stale.
+
+And you are not the one polling. Medulla reads every backgrounded session for the signals that mean it needs a human — a permission prompt, a startup dialog, a blocking error, a bell, a dead session, a finished turn awaiting review — and surfaces them as one mark per row and a count in the title: `⚠ 3 waiting on you`. `Ctrl-]` attaches your keyboard to a session and detaches it again; the rest keep running.
+
+A multiplexer gives you N panes and no opinion about them. Medulla gives you the one that needs you.
+
 ## Correctness first, by design
 
 Medulla is built around one principle: get the right answer. When a worker fails, it re-delegates. When results look thin, it verifies. When a task splits, it fans out rather than guessing. Every task settles into a definite state and every budget is enforced, so an operation too large to eyeball still finishes with an answer you can act on.

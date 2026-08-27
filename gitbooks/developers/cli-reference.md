@@ -13,6 +13,7 @@ the host link, and self-updating.
 | `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to your orchestrator. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run multi-step plans. |
+| `medulla skills <cmd>` | [Harness skills](#medulla-skills): put harness-native skills that trigger saved workflows on disk (`list` / `install` / `sync` / `uninstall`). |
 | `medulla init [dir]` | [Draft a MEDULLA.md](#medulla-init) workspace profile. |
 | `medulla workspace <cmd>` | [Workspace registry](#medulla-workspace): `add [dir]` / `list` / `remove <dir\|id>`. |
 | `medulla hub` | [Relay hosted-backend tasks](#medulla-hub) to configured host-link workers. |
@@ -20,16 +21,19 @@ the host link, and self-updating.
 | `medulla version` / `help` | Version string; usage. |
 
 Unknown first arguments are treated as arguments to the main TUI rather than
-rejected as unknown subcommands.
+rejected as unknown subcommands. Two further subcommands exist but are not for
+a human to type: `medulla mcp` serves Medulla's own tools over MCP on
+stdin/stdout, and `medulla hook <Event>` is the shim Medulla installs as every
+launched harness's own lifecycle hook. Medulla spawns both itself.
 
 ## The TUI
 
 A [ratatui](https://ratatui.rs/) terminal UI over the SDK: chat with the
-orchestrator and watch agent lanes, traces, and context live. It runs on an
-OpenHuman core embedded in the same process, so there is no server to start and
-no socket to attach to. See [Runtimes](configuration.md#runtimes) for what happens
-when nobody is signed in, and
-[Upgrading from the external core socket](configuration.md#upgrading-from-the-external-core-socket)
+orchestrator and watch agent lanes, traces, and context live. It drives the
+Medulla backend directly over the network — there is no embedded core process
+to boot and no socket to attach to. See [Runtimes](configuration.md#runtimes)
+for what happens when nobody is signed in, and
+[The retired `--core-socket` flag](configuration.md#the-retired---core-socket-flag)
 if you are coming from a version that used `--core-socket`.
 
 TUI flags:
@@ -45,11 +49,35 @@ Feedback, and Settings. Workflows is present only in a build with the default
 `workflows` feature. See [The TUI](the-tui.md#the-tabs) for what each one holds and for the
 surfaces that are not in the tab bar of this build.
 
+### Slash commands
+
+Typed into the composer, `/` opens a peek of matching commands as you type; an
+exact match keeps showing its description until you press Enter.
+
+| Command | Description |
+| --- | --- |
+| `/new` | Open a new thread beside this one |
+| `/resume` | Pick up an earlier saved session |
+| `/session [harness] [path]` (alias `/harness`) | Start a local session |
+| `/abort` | Stop the running cycle |
+| `/clear` | Reset the view (history is kept) |
+| `/copy [all\|last]` | Copy the transcript to the clipboard |
+| `/usage` | Show account token usage |
+| `/settings` (alias `/theme`) | Open the appearance settings |
+| `/config` | Show the loaded configuration |
+| `/feedback` (alias `/fb`) | Open the feedback board |
+| `/mouse` | Toggle mouse capture (off to select text) |
+| `/help` | List the commands and keys |
+| `/quit` (aliases `/exit`, `/q`) | Exit medulla |
+
 ## `medulla run`
 
 A headless, scriptable path to a single instruction, and the one to drive from CI
-or a container, since it needs no TTY. It boots the same embedded core the TUI
-uses, submits one instruction, and streams the folded cycle events to stdout as
+or a container, since it needs no TTY. It resolves the same layered config the
+TUI does, builds a client against the configured backend with the same token
+precedence every backend-facing surface shares (an inline `backend.token`, then
+`backend.tokenEnv`, then the stored `medulla login` session), submits one
+instruction, and streams the folded cycle events to stdout as
 newline-delimited JSON:
 
 ```sh
@@ -59,9 +87,15 @@ medulla run --config ./medulla.toml "..."
 
 Everything that is not a flag is joined into one instruction; with no instruction
 it errors. It emits each folded event as a JSON line and returns when the cycle
-ends. It binds the core's state directory, action directory, and endpoints from
-the resolved config before booting, so a scripted run pointed at `MEDULLA_HOME`
-reads and writes that home rather than the developer's real one.
+ends. Because the resolved config and the stored login session both come out of
+the operator's Medulla home, a scripted run pointed at `MEDULLA_HOME` reads and
+writes that home rather than the developer's real one. It fails immediately when
+there is nothing to sign in with (`not signed in — run medulla login, or set
+MEDULLA_TOKEN`).
+
+`--core-socket` used to point this at an external `medulla-serve` process; it is
+gone, and passing it is a hard error rather than being folded into the
+instruction text.
 
 | Flag | Effect |
 | --- | --- |
@@ -101,14 +135,11 @@ Daemon flags:
 | `--providers <a,b>` | Restrict the accepted harnesses (default: all found on `PATH`). |
 | `--default-provider <name>` | Choose the default harness among those available. |
 | `--workspace <dir>` | Set the primary task working directory (default: cwd). |
-| `--handle <name>` | Register an `@handle` on startup. |
 | `--name <label>` | Override the worker's advertised display name. |
 | `--model <name>` | Supply a default model hint passed to the harness. |
 | `--opencode-agent <name>` | Agent name for the OpenCode provider. |
-| `--skills <a,b>` | Extra skills to advertise. |
 | `--concurrency <n>` | Cap simultaneous executions. |
 | `--once` | Drain the current inbox once and exit (a probe). |
-| `--no-onboard` | Skip key publishing and directory registration. |
 | `--reonboard` | Replace the stored worker registration. |
 | `--no-pair` | Do not print the pairing block or copy the address. |
 | `--dangerously-skip-permissions` | Headless path: pass the provider's unsafe permission switch. |
@@ -140,7 +171,6 @@ one-line installer to paste into an SSH session on the machine you are adding.
 OSC 52 needs a terminal that accepts it: tmux wants `set -g set-clipboard on`,
 and some terminals disable it for security. The copy is also skipped when the
 daemon's output is piped. The address is printed on a line of its own either way.
-`--handle build-box` skips the copy entirely: type `@build-box` into Add Host.
 Pass `--no-pair` when the output is being parsed by a script.
 
 ## Harness wrappers
@@ -176,7 +206,7 @@ host configured before the rename keeps working:
 | `MEDULLA_HARNESS_RECEIVE_FROM` / `MEDULLA_<P>_RECEIVE_FROM` | Peer whose input control frames / plain DMs are injected (defaults to the owner). |
 | `MEDULLA_HARNESS_RECEIVE=0` / `MEDULLA_<P>_RECEIVE=0` | Disable inbound input injection. |
 | `MEDULLA_<P>_BIN` (`MEDULLA_CODEX_BIN`, `MEDULLA_CLAUDE_BIN`, `MEDULLA_OPENCODE_BIN`, `MEDULLA_OPENHUMAN_BIN`) | Override the provider binary. OpenHuman's bare `OPENHUMAN_BIN` predates the convention and is still read behind the namespaced pair. |
-| `MEDULLA_HARNESS_MODEL` / `MEDULLA_<P>_MODEL` | Override the model a turn runs on. Read today by the embedded OpenHuman harness (`MEDULLA_OPENHUMAN_MODEL`); see [Custom harness presets](configuration.md#custom-harness-presets) for the full precedence. |
+| `MEDULLA_HARNESS_MODEL` / `MEDULLA_<P>_MODEL` | Override the model a turn runs on. Read today by the in-process local harness (`MEDULLA_OPENHUMAN_MODEL`), which runs the turn on Medulla's own agent loop rather than a spawned CLI; see [Custom harness presets](configuration.md#custom-harness-presets) for the full precedence. |
 | `MEDULLA_<P>_SESSIONS_DIR` | Override the transcript directory the tailer watches. |
 
 If no owner is configured (and `--no-bridge` was not passed), the wrapper prints
@@ -270,7 +300,48 @@ executing it.
 
 `medulla workflow mcp` is not for a human to run. It is the command Medulla
 attaches to an ACP session so the harness on the other end can author workflows
-itself.
+itself. `medulla mcp` (no `workflow`) is the same server unrestricted to every
+tool family Medulla exposes, scoped by whatever grant the caller was handed.
+
+## `medulla skills`
+
+Put harness-native skills that trigger saved [workflows](../features/workflows.md)
+on disk, so an everyday Claude Code or Codex session run outside Medulla can
+still discover and start one:
+
+```sh
+medulla skills list                    # the managed skills currently on disk
+medulla skills install                 # write skills for every enabled workflow
+medulla skills sync                    # reconcile disk with the current workflow set
+medulla skills sync --prune            # additionally remove skills for workflows that are gone
+medulla skills uninstall <id...>       # remove skills for named workflows
+medulla skills uninstall --all         # remove every managed skill
+```
+
+With no verb it lists. `install`/`add` and `sync`/`refresh` take zero or more
+workflow ids (all enabled workflows when none are named); `uninstall`/`remove`/`rm`
+needs either explicit ids or `--all`.
+
+| Flag | Effect |
+| --- | --- |
+| `--harness <a,b>` | Restrict to `claude`, `codex`, `generic`, or `all` (repeatable and comma-joined; default: harnesses already set up). |
+| `--scope <user\|project\|managed>` | Install into `$HOME`, into this checkout, or into Medulla's own root that spawned harnesses are pointed at (default: `user`). |
+| `--dir <path>` | Explicit root, overriding `--scope`. |
+| `--with-mcp` | Also register `medulla mcp` with each harness. |
+| `--with-commands` | Also write the slash-command variant. |
+| `--tools <run\|full>` | Tool surface a skill-triggered session gets (default: `run`). |
+| `--prune` | Remove skills for workflows that no longer exist (`sync`, with no ids). |
+| `--all` | Remove every managed skill (`uninstall`, instead of naming ids). |
+| `--dry-run` | Report what would change and write nothing. |
+| `--json` | Emit JSON instead of the human summary. |
+
+Unlike the rest of the CLI, an unrecognised flag or a bad value here is a hard
+error rather than a silently ignored token: every flag decides where files get
+written, so a dropped `--dir` would retarget the whole operation at `$HOME`
+while still reporting success. `--prune` combined with explicit workflow ids is
+refused for the same reason — pruning decides what to remove by looking at
+every workflow, so restricting it to named ids would delete the skills for
+every workflow not named.
 
 ## `medulla init`
 

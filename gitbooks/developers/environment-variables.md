@@ -45,9 +45,9 @@ these can be set either way. Truthy values are `1` and `true`, case-insensitive.
 
 ## Harness selection and transport
 
-`<P>` is the uppercased provider: `CLAUDE`, `CODEX`, or `OPENCODE`. A
-per-provider key always beats the generic `MEDULLA_HARNESS_*` key, which beats
-the owner fallbacks and provider defaults. Within each tier the `MEDULLA_*` name
+`<P>` is the uppercased provider: `CLAUDE`, `CODEX`, `OPENCODE`, `OPENHUMAN`, or
+`SHELL`. A per-provider key always beats the generic `MEDULLA_HARNESS_*` key,
+which beats the owner fallbacks and provider defaults. Within each tier the `MEDULLA_*` name
 wins and the deprecated `TINYPLACE_*` spelling of the same name is read directly
 behind it, so hosts configured before the rename keep working.
 
@@ -55,7 +55,8 @@ behind it, so hosts configured before the rename keep working.
 | --- | --- | --- |
 | `MEDULLA_HARNESS_PROTOCOL` | `acp` makes the daemon talk to harnesses over the Agent Client Protocol instead of the legacy provider JSONL. | unset (legacy JSONL) |
 | `MEDULLA_HARNESS_TRANSPORT` | `app-server` selects the shared-process Codex path for a caller with no frame to state a flavor on. | unset |
-| `MEDULLA_<P>_BIN` | Overrides the provider binary. Claude also honours the legacy `TINYVERSE_CLAUDE_BIN`. Treated as untrusted configuration: an overridden binary is withheld the fleet grant. | `claude`, `codex`, `opencode` |
+| `MEDULLA_<P>_BIN` | Overrides the provider binary. Claude also honours the legacy `TINYVERSE_CLAUDE_BIN`, and `OPENHUMAN` the bare `OPENHUMAN_BIN` that predates the namespaced convention. Treated as untrusted configuration: an overridden binary is withheld the fleet grant. | `claude`, `codex`, `opencode` |
+| `MEDULLA_OPENHUMAN_BIN` | The standalone `openhuman-core` binary a bridged wrapper or PTY session spawns. It says nothing about the in-process `openhuman` provider, which spawns no binary at all — see [Architecture](architecture.md#the-openhuman-provider-runs-in-process). | unset |
 | `MEDULLA_SHELL_BIN` | The shell the Sessions picker offers first. Falls back to `$SHELL`, then `sh`. | `$SHELL` |
 | `MEDULLA_<P>_ARGS` | Extra arguments prepended to the child argv, whitespace-split. | none |
 | `MEDULLA_<P>_DM_TO`, `MEDULLA_HARNESS_DM_TO` | The owner a wrapped session forwards envelopes to, and by default receives input from. Falls back to `MEDULLA_OPENHUMAN_OWNER` and then `OPENHUMAN_OWNER_AGENT`. | unset |
@@ -114,6 +115,7 @@ operator. They are listed so a spawn's environment is readable.
 | `MEDULLA_WORKFLOW_TOOLS` | How much of the `workflow_*` tool surface a spawned MCP server serves: `full`, `propose` (read, reason, note, propose; never write or run a graph), or `run` (read a workflow and run it). An unrecognised value fails closed to `propose`. | `full` |
 | `MEDULLA_WORKFLOW_SCOPE` | Restricts evolution writes to the workflow being reviewed. | unset |
 | `MEDULLA_INPUT` | The path to the JSON input file a workflow `code` node's script is handed. Set by the engine; a workflow's own `env` declaration wins over it. | set per run |
+| `MEDULLA_WORKSPACE` | The checkout a workflow's steps operate in. Set by the engine on every node it runs, so a step reads the path from here rather than the graph declaring an input for it. | set per run |
 
 ## Attribution
 
@@ -157,8 +159,39 @@ readable.
 
 | Variable | Status |
 | --- | --- |
-| `MEDULLA_CORE_SOCKET` | Named the external `medulla-serve` NDJSON socket before the core was embedded. `medulla run` rejects the matching `--core-socket` flag with that explanation, and a `[core]` config section is inert. |
+| `MEDULLA_CORE_SOCKET` | Named the external `medulla-serve` NDJSON socket, back when the runtime was reached over one. There is no such socket now — the client drives the backend over HTTP. `medulla run` rejects the matching `--core-socket` flag, and a `[core]` config section is inert. |
 | `TINYPLACE_*` | The deprecated spelling of the harness knobs above. Still read, directly behind the `MEDULLA_*` name in each tier. |
+
+## What an agent turn cannot see
+
+A `shell` command run by an agent turn does not inherit Medulla's environment.
+The child is spawned from a cleared environment and given an explicitly scrubbed
+set, so a credential the operator exported is not silently handed to a model's
+tool call.
+
+Dropped unconditionally:
+
+* `MEDULLA_HOME`, `MEDULLA_USER` — a turn that could reach the account home
+  could read the session file directly.
+
+Dropped by name, case-insensitively, wherever the substring appears:
+
+`TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `AUTH`, `SESSION`.
+
+That is a denylist rather than an allowlist on purpose. An allowlist would have
+to enumerate every legitimate build variable — `PATH`, `HOME`, `LANG`,
+`CARGO_HOME`, the `npm_config_*` family, the Windows-only set — and a miss
+silently breaks somebody's build, which is a worse failure than a leaked
+variable name pattern being slightly too eager.
+
+It is deliberately too eager in one visible place: `SSH_AUTH_SOCK` contains
+`AUTH`, so a shelled command cannot reach the operator's ssh-agent, and a
+`git push` over SSH from inside a turn will not authenticate. Give the turn an
+HTTPS remote and a scoped token in the workspace if it needs to push.
+
+This is environment scoping, not a sandbox. What the process can reach on the
+filesystem or over the network is the operating system's to bound, not this
+tool's.
 
 ## Read next
 

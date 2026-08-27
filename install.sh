@@ -84,7 +84,7 @@ sha256_of() {
 
 # ---- Platform detection ------------------------------------------------------
 # Keys match the release build matrix's Rust target triples (see
-# src/sdk/src/update.rs::platform_key).
+# src/sdk/src/update/check.rs::platform_key).
 
 detect_target() {
     os="$(uname -s)"

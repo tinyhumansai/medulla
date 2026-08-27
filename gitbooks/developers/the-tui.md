@@ -1,9 +1,10 @@
 # The TUI
 
 `medulla` with no arguments starts the terminal app: a [ratatui](https://ratatui.rs/)
-interface over an OpenHuman core embedded in the same process. There is no
-server to start and no socket to attach to. With nobody signed in it opens a
-login screen; `medulla --mock` skips straight to the offline demo runtime.
+interface driven by `CloudRuntime`, which talks straight to the Medulla
+backend over HTTP. There is no server to start and no socket to attach to. With
+nobody signed in it opens a login screen; `medulla --mock` skips straight to
+the offline demo runtime.
 
 ## The tabs
 
@@ -15,7 +16,7 @@ login screen; `medulla --mock` skips straight to the offline demo runtime.
 | Subconscious | A placeholder for the layer under the work: what it filters on intake, what it learns from the gap between expectation and outcome, and what it escalates for a human to approve. Nothing here is live yet. |
 | Changes | The session's Git changes: a rail of changed files, commits, patches, and review comments, with the selected unified patch beside it. `b` sets the baseline. |
 | Hosts | What capacity exists: Hosts, Harness Types, Hooks, Agent Templates, Add Host, Strategies. |
-| Feedback | The feedback board for the active runtime, with the selected item's body and comments. A runtime with no board (the local and core runtimes, or a signed-out session) shows a single hint panel instead. |
+| Feedback | The feedback board for the active runtime, with the selected item's body and comments. The mock demo runtime always has a scripted board; a signed-out or unconfigured backend connection has none, and shows a single hint panel instead. |
 | Settings | Usage, Appearance, Status line, Config, Feedback, Trace, Context, Account, Help, grouped under General, Debug, and About. |
 
 `Tab` walks the top-level views. Within a tab, `↑↓` walk the left nav and `1`-`9`
@@ -179,6 +180,14 @@ Most of it is recognised from what the harness paints, in order of specificity:
    not happen; the row says which, and the count includes it.
 5. **The terminal bell** — the universal fallback, in case a prompt is worded
    differently or not recognised.
+
+A sixth signal does not come from the screen at all: Claude Code raises a
+`Notification` lifecycle hook when it stops on a tool-use approval, an MCP
+elicitation form, or a background agent waiting on you, and Medulla treats a
+`Notification` in that harness's hook log as a wait. The screen scraper still
+wins when it can name something more specific; the hook is the fallback that
+catches a stop the screen paints nothing recognisable for. Codex never reports
+it, so this cue is Claude's alone.
 
 Two states cannot be read off a screen at all, and are taken from the session
 itself. A harness that **died** leaves its terminal frozen on whatever it last

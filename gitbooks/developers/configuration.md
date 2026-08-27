@@ -11,7 +11,7 @@ belongs to one account. There are two levels:
   * Default: `~/.medulla`.
   * Local dev: set `MEDULLA_DEV=1` (truthy is `1`/`true`, case-insensitive) and the root becomes `./.medulla` (relative to the cwd; gitignored).
   * Explicit: `MEDULLA_HOME=<path>` overrides both.
-* The **home** is `<root>/<account id>`, where config, state, logs, workflows, and the core's own workspace live.
+* The **home** is `<root>/<account id>`, where config, state, logs, and workflows live.
 
 The active account is recorded in `<root>/active_user.toml`, written by
 [`medulla login`](authentication.md). Before anyone signs in the account is
@@ -35,7 +35,7 @@ session minted on staging is never later verified against production.
 
 Under the home:
 
-* `workspace/` and `.openhuman/`: the embedded core's state and its config, including the app session `medulla login` stores.
+* `session.json`: the app session `medulla login` stores — the verified bearer, the account id, and the `baseUrl` that issued it. Owner-only (`0600`) on unix.
 * `config.toml`: the user-global config file.
 * `state/`: the default `stateDir`, holding chat history under `chats/`, and workflow run records and engine checkpoints under `state/workflows/runs/` and `state/workflows/checkpoints/`.
 * `workflows/*.json`: your [workflow](../features/workflows.md) definitions. A repository's own `<cwd>/.medulla/workflows/*.json` layers on top and shadows a personal one of the same id.
@@ -70,15 +70,23 @@ has no config for them.
 | --- | --- |
 | `backend` | The orchestration backend: base URL, token, and token env var name. |
 | `host` | Whether this device also runs the work it orchestrates, and the workspace and roots it advertises. |
+| `hosts` | Additional hosts on this same machine, each with its own working directory, device-local address, and agent registration. Additive: `host` keeps its meaning; a config with no `[[hosts]]` behaves exactly as before. |
 | `link` | Host-link identity, forwarder, and the peer roster for the daemon and the Overview panel. |
 | `hub` | The persisted worker roster and the selected default worker, so a fleet survives a restart. |
 | `stateDir` | Where local state is written. Default `<home>/state`; `MEDULLA_STATE_DIR` overrides. |
 | `opencode` | Worker display, model, agent, workspace, and concurrency for the OpenCode provider. |
-| `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. |
+| `workflow` | The daemon's workspace allowlist, and the workspace roots whose `MEDULLA.md` rides every backend session mint. Despite the name, unrelated to authored workflows — see `workflows` below. |
+| `workflows` | What authored workflows may do when they run: whether they may be listed and run at all, the default worker and harness/model hints a bare `agent` node dispatches to, and whether `code` nodes may execute (this host has no sandbox, so that grants a workflow author the daemon's own privileges). |
 | `fleet` | The declared `Host → Harness → Workspace → Agent` capacity chain and the agent-template catalog. |
+| `harness` | How harnesses the *operator* starts by hand behave: whether they launch with permissions bypassed (off by default, unlike a hosted task), and the manual launcher's recent/favorite workspace shortcuts. |
+| `attribution` | Whether commits made by a Medulla-launched harness carry the `Co-authored-by: Medulla` trailer. On by default. |
+| `hooks` | Operator-declared lifecycle hooks (`[[hooks]]`) for the harnesses Medulla launches, in the harness-native vocabulary (`PreToolUse`, `Stop`, …; camelCase spellings are also accepted). Empty by default. |
+| `hookDefaults` | Whether Medulla installs its own lifecycle reporting hooks into the harnesses it launches, alongside any operator-declared `[[hooks]]`. On by default. |
 | `router` | A custom OpenAI-compatible router the daemon spawns harnesses against. Absent leaves every harness unrouted. |
-| `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the embedded OpenHuman core. |
+| `customHarnesses` | Named presets that run a chosen model through Claude Code, Codex, OpenCode, or the in-process local (`openhuman`) harness. |
 | `budget` | Operator-declared per-provider budgets. Absent leaves every harness advertising an estimate. |
+| `routingStrategy` | The operator's persisted worker routing preference (`manual`, `balanced`, `cpuFirst`, `memoryFirst`) for choosing a host. Absent defaults to `manual` and is reconciled with the backend's own setting when present. |
+| `subscriptionRoutingStrategy` | How the orchestrator chooses among ready provider subscriptions after a host is selected (`manual`, `balanced`, `mostAvailableBudget`). Absent preserves the requested or host-default provider. |
 | `onboarding` | Welcome-flow completion state. |
 | `update` | `check = true`/`false` for the background release check. `MEDULLA_NO_UPDATE_CHECK` is the env kill-switch. |
 | `theme` | TUI colors: `primary`, `accent`, `selectionFg`, `dimBorder`, and `attention`, as [ratatui](https://ratatui.rs/) color names or `#rrggbb`. `attentionBlink` and `attentionBlinkSeconds` control whether and how quickly attention cues pulse. The Settings › Appearance subpage edits and persists these. |
@@ -117,14 +125,17 @@ An inline `"token"` field is also accepted, but keep secrets out of committed fi
 
 ## Runtimes
 
-Two runtimes ship:
+Two runtimes ship, both implementing the same `Runtime` trait (see
+[Architecture › The Runtime trait](architecture.md#the-runtime-trait)):
 
-1. The embedded OpenHuman core, which is the product runtime. It boots inside the `medulla` process, so there is no server to start, no socket to resolve, no attach handshake to fail, and no unix-only restriction.
+1. `cloud`, the product runtime. It drives the orchestration API directly —
+   HTTP for mutations, a polled event cursor for the live feed — so there is no
+   server to start, no socket to resolve, and no attach handshake to fail.
 2. Mock, a scripted offline runtime for demos and tests, reached with `--mock`.
 
-`--mock` is checked first and skips the token lookup and the login screen entirely, which makes it the only way to get a working runtime with no backend at all. Otherwise the core boots and the TUI runs on it.
+`--mock` is checked first and skips the token lookup and the login screen entirely, which makes it the only way to get a working runtime with no backend at all. Otherwise `cloud` builds its client and the TUI runs on it.
 
-A core that boots but has no Medulla backend to talk to (no configured URL, or nobody signed in) takes the offline demo exactly as `--mock` does. This is the documented credential-free start, not a misconfiguration to surface; every drive method would otherwise fail behind a UI that looks live. Before that point the TUI opens the [login screen](authentication.md#logging-in-from-the-tui); press `m` to continue offline.
+A `cloud` runtime with no Medulla backend to talk to (no configured URL, or nobody signed in) takes the offline demo exactly as `--mock` does. This is the documented credential-free start, not a misconfiguration to surface; every drive method would otherwise fail behind a UI that looks live. Before that point the TUI opens the [login screen](authentication.md#logging-in-from-the-tui); press `m` to continue offline.
 
 ### Mock (zero setup)
 
@@ -138,18 +149,18 @@ A scripted demo: no credentials, no network, and the fastest way to explore the 
 
 ```sh
 medulla login          # browser OAuth; stores a verified session
-medulla                # runs on the embedded core
+medulla                # runs on the cloud runtime
 ```
 
 `MEDULLA_TOKEN=<jwt> medulla` supplies a bearer directly instead. See [Authentication](authentication.md).
 
-### Upgrading from the external core socket
+### The retired `--core-socket` flag
 
-Versions before the embedded core attached to an external `medulla-serve` NDJSON
-Unix socket via `--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config
-section. The core now runs in-process. `medulla run` rejects `--core-socket` with
-that explanation instead of absorbing it into the instruction text, and a
-`[core]` section left in a config file is inert.
+Older versions attached to an external `medulla-serve` NDJSON Unix socket via
+`--core-socket`, `MEDULLA_CORE_SOCKET`, or a `[core]` config section. `medulla
+run` rejects `--core-socket` outright, naming it retired, rather than absorbing
+it into the instruction text, and a `[core]` section left in a config file is
+inert.
 
 ## Hosting on this device
 
@@ -239,52 +250,47 @@ How the model reaches the CLI depends on the base harness. Claude Code takes it
 through the model-tier variables, with `model` on the Opus tier and `fastModel`
 on the Sonnet, Haiku, and small-fast tiers, so sub-agents stay on OpenRouter too.
 Codex and OpenCode take it through their own `-m` argument. OpenHuman takes it as
-the `model_override` on the core call — see below.
+the model id on the in-process turn's inference route — see below.
 
 ### Choosing the model an OpenHuman turn runs on
 
 A workflow step may name the harness id `openhuman`, and that turn runs in
-Medulla's own process on the embedded core rather than in a spawned CLI. Without
-a choice it runs on the core's `default_model`, the cloud alias a turn
-self-reports as `Chat V1 (Orchestrator)`. Three routes name a different one, and
-they resolve in this order, highest first:
+Medulla's own process, on the in-process local harness, rather than in a spawned
+CLI. Three routes name the model, and they resolve in this order, highest first:
 
 1. `MEDULLA_OPENHUMAN_MODEL` (deprecated spelling: `TINYPLACE_OPENHUMAN_MODEL`)
 2. `MEDULLA_HARNESS_MODEL` (deprecated spelling: `TINYPLACE_HARNESS_MODEL`)
 3. the step's own `config.model`, or the workflow's `defaults.model`
 4. the `[[customHarnesses]]` preset the step selected, through its `model`
 5. `medulla workflow run --model <name>`, then `[workflows] defaultModel`
-6. nothing — the core's own `default_model` answers
+
+Unlike a spawned CLI, which falls back to its own configured default when none
+of these name a model, the local harness has no default of its own: a turn with
+no model resolved fails outright rather than running on some ambient choice.
 
 The environment sits on top for the same reason `MEDULLA_<P>_BIN` does: it is the
 operator's override of what the configuration says, applied to the machine they
 are standing at, with no file to edit. An exported-but-blank value counts as
 unset.
 
-### Running an OpenHuman turn on OpenRouter
+### Running an OpenHuman turn on an inference route
 
-Naming a model is only half the answer: on its own the name is resolved against
-whatever providers the core already has, and one no configured provider serves is
-not an error — the agent loop falls through to its resolved default and records
-that it skipped the override.
+Naming a model is only half the answer, and for this harness it is the smaller
+half: unlike a spawned CLI, which can fall back to a coding tool's own
+configured provider, the local harness has no provider bindings of its own. It
+needs an explicit endpoint and credential for every call, and a turn that
+resolves a model but no route fails with "the local harness needs an inference
+route", not a quiet fallback.
 
-`baseUrl` and `apiKeyEnv` supply the other half, and they are live for
-`openhuman` presets. They reach the turn by a different road than they do for a
-spawned CLI, which has no child to hand an environment to: Medulla resolves the
-key named by `apiKeyEnv`, exchanges it at the loopback attribution proxy for a
-machine-local token, and passes the core the mount and that token as a
-**per-call** route. The core applies the route to that one turn's in-memory
-configuration and never writes it to disk, so pointing a workflow step at
-OpenRouter does not repoint the account's own OpenHuman inference — the next turn
-without a preset runs exactly where it did before.
+`baseUrl` and `apiKeyEnv` supply that route, and they reach the turn by a
+different road than they do for a spawned CLI, which has no child to hand an
+environment to: Medulla resolves the key named by `apiKeyEnv` and, for an
+OpenRouter endpoint, exchanges it at the loopback attribution proxy for a
+machine-local token, then passes the turn the mount and that token as a
+**per-call** route it uses for that turn alone.
 
-The route governs the four roles an agent turn runs on (chat, reasoning, agentic,
-coding). Background workloads — memory, embeddings, heartbeat, learning — stay
-where the account's configuration puts them, because they run tier-specific
-models a coding endpoint generally cannot serve.
-
-So a complete OpenHuman preset needs nothing installed and nothing pre-configured
-in the core:
+So a complete OpenHuman preset needs a model, an endpoint, and a key — nothing
+installed, but nothing implicit either:
 
 ```toml
 [[customHarnesses]]
@@ -296,19 +302,22 @@ hostId = "this-device"
 apiKeyEnv = "OPENROUTER_API_KEY"
 ```
 
-Routing is skipped, with no error, in three cases: no key exported under
-`apiKeyEnv`, a `baseUrl` that resolves somewhere other than `openrouter.ai`, and
-a turn with no model resolved. Each leaves the turn on the account's own
-OpenHuman configuration, which is why an `openhuman` preset that names only a
-model still works and is still advertised as capacity without an OpenRouter key —
-unlike every other base harness.
+The route is skipped in three cases: the step names no router at all, no key is
+exported under `apiKeyEnv`, and a turn with no model resolved. Every one of
+those leaves the turn with no route to call, so it fails rather than running
+somewhere else — an `openhuman` preset with no key exported is not usable and,
+like every other base harness, is not advertised as capacity either. A
+non-OpenRouter `baseUrl` (a self-hosted gateway, a vendor's own OpenAI-compatible
+endpoint) is handed to the turn as spelled, with the key the preset named — only
+an OpenRouter endpoint is exchanged for a loopback mount and a machine-local
+token first.
 
 `apiKeyEnv` holds a variable name and never a value. The key stays in the process
 environment, and neither the config file nor the app's own state ever holds it. A
 host advertises a preset as capacity only when the named variable is set to
-something non-blank and the preset's base CLI is one that host runs. The key does
-not reach the harness either: an OpenRouter-bound run goes through a loopback
-proxy that hands the child a machine-local token instead. See
+something non-blank and the preset's base harness is one that host runs. The key
+does not reach the harness either: an OpenRouter-bound run goes through a
+loopback proxy that hands it a machine-local token instead. See
 [Attribution and routing](attribution-and-routing.md).
 
 Presets attach to a host by `hostId`, which must match the `address` of a

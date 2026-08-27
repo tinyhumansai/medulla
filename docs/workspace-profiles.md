@@ -86,13 +86,20 @@ Drafts a profile for `dir` (default: the current directory) and writes
 `MEDULLA.md` there:
 
 1. Reads the directory's `AGENTS.md`, `CLAUDE.md`, and `README.md` (whichever
-   exist).
+   exist) — recorded as `sources`, but not otherwise used.
 2. Scans the file layout.
-3. Asks the configured model to distil them into a summary plus routing hints.
-4. Writes the result for you to review and edit.
+3. Writes a deterministic stub body alongside the scanned layout, for you to
+   review and edit.
 
-The draft is a starting point. The summary is what the orchestrator actually
-reads, so it is worth a pass by hand.
+The model-drafted body went out with the memory layer that owned the provider
+seam, so this stub is the only behaviour `init` has: `--offline` is accepted
+but is now a no-op, since there is no model call left to skip. `--config
+<path>` is likewise accepted but unused — `init` neither reads backend
+settings nor writes the registry.
+
+The layout is the part of the profile that carries real information, since it
+is read straight off the tree rather than drafted. The summary is a starting
+point for you to fill in by hand.
 
 `init` authors the file and stops there; it does **not** register the workspace.
 Use `medulla workspace add` for both.
@@ -107,15 +114,8 @@ template outside the crate root fails that build.
 | Flag | Effect |
 | --- | --- |
 | `--force`, `-f` | Overwrite an existing `MEDULLA.md`. Without it, `init` refuses rather than discarding an authored profile. |
-| `--offline` | Skip the model call and write the editable stub. |
-| `--config <path>` | Explicit config file for the backend/model settings. |
-
-### Model resolution
-
-Resolution takes one order: an explicit `OPENROUTER_API_KEY` wins, otherwise the
-backend's inference surface is used with the JWT from `medulla login`. With
-neither, or if the model call fails, `init` writes the stub and says so, so it
-always leaves you a usable file.
+| `--offline` | Accepted for backward compatibility; a no-op, since `init` never calls a model. |
+| `--config <path>` | Accepted but currently unused by `init`. |
 
 ## How a profile reaches the orchestrator
 

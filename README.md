@@ -41,6 +41,12 @@ Not ready to sign in? `medulla --mock` runs a full offline demo, with no account
 
 Prebuilt binaries ship for Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). Building from source, pinning a version, and embedding the SDK are covered in [Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started).
 
+## No tmux, no multi-agent wrapper
+
+Running a lot of agents has meant one of two workarounds: split the terminal into panes and be the scheduler yourself, or wrap the harnesses in another agent and hope it can read everything they produce. Medulla is one process, in one terminal, built for the job instead.
+
+Opening another agent is `Ctrl-T` — pick a harness or a shell, pick a directory, it is running. There is no ceiling on how many you keep open. Each gets its own terminal, kept live in the background whether or not it is the one on screen, and Medulla reads all of them for the things that need a human: a permission prompt, a blocking error, a dead session, a turn finished and waiting on review. Those arrive as `⚠ 3 waiting on you`, not as three panes you were supposed to have been watching.
+
 ## What you get
 
 Your whole fleet, legible. One lane per agent, live. You can see what each agent is doing, answer the one that has a question, and cancel the one that has gone wrong, without losing your place in everything else.

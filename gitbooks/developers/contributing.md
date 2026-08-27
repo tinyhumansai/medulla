@@ -20,10 +20,15 @@ formatting and runs Clippy with warnings denied.
 ## Build and run
 
 ```sh
-cargo run                       # debug build, starts the TUI (mock runtime)
+cargo run                       # debug build, starts the TUI
+cargo run -- --mock             # debug build, offline demo runtime (no backend, no login)
 cargo run --release             # optimized build
 cargo install --path src/tui    # installs the `medulla` binary onto your PATH
 ```
+
+`cargo run` with no flags drives `CloudRuntime` against the configured backend
+when a session is available; with nobody signed in, it falls back to the same
+offline mock runtime `--mock` selects explicitly.
 
 ## Validate
 

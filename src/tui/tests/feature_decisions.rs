@@ -85,10 +85,17 @@ fn app() -> (App, Arc<MockRuntime>) {
 }
 
 #[test]
-fn overview_badge_opens_prepared_context_and_answer_routes_to_runtime() {
+fn subconscious_badge_opens_prepared_context_and_answer_routes_to_runtime() {
     let (mut app, runtime) = app();
-    let overview = render(&mut app);
-    assert!(overview.contains("decisions: 2 · E open"), "{overview}");
+    app.tab_index = medulla_tui::ui::app::TABS
+        .iter()
+        .position(|tab| *tab == "Subconscious")
+        .expect("Subconscious tab is listed");
+    let subconscious = render(&mut app);
+    assert!(
+        subconscious.contains("2 decisions · E review"),
+        "{subconscious}"
+    );
 
     key(&mut app, KeyCode::Char('E'));
     let overlay = render(&mut app);

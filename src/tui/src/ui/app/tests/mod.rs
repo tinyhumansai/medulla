@@ -569,7 +569,7 @@ fn leaving_the_agents_tab_releases_the_subscription() {
     // advance and a send every tick.
     let mut app = app();
     select_first_task(&mut app).expect("a task to select");
-    app.tab_index = tab("Overview");
+    app.tab_index = tab("Subconscious");
 
     let Some(Cmd::WatchTask { stop, start }) = app.retarget_watch() else {
         panic!("leaving the tab should release the watch");

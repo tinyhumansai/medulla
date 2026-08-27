@@ -7,7 +7,7 @@
 //! needs it too: handing a worker's address to the operator's terminal is how
 //! pairing avoids a manual copy off a remote shell.
 
-/// The medulla wordmark, rendered on the login screen and the Overview tab.
+/// The medulla wordmark, rendered on the login screen.
 pub const LOGO: [&str; 3] = ["      ▌  ▜ ▜   ", "▛▛▌█▌▛▌▌▌▐ ▐ ▀▌", "▌▌▌▙▖▙▌▙▌▐▖▐▖█▌"];
 
 pub use medulla::clipboard;

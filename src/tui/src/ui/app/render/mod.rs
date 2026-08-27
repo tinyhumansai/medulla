@@ -23,7 +23,6 @@ mod decisions;
 mod feedback;
 mod frame_state;
 pub(super) mod graph;
-mod overview;
 mod points;
 mod prompt;
 mod routing;
@@ -72,7 +71,7 @@ pub(super) fn styled_to_tline(line: &StyledLine) -> TLine<'static> {
     TLine::from(Span::styled(text, style))
 }
 
-/// The accent color for an event line in the Overview/Trace lists, if any.
+/// The accent color for an event line in the Trace list, if any.
 pub(super) fn event_color(env: &EventEnvelope) -> Option<&'static str> {
     match &env.event {
         TuiEvent::Error { .. } => Some("red"),
@@ -275,9 +274,7 @@ impl App {
         } else if self.tab() == "TokenMaxxxing" {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
         } else if self.tab() == "Subconscious" {
-            // Its own line, and a short one: the placeholder binds nothing, and
-            // the default hint below advertises the session steering chords.
-            "Tab views · Subconscious coming soon"
+            "Tab views · live signal field · E decisions"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ lanes · i inspect · c copilot · x run · d dry-run · r refresh"
         } else if self.tab() == "Sessions" && self.pane_view == PaneView::Diff {
@@ -306,7 +303,6 @@ impl App {
     /// Dispatch content rendering to the active tab's draw method.
     pub(super) fn draw_content(&mut self, f: &mut Frame, area: Rect) {
         match self.tab() {
-            "Overview" => self.draw_overview(f, area),
             "Sessions" => self.draw_sessions_tab(f, area),
             #[cfg(feature = "workflows")]
             "Workflows" => self.draw_workflows_tab(f, area),
@@ -318,11 +314,11 @@ impl App {
             "Feedback" => self.draw_feedback(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
             "Settings" => self.draw_settings(f, area),
-            _ => self.draw_overview(f, area),
+            _ => self.draw_sessions_tab(f, area),
         }
     }
 
-    /// One formatted event row for the Overview/Trace lists.
+    /// One formatted event row for the Trace list.
     pub(super) fn event_line(
         &self,
         env: &EventEnvelope,
@@ -348,7 +344,6 @@ fn compact_tab_label(name: &str, compact: bool) -> &str {
         return name;
     }
     match name {
-        "Overview" => "Over",
         "Sessions" => "Sess",
         "Workflows" => "Flows",
         "Subconscious" => "Sub",

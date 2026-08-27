@@ -1,4 +1,4 @@
-//! Unit tests for the Subconscious placeholder tab.
+//! Unit tests for the Subconscious live signal tab.
 //!
 //! Pinned through a rendered buffer rather than by calling the draw helper: the
 //! point of the tab is what an operator reads on it, and the shortcut line is
@@ -34,26 +34,27 @@ fn render_subconscious() -> String {
 }
 
 #[test]
-fn the_placeholder_names_the_three_surfaces_that_will_land_here() {
+fn the_live_signal_field_has_a_clear_status_and_animated_graph() {
     let out = render_subconscious();
     assert!(
-        out.contains("Subconscious · Coming soon"),
-        "the panel title is missing"
+        out.contains("Quietly processing"),
+        "the status panel is missing: {out}"
     );
-    for section in ["Intake", "Learnings", "Approvals"] {
-        assert!(out.contains(section), "{section} is missing from the card");
-    }
     assert!(
-        out.contains("Nothing here is live yet"),
-        "the card must say it is not wired yet"
+        out.contains("LIVE OBSERVATION"),
+        "the live status should be explicit: {out}"
+    );
+    assert!(
+        out.contains("Signal field · live"),
+        "the animated graph has moved here: {out}"
     );
 }
 
 #[test]
-fn the_shortcut_line_does_not_advertise_the_session_chords() {
+fn the_shortcut_line_advertises_decision_review_not_session_chords() {
     let out = render_subconscious();
     assert!(
-        out.contains("Subconscious coming soon"),
+        out.contains("live signal field · E decisions"),
         "the tab needs its own shortcut line"
     );
     assert!(

@@ -448,7 +448,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         .unwrap_or_else(|| home_config_path.clone());
 
     // Optional background host-link service (observational only): keep per-peer
-    // liveness current and surface it into the Overview panel and Agents lanes.
+    // liveness current and surface it into routing and Agents lanes.
     let mut link_status: Option<String> = None;
     let link_config = loaded.config.link.clone().unwrap_or_else(|| {
         medulla::config::default_link_config(&env, &loaded.config.backend.base_url)
@@ -718,7 +718,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 account: account.clone(),
                 sharing: sharing.take(),
                 onboarding_path: active_config_path.clone(),
-                // The primary's counters only. The Overview device panel shows
+                // The primary's counters only. The routing view can show
                 // one host, so extras are served and dispatchable but not yet
                 // reflected there — a UI gap, not a hosting one.
                 host: primary_observation.clone(),

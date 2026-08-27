@@ -192,7 +192,7 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
             let mut buffered = drain_sink.lock().unwrap();
             buffered.extend_from_slice(&chunk[..n]);
             // The shortcut line heads every frame. The wordmark used to be the
-            // sentinel, but it is block art on the Overview tab now and never
+            // sentinel, but it is block art in the signal field now and never
             // reaches the wire as the letters "MEDULLA".
             if !announced && buffered.windows(9).any(|window| window == b"Tab views") {
                 announced = true;

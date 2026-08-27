@@ -269,7 +269,7 @@ impl App {
         }
 
         match k.code {
-            KeyCode::Char('E') if tab == "Overview" => {
+            KeyCode::Char('E') if tab == "Subconscious" => {
                 self.open_decisions();
                 return None;
             }

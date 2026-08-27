@@ -20,7 +20,7 @@ use super::types::{
 
 impl App {
     /// Build a fresh screen bound to `runtime` and `loaded`, starting on the
-    /// Overview tab with an empty composer and the config-derived theme.
+    /// Sessions tab with an empty composer and the config-derived theme.
     pub fn new(runtime: Arc<dyn Runtime>, loaded: LoadedConfig) -> Self {
         let snapshot = runtime.snapshot();
         let theme = Theme::from_config(&loaded.config.theme);
@@ -349,7 +349,7 @@ impl App {
     }
 
     /// Attach the read-only view of the host running on this device, so the
-    /// Overview tab can say what this machine is doing with the work it is sent.
+    /// host state can remain available to the runtime and routing surfaces.
     pub fn set_host_observation(&mut self, host: medulla::daemon::embedded::HostObservation) {
         self.host_obs = Some(host);
     }

@@ -248,7 +248,7 @@ fn workers_render_with_harness_and_stream_health() {
     // The status line shows stream health as a dot beside the backend host when
     // the runtime tracks one — the spelled-out label it replaced cost a third of
     // the line to say what a glyph says.
-    tab(&mut app, "Overview");
+    tab(&mut app, "Subconscious");
     let out = render(&mut app, 120, 40);
     assert!(
         out.contains("● api.tinyhumans.ai"),

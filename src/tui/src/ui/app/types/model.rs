@@ -60,8 +60,7 @@ use super::rail_hit::RailHit;
 /// bindings stay in `app::changes`; only the top-level tab and its `D` shortcut
 /// were removed.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 7] = [
-    "Overview",
+pub const TABS: [&str; 6] = [
     "Sessions",
     "Workflows",
     "Subconscious",
@@ -74,18 +73,10 @@ pub const TABS: [&str; 7] = [
 /// draw anything.
 ///
 /// This is the workflow-enabled list minus `Workflows`: every remaining tab —
-/// the fleet Overview, the Sessions rail with its `d` diff pane, Subconscious
-/// (still drawing its placeholder), Hosts, Feedback, and Settings — renders
-/// without the workflow engine.
+/// the Sessions rail with its `d` diff pane, the live Subconscious signal
+/// field, Hosts, Feedback, and Settings — renders without the workflow engine.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 6] = [
-    "Overview",
-    "Sessions",
-    "Subconscious",
-    "Hosts",
-    "Feedback",
-    "Settings",
-];
+pub const TABS: [&str; 5] = ["Sessions", "Subconscious", "Hosts", "Feedback", "Settings"];
 
 /// The Routing tab's left-nav pages.
 ///
@@ -585,7 +576,7 @@ pub(in crate::ui::app) struct CredentialStatus {
 pub struct App {
     /// The runtime this screen drives.
     pub runtime: Arc<dyn Runtime>,
-    /// The loaded configuration (for the Config/Overview surfaces).
+    /// The loaded configuration (for the Config and settings surfaces).
     pub loaded: LoadedConfig,
     /// The most recent runtime snapshot, refreshed each loop tick.
     pub snapshot: RuntimeSnapshot,
@@ -595,7 +586,7 @@ pub struct App {
     pub(in crate::ui::app) changes: super::super::changes::GitChangesState,
     pub(in crate::ui::app) draft: Draft,
     pub(in crate::ui::app) selected: usize,
-    /// The Overview tab's animated workflow graph. Held on the app because its
+    /// The Subconscious tab's animated signal graph. Held on the app because its
     /// simulation has to survive between frames; it is advanced by the draw
     /// path, which is the only thing that looks at it.
     pub(in crate::ui::app) graph: super::super::render::graph::Graph,
@@ -847,7 +838,7 @@ pub struct App {
 
     // Optional observational overlay from the background host-link service:
     // this endpoint's own identity, its peer roster, and peer presence. Merged
-    // into the snapshot on every refresh so the Overview panel and Agents lanes
+    // into the snapshot on every refresh so the routing and Agents lanes
     // light up without the runtime having to know about the link.
     pub(in crate::ui::app) link_obs:
         Option<Arc<std::sync::Mutex<medulla::protocol::service::LinkObservation>>>,

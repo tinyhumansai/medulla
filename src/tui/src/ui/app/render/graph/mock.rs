@@ -1,4 +1,4 @@
-//! The demonstration workflow graph shown on the Overview tab.
+//! The demonstration signal graph shown on the Subconscious tab.
 //!
 //! This is deliberately mock topology, not live run state: it shows the *shape*
 //! a Medulla run takes — many input sources funnelling into one orchestrator,

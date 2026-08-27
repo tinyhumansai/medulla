@@ -155,7 +155,7 @@ fn leaving_the_agents_tab_takes_the_keyboard_back_from_an_attached_harness() {
 #[test]
 fn a_stale_harness_diff_does_not_advertise_agents_shortcuts_on_another_tab() {
     let mut app = app();
-    app.tab_index = tab_pos("Overview");
+    app.tab_index = tab_pos("Subconscious");
     app.pane_view = PaneView::Diff;
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");

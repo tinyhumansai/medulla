@@ -1,4 +1,4 @@
-//! Data types for the Overview workflow graph: the nodes, the edges between
+//! Data types for the Subconscious signal graph: the nodes, the edges between
 //! them, and the simulation state that animates the whole thing.
 
 /// A node's role in the workflow, which decides its color, size, and glyph.

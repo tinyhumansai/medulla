@@ -1,7 +1,7 @@
-//! The animated workflow graph on the Overview tab.
+//! The animated signal graph on the Subconscious tab.
 //!
 //! This module connects the graph model, simulation, character surface, and
-//! renderer used by the Overview panel.
+//! renderer used by the Subconscious signal field.
 
 pub(crate) mod charmap;
 pub(crate) mod layout;

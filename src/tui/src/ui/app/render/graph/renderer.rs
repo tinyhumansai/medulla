@@ -1,9 +1,8 @@
-//! Rendering for the animated workflow graph on the Overview tab.
+//! Rendering for the animated signal graph on the Subconscious tab.
 //!
-//! The panel answers, at a glance, the question the Overview tab exists for:
-//! what does a Medulla run actually look like? Sources fan *in* from the left,
-//! the orchestrator sits at the centre, and agents fan *out* to the right into
-//! subagents, tools, and review loops that fold back on themselves.
+//! The panel shows what the quiet layer is watching: signals fan *in* from the
+//! left, Medulla weighs them at the centre, and downstream work fans *out* into
+//! subagents, tools, and feedback loops.
 //!
 //! The topology is currently mock data ([`mock`]); everything else — the force
 //! simulation in [`layout`], the character surface in [`charmap`], and the
@@ -45,14 +44,18 @@ const EDGE_DIM: f64 = 0.62;
 const RISER_SPREAD: f64 = 0.18;
 
 impl App {
-    /// Draw the workflow graph panel, advancing its simulation by one frame.
+    /// Draw the subconscious signal graph, advancing its simulation by one frame.
     ///
     /// Stepping the simulation from the draw path is intentional: the panel's
     /// only clock is the render tick, and the graph owns no state that anything
     /// else reads. Below a few rows the canvas cannot say anything useful, so a
     /// cramped panel gets a plain note instead of an unreadable smear.
-    pub(in crate::ui::app::render) fn draw_overview_graph(&mut self, f: &mut Frame, area: Rect) {
-        let block = self.panel("Workflow");
+    pub(in crate::ui::app::render) fn draw_subconscious_graph(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+    ) {
+        let block = self.panel("Signal field · live");
         let inner = block.inner(area);
         f.render_widget(block, area);
         let drawable_width = inner.width as f64 - 1.0 - 2.0 * LABEL_GUTTER;
@@ -62,7 +65,7 @@ impl App {
         if drawable_width * SPREAD < 8.0 || drawable_height * SPREAD < 4.0 {
             f.render_widget(
                 Paragraph::new(TLine::from(Span::styled(
-                    "Workflow graph needs a larger window.",
+                    "Signal field needs a larger window.",
                     Style::default().add_modifier(Modifier::DIM),
                 ))),
                 inner,

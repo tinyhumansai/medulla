@@ -14,11 +14,9 @@ use super::super::super::types::App;
 impl App {
     /// Draw the Help subpage.
     pub(super) fn draw_help(&mut self, f: &mut Frame, area: Rect) {
-        let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let lines = vec![
             TLine::from("Tab / Shift-Tab switch views · Ctrl-C quit"),
-            TLine::from("Overview: E prepared decisions"),
             TLine::from("Routing: a add host · Enter/s select · e edit label · d/x remove"),
             TLine::from(" "),
             TLine::from(Span::styled("Sessions", bold)),
@@ -31,10 +29,7 @@ impl App {
             TLine::from("⌥X cancels a dispatched task · ⌥A answers its open question"),
             TLine::from(" "),
             TLine::from(Span::styled("Subconscious", bold)),
-            TLine::from(Span::styled(
-                "Intake filtering, learnings, and human approvals will live here. Nothing is wired yet.",
-                dim,
-            )),
+            TLine::from("Live signal field: E reviews prepared decisions"),
             TLine::from(" "),
             TLine::from(Span::styled("Settings", bold)),
             TLine::from("↑↓ move between subpages · 1-9 jump straight to one"),

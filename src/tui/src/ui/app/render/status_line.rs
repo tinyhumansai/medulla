@@ -15,7 +15,7 @@ impl App {
     /// Draw the bottom status line: the connection dot and backend host, the
     /// update badge, and the right-aligned status text.
     ///
-    /// No product name — the wordmark is already on the Overview tab, and a
+    /// No product name — the login screen already carries the wordmark, and a
     /// status bar that opens by telling you which program you are running spends
     /// its first columns on the one thing you cannot be unsure of.
     pub(super) fn draw_status_line(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {

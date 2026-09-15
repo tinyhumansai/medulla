@@ -6,7 +6,7 @@ description: >-
 
 # Sessions
 
-A session is one running process on its own pseudo-terminal: Claude Code in a repo, Codex in another, a shell on the build box. The Sessions tab is a rail of every session you have open down the left and the selected session's screen beside it. That screen is live for every row, not just the one you are looking at, because each session has its own terminal emulator that keeps painting in the background. Switching rows shows a screen that is already current.
+A session is one running process on its own pseudo-terminal: Claude Code in a repo, Codex in another, a shell on the build box. The Sessions tab is a rail of every session you have open down the left and the selected session's screen beside it. Every row has a live screen, whichever one you are looking at, because each session has its own terminal emulator that keeps painting in the background. Switching rows shows a screen that is already current.
 
 Nothing caps how many you keep open.
 

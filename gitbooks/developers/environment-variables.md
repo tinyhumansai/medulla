@@ -27,24 +27,12 @@ these can be set either way. Truthy values are `1` and `true`, case-insensitive.
 
 The backend endpoint is **not** configurable. It is compiled into the binary as
 `https://api.tinyhumans.ai`, and no environment variable moves it. `MEDULLA_API_URL`
-and `MEDULLA_STAGING` used to, and no longer do — setting either has no effect at
+and `MEDULLA_STAGING` used to, and no longer do. Setting either has no effect at
 all rather than an error, because there is no longer a setting to be wrong about.
 
 | Variable | What it does | Default |
 | --- | --- | --- |
 | `MEDULLA_TOKEN` | The bearer JWT, named by the default `backend.tokenEnv`. Config can point `tokenEnv` at a different variable. | unset |
-
-## Halves of the process
-
-| Variable | What it does | Default |
-| --- | --- | --- |
-| `MEDULLA_HOST` | `0` orchestrates only, this machine runs nothing; `1` forces hosting on. Beats the `[host].enabled` config key for one run. | the config value |
-| `MEDULLA_HUB` | `0` disables the orchestrator uplink to the backend, leaving the host half; `1` is the redundant explicit opt-in. | on |
-| `MEDULLA_HUB_POLL_MS` | The hub's poll interval, in milliseconds. | `1500` |
-| `MEDULLA_HUB_WORKERS` | Pre-seeds the worker roster as a comma-separated `id=address` list (a bare token is used as both). | unset |
-| `MEDULLA_LINK_PEER` | Pre-seeds a single worker by address, when `MEDULLA_HUB_WORKERS` is not set. | unset |
-| `MEDULLA_WORKER_PROVIDER` | The harness recorded on workers seeded from the two variables above. | `claude` |
-| `MEDULLA_DEMO_FLEET` | Truthy stands in a small fake fleet (two hosts, three harnesses, two workspaces, two agents, two templates) so every fleet surface can be exercised with no backend. It is the last fallback; any real capacity wins. | unset |
 
 ## Harness selection and transport
 
@@ -59,7 +47,7 @@ behind it, so hosts configured before the rename keep working.
 | `MEDULLA_HARNESS_PROTOCOL` | `acp` makes the daemon talk to harnesses over the Agent Client Protocol instead of the legacy provider JSONL. | unset (legacy JSONL) |
 | `MEDULLA_HARNESS_TRANSPORT` | `app-server` selects the shared-process Codex path for a caller with no frame to state a flavor on. | unset |
 | `MEDULLA_<P>_BIN` | Overrides the provider binary. Claude also honours the legacy `TINYVERSE_CLAUDE_BIN`, and `OPENHUMAN` the bare `OPENHUMAN_BIN` that predates the namespaced convention. Treated as untrusted configuration: an overridden binary is withheld the fleet grant. | `claude`, `codex`, `opencode` |
-| `MEDULLA_OPENHUMAN_BIN` | The standalone `openhuman-core` binary a bridged wrapper or PTY session spawns. It says nothing about the in-process `openhuman` provider, which spawns no binary at all — see [Architecture](architecture.md#the-openhuman-provider-runs-in-process). | unset |
+| `MEDULLA_OPENHUMAN_BIN` | The standalone `openhuman` binary a session spawns. A custom preset with `baseHarness = "openhuman"` spawns no binary at all and ignores this. | `openhuman` |
 | `MEDULLA_SHELL_BIN` | The shell the Sessions picker offers first. Falls back to `$SHELL`, then `sh`. | `$SHELL` |
 | `MEDULLA_<P>_ARGS` | Extra arguments prepended to the child argv, whitespace-split. | none |
 | `MEDULLA_<P>_DM_TO`, `MEDULLA_HARNESS_DM_TO` | The owner a wrapped session forwards envelopes to, and by default receives input from. Falls back to `MEDULLA_OPENHUMAN_OWNER` and then `OPENHUMAN_OWNER_AGENT`. | unset |
@@ -162,7 +150,8 @@ readable.
 
 | Variable | Status |
 | --- | --- |
-| `MEDULLA_CORE_SOCKET` | Named the external `medulla-serve` NDJSON socket, back when the runtime was reached over one. There is no such socket now — the client drives the backend over HTTP. `medulla run` rejects the matching `--core-socket` flag, and a `[core]` config section is inert. |
+| `MEDULLA_HOST`, `MEDULLA_HUB`, `MEDULLA_HUB_POLL_MS`, `MEDULLA_HUB_WORKERS`, `MEDULLA_LINK_PEER`, `MEDULLA_WORKER_PROVIDER`, `MEDULLA_DEMO_FLEET` | Switches for the dispatching model that is no longer part of the product: the local host half, the hub uplink, and a stand-in fleet. Still parsed; nothing a session opened from the picker does reads them. |
+| `MEDULLA_CORE_SOCKET` | Named an external NDJSON socket the runtime was once reached over. There is no such socket now, and a `[core]` config section is inert. |
 | `TINYPLACE_*` | The deprecated spelling of the harness knobs above. Still read, directly behind the `MEDULLA_*` name in each tier. |
 
 ## What an agent turn cannot see
@@ -174,16 +163,16 @@ tool call.
 
 Dropped unconditionally:
 
-* `MEDULLA_HOME`, `MEDULLA_USER` — a turn that could reach the account home
-  could read the session file directly.
+* `MEDULLA_HOME` and `MEDULLA_USER`, because a turn that could reach the
+  account home could read the session file directly.
 
 Dropped by name, case-insensitively, wherever the substring appears:
 
 `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `AUTH`, `SESSION`.
 
 That is a denylist rather than an allowlist on purpose. An allowlist would have
-to enumerate every legitimate build variable — `PATH`, `HOME`, `LANG`,
-`CARGO_HOME`, the `npm_config_*` family, the Windows-only set — and a miss
+to enumerate every legitimate build variable (`PATH`, `HOME`, `LANG`,
+`CARGO_HOME`, the `npm_config_*` family, the Windows-only set), and a miss
 silently breaks somebody's build, which is a worse failure than a leaked
 variable name pattern being slightly too eager.
 

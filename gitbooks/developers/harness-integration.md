@@ -124,7 +124,7 @@ the backend already attaches to a descriptor.
 Medulla can communicate with coding harnesses through version 1 of the
 [Agent Client Protocol](https://agentclientprotocol.com/). This gives the daemon
 one lifecycle and event stream for Claude Code, Codex, OpenCode, and future ACP
-agents instead of teaching the orchestration layer each harness's private JSONL
+agents instead of teaching Medulla each harness's private JSONL
 format.
 
 Set the protocol in the daemon environment:

@@ -2,18 +2,17 @@
 
 ## Overview
 
-* [The Orchestrator](README.md)
-* [Why an Orchestrator](why-an-orchestrator-model.md)
-* [Context Scaling Without Collapse](rlm-context-scaling.md)
-* [Pricing and Availability](pricing-and-availability.md)
+* [Medulla](README.md)
+* [One terminal, not a pile of them](why-one-terminal.md)
+* [Availability](availability.md)
 
 ## Features
 
-* [Workers and Sessions](features/workers-and-sessions.md)
+* [Sessions](features/sessions.md)
+* [Remote machines](features/remote-hosts.md)
+* [Harnesses](features/harnesses.md)
+* [Attention cues](features/attention.md)
 * [Workflows](features/workflows.md)
-* [MEDULLA.md](features/workspace-profiles.md)
-* [Orchestrator Routing](features/routing.md)
-* [Token Efficiency and Budgets](features/token-efficiency.md)
 
 ## Developers
 

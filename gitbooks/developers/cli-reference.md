@@ -205,7 +205,7 @@ medulla logout
 | `--no-browser` | Print the login URL without launching a browser. |
 | `--code` | Sign in by pasting a code; open the URL on any device. |
 | `--token <64-hex>` | Redeem a one-time login token instead. |
-| `--config <path>` | Config file to read `backend.baseUrl` from. |
+| `--config <path>` | Config file to read `backend.tokenEnv` from. |
 
 [Authentication](authentication.md) covers the flows and where credentials are stored.
 

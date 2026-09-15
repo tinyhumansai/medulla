@@ -192,16 +192,26 @@ How a session row is laid out. Every field answers the same three questions: whi
 
 ```toml
 [statusLine]
-state = "line1"          ; stateWhen = "always"
-harness = "line1"        ; harnessWhen = "always" ; harnessStyle = "short"      # long | short | icon
-control = "line1"        ; controlWhen = "always" ; controlStyle = "text"       # text | icon
-thread = "line2"         ; threadWhen = "always"
-branch = "line1"         ; branchWhen = "always"
-worktree = "line1"       ; worktreeWhen = "always"
-path = "line1"           ; pathWhen = "always"    ; pathStyle = "shortened"     # full | shortened | last
+state = "line1"
+stateWhen = "always"
+harness = "line1"
+harnessWhen = "always"
+harnessStyle = "short"        # long (Claude Code) | short (claude) | icon
+control = "line1"             # managed / unmanaged: a workflow's session or yours
+controlWhen = "always"
+controlStyle = "text"         # text | icon
+thread = "line2"
+threadWhen = "always"
+branch = "line1"
+branchWhen = "always"
+worktree = "line1"            # the linked worktree's name, when there is one
+worktreeWhen = "always"
+path = "line1"
+pathWhen = "always"
+pathStyle = "shortened"       # full | shortened (~/…/tail) | last
 ```
 
-(Written on one line each here for space; in the file each key is its own line.) The defaults produce an identifying line plus the thread beneath it:
+The defaults produce an identifying line plus the thread beneath it:
 
 ```
 ● codex · unmanaged · main · ~/work/medulla

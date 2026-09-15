@@ -1,69 +1,39 @@
 ---
 description: >-
-  A task is one instruction handed to one harness. A workflow is a saved
-  multi-step plan whose steps each run as a real coding-harness session.
+  A workflow is a saved multi-step plan whose agent steps each run as a real
+  coding-agent session, in the order and with the parallelism the graph declares.
 ---
 
 # Workflows
 
-A Medulla task is one instruction handed to one harness. A **workflow** is a
-saved, multi-step plan: a directed acyclic graph whose `agent` steps each run as
-a real coding-harness session (Claude Code, Codex, or OpenCode) in the order and
-with the parallelism the graph declares.
+A workflow is a saved plan: a directed acyclic graph whose `agent` steps each open a real harness session (Claude Code, Codex, or OpenCode) in a workspace, with parallel branches and approval gates where a person has to say yes. Plenty of tools chain model calls. Here a step is a harness, with your credentials, in a directory, doing real work, and the graph only decides what runs when and what each step is given.
 
-That is the distinction worth holding on to. Plenty of tools let you chain model
-calls. Here an `agent` node is a *dispatched task*: a harness, with your
-credentials, in a workspace, doing real work. The graph decides what runs when,
-what each step is given, and where a human has to say yes.
+Workflows are optional. Medulla is a terminal first, and a build without the `workflows` feature drops the tab and the CLI verbs.
 
 ## Where they live
 
-Workflows are JSON documents, one graph per file, in two layered directories,
-lowest precedence first:
+Workflows are JSON documents, one graph per file, in two layered directories, lowest precedence first:
 
 ```
 <medulla home>/workflows/*.json     # yours, on this machine
 <cwd>/.medulla/workflows/*.json     # this repository's, checked in
 ```
 
-A workflow committed to a repository shadows a personal one with the same id, the
-same way `.medulla/agents` layers. A malformed document costs only itself: the
-rest of the catalogue still loads and the failure is reported rather than
-swallowed.
+A workflow committed to a repository shadows a personal one with the same id. A malformed document costs only itself: the rest of the catalogue still loads and the failure is reported.
 
-Run records live under `<medulla home>/state/workflows/runs/`, and the engine's
-checkpoints, which are what let a paused run survive a restart, under
-`state/workflows/checkpoints/`.
+Run records live under `<medulla home>/state/workflows/runs/`, and the engine's checkpoints, which let a paused run survive a restart, under `state/workflows/checkpoints/`.
 
 ## In the TUI
 
-Workflows is a top-level tab with three parts:
+Workflows is a top-level tab with three parts. The sidebar lists the installed workflows, with the selected one's runs indented beneath it; `↑↓` walk it, `1`-`9` jump, `Enter` opens the graph, `Esc` comes back. The canvas draws the graph, a box per node laid out left to right by distance from the trigger, a lane per concurrent branch; `←→` follows edges, `↑↓` walks lanes, `i` expands the selected node. Selecting a run overlays it, with each box recoloured by how that run left it and durations and diagnostics in the inspector.
 
-* **The sidebar** lists the installed workflows, with the selected one's runs
-  indented beneath it. `↑↓` walk it, `1`-`9` jump, `Enter` opens the graph, `Esc`
-  comes back.
-* **The canvas** draws the graph: a box per node, laid out left to right by
-  distance from the trigger, a lane per concurrent branch, and each branch's port
-  name written on the wire that carries it. `←→` follows edges, `↑↓` walks the
-  lanes, and `i` expands the selected node's whole declaration. Selecting a run
-  overlays it: each box recoloured by how that run left it, unreached steps
-  dimmed, and durations and diagnostics in the inspector.
-* **The copilot** (`c`) is a conversation that edits the graph. Ask for a change
-  in plain words; a real harness session makes it, and the graph is re-read from
-  the store afterwards so the transcript reports what actually changed rather
-  than whatever the agent said it did.
+The copilot (`c`) is a conversation that edits the graph. Ask for a change in plain words; a real harness session makes it, and the graph is re-read from disk afterwards so the transcript reports what changed rather than what the agent said it did.
 
-`x` runs the selected workflow and `d` simulates it, from either pane. `r`
-re-reads the store.
-
-The tab is present when the crate is built with its default `workflows` feature.
-A slim build without the engine drops the tab rather than offering one that
-cannot draw anything.
+`x` runs the selected workflow and `d` simulates it. `r` re-reads the store. A run's agent steps appear in the Sessions rail like any other session, and `Enter` on a session row that belongs to a run opens that run.
 
 ## From the command line
 
-Every verb prints JSON and reads bulk input from stdin, so the same surface is
-usable by a person and by an agent without either being a special case:
+Every verb prints JSON and reads bulk input from stdin, so a person and an agent use the same surface:
 
 ```sh
 medulla workflow list                  # what is installed
@@ -79,66 +49,26 @@ medulla workflow resume <run-id> --approve <node-id>
 medulla workflow cancel <run-id>
 ```
 
-`dry-run` is the one to reach for while authoring. Validation catches a malformed
-graph; a dry run catches a *well-formed* graph that is wired wrong, resolving
-every expression and checking every declared output shape against capability
-stand-ins, with nothing dispatched.
+`dry-run` is the one to reach for while authoring. Validation catches a malformed graph; a dry run catches a well-formed graph that is wired wrong, resolving every expression and checking every declared output shape with nothing dispatched.
 
-`cancel` is process-local. A run started by `medulla workflow run` in one shell
-cannot be cancelled from another, because there is no control channel between two
-CLI invocations, and the command says so rather than reporting a bare failure.
-The paths that can always cancel are the ones that own the running process: the
-TUI cancels the run it started, and an orchestrator's abort frame reaches the
-daemon executing it.
+`cancel` is process-local. A run started by `medulla workflow run` in one shell cannot be cancelled from another, and the command says so. The TUI can always cancel the run it started.
 
 ## Approval gates
 
-A node with `config.requires_approval: true` parks the run instead of continuing.
-Release it with `medulla workflow resume <run-id> --approve <node-id>`, or refuse
-it with `--reject <node-id>`; both flags repeat. This is how a plan that ends in
-something irreversible gets a human in the middle of it without a person having
-to sit and watch the run.
+A node with `config.requires_approval: true` parks the run. Release it with `medulla workflow resume <run-id> --approve <node-id>`, or refuse it with `--reject <node-id>`; both flags repeat. That is how a plan that ends in something irreversible gets a person in the middle without someone sitting and watching.
 
-## Agents author them too
+## Agents run and author them
 
-Medulla drives Claude Code and Codex over [ACP](https://github.com/tinyhumansai/medulla/blob/main/docs/acp-harnesses.md)
-as a *client*, so it cannot hand them tools directly; it offers them. Every ACP
-session gets an MCP server (`medulla workflow mcp`, the same binary) exposing the
-catalogue, `workflow_create`, `workflow_apply_ops` / `workflow_preview_ops`,
-`workflow_validate`, `workflow_dry_run`, `workflow_run`, and `workflow_runs`.
+Every harness Medulla launches is handed an MCP server, `medulla mcp`, with the workflow tools: the catalogue, `workflow_create`, `workflow_apply_ops` and `workflow_preview_ops`, `workflow_validate`, `workflow_dry_run`, `workflow_run`, `workflow_run_get`, `workflow_run_detail`, and `workflow_run_cancel`. So an agent in a session can start a saved workflow, or write a new one, without leaving its own transcript.
 
-`workflow_run` starts the run and answers with its id rather than waiting for
-it. A real workflow outlives any client's idle ceiling. In one of our own runs a
-three-pass babysit took 35 minutes, with a single step of it taking 20, so a call
-that waits is reported as a failure while the run carries on succeeding.
-`workflow_run_get` says how far it has got and, once it settles, what it did.
-`wait: true` and `waitMs` are there for the short ones.
+`workflow_run` answers with the run id rather than waiting, because a real workflow outlives any client's idle ceiling; `workflow_run_get` says how far it has got. `workflow_apply_ops` is the one that matters for editing: a patch is checked op by op, and a batch that fails anywhere leaves the workflow untouched.
 
-`workflow_run_detail` answers the question the run record cannot. A step is
-written only once it has *finished*, so an `agent` node twenty minutes into a
-coding session is invisible to `workflow_run_get`. This verb joins the run to the
-harness sessions in flight for it, and says which worker each one is on. It looks
-in two places: the sessions this server dispatched itself, and the fleet roster,
-which is the only view of a run executing somewhere else.
+`medulla skills install` goes the other way. It writes harness-native skill files (Claude Code skills, Codex prompts, or a generic form) that trigger your saved workflows, into your home, the current checkout, or Medulla's own managed root, so an everyday session started outside Medulla can still find and start one. See [CLI Reference › `medulla skills`](../developers/cli-reference.md#medulla-skills).
 
-And `workflow_run_cancel` stops a run, because a model that started one over MCP
-and answered with the id had no way to stop it and nobody was watching it in the
-pane. Cancellation is *process-local*: it reaches the runs the serving process
-is executing, which for a session that started its own run is the case that
-matters. A run started elsewhere (the TUI, another MCP server, a daemon)
-answers `cancelled: false` with a reason rather than an error, and stopping it
-means going to the process that owns it. `workflow_run_detail`'s
-`live.executingHere` is the same fact read ahead of time: true there means a
-cancel will land.
+## Evolve
 
-`workflow_apply_ops` is the one that matters for editing. Rewriting a whole
-document loses whatever the model misremembered; a patch is checked op by op, and
-a batch that fails anywhere leaves the workflow untouched.
+`medulla workflow evolve <id>` asks a harness to review a workflow's own run history and file notes and proposals against it. Nothing is applied on its own: `medulla workflow proposals`, `accept`, and `reject` are how a person decides. `[workflows.evolve] autoOnFailure = true` queues a review after a failed run.
 
 ## Read next
 
-The full authoring reference, covering the node-kind catalogue, `agent` node
-config, jq expressions, and how the orchestrator dispatches a workflow to a
-worker, is in
-[`docs/workflows.md`](https://github.com/tinyhumansai/medulla/blob/main/docs/workflows.md)
-in the repository.
+The full authoring reference, covering the node-kind catalogue, `agent` node config, and jq expressions, is in [`docs/workflows.md`](https://github.com/tinyhumansai/medulla/blob/main/docs/workflows.md) in the repository.

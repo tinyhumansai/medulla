@@ -26,8 +26,6 @@ A shell session is an ordinary terminal in the same pane. It attaches and detach
 
 Every other session keeps running while you are attached to one. Attaching also clears that session's attention mark, since someone is now dealing with it.
 
-Kitty-protocol terminals (kitty, WezTerm, Ghostty, recent iTerm2) can send `Shift-Enter` through to the agent as a newline.
-
 ## Reading the rail
 
 Each row is a session. The glyph at its head is its state:
@@ -54,7 +52,7 @@ The rest of the row is the status line. Which fields it shows (state, harness, w
 
 `k` closes the selected session, after asking. `K` then `y` kills the underlying process without ceremony; any other key after `K` cancels. A session that has exited leaves the rail on its own; it is not kept as a row.
 
-Sessions on remote hosts behave the same way. The row lives under that host's group in the rail, and `k` and `K` reach across the link to the process on the far side.
+Sessions on remote hosts behave the same way. The row lives under that host's group in the rail, and closing it reaches across the link to the process on the far side.
 
 ## What survives a restart
 
@@ -64,7 +62,7 @@ Scrollback is 2,000 lines per session.
 
 ## Copying out
 
-`Ctrl-Y` copies the selected session's screen. `Ctrl-O` releases the mouse to the terminal so you can drag-select natively; press it again to take the mouse back. Copies go to the terminal you are looking at, which matters when Medulla is itself running inside ssh or tmux: it uses OSC 52 so the text lands on your laptop's clipboard rather than the remote machine's. [Troubleshooting › Copying out of Medulla](../developers/troubleshooting.md#copying-out-of-medulla) covers the nested cases.
+`Ctrl-O` releases the mouse to the terminal so you can drag-select and copy natively; press it again to take the mouse back. When Medulla copies something itself, such as a connect line, it writes to the terminal you are looking at using OSC 52, so the text lands on your laptop's clipboard even when Medulla is running inside ssh or tmux. [Troubleshooting › Copying out of Medulla](../developers/troubleshooting.md#copying-out-of-medulla) covers the nested cases.
 
 ## Read next
 

@@ -95,7 +95,7 @@ The next `Ctrl-T` starts with a host step. Picking the new host runs your own `s
 ## Explore with zero setup
 
 ```sh
-cargo run       # or: medulla, with no token configured
+cargo run -- --mock     # or: medulla --mock
 ```
 
 `medulla --mock` runs the mock runtime, a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab and its Help subpage for the keys. Usage, the effective config, and the theme editor live under Settings as well.

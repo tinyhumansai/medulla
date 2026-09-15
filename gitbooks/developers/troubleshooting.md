@@ -1,7 +1,6 @@
 ---
 description: >-
-  Diagnosing the failures Medulla actually produces: install, login, hosting and
-  remote hosts, clipboard through tmux and SSH, and where the logs are.
+  Diagnosing the failures Medulla actually produces: install, login, remote hosts, clipboard through tmux and SSH, and where the logs are.
 ---
 
 # Troubleshooting

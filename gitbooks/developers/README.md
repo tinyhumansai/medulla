@@ -52,7 +52,7 @@ medulla login   # browser OAuth; stores a verified JWT
 medulla         # bare invocation starts the TUI
 ```
 
-With no credentials configured, `medulla` opens a login screen. Press `m` there to explore offline against the scripted [mock runtime](configuration.md#the-mock-runtime), with no network and no account. See [Getting Started](getting-started.md) for the full walkthrough.
+With no credentials configured, `medulla` opens a login screen. To explore offline instead, run `medulla --mock`, the scripted [mock runtime](configuration.md#the-mock-runtime), with no network and no account. See [Getting Started](getting-started.md) for the full walkthrough.
 
 ## What is open source
 

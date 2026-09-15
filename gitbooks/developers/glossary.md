@@ -80,7 +80,7 @@ A backend relay that forwards host-link datagrams it cannot read, for enrolled p
 
 ## Mock runtime
 
-The scripted offline runtime behind `medulla --mock` and the `m` key on the login screen. No account, no network, every tab has something to draw.
+The scripted offline runtime behind `medulla --mock`. No account, no network, every tab has something to draw.
 
 ## Hook
 

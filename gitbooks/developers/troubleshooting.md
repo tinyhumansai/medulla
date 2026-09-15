@@ -80,7 +80,7 @@ peers, and bounds each connection with a 5 s read timeout and an 8 KiB buffer.
 
 Something outranks the stored session, or the session was stored somewhere this
 process does not read. The credential chain is inline `backend.token`, then
-`backend.tokenEnv` (default `MEDULLA_TOKEN`), then `<home>/session.json` — and
+`backend.tokenEnv` (default `MEDULLA_TOKEN`), then `<home>/session.json`, and
 `medulla login` now refuses to store a session underneath one of the first two
 rather than saving one nothing would read, so a login that reports this is
 telling you which source to remove.
@@ -91,8 +91,8 @@ minted against another deployment — by an older build, back when the endpoint 
 configurable — will not be offered to the pinned one; sign in again.
 
 Older installs kept a separate `credentials.json`, which could report success
-while the runtime stayed signed out. `login` now adopts that file — verifying its
-JWT and rewriting it as a proper session — and only `logout` deletes it. See
+while the runtime stayed signed out. `login` now adopts that file, verifying its
+JWT and rewriting it as a proper session, and only `logout` deletes it. See
 [Authentication](authentication.md#upgrading-from-a-standalone-credentials-file).
 
 Check which account you are on. The active account is recorded in
@@ -110,7 +110,7 @@ something a config or environment variable can get wrong — a build that report
 is a build whose constant is empty, which is a bug worth filing.
 
 To get a working interface with no backend at all, ask for the mock runtime:
-`medulla --mock`. The login screen deliberately does not offer it — a failed
+`medulla --mock`. The login screen deliberately does not offer it: a failed
 sign-in should not quietly land you in a scripted demo you might mistake for the
 product.
 

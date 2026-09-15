@@ -51,7 +51,7 @@ Token precedence is an inline `token`, then the variable `tokenEnv` names, then 
 
 ### The mock runtime
 
-`medulla --mock` runs a scripted, self-contained runtime with no backend and no login. It fabricates a plausible set of sessions and a feedback board so every tab has something to draw, and it is the fastest way to look at the interface. With nobody signed in, the login screen also offers it on `m`.
+`medulla --mock` runs a scripted, self-contained runtime with no backend and no login. It fabricates a plausible set of sessions and a feedback board so every tab has something to draw, and it is the fastest way to look at the interface. The login screen does not offer it, so a failed sign-in cannot land you in a demo by accident.
 
 ## Remote hosts
 

@@ -76,7 +76,7 @@ medulla         # bare invocation starts the TUI
 
 `medulla login` opens your browser, captures the JWT the backend redirects back with, verifies it, and saves credentials under your [Medulla home](configuration.md#medulla-home). The next `medulla` run picks them up automatically. Over SSH, where the browser cannot reach back, use `medulla login --code`. Providers, headless tokens, and the security model are covered in [Authentication](authentication.md).
 
-If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen (browser flow, paste-a-token, or press `m` to continue against the scripted [mock runtime](configuration.md#the-mock-runtime)).
+If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen with the browser flow and a paste-a-token option. It does not offer the mock runtime; that is `medulla --mock`, so a failed sign-in cannot quietly land you in a demo.
 
 Once in, press `Ctrl-T`, pick a harness, pick a directory, and the session is running. `Ctrl-]` attaches your keyboard to it and detaches again. [The TUI](the-tui.md) has every key.
 
@@ -98,7 +98,7 @@ The next `Ctrl-T` starts with a host step. Picking the new host runs your own `s
 cargo run       # or: medulla, with no token configured
 ```
 
-With nobody signed in, `medulla` opens a login screen; press `m` to continue offline against the mock runtime, a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab and its Help subpage for the keys. Usage, the effective config, and the theme editor live under Settings as well.
+`medulla --mock` runs the mock runtime, a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab and its Help subpage for the keys. Usage, the effective config, and the theme editor live under Settings as well.
 
 ## Use the SDK from your own crate
 

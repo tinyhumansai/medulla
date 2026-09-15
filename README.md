@@ -71,9 +71,9 @@ The client is the Rust workspace at [`tinyhumansai/medulla-src`](https://github.
 
 This is Medulla's documentation and distribution surface:
 
-- `docs/` — engineering specs and protocol documents.
-- `gitbooks/` — the sources behind [tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla).
-- `install.sh` / `install.ps1` — the installers the commands above run.
-- [Releases](https://github.com/tinyhumansai/medulla/releases) — every published binary, its checksum, and the `latest.json` manifest `medulla update` reads.
+- `docs/`: engineering specs and protocol documents.
+- `gitbooks/`: the sources behind [tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla).
+- `install.sh` / `install.ps1`: the installers the commands above run.
+- [Releases](https://github.com/tinyhumansai/medulla/releases): every published binary, its checksum, and the `latest.json` manifest `medulla update` reads.
 
 The Rust workspace that produces those binaries is developed in `medulla-src`; its release pipeline publishes here.

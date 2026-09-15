@@ -15,10 +15,10 @@ A harness is the thing a session runs. Medulla opens the real coding CLI on a re
 | Claude Code | `claude` on `PATH` | `claude`, full screen |
 | Codex | `codex` on `PATH` | `codex`, full screen |
 | OpenCode | `opencode` on `PATH` | `opencode tui` |
-| OpenHuman | always offered when a preset names it | runs in-process on Medulla's own agent loop; there is no binary to install |
+| OpenHuman | `openhuman` on `PATH` | `openhuman tui` |
 | Shell | every shell installed on the machine, your `$SHELL` first | the shell, as a plain terminal |
 
-The three CLIs are detected by searching `PATH`. `MEDULLA_CLAUDE_BIN`, `MEDULLA_CODEX_BIN`, and `MEDULLA_OPENCODE_BIN` point at a specific binary instead. `MEDULLA_SHELL_BIN` pins which shell leads the list.
+The CLIs are detected by searching `PATH`. `MEDULLA_CLAUDE_BIN`, `MEDULLA_CODEX_BIN`, `MEDULLA_OPENCODE_BIN`, and `MEDULLA_OPENHUMAN_BIN` point at a specific binary instead. `MEDULLA_SHELL_BIN` pins which shell leads the list.
 
 A shell session is yours alone. Nothing dispatches into it and no automation types into it; it exists so you can have a terminal beside your agents without leaving the window.
 
@@ -44,9 +44,11 @@ fastModel = "deepseek/deepseek-chat"
 apiKeyEnv = "OPENROUTER_API_KEY"
 ```
 
-Presets appear in the picker by name. `apiKeyEnv` names an environment variable; the key itself never goes in the file. Claude presets map `model` onto Opus and `fastModel` onto the Sonnet and Haiku tiers so sub-agents also use the preset; Codex and OpenCode get the model through their normal `-m` argument.
+Presets appear in the picker by name, after the CLIs. `apiKeyEnv` names an environment variable; the key itself never goes in the file. Claude presets map `model` onto Opus and `fastModel` onto the Sonnet and Haiku tiers so sub-agents also use the preset; Codex and OpenCode get the model through their normal `-m` argument.
 
 The CLI never sees the real key. Medulla starts a loopback proxy, hands the CLI a machine-local token, and forwards to OpenRouter with Medulla's own attribution headers. `providerOnly` pins which of OpenRouter's serving providers may answer, which matters because one model is offered at prices that differ by more than an order of magnitude. [Configuration › Custom harness presets](../developers/configuration.md#custom-harness-presets) has every field.
+
+A preset with `baseHarness = "openhuman"` does not spawn a CLI at all. It runs the turn in-process on Medulla's own agent loop, so there is nothing to install, and it is only offered when the key its `apiKeyEnv` names is actually set.
 
 A `[router]` section points every harness at one OpenAI-compatible gateway instead, for centralised metering. See [Attribution and routing](../developers/attribution-and-routing.md).
 

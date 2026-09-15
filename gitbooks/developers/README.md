@@ -56,4 +56,4 @@ With no credentials configured, `medulla` opens a login screen. To explore offli
 
 ## What is open source
 
-The SDK, the TUI, and the host link are open source under GPL-3.0-only. The hosted sign-in and the account features behind it are gated. You can read all of the client, build it, and run it offline against the mock runtime before requesting access. See [Availability](../availability.md).
+The SDK, the TUI, and the host link are open source under GPL-3.0-only. The hosted sign-in and the account behind it are what a plan pays for. You can read all of the client, build it, and run it offline against the mock runtime without one. See [Availability](../availability.md).

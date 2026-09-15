@@ -61,7 +61,7 @@ Running it yourself or building on it? Everything technical is in [Developers](h
 
 ## Availability
 
-Medulla is in early alpha and access is gated. It is rolling out to a small group of OpenHuman subscribers first. See [Availability](https://tinyhumans.gitbook.io/medulla/availability) for how to ask for access.
+Any registered account can use Medulla free for its first 30 days. After that it needs a Basic or Pro plan. See [Availability](https://tinyhumans.gitbook.io/medulla/availability).
 
 ## Open source
 

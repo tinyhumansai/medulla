@@ -29,12 +29,12 @@ A `.env` file in the current directory is loaded at startup (`KEY=VALUE`, `#` co
 Values combine from five layers, highest wins:
 
 1. CLI flags (`--config`, `--no-alt-screen`, …)
-2. Environment variables (`MEDULLA_API_URL`, `MEDULLA_TOKEN`, `MEDULLA_STATE_DIR`, the `MEDULLA_*` harness knobs; the older `TINYPLACE_*` spelling of those is still read)
+2. Environment variables (`MEDULLA_TOKEN`, `MEDULLA_STATE_DIR`, the `MEDULLA_*` harness knobs; the older `TINYPLACE_*` spelling of those is still read)
 3. The project-local file: `./.medulla/config.toml` or `./medulla.toml`
 4. The user-global file: `<home>/config.toml`
 5. Built-in defaults
 
-Files merge field by field, so a project-local file can override just `backend.baseUrl` without discarding the rest of the global file. An explicit `--config <path>` (`.toml` or `.json`) replaces layers 3 and 4; environment variables and flags still override it.
+Files merge field by field, so a project-local file can override just `backend.tokenEnv` without discarding the rest of the global file. An explicit `--config <path>` (`.toml` or `.json`) replaces layers 3 and 4; environment variables and flags still override it.
 
 Two sections are only ever read from the global file or an explicit `--config`, never from a project-local one: `[[remoteHosts]]` and `[[hooks]]`. Both can run a command on your machine (`sshOptions` accepts `-o ProxyCommand=…`; a hook is a command), so a config checked into a repository must not be able to supply them.
 
@@ -42,10 +42,11 @@ Two sections are only ever read from the global file or an explicit `--config`, 
 
 ```toml
 [backend]
-baseUrl = "https://api.tinyhumans.ai"   # MEDULLA_API_URL overrides; MEDULLA_STAGING=1 flips the default
 tokenEnv = "MEDULLA_TOKEN"              # the env var holding a bearer JWT
 # token = "eyJ..."                      # inline; discouraged
 ```
+
+The backend URL is pinned to `https://api.tinyhumans.ai` as a constant in the binary. No environment variable, config key, or flag moves it; a `backend.baseUrl` key in an older config parses and does nothing. Reaching any other deployment means editing the constant and rebuilding.
 
 Token precedence is an inline `token`, then the variable `tokenEnv` names, then the session `medulla login` stored. See [Authentication](authentication.md).
 
@@ -314,7 +315,7 @@ The host link identity. The pair key is deliberately absent from config: it is g
 
 ```toml
 [link]
-forwarderUrl = "https://api.tinyhumans.ai"   # defaults to backend.baseUrl
+forwarderUrl = "https://api.tinyhumans.ai"   # defaults to the pinned backend URL
 nodeName = "my-laptop"
 stateDir = "/absolute/path/to/link"          # default <home>/link
 peers = []                                   # enrolled forwarder peers, if any

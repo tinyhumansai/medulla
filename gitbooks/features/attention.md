@@ -38,7 +38,7 @@ The pulse is counted off Medulla's own render clock rather than the terminal's b
 [theme]
 attention = "yellow"
 attentionBlink = true
-attentionBlinkSeconds = 1.0   # one bright-to-dim cycle; clamped to 0.2–10.0
+attentionBlinkSeconds = 1.0   # one bright-to-dim cycle; clamped to 0.2 to 10.0
 ```
 
 Settings › Appearance edits all three live.

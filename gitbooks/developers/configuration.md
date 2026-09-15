@@ -144,7 +144,7 @@ selectionFg = "white"          # text on the selection background
 dimBorder = "darkgray"         # panel borders
 attention = "yellow"           # ⚠ rows, the tab badge, "N waiting on you"
 attentionBlink = true          # false holds the cue steady
-attentionBlinkSeconds = 1.0    # one full pulse; clamped to 0.2–10.0
+attentionBlinkSeconds = 1.0    # one full pulse; clamped to 0.2 to 10.0
 ```
 
 Values are ratatui colour names (`cyan`, `lightblue`, `darkgray`, …) or `#rrggbb`. A failed session pulses red regardless of `attention`. Settings › Appearance edits these live and writes them back.

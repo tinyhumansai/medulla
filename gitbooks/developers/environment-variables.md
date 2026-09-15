@@ -27,7 +27,7 @@ these can be set either way. Truthy values are `1` and `true`, case-insensitive.
 
 The backend endpoint is **not** configurable. It is compiled into the binary as
 `https://api.tinyhumans.ai`, and no environment variable moves it. `MEDULLA_API_URL`
-and `MEDULLA_STAGING` used to, and no longer do — setting either has no effect at
+and `MEDULLA_STAGING` used to, and no longer do. Setting either has no effect at
 all rather than an error, because there is no longer a setting to be wrong about.
 
 | Variable | What it does | Default |

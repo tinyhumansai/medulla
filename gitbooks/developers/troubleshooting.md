@@ -106,7 +106,7 @@ Readiness is three states, not two, because a host answers each differently: run
 sign in, or stop. Reachable but signed out opens the login flow. No backend URL
 at all reports that error instead, because a login screen cannot fix a missing
 base URL. The endpoint is pinned into the binary now, so this is no longer
-something a config or environment variable can get wrong — a build that reports it
+something a config or environment variable can get wrong. A build that reports it
 is a build whose constant is empty, which is a bug worth filing.
 
 To get a working interface with no backend at all, ask for the mock runtime:

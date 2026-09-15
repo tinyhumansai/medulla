@@ -56,7 +56,7 @@ The one-to-three-line layout of a session row: state glyph, harness, control, th
 
 ## Connect line
 
-The single line `medulla daemon --direct` prints to stdout before detaching: `MEDULLA_LINK_CONNECT port=… node=… key=…`. The client reads it from the SSH channel and never needs SSH again for that host.
+The single line `medulla daemon --direct` prints to stdout before detaching: `MEDULLA-CONNECT v1 port=… node=… key=…`. The client reads it from the SSH channel and never needs SSH again for that host.
 
 ## Host link
 

@@ -8,7 +8,7 @@ The `medulla` binary is the terminal app plus a small set of subcommands: the da
 | `medulla login` / `logout` | [OAuth login](authentication.md), via the browser or `--code` for SSH and other browserless terminals; logout clears the session. |
 | `medulla remote <host> --exec <cmd>` | [Run one command](#medulla-remote) on a configured remote host and print what its screen showed. |
 | `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host. |
-| `medulla claude` / `codex` / `opencode` | [Wrappers](#harness-wrappers): run a CLI in this terminal with Medulla's tools attached. |
+| `medulla claude` / `codex` / `opencode` | [Wrappers](#harness-wrappers): run a CLI in this terminal, forwarding its transcript to a configured owner. |
 | `medulla sessions` | List recent Claude Code and Codex sessions on this machine as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run saved multi-step plans. |
 | `medulla skills <cmd>` | [Harness skills](#medulla-skills): write skills that trigger saved workflows into a harness's skill directory. |
@@ -102,7 +102,9 @@ medulla codex --no-bridge       # plain passthrough, nothing attached
 medulla codex -- --no-bridge    # `--` forces everything after it to the child
 ```
 
-The wrapper attaches Medulla's MCP server and lifecycle hook to the child, so a session you run outside the TUI still gets the workflow tools. `--no-bridge` skips that. `MEDULLA_<PROVIDER>_BIN` overrides which binary is launched.
+Underneath, the wrapper tails the harness's own JSONL transcript and forwards each record as an encrypted event to the owner named by `MEDULLA_HARNESS_DM_TO` (or `MEDULLA_<PROVIDER>_DM_TO`); with inbound input enabled it also types the owner's replies into the child. With no owner configured it prints one warning and runs as a plain passthrough, which is also what `--no-bridge` asks for. OpenCode is always passthrough with input injection only, since its session log is not a flat JSONL. `MEDULLA_<PROVIDER>_BIN` overrides which binary is launched.
+
+This is the bridge the standing daemon uses. A session opened from the TUI does not go through it; the TUI owns the PTY directly.
 
 ## `medulla sessions`
 

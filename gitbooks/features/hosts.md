@@ -5,6 +5,11 @@ machine you have paired once; after that the TUI reaches it directly over UDP,
 mosh-style — no SSH session to keep alive, no relay in between, and a laptop
 that sleeps or changes networks picks up where it left off.
 
+The machine you pair must be Unix (Linux or macOS): the daemon's provider-spawn
+paths and the harness wrappers it runs are unix-only, the same requirement as
+[remote machines](remote-hosts.md) generally. Windows can run the Medulla TUI
+that *dials in*, just not be the paired host on the other end.
+
 ## Pairing a machine
 
 1. On the **Hosts** tab press `a`. Give the machine a name and the address the
@@ -17,8 +22,15 @@ that sleeps or changes networks picks up where it left off.
    medulla daemon HK1-…
    ```
 
-3. Run that once on the machine, in any shell. It says
-   `paired with client … on udp/<port>` and stays running.
+3. Run that once on the machine. It says `paired with client … on udp/<port>`
+   and stays running. The key is embedded in that command, so treat it like a
+   credential: it stays in that shell's history and in the daemon's process
+   arguments for as long as the daemon runs un-scrubbed, and anyone else who
+   can read either on that machine can act as your paired client. Only run
+   this on a machine you trust and that you are the only user of. On a
+   shared machine, use `s` (below) so `ssh` carries the key instead of a
+   shell you typed it into, or ask for the [remoteHosts](remote-hosts.md)
+   forwarder path, whose pair key is never accepted on the command line.
 4. Back in the TUI, press `⏎` on the host. It goes **live** and lists what it
    offers: the coding CLIs installed there, plus a shell.
 

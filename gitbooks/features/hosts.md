@@ -22,15 +22,19 @@ that *dials in*, just not be the paired host on the other end.
    medulla daemon HK1-…
    ```
 
-3. Run that once on the machine. It says `paired with client … on udp/<port>`
-   and stays running. The key is embedded in that command, so treat it like a
-   credential: it stays in that shell's history and in the daemon's process
-   arguments for as long as the daemon runs un-scrubbed, and anyone else who
-   can read either on that machine can act as your paired client. Only run
-   this on a machine you trust and that you are the only user of. On a
-   shared machine, use `s` (below) so `ssh` carries the key instead of a
-   shell you typed it into, or ask for the [remoteHosts](remote-hosts.md)
-   forwarder path, whose pair key is never accepted on the command line.
+3. Run that once on the machine. It says `paired with client … on udp/<port>`,
+   then immediately re-execs itself as `medulla daemon --host`, which is what
+   actually stays running — so the key is on that process's command line only
+   for the instant it takes to record the pairing, not for the life of the
+   daemon. Treat it like a credential anyway: it can still be read by another
+   local user watching `ps`/`/proc` in that instant, or by anyone who can see
+   the shell history of whoever typed the command in. Only pair from a
+   machine and an account you trust. Running it via `s` (below), over a
+   non-interactive `ssh`, keeps it out of the target's shell history
+   entirely; typing it directly on a shared machine's own interactive shell
+   does not. For a pair key that is never on a command line at all, use the
+   [remoteHosts](remote-hosts.md) SSH-bootstrapped path instead, which mints
+   its key over the SSH channel.
 4. Back in the TUI, press `⏎` on the host. It goes **live** and lists what it
    offers: the coding CLIs installed there, plus a shell.
 

@@ -148,8 +148,10 @@ copilot. See [workflows.md](./workflows.md).
 The transport that carries encrypted frames between a Medulla and its remote
 hosts, specified in [`host-link-protocol.md`](host-link-protocol.md). Two
 endpoints exchange UDP datagrams straight to each other under a **pair key**
-that only they hold; there is no relay in the path. All coordination e2e tests
-drive it in-process to keep suites deterministic and offline.
+that only they hold; there is no relay in the production path. Offline
+coordination e2e suites instead use an in-process relayed route, keeping those
+suites deterministic and offline; the direct path is covered separately by the
+live harness.
 
 ## Pair key and host key
 
@@ -158,7 +160,7 @@ SSH-bootstrapped path it is minted by `medulla daemon --direct` and carried back
 once inside the SSH channel. On the paired path it rides inside the **host
 key**, a single `HK1-…` string minted on the client that also names both node
 ids and the UDP port, and is pasted once into `medulla daemon <key>`. Either
-way it is stored only in `<stateDir>/node.json` and never in config.
+way it is stored only in `<home>/link/node.json` and never in config.
 
 ## ACP (Agent Client Protocol)
 
@@ -198,13 +200,12 @@ UDP.
 
 ## Backend
 
-The TinyHumans API at `api.tinyhumans.ai`. Medulla talks to it for exactly four
-things: signing in, reading the account's plan entitlement (whether this user
-may run Medulla at all, from `/auth/me`), account usage, and the feedback board.
-No session, task, transcript, or workspace content goes to it. The `Backend`
-trait in the SDK (`backend` module) is that whole surface; `medulla --mock`
-swaps in a scripted `MockBackend`, and a signed-out run uses an
-`OfflineBackend`.
+The TinyHumans API at `api.tinyhumans.ai`. Signing in and plan entitlement
+(`/auth/me`, which decides whether the account may run Medulla) are separate
+account flows. The SDK's `Backend` trait (`backend` module) covers account usage,
+logout, and the feedback board. No session, task, transcript, or workspace
+content goes to it. `medulla --mock` swaps in a scripted `MockBackend`, and a
+signed-out run uses an `OfflineBackend`.
 
 ## TUI
 

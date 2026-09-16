@@ -16,9 +16,9 @@ Two bootstraps produce a pair, and both end in the same link:
 * **SSH-bootstrapped.** A `[[remoteHosts]]` entry is reached over SSH, the
   client starts `medulla daemon --direct` there, the host mints the pair key and
   prints it back up the SSH channel, and SSH is not used again.
-* **Paired.** The client mints a host key (section 7.2) and the operator pastes
-  it into `medulla daemon <key>` on the host, which then serves that one client
-  on the port the key names, across the client coming and going.
+* **Paired.** The client mints a host key (section 7.2) and the operator supplies
+  it to the paired-daemon invocation on the host, which then serves that one
+  client on the port the key names, across the client coming and going.
 
 This document is normative. Both endpoints live in the `medulla-link` crate and
 code against it. Where this document and the implementation disagree, this
@@ -37,13 +37,13 @@ Two layers, deliberately separated:
 | Layer | Key | Purpose |
 |---|---|---|
 | Outer header | path key, derived from the pair key | addressing, roaming, cheap rejection of off-path junk |
-| Inner payload | pair key | the actual messages |
+| Inner payload | AEAD key, derived from the pair key | the actual messages |
 
-Both keys are held by the two endpoints and nobody else. The path key is not a
-second secret: it is derived from the pair key under its own label (section
-5), exactly as the AEAD key is, and anything that could forge it could already
-decrypt. Its job is to reject a datagram that is not from the peer before any
-AEAD work is done.
+Both derived keys are held by the two endpoints and nobody else. The path key
+is not a second secret: it is derived from the pair key under its own label
+(section 5), exactly as the AEAD key is, and anything that could forge it could
+already decrypt. Its job is to reject a datagram that is not from the peer
+before any AEAD work is done.
 
 The pair key never appears in a config file, a log line or a request body. It
 lives in the state file (section 7.3) on each end and nowhere else.
@@ -112,8 +112,15 @@ at the state layer (by sending a smaller diff), never at the datagram layer.
 
 ## 4. Payload
 
-`payload = ChaCha20-Poly1305(key = pair_key, nonce = section 4.2, aad =
+`payload = ChaCha20-Poly1305(key = aead_key, nonce = section 4.2, aad =
 header[0..50], plaintext = section 4.1)`.
+
+```
+aead_key = SHA-256("medulla-link/1 aead" ‖ pair_key)
+```
+
+`aead_key` is the 32-byte output of SHA-256. The pair key remains the 16-byte
+pairing secret; it is never passed directly to ChaCha20-Poly1305.
 
 Binding the AAD to the outer header means a recipient can verify the datagram was
 addressed to it, by that sender, at that sequence. Anything on the path that redirected a
@@ -239,12 +246,12 @@ rule: adopt the source address of a datagram that both authenticates (the tag
 verifies and the payload decrypts) **and** advances the highest sequence seen
 from that peer.
 
-The freshness half is load-bearing. An endpoint that moved on any authenticated
-datagram could have its peer address stolen by an attacker replaying one
-captured datagram from their own address, turning roaming support into a
-traffic-hijacking primitive. Requiring a strictly higher sequence means the
-attacker must produce a datagram the legitimate peer has not sent yet, which
-the tag and the AEAD prevent. This is mosh's rule.
+The freshness half rejects any replay received after the original sequence has
+been accepted. Before an endpoint receives the original datagram, an attacker
+who can replay it from another address can temporarily move the peer address;
+the next legitimate datagram with a higher sequence restores it. A deployment
+that cannot tolerate that transient limitation MUST use a reachability path
+that prevents captured datagrams from being replayed from a different source.
 
 ### 5.4 Limits
 
@@ -375,10 +382,11 @@ never comes up.
 
 The pair key rides in argv here, which section 7.1 forbids for the typed key.
 The trade is deliberate: a one-shot command that works on any box is the whole
-point of pairing this way, the host can be re-paired with a fresh key at any
-time, and the exposure window is one process start on a machine the operator
-already controls. A re-issued key always carries a fresh host node id and pair
-key; re-pairing must not be a way to recover the old one.
+point of pairing this way, but local processes that can inspect argv and readers
+of shell history MUST be trusted for that start. On hosts that cannot meet that
+assumption, use a supported protected input channel such as stdin or a
+permission-restricted file descriptor. A re-issued key always carries a fresh host node id
+and pair key; re-pairing must not be a way to recover the old one.
 
 ### 7.3 State file
 
@@ -393,9 +401,10 @@ There is no key recovery. A lost state file means pairing the host again.
 ## 8. Scope
 
 Each link is one socket talking to one peer. The protocol has no peer discovery
-and no NAT traversal beyond what roaming (section 5.3) and the heartbeat
-(section 6.1) give for free: a host behind a NAT is reached because the owner
-dials it, or because the paired daemon listens on a port the operator opened.
+or NAT traversal. Roaming and the heartbeat preserve an already reachable path;
+they do not create a NAT mapping. A host behind a NAT therefore needs an opened
+or forwarded UDP port, or an existing compatible outbound mapping, before the
+owner can reach it.
 
 Confidentiality covers payloads; the cleartext header exposes the two node ids,
 the sequence and the epoch to anyone on the path, so the protocol offers no
@@ -428,8 +437,10 @@ than in a test file because they are part of the contract.
 * A datagram with a bad tag is dropped before any AEAD work.
 * A source-address change carried by a datagram with `seq > highest_seq`
   moves the peer address and traffic resumes.
-* A captured datagram replayed from a different source address does not move
-  the peer address (section 5.3).
+* A captured datagram replayed from a different source after its original has
+  been accepted does not move the peer address; a replay before first receipt
+  may move it temporarily and is corrected by the next fresh peer datagram
+  (section 5.3).
 * A datagram naming a node id outside the pair is dropped.
 * Both ends derive the same path key from the pair key, and it differs from the
   AEAD key.

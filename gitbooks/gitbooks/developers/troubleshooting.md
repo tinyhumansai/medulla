@@ -1,6 +1,7 @@
 ---
 description: >-
-  Diagnosing the failures Medulla actually produces: install, login, remote hosts, clipboard through tmux and SSH, and where the logs are.
+  Diagnosing the failures Medulla actually produces: install, login, hosting and
+  enrollment, clipboard through tmux and SSH, and where the logs are.
 ---
 
 # Troubleshooting
@@ -80,7 +81,7 @@ peers, and bounds each connection with a 5 s read timeout and an 8 KiB buffer.
 
 Something outranks the stored session, or the session was stored somewhere this
 process does not read. The credential chain is inline `backend.token`, then
-`backend.tokenEnv` (default `MEDULLA_TOKEN`), then `<home>/session.json`, and
+`backend.tokenEnv` (default `MEDULLA_TOKEN`), then `<home>/session.json` — and
 `medulla login` now refuses to store a session underneath one of the first two
 rather than saving one nothing would read, so a login that reports this is
 telling you which source to remove.
@@ -91,8 +92,8 @@ minted against another deployment — by an older build, back when the endpoint 
 configurable — will not be offered to the pinned one; sign in again.
 
 Older installs kept a separate `credentials.json`, which could report success
-while the runtime stayed signed out. `login` now adopts that file, verifying its
-JWT and rewriting it as a proper session, and only `logout` deletes it. See
+while the runtime stayed signed out. `login` now adopts that file — verifying its
+JWT and rewriting it as a proper session — and only `logout` deletes it. See
 [Authentication](authentication.md#upgrading-from-a-standalone-credentials-file).
 
 Check which account you are on. The active account is recorded in
@@ -106,75 +107,70 @@ Readiness is three states, not two, because a host answers each differently: run
 sign in, or stop. Reachable but signed out opens the login flow. No backend URL
 at all reports that error instead, because a login screen cannot fix a missing
 base URL. The endpoint is pinned into the binary now, so this is no longer
-something a config or environment variable can get wrong. A build that reports it
+something a config or environment variable can get wrong — a build that reports it
 is a build whose constant is empty, which is a bug worth filing.
 
 To get a working interface with no backend at all, ask for the mock runtime:
-`medulla --mock`. The login screen deliberately does not offer it: a failed
+`medulla --mock`. The login screen deliberately does not offer it — a failed
 sign-in should not quietly land you in a scripted demo you might mistake for the
 product.
 
-## Remote hosts
+## Hosting and the daemon
 
-### The host row says failed
+### Hosting on this device did not start
 
-The failure carries the reason, and the three worth knowing are different
-problems with different fixes.
+`medulla` hosts by default. When hosting was wanted and could not happen, the TUI
+reports it on the status line. The two causes are that no coding-agent CLI was
+found on `PATH` (`claude`, `codex`, `opencode`), or that the configured address
+is already bound. Set `[host].providers` explicitly, or change `[host].address`.
 
-An unknown or changed host key, a refused login, or an unreachable machine is
-`ssh` failing, and the message is `ssh`'s own stderr. Fix it the way you would
-fix `ssh <host>` at a shell prompt, because that is literally what ran: your
-`~/.ssh/config`, your keys, and your `known_hosts` are what Medulla used.
+`MEDULLA_HOST=0` turns hosting off for one run and `MEDULLA_HUB=0` turns off the
+orchestrator uplink; both beat the config file, and setting both leaves a plain
+chat client. If either is set in your shell profile or a cwd `.env`, that is
+worth checking before anything else.
 
-`<host> has no medulla on its PATH` means the login worked and the binary is
-missing on the far side. Install it there with the same installer, or set
-`remoteCommand` to its full path if it is installed somewhere the login shell
-does not see.
+### A declared workspace is rejected
 
-A bootstrap that times out after thirty seconds usually means something before
-the connect line took too long: a slow MOTD, a `ProxyJump` through a bastion, or
-a login shell that blocks. Run the ssh command by hand and see what it prints
-before the `MEDULLA-CONNECT v1` line.
+A workspace declaration naming a directory that cannot be used costs that
+declaration, not hosting altogether. The other declared hosts keep serving, so
+look for the specific declaration in the log rather than assuming hosting is
+down.
 
-### It connected, but nothing happens after picking the host
+### A task hangs until it times out
 
-The picker waits on the host step until the far side answers, because the
-harness list has to come from that machine. If the daemon started but its UDP
-port cannot be reached, for instance because SSH went through a jump host and
-UDP cannot follow, set `udpHost` on the entry to the address UDP should use.
+An unattended harness that hits a permission prompt has nobody to answer it.
+`[host].skipPermissions` defaults to on for that reason. On the daemon,
+`--dangerously-skip-permissions` is the headless opt-in and
+`--no-skip-permissions` is the operator-screen opt-out; if you passed the latter,
+peer sessions will stop on prompts. Claude's fresh-directory trust dialog is
+cleared up front on the operator path unless you passed `--no-trust-workspace`.
 
-### The remote list offers no harness
+### Enrollment and pairing
 
-The far side detects the coding CLIs on the `PATH` of the shell that started the
-daemon, which is a non-interactive login shell over SSH. A CLI installed by a
-tool that only edits `.bashrc` or `.zshrc` will not be on that `PATH`. Put it
-somewhere the login shell sees, or export it from `.profile` or `.zshenv`.
+Enrollment is the entire admission decision; there is no separate approval queue.
+A peer that was never enrolled cannot be addressed at all.
 
-### Sessions there run in the wrong directory
+Pairing needs one string to travel, the worker's address. The daemon prints it on
+a line of its own at startup and also copies it to your terminal's clipboard with
+OSC 52, so it survives an SSH boundary. The copy is skipped when the daemon's
+output is piped, and it needs a terminal that accepts OSC 52; see
+[copying out of Medulla](#copying-out-of-medulla) below. `--handle build-box`
+skips the copy entirely, so you can type `@build-box` into Add Host instead.
+`--no-pair` suppresses the pairing block when a script is parsing the output.
 
-The daemon's `--workspace` is the `workspace` on your `[[remoteHosts]]` entry,
-and with none set it is the directory the daemon was launched in, which over SSH
-is the login home. Set `workspace`, and list any others under `workspaces` so the
-picker can offer them; a remote directory cannot be completed from here.
+### Two peers that both look healthy never hear from each other
 
-### The remote row's "waiting" timer looks wrong
+The usual cause is that they are pointed at different forwarders. The daemon
+states its identity and forwarder together on its first log line for exactly this
+reason (`host link: <id> on <endpoint>`), and the orchestrator prints its own.
+Compare the two lines side by side.
 
-It is measured from when your machine first saw the cue, not from the remote
-clock, so it cannot be skewed by the host's time. A timer that resets is a cue
-that changed to a different one, which is what "how long has it been asking this"
-means.
+A peer being `Offline` is not terminal on its own. The link keeps retransmitting
+through `Degraded` and `Offline`, and recovery needs no reconnect, handshake, or
+re-enrollment. See [liveness](host-link-protocol.md#62-liveness).
 
-### The standing daemon: two peers never hear from each other
-
-For an enrolled `medulla daemon` (not the SSH-bootstrapped `--direct` case), the
-usual cause is that the two ends are pointed at different forwarders. The daemon
-states its identity and forwarder together on its first log line
-(`host link: <id> on <endpoint>`), and the client prints its own. Compare them.
-
-A peer being `Offline` is not terminal. The link keeps retransmitting through
-`Degraded` and `Offline`, and recovery needs no reconnect or re-enrollment. See
-[liveness](host-link-protocol.md#62-liveness). There is no key recovery: the
-backend never holds a pair key, so a lost key means re-enrolling the host.
+There is no key recovery. The backend never holds a pair key, so a lost key means
+re-enrolling the host.
 
 ## Copying out of Medulla
 
@@ -187,6 +183,8 @@ cross those layers to reach the clipboard you actually paste from.
 
 A drag over the TUI copies the swept block, read back out of the rendered frame,
 so this works over any pane, including a harness pane.
+
+`/copy` and the chat copy bindings copy the transcript or the last reply.
 
 A short line, such as a worker address or a command, can be copied on its own.
 
@@ -256,8 +254,8 @@ a file.
 
 | Process | File |
 | --- | --- |
-| The TUI | `<medulla home>/logs/orchestrator.log` (the name is historical) |
-| The daemon | `<medulla home>/logs/worker.log` |
+| The TUI and its hub | `<medulla home>/logs/orchestrator.log` |
+| The worker TUI and daemon | `<medulla home>/logs/worker.log` |
 
 `MEDULLA_LOG_DIR` overrides the directory. The default is deliberately not the
 workspace: a worker's workspace is full of real repositories, and a log file
@@ -284,6 +282,6 @@ For a failure inside a test harness rather than a live run, see
 
 ## Read next
 
-* [Configuration](configuration.md): home directory, layered config, remote hosts.
+* [Configuration](configuration.md): home directory, layered config, hosting.
 * [Authentication](authentication.md): the full login flows and security model.
 * [Environment variables](environment-variables.md): every variable named on this page.

@@ -1,29 +1,16 @@
 ---
 description: >-
   The normative wire specification for medulla-link/1, the transport between a
-  Medulla client and its remote hosts.
+  Medulla orchestrator and its remote hosts.
 ---
 
 # Host link protocol (`medulla-link/1`)
 
-The transport between the Medulla you are looking at and its remote hosts.
-Endpoints exchange UDP datagrams carrying mosh-style state synchronisation,
-either directly or through a backend that forwards bytes it cannot read.
-
-Two words in this specification are protocol role names, not product terms.
-The **orchestrator** is the client end: the machine you run `medulla` on, which
-opens sessions elsewhere. The **host** is the machine serving them. The names
-are fixed on the wire (`orchestratorNodeId` is a field in the enrollment
-exchange) and are kept here for that reason.
-
-This specification describes the forwarded topology, where a backend relays
-between two enrolled endpoints. The SSH-bootstrapped case, which is how a
-`[[remoteHosts]]` entry is reached, uses the same packet format, crypto, and
-state synchronisation with no forwarder in the path: the pair key is minted by
-`medulla daemon --direct` and carried back inside the SSH channel instead of
-being enrolled (section 7), and the outer header is authenticated under a path
-key both ends derive from the pair key, since there is no forwarder key. The
-`direct` module of the `medulla-link` crate documents the differences.
+The transport between a Medulla orchestrator and its remote hosts. It replaces
+the tiny.place mailbox: instead of Signal-encrypting a frame, pushing it to a
+hosted relay and polling it back down, endpoints exchange UDP datagrams carrying
+mosh-style state synchronisation through a backend that forwards bytes it cannot
+read.
 
 This document is normative. Three implementations code against it: the
 orchestrator endpoint, the host endpoint (both in the `medulla-link` crate) and

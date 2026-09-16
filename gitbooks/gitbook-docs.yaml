@@ -1,0 +1,11 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: Medulla
+  structure:
+    - type: space
+      key: space-1
+      title: Medulla
+      path: medulla-old
+      default: true
+      content:
+        directory: ./gitbooks

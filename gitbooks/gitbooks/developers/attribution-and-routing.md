@@ -118,5 +118,5 @@ key back in the child, undoing both things this exists to do.
 ## Read next
 
 * [Configuration](configuration.md): the `[router]` section and custom harness presets.
-* [Harnesses](../features/harnesses.md): custom presets from the user's side.
+* [Orchestrator routing](../features/routing.md): why work is sent to one model rather than another.
 * [Environment variables](environment-variables.md): `MEDULLA_PROXY_TOKEN` and `MEDULLA_OPENROUTER_URL`.

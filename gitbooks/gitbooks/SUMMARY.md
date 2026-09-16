@@ -2,22 +2,22 @@
 
 ## Overview
 
-* [Medulla](README.md)
-* [One terminal, not a pile of them](why-one-terminal.md)
-* [Availability](availability.md)
+* [The Orchestrator](README.md)
+* [Why an Orchestrator](overview/why-an-orchestrator-model.md)
+* [Context Scaling Without Collapse](overview/rlm-context-scaling.md)
+* [Pricing and Availability](overview/pricing-and-availability.md)
 
 ## Features
 
-* [Sessions](features/sessions.md)
-* [Remote machines](features/remote-hosts.md)
-* [Hosts](features/hosts.md)
-* [Harnesses](features/harnesses.md)
-* [Attention cues](features/attention.md)
+* [Workers and Sessions](features/workers-and-sessions.md)
 * [Workflows](features/workflows.md)
+* [MEDULLA.md](features/workspace-profiles.md)
+* [Orchestrator Routing](features/routing.md)
+* [Token Efficiency and Budgets](features/token-efficiency.md)
 
 ## Developers
 
-* [Overview](developers/README.md)
+* [Overview](developers/developers.md)
 * [Getting Started](developers/getting-started.md)
 * [The TUI](developers/the-tui.md)
 * [CLI Reference](developers/cli-reference.md)

@@ -27,8 +27,8 @@ wins:
 3. The stored session, `session.json` in the account's
    [Medulla home](configuration.md#medulla-home).
 
-Every backend-facing surface resolves the token through that one chain (the
-TUI's readiness check and `medulla login`/`logout` alike), so
+Every backend-facing surface resolves the token through that one chain — the
+TUI's readiness check, `medulla hub`, and `medulla login`/`logout` alike — so
 there is no path where one part of Medulla considers you signed in and another
 does not.
 

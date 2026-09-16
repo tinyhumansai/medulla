@@ -18,7 +18,7 @@ The **task ledger** holds one digest per settled delegated task. It is the orche
 
 **Compressed history** holds the running summaries. Each reasoning pass leaves a summary rather than a transcript, roughly 20:1, so a long operation carries its own past forward at a fraction of the size. The compress tier does that work, which is why it is a tier of its own and routed to a model sized for it rather than to the orchestrator's model.
 
-Both are covered from the cost side in [Token Efficiency and Budgets](features/token-efficiency.md).
+Both are covered from the cost side in [Token Efficiency and Budgets](../features/token-efficiency.md).
 
 ## A walk-through: what reaches the orchestrator
 
@@ -47,6 +47,6 @@ Nothing here is lost. The full material stays in the context store and the event
 
 Accuracy holds as the fleet grows, because the reasoning surface does not grow with it. The tenth harness and the hundredth cost the orchestrator roughly the same attention, since both arrive as digests rather than transcripts.
 
-It also changes the bill: the orchestrator is metered on the distilled slice, not on the fleet's traffic. [Token Efficiency and Budgets](features/token-efficiency.md) has the numbers and the enforcement mechanisms, and [Pricing and Availability](pricing-and-availability.md) has the rates.
+It also changes the bill: the orchestrator is metered on the distilled slice, not on the fleet's traffic. [Token Efficiency and Budgets](../features/token-efficiency.md) has the numbers and the enforcement mechanisms, and [Pricing and Availability](pricing-and-availability.md) has the rates.
 
-Curious how the offload works in the code? See [Architecture](developers/architecture.md).
+Curious how the offload works in the code? See [Architecture](../developers/architecture.md).

@@ -156,8 +156,10 @@ E2E_LIVE=1 OPENROUTER_API_KEY=sk-or-… make e2e-live
 
 - `E2E_LIVE=1`: required; the deliberate opt-in.
 - `OPENROUTER_API_KEY`: required; billed per token.
-- `MEDULLA_STAGING=1`: the default. Targeting production additionally needs
-  `E2E_ALLOW_PROD=1`.
+- `E2E_ALLOW_PROD=1`: required. The binary's endpoint is pinned to production, so
+  this suite can only run against production. `MEDULLA_STAGING` no longer does
+  anything, and the harness refuses outright if it is set rather than letting a
+  stale invocation believe it is safely on staging.
 - `LIVE_MODEL`: defaults to a cheap small model.
 - `MEDULLA_LINK_FORWARDER`, `MEDULLA_LINK_HOME_<name>`,
   `MEDULLA_LINK_OWNER_DIR_<name>`: the transport prerequisites above.

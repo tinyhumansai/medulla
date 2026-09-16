@@ -8,7 +8,7 @@ Both work for three or four. Both stop working past that, and neither stops for 
 
 tmux solves a real problem, and it is not this one. It gives you panes; it has no idea what is in them. Which agent is blocked on a permission prompt, which one died twenty minutes ago, which one is finished and waiting for you to look — a multiplexer cannot tell you, because to it they are all just bytes on a pseudo-terminal. You are the scheduler. You cycle the panes, you read them, you notice. That is a job that scales linearly with the number of agents and holds for about as long as your attention does.
 
-Medulla runs the same processes, on the same kind of PTY, and reads them. Every session it opens has its own terminal emulator kept live in the background whether or not you are looking at it, and Medulla watches all of them for the things that actually need you: a permission prompt, a startup dialog, a blocking error, a terminal bell, a session that died, a turn that finished and is waiting on review. Those roll up to one mark per row and one count in the rail's title — *`⚠ 3 waiting on you`* — so a fleet you are not watching still tells you when it needs you.
+Medulla runs the same processes, on the same kind of PTY, and reads them. Every session it opens has its own terminal emulator kept live in the background whether or not you are looking at it, and Medulla watches all of them for the things that actually need you: a permission prompt, a startup dialog, a blocking error, a terminal bell, a session that died, a turn that finished and is waiting on review. Those roll up to one mark per row and one count in the rail's title — _`⚠ 3 waiting on you`_ — so a fleet you are not watching still tells you when it needs you.
 
 That is the difference in one line. A multiplexer gives you N things to check. Medulla tells you which of the N to look at, and puts you there in a keystroke.
 
@@ -38,7 +38,7 @@ Medulla records every delegated task in a ledger: its id, instruction, assigned 
 
 Fan-out in a chat orchestrator is an emergent property of prompting. Nothing bounds how many harnesses run at once, how deep delegation recurses, how long the whole thing may take, or what it may spend.
 
-Medulla makes those explicit caps: a per-cycle token draw, deadline, and concurrency cap; per-task step and token allowances; a depth cap on recursion; and a daily account limit. The concurrency cap is a semaphore rather than a scheduler, so excess tasks queue and run as slots free up instead of being rejected for arriving at a busy moment. A two-hundred task fan-out completes under a cap of eight. See [Token Efficiency and Budgets](features/token-efficiency.md).
+Medulla makes those explicit caps: a per-cycle token draw, deadline, and concurrency cap; per-task step and token allowances; a depth cap on recursion; and a daily account limit. The concurrency cap is a semaphore rather than a scheduler, so excess tasks queue and run as slots free up instead of being rejected for arriving at a busy moment. A two-hundred task fan-out completes under a cap of eight. See [Token Efficiency and Budgets](../features/token-efficiency.md).
 
 ### Running out of budget ends the operation
 
@@ -46,11 +46,11 @@ In a chat orchestrator, a hard limit surfaces as an exception, and an exception 
 
 ### Every kind of thinking costs the same
 
-Deciding how to decompose a problem, carrying out a step, and squeezing a verbose transcript into something short are three different jobs with different price tags. A single chat session pays top-tier rates for all three. Medulla splits them into cognitive tiers (orchestrator, reasoning, compress) and routes each to a model sized for it. See [Orchestrator Routing](features/routing.md).
+Deciding how to decompose a problem, carrying out a step, and squeezing a verbose transcript into something short are three different jobs with different price tags. A single chat session pays top-tier rates for all three. Medulla splits them into cognitive tiers (orchestrator, reasoning, compress) and routes each to a model sized for it. See [Orchestrator Routing](../features/routing.md).
 
 ### Placement is a guess
 
-Handed five repositories and a fleet of harnesses, a model with no other information will guess where work belongs, and its guesses will read plausibly whether or not they are right. Medulla narrows the guess from two directions. Capability probing asks an agent what it can actually reach (working directory, accessible directories, git project and branch, tools, MCP servers, provider backends) and caches the answer. [`MEDULLA.md`](features/workspace-profiles.md) profiles let an operator state what a repository is and how work over it should be routed, in roughly 100 to 200 tokens per workspace.
+Handed five repositories and a fleet of harnesses, a model with no other information will guess where work belongs, and its guesses will read plausibly whether or not they are right. Medulla narrows the guess from two directions. Capability probing asks an agent what it can actually reach (working directory, accessible directories, git project and branch, tools, MCP servers, provider backends) and caches the answer. [`MEDULLA.md`](../features/workspace-profiles.md) profiles let an operator state what a repository is and how work over it should be routed, in roughly 100 to 200 tokens per workspace.
 
 ## What an orchestrator does instead
 
@@ -67,6 +67,6 @@ Medulla is the third option: a process built to hold an operation — a registry
 ## Read next
 
 * [Context Scaling Without Collapse](rlm-context-scaling.md) for how the reasoning surface is kept small.
-* [Orchestrator Routing](features/routing.md) for the tiers and how work reaches a harness.
-* [Workers and Sessions](features/workers-and-sessions.md) for what a worker is and how tasks are assigned.
-* [Architecture](developers/architecture.md) for how this maps onto modules you can read.
+* [Orchestrator Routing](../features/routing.md) for the tiers and how work reaches a harness.
+* [Workers and Sessions](../features/workers-and-sessions.md) for what a worker is and how tasks are assigned.
+* [Architecture](../developers/architecture.md) for how this maps onto modules you can read.

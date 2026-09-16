@@ -251,13 +251,15 @@ every delegation behaves; there is no setting for it.
 
 ## What you see
 
-The terminal app organizes this into Sessions, Workflows, Hosts, Feedback, and
-Settings. Settings holds Usage, Appearance, Status line, Config, Feedback,
-Trace, Context, Account, and Help, grouped under General, Debug, and About
-headings. [Workflows](workflows.md) is the authored planning and execution
-surface; [Hosts](hosts.md) is where other machines are paired, and `H` picks
-which machine Sessions and Workflows are about. There is no Memory tab: the
-persona-memory layer is out of this build.
+The terminal app organizes this into Overview, Sessions, Workflows,
+Subconscious, Changes, Hosts, Feedback, and Settings. Settings holds Usage,
+Appearance, Status line, Config, Feedback, Trace, Context, Account, and Help, grouped under General,
+Debug, and About headings. Overview is the at-a-glance panel: runtime identity
+and health, the active cycle, recent events, the last cycle's results, the task
+ledger, any pending decision, and a **This device** panel for what this machine
+is hosting. [Workflows](workflows.md) is the authored planning and execution
+surface; Hosts holds the fleet's management pages described above. There is no
+Memory tab: the persona-memory layer is out of this build.
 
 The Sessions tab is where an operation becomes legible, and where you drive it.
 The rail lists the sessions running on this machine and the ones dispatched to

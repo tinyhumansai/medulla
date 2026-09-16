@@ -10,7 +10,7 @@ Usage-based pricing for the orchestrator:
 | Cached input tokens | $0.10 / million |
 | Output tokens       | $6 / million    |
 
-These rates are metered against what the orchestrator actually reads, which is a fraction of what your fleet produces. [Token Efficiency and Budgets](features/token-efficiency.md) explains why, and covers the budget caps that bound spend per cycle, per task, and per day.
+These rates are metered against what the orchestrator actually reads, which is a fraction of what your fleet produces. [Token Efficiency and Budgets](../features/token-efficiency.md) explains why, and covers the budget caps that bound spend per cycle, per task, and per day.
 
 ## Early alpha, by invitation
 

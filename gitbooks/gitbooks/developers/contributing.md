@@ -45,7 +45,7 @@ live in `src/sdk/tests/support/`:
 
 | File | What it stands in for |
 | --- | --- |
-| `mock_backend.rs` | The backend's HTTP and SSE surfaces. |
+| `mock_backend.rs` | The orchestration backend's HTTP and SSE surfaces. |
 | `fake_app_server.rs` | The app-facing server endpoints. |
 | `fake_provider.rs` | A coding-agent provider. |
 | `mock_harness.rs`, `mock_harness_helpers.rs`, `mock_harness_script.rs`, `mock_harness_types.rs` | Mock `claude`/`codex`/`opencode` CLIs that emit realistic provider stream-JSONL, selected via the `MEDULLA_*_BIN` overrides. |

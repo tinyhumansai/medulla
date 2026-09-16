@@ -65,11 +65,11 @@ Two implementations ship, both under
 [`src/sdk/src/runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/):
 
 * [`runtime::cloud::CloudRuntime`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/)
-  is what a signed-in session runs on. It drives the backend API directly through
+  is what the product runs on. It drives the orchestration API directly through
   a [`MedullaClient`](#the-backend-client) (`CloudRuntime::new(client)`, or
   `with_hub(client, hub)` when the outbound dispatch hub is wired in): HTTP for
-  submit/abort/new-session, and a polled event cursor, backing off between an
-  active 120 ms and an idle 1 s, for the live feed. There is no socket and no
+  submit/abort/new-session, and a polled event cursor — backing off between an
+  active 120 ms and an idle 1 s — for the live feed. There is no socket and no
   attach handshake.
   [`runtime::cloud::connect`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/cloud/connect/)
   builds that client from config and the environment and reports whether it is
@@ -83,7 +83,7 @@ Two implementations ship, both under
 
 `cloud` reclaims a name it already had. Before v0.11.0 an OpenHuman core was
 embedded in front of the transport, so every backend call became an RPC hop
-onto that core's own client, against the same deployment, with a second wire-
+onto that core's own client — against the same deployment, with a second wire-
 type set and an error-string decode in the middle. Dropping the core removed
 the hop, not the transport.
 
@@ -190,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `mock_link_forwarder.rs` is a blind loopback UDP forwarder implementing
 [section 5](host-link-protocol.md#5-forwarder-rules) of the host-link protocol,
 standing in for the backend in the coordination end-to-end harness.
-`coordination_owner` is the client end of that harness: it enrolls a pair,
+`coordination_owner` is the orchestrator end of that harness: it enrolls a pair,
 dispatches task frames over the link, and prints the terminal frame as JSON. See
 [Testing](testing.md#the-coordination-end-to-end-harness).
 
@@ -202,10 +202,11 @@ of truth. `lib.rs` defines the public surface.
 | Module | Responsibility |
 | --- | --- |
 | [`agent/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agent/) | Medulla's own local agent: a `tinyagents` harness, a tool surface (`fs`, `shell`, and the guard around them), and one turn driver. What the `openhuman` harness id runs on. |
+| [`agents/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agents/) | Where agent templates come from: the built-in coding catalog, the on-disk `.medulla/agents/*.toml` store that supersedes it, and the installer between them. |
 | [`attribution/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/attribution/) | Git commit attribution: the `Co-authored-by` trailer and the hook shims that carry it without disabling a repository's own hooks. |
 | [`auth/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/auth/) | An RFC 8252 loopback OAuth flow against the backend, plus the pure URL and query helpers the CLI and tests share. |
 | [`bridge/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/bridge/) | Message delivery bridges for local and remote agent communication. |
-| [`client/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/client/) | The HTTP and SSE client for the backend. |
+| [`client/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/client/) | The HTTP and SSE client for the orchestration backend. |
 | [`clipboard/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/clipboard/) | Clipboard writers: a platform binary first, then OSC 52. See [Troubleshooting](troubleshooting.md#copying-out-of-medulla). |
 | [`codex_app_server/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/codex_app_server/) | A pooled client for `codex app-server`. See [Harness integration](harness-integration.md#codex-on-a-shared-process). |
 | [`codex_overrides/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/codex_overrides/) | Codex `-c` config overrides that make a routed Codex run reach a non-OpenAI model. |
@@ -219,12 +220,12 @@ of truth. `lib.rs` defines the public surface.
 | [`harness_work/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_work/) | What a coding-agent harness is working on, in one vocabulary. |
 | [`history_upload/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/history_upload/) | Sharing local coding-agent history to earn onboarding credit. |
 | [`home/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/home/) | The Medulla home directory and the early `.env` loader. |
-| [`hub/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/hub/) | The task-sender hub of the earlier dispatching design; serves the standing daemon, not a session opened from the picker. |
+| [`hub/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/hub/) | The task-sender hub: the outbound half of the harness plane. |
 | [`inference_proxy/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/inference_proxy/) | The loopback attribution proxy. See [Attribution and routing](attribution-and-routing.md). |
-| [`init/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/init/) | The workspace profile writer behind `medulla init`; from the earlier dispatching design, kept because it builds. |
+| [`init/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/init/) | Workspace initialisation: registering a directory and authoring its `MEDULLA.md`. |
 | [`logging/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/logging/) | The one line-sink type every subsystem narrates through. |
 | [`mcp/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/mcp/) | Medulla's own MCP server, offered to the harnesses it spawns (`workflows` feature). |
-| [`onboarding/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/onboarding/) | First-run worker registration for the standing daemon. |
+| [`onboarding/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/onboarding/) | First-run worker registration orchestration. |
 | [`protocol/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/protocol/) | Medulla's own wire protocol for the TUI and daemon, plus the centralized environment-variable resolution both share. |
 | [`runtime/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/runtime/) | The `Runtime` trait, its snapshot contract, and the `cloud` and `mock` implementations. |
 | [`session_history/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/session_history/) | Recent-session history for local harness sessions. |

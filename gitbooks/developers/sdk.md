@@ -105,10 +105,10 @@ mirroring backend responses), and `feedback/` (the feedback-board calls).
 [`src/sdk/examples/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/examples/) holds runnable examples that
 demonstrate a narrow contract without becoming production entry points.
 
-`harness_contract_decode.rs` is the executable seam the integration umbrella's
-cross-repository contract test drives. It reads one JSON value from stdin, exits
-non-zero if serde rejects it, and writes the canonical re-serialized value to
-stdout:
+`harness_contract_decode.rs` is an executable seam for checking a harness's
+task JSON against the contract from outside the crate. It reads one JSON value
+from stdin, exits non-zero if serde rejects it, and writes the canonical
+re-serialized value to stdout:
 
 ```rust
 use std::io::{self, Read};

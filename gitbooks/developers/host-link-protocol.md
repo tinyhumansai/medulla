@@ -466,6 +466,16 @@ SSH bootstrap that carries the same material back over the SSH channel. The
 requirement it adds is mosh's: the host must be reachable on that port from
 wherever the client is.
 
+This is mosh's own address-learning trade-off, not a gap introduced here: an
+on-path attacker who captures a datagram and replays it from another address
+before the genuine one arrives, with a sequence number that still advances the
+watermark, can win the race and get the host to adopt their address. They hold
+no key, so they cannot decrypt or forge new traffic — the result is a
+blackhole for the legitimate peer (denial of service), not a compromise of
+confidentiality or integrity. There is no equivalent to the forwarder's
+"replay from another source does not rebind" rule (section 5, rule 5) on the
+direct path, because there is no forwarder to enforce it centrally.
+
 Confidentiality covers payloads only. The backend sees the full social graph and
 traffic volumes, so the protocol offers no metadata privacy.
 

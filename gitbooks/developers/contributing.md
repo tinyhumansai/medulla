@@ -26,9 +26,10 @@ cargo run --release             # optimized build
 cargo install --path src/tui    # installs the `medulla` binary onto your PATH
 ```
 
-`cargo run` with no flags signs in against the configured backend
-when a session is available; with nobody signed in, it falls back to the same
-offline mock runtime `--mock` selects explicitly.
+`cargo run` with no flags uses the configured backend when a session is
+available. Without usable credentials, it opens the TUI login screen; it does
+not select mock mode. Use `cargo run -- --mock` explicitly for the offline mock
+runtime.
 
 ## Validate
 

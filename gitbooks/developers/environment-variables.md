@@ -146,11 +146,11 @@ readable.
 | `MEDULLA_BIN`, `FORWARDER_BIN`, `OWNER_BIN`, `OPENCODE_BIN` | Prebuilt binary overrides for the coordination harness. |
 | `MOCK_LLM_MARKER`, `MOCK_LLM_MODEL`, `MOCK_LLM_PORT`, `MOCK_LLM_LOG` | Mock LLM knobs for the coordination harness. |
 
-## Inert
+## Entry-point-specific variables
 
 | Variable | Status |
 | --- | --- |
-| `MEDULLA_HOST`, `MEDULLA_HUB`, `MEDULLA_HUB_POLL_MS`, `MEDULLA_HUB_WORKERS`, `MEDULLA_LINK_PEER`, `MEDULLA_WORKER_PROVIDER`, `MEDULLA_DEMO_FLEET` | Switches for the local dispatch hub and its stand-in fleet: whether this device hosts tasks, whether the hub starts, its poll interval, a pre-seeded worker roster, and a demo roster for development. Nothing a session opened from the picker does reads them. |
+| `MEDULLA_HOST`, `MEDULLA_HUB`, `MEDULLA_HUB_POLL_MS`, `MEDULLA_HUB_WORKERS`, `MEDULLA_LINK_PEER`, `MEDULLA_WORKER_PROVIDER`, `MEDULLA_DEMO_FLEET` | Active for the local dispatch hub and development/stand-in-fleet entrypoints: they control whether this device hosts tasks, whether the hub starts, its poll interval, a pre-seeded worker roster, and a demo roster. Picker sessions ignore them. |
 | `TINYPLACE_*` | The deprecated spelling of the harness knobs above. Still read, directly behind the `MEDULLA_*` name in each tier. |
 
 ## What an agent turn cannot see

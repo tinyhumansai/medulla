@@ -64,7 +64,7 @@ The transport between a Medulla and a remote host: `medulla-link/1`, UDP datagra
 
 ## Pair key
 
-The 128-bit key the two ends of a host link share. Minted per connection, carried once inside the SSH channel or inside a host key, stored only in `<stateDir>/node.json`, and never in config.
+The 128-bit key the two ends of a host link share. Minted per connection, carried once inside the SSH channel or inside a host key, stored only in `<home>/link/node.json`, and never in config.
 
 ## Host key
 
@@ -88,7 +88,7 @@ The device-local router that dispatches a task to an agent on this machine when 
 
 ## Backend
 
-The TinyHumans API. Medulla asks it four things: to sign in, whether the account's plan entitles it to run Medulla, the account's usage, and the feedback board. No session, task, or transcript content goes to it.
+The TinyHumans API. Sign-in and plan entitlement are separate account flows. The SDK `Backend` handles account usage, logout, and the feedback board. No session, task, or transcript content goes to it.
 
 ## Hook
 

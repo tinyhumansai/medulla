@@ -169,8 +169,11 @@ means.
 For a paired `medulla daemon <key>`, the usual cause is that the key the host
 was started with is not the one the client currently holds: re-issuing a key
 mints a fresh pair, so a host still running on the old one is a stranger. The
-daemon states its identity on its first log line (`host link: <id>`), and the
-client prints its own. Compare them, and restart the host with the current key.
+daemon's first log line (`host link: <id>`) is its local host endpoint ID; the
+client prints its local owner endpoint ID, so those two values are expected to
+differ. Compare the daemon's ID with the client's stored host peer ID, and
+compare the client's ID with the owner ID in the host key used to start the
+daemon. Restart the host with the current key when either comparison differs.
 
 A peer being `Offline` is not terminal. The link keeps retransmitting through
 `Degraded` and `Offline`, and recovery needs no reconnect or re-pairing. See

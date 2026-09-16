@@ -7,7 +7,7 @@ The `medulla` binary is the terminal app plus a small set of subcommands: the da
 | `medulla` | Bare invocation starts the [TUI](#the-tui). |
 | `medulla login` / `logout` | [OAuth login](authentication.md), via the browser or `--code` for SSH and other browserless terminals; logout clears the session. |
 | `medulla remote <host> --exec <cmd>` | [Run one command](#medulla-remote) on a configured remote host and print what its screen showed. |
-| `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host. |
+| `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host; a host key starts the one-client paired variant. |
 | `medulla claude` / `codex` / `opencode` | [Wrappers](#harness-wrappers): run a CLI in this terminal, forwarding its transcript to a configured owner. |
 | `medulla sessions` | List recent Claude Code and Codex sessions on this machine as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run saved multi-step plans. |
@@ -90,6 +90,13 @@ A long-running daemon for a machine that serves work continuously. With a termin
 | `--config <path>` | Explicit config file. |
 
 The two permission flags point opposite ways on purpose. Headless, the bypass is opt-in and named for what it is. On the operator screen, sessions run unattended with the bypass on by default, because nobody is in the pane to answer a prompt and a task that stops on one hangs until it times out; `--no-skip-permissions` turns that off. The daemon's provider-spawn paths are unix-only.
+
+### Paired daemon
+
+`medulla daemon <host-key>` starts the one-client paired daemon described in the
+[host-link protocol](host-link-protocol.md#72-host-key). The host key is a
+one-shot bootstrap secret: its pair key is exposed in argv for that process
+start, so use it only where local argv and shell-history readers are trusted.
 
 ## Harness wrappers
 

@@ -350,8 +350,36 @@ and decoding folds the confusable characters, so `0`/`O` and `1`/`I`/`L` typos
 resolve rather than fail. The checksum catches the rest at entry, where the error
 is obvious, instead of surfacing later as an unexplained decrypt failure.
 
-The host reads it **from its TTY**, prompted. It MUST NOT be accepted as a
-command-line flag: argv is world-readable via `ps` and lands in shell history.
+On the forwarder path the host reads it **from its TTY**, prompted. It MUST NOT
+be accepted as a command-line flag there: argv is world-readable via `ps` and
+lands in shell history.
+
+### 7.1.1 Host key (direct path)
+
+The direct path (§8.1) pairs without a forwarder and without a TTY prompt:
+everything both ends must agree on travels in one string the operator pastes
+once, `medulla daemon <key>`.
+
+```
+raw      = 0x01 ‖ client node id (16) ‖ host node id (16) ‖ pair key (16)
+           ‖ udp port (2, big-endian) ‖ checksum (2)               (53 bytes)
+checksum = SHA-256(raw[0..51])[0..2]
+encoding = Crockford base32 of 424 bits                             (85 chars)
+display  = "HK1-" + groups of 4, hyphen-separated
+```
+
+Both node ids are minted on the client, so the peer table is known on both
+sides before the first datagram: the host binds `udp port` and learns the
+client's address from its first authenticated datagram; the client dials the
+host's address at `udp port`. Decoding ignores case, whitespace and hyphens and
+folds the confusables; the checksum rejects a truncated paste at entry.
+
+This key **is** accepted in argv, which the rule above forbids for the typed
+pair key. The trade is deliberate: a one-shot command that works in any shell
+on any box is what pairing this way is for; the exposure is one process start
+on a machine the operator already controls; and a key is revocable by issuing
+another, which replaces the host node id and the pair key together. The
+forwarder path's rule is unchanged.
 
 ### 7.2 Enroll token and forwarder key
 
@@ -379,11 +407,34 @@ forwarder key, forwarder endpoint and the persisted sequence reservation (§3.1)
 Created and loaded under the same file lock used by the existing identity
 bootstrap.
 
+`version` is `1` or `2`. A version-1 file holds one peer in `peer_node_id` /
+`pair_key`. A version-2 file holds every peer in `peers[]`, each with its own
+pair key, and an empty list there means *no peers* — a client identity is
+minted before its first host is paired, and an implementation MUST NOT fall
+back to the legacy single-peer fields for a version-2 file. Direct-path
+pairings (§7.1.1) keep one identity directory per peer:
+`<home>/remote/clients/<host id>/` on the client and
+`<home>/remote/hosts/<client node id>/` on the host, the latter beside a
+`pairing.json` recording the port so the daemon can be restarted without the key.
+
 ## 8. Scope
 
-Every datagram goes through the forwarder. The protocol has no peer discovery, no
-NAT traversal and no direct path between endpoints, so it is a relay topology
-rather than a mesh.
+On the forwarder path every datagram goes through the forwarder. The protocol
+has no peer discovery and no NAT traversal, so it is a relay topology rather
+than a mesh.
+
+### 8.1 Direct path
+
+The same payload layer (§4) also runs with no forwarder: one socket, one peer,
+the outer header authenticated by a key both ends derive from the pair key
+(`SHA-256("medulla-link/1 direct-path" ‖ pair_key)`) rather than by a
+forwarder key. The host binds a fixed UDP port and adopts the client's address
+from any datagram that authenticates *and* advances the highest sequence seen
+— mosh's rule, client→server only. A host that changes address is not
+followed; the client re-dials. Pairing for this path is §7.1.1, or an SSH
+bootstrap that carries the same material back over the SSH channel. The
+requirement it adds is mosh's: the host must be reachable on that port from
+wherever the client is.
 
 Confidentiality covers payloads only. The backend sees the full social graph and
 traffic volumes, so the protocol offers no metadata privacy.

@@ -17,13 +17,14 @@ are fixed on the wire (`orchestratorNodeId` is a field in the enrollment
 exchange) and are kept here for that reason.
 
 This specification describes the forwarded topology, where a backend relays
-between two enrolled endpoints. The SSH-bootstrapped case, which is how a
-`[[remoteHosts]]` entry is reached, uses the same packet format, crypto, and
-state synchronisation with no forwarder in the path: the pair key is minted by
-`medulla daemon --direct` and carried back inside the SSH channel instead of
-being enrolled (section 7), and the outer header is authenticated under a path
-key both ends derive from the pair key, since there is no forwarder key. The
-`direct` module of the `medulla-link` crate documents the differences.
+between two enrolled endpoints. The direct path (section 8.1), which is how a
+`[[remoteHosts]]` entry or a pasted `medulla daemon <key>` command is reached,
+uses the same packet format, crypto, and state synchronisation with no
+forwarder in the path: the pair key travels inside the host key (section
+7.1.1) instead of being enrolled (section 7), and the outer header is
+authenticated under a key both ends derive from the pair key, since there is
+no forwarder key. The `direct` module of the `medulla-link` crate documents
+the differences.
 
 This document is normative. Three implementations code against it: the
 orchestrator endpoint, the host endpoint (both in the `medulla-link` crate) and
@@ -55,14 +56,21 @@ the database.
 
 ### Roles and direction
 
-Every endpoint is either the orchestrator or a host. The role is fixed at
-enrollment and determines the direction bit (section 4.2). It is not a property
-of a given datagram.
+Every endpoint is either the orchestrator or a host. The role determines the
+direction bit (section 4.2) and is not a property of a given datagram. On the
+forwarder path it is fixed at enrollment (section 7.2); on the direct path it
+is fixed at pairing (section 7.1.1), where the client is always the
+orchestrator and the machine it pastes the key into is always the host.
 
 ## 2. Identifiers
 
-`node_id` is 16 random bytes, issued by the backend at enrollment. This is what
-travels on the wire.
+`node_id` is 16 random bytes. This is what travels on the wire. On the
+forwarder path it is issued by the backend at enrollment (section 7.2). On the
+direct path (section 8.1) there is no backend in the loop: both node ids are
+minted locally by the client when it generates the host key (section 7.1.1),
+and the host simply adopts the id it is given. The two are separate
+namespaces — a direct-path id is never registered with the backend and an
+implementation MUST NOT assume every `node_id` it sees resolves there.
 
 `node_name` is human-readable, unique within a team, shown in the TUI and used as
 a `Bridge` address. It lives in the registry and never on the wire; endpoints
@@ -366,8 +374,46 @@ and decoding folds the confusable characters, so `0`/`O` and `1`/`I`/`L` typos
 resolve rather than fail. The checksum catches the rest at entry, where the error
 is obvious, instead of surfacing later as an unexplained decrypt failure.
 
-The host reads it from its TTY, prompted. It MUST NOT be accepted as a
-command-line flag: argv is world-readable via `ps` and lands in shell history.
+On the forwarder path the host reads it from its TTY, prompted. It MUST NOT be
+accepted as a command-line flag there: argv is world-readable via `ps` and
+lands in shell history.
+
+### 7.1.1 Host key (direct path)
+
+The direct path (section 8.1) pairs without a forwarder and without a TTY
+prompt: everything both ends must agree on travels in one string the operator
+pastes once, `medulla daemon <key>`.
+
+```
+raw      = 0x01 ‖ client node id (16) ‖ host node id (16) ‖ pair key (16)
+           ‖ udp port (2, big-endian) ‖ checksum (2)               (53 bytes)
+checksum = SHA-256(raw[0..51])[0..2]
+encoding = Crockford base32 of 424 bits                             (85 chars)
+display  = "HK1-" + groups of 4, hyphen-separated
+```
+
+Both node ids are minted on the client, so the peer table is known on both
+sides before the first datagram: the host binds `udp port` and learns the
+client's address from its first authenticated datagram; the client dials the
+host's address at `udp port`. Decoding ignores case, whitespace and hyphens
+and folds the confusables; the checksum rejects a truncated paste at entry.
+
+This key is accepted in argv, which the rule above forbids for the typed pair
+key. The trade is deliberate: a one-shot command that works in any shell on
+any box is what pairing this way is for. The process that reads it records
+the pairing and immediately re-execs itself as `medulla daemon --host`, which
+re-derives everything from that pairing rather than from argv — so the key
+does not sit on the *running* daemon's command line, only on the
+initial-invocation process's, for the moment it takes to write the pairing to
+disk and hand off. That is still a real, if brief, exposure: any local
+process able to read `ps`/`/proc` during that moment, or the shell history of
+whoever typed the command, can recover the key and forge authenticated
+direct-path datagrams against the host's services until it is rotated.
+Direct pairing this way therefore assumes the invoking shell and the moment
+of invocation are trustworthy, even once the daemon itself is running clean;
+rotating the key (section 7.1.1) closes off future access but does not undo
+exposure that already happened. Where that assumption does not hold, use the
+forwarder path's TTY prompt instead. The forwarder path's rule is unchanged.
 
 ### 7.2 Enroll token and forwarder key
 
@@ -390,16 +436,51 @@ means re-enrolling the host.
 
 ### 7.3 State file
 
-`<home>/link/node.json`, mode `0600`, holding the node id, role, pair key,
-forwarder key, forwarder endpoint and the persisted sequence reservation
-(section 3.1). Created and loaded under the same file lock used by the existing
-identity bootstrap.
+`<home>/link/node.json`, mode `0600`, holding the node id, role, the pair
+key(s) (a single `pair_key` for version 1, or per-peer keys in `peers[]` for
+version 2 — see below), forwarder key, forwarder endpoint and the persisted
+sequence reservation (section 3.1). Created and loaded under the same file
+lock used by the existing identity bootstrap.
+
+`version` is `1` or `2`. A version-1 file holds one peer in `peer_node_id` /
+`pair_key`. A version-2 file holds every peer in `peers[]`, each with its own
+pair key, and an empty list there means *no peers* — a client identity is
+minted before its first host is paired, and an implementation MUST NOT fall
+back to the legacy single-peer fields for a version-2 file. Direct-path
+pairings (section 7.1.1) keep one identity directory per peer:
+`<home>/remote/clients/<host id>/` on the client and
+`<home>/remote/hosts/<client node id>/` on the host, the latter beside a
+`pairing.json` recording the port so the daemon can be restarted without the
+key.
 
 ## 8. Scope
 
-Every datagram goes through the forwarder. The protocol has no peer discovery, no
-NAT traversal and no direct path between endpoints, so it is a relay topology
-rather than a mesh.
+On the forwarder path every datagram goes through the forwarder. The protocol
+has no peer discovery and no NAT traversal, so it is a relay topology rather
+than a mesh.
+
+### 8.1 Direct path
+
+The same payload layer (section 4) also runs with no forwarder: one socket,
+one peer, the outer header authenticated by a key both ends derive from the
+pair key (`SHA-256("medulla-link/1 direct-path" ‖ pair_key)`) rather than by a
+forwarder key. The host binds a fixed UDP port and adopts the client's address
+from any datagram that authenticates *and* advances the highest sequence seen
+— mosh's rule, client→server only. A host that changes address is not
+followed; the client re-dials. Pairing for this path is section 7.1.1, or an
+SSH bootstrap that carries the same material back over the SSH channel. The
+requirement it adds is mosh's: the host must be reachable on that port from
+wherever the client is.
+
+This is mosh's own address-learning trade-off, not a gap introduced here: an
+on-path attacker who captures a datagram and replays it from another address
+before the genuine one arrives, with a sequence number that still advances the
+watermark, can win the race and get the host to adopt their address. They hold
+no key, so they cannot decrypt or forge new traffic — the result is a
+blackhole for the legitimate peer (denial of service), not a compromise of
+confidentiality or integrity. There is no equivalent to the forwarder's
+"replay from another source does not rebind" rule (section 5, rule 5) on the
+direct path, because there is no forwarder to enforce it centrally.
 
 Confidentiality covers payloads only. The backend sees the full social graph and
 traffic volumes, so the protocol offers no metadata privacy.

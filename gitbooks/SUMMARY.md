@@ -10,6 +10,7 @@
 
 * [Sessions](features/sessions.md)
 * [Remote machines](features/remote-hosts.md)
+* [Hosts](features/hosts.md)
 * [Harnesses](features/harnesses.md)
 * [Attention cues](features/attention.md)
 * [Workflows](features/workflows.md)

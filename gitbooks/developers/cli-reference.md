@@ -8,6 +8,7 @@ The `medulla` binary is the terminal app plus a small set of subcommands: the da
 | `medulla login` / `logout` | [OAuth login](authentication.md), via the browser or `--code` for SSH and other browserless terminals; logout clears the session. |
 | `medulla remote <host> --exec <cmd>` | [Run one command](#medulla-remote) on a configured remote host and print what its screen showed. |
 | `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host. |
+| `medulla daemon <key>` | [Pair this machine](#medulla-daemon) as a remote host of the TUI that minted the key, no SSH needed; `--host` re-runs a pairing already on disk. |
 | `medulla claude` / `codex` / `opencode` | [Wrappers](#harness-wrappers): run a CLI in this terminal, forwarding its transcript to a configured owner. |
 | `medulla sessions` | List recent Claude Code and Codex sessions on this machine as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run saved multi-step plans. |
@@ -29,7 +30,7 @@ A [ratatui](https://ratatui.rs/) app that holds a pseudo-terminal per session an
 | `--mock` | Run the scripted offline runtime, with no backend and no login screen. |
 | `--no-alt-screen` | Stay on the main screen buffer, so the terminal's own scrollback keeps what Medulla drew. |
 
-Unknown first arguments are treated as TUI arguments rather than rejected.
+Unknown first arguments are treated as TUI arguments rather than rejected. See [The TUI](the-tui.md#the-tabs) for the tabs and keys.
 
 ## `medulla remote`
 
@@ -47,7 +48,7 @@ It goes through the same chain the TUI does: the SSH bootstrap, identity enrollm
 
 ## `medulla daemon`
 
-A process that serves sessions on this machine to a Medulla somewhere else. There are two ways to run it.
+A process that serves sessions on this machine to a Medulla somewhere else. There are three ways to run it: two serve the direct link a single client paired for, and one is a standing worker.
 
 ### `--direct`: what the SSH bootstrap starts
 
@@ -60,6 +61,39 @@ This is the command Medulla runs over `ssh` when you open a session on a remote 
 `--workspace` is where sessions it serves start, and it is the most consequential flag: a harness serving a client edits files there. It defaults to the directory the daemon was launched in, so the shell that started it decides what the client can touch. The client passes its `[[remoteHosts]] workspace` here when one is set.
 
 The daemon reads the far machine's own config (`~/.medulla/config.toml` there, or `--config`), never the client's. Its router, hooks, attribution, and custom presets are its own.
+
+### `<key>`: pairing from the Hosts tab
+
+```sh
+medulla daemon HK1-…  [--workspace <dir>] [--workspaces <a,b>] [--host-name <label>] [--config <path>]
+medulla daemon --host [--workspace <dir>]
+```
+
+The same direct link the SSH bootstrap sets up, minus the `ssh`. The key comes from the TUI's [Hosts tab](the-tui.md#the-hosts-tab) (`a` to add a machine, `i` to issue a new key) and carries the TUI's node id, an id for this host, the shared secret, and the UDP port to listen on, so this machine needs nothing else and never talks to anyone but that one client: no SSH, no backend, no login here. The daemon records the pairing under this machine's Medulla home, binds the port, and serves sessions and workflow calls to that client over the direct host link. [Hosts](../features/hosts.md) covers the pairing flow from the TUI side.
+
+| Flag | Effect |
+| --- | --- |
+| `--host` | Serve every pairing already on disk, without a key. What to put in a service unit. |
+| `--workspace <dir>` | Where sessions on this host start (default: the current directory). |
+| `--workspaces <a,b>` | Capability metadata only, not concurrent execution roots: other directories this host advertises so the client can pick one of them on its workspace step. Each session still runs in the single directory it picked, same as `--workspace`. |
+| `--host-name <label>` | What the client's rail calls this machine (default: the hostname). |
+| `--config <path>` | Explicit config file for this host's own `[router]`, `[[hooks]]`, presets. |
+
+`medulla daemon <key>` reads the key, records the pairing, then immediately
+re-execs itself as `medulla daemon --host`, which is what actually keeps
+running — so the key never sits on the long-running daemon's command line,
+only on the instant it takes to record the pairing. Re-running with the same
+key is a true no-op. A *different* key for the same client fails outright
+while a daemon already holds that client's pairing: stop the daemon first,
+then pair again. Two different clients cannot share a port on one host — that
+is refused immediately when you pair, before anything tries to bind, with a
+message pointing you back to the Hosts tab to issue a key on another port.
+`--host` skips any individual pairing it genuinely cannot serve (a corrupted
+identity, or a port that turns out to be unavailable at bind time) and keeps
+serving the rest; it only fails outright when none of the pairings on disk
+could be served. Keeping the daemon running across reboots is left to the
+operator, since a `systemd-run --user` unit, a launchd job, or a tmux window
+all do, and the daemon prints that hint on start.
 
 ### The standing daemon
 

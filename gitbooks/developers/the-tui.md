@@ -6,13 +6,13 @@
 
 | Tab | What it is for |
 | --- | --- |
-| Sessions | Every session you have open, local and remote, as a rail on the left, with the selected one's terminal beside it. This is where you spend your time. |
-| Workflows | Saved multi-step plans: a sidebar, a graph canvas, and a copilot that edits the graph. Present only in a build with the default `workflows` feature. See [Workflows](../features/workflows.md). |
-| Subconscious | A placeholder for a layer under the sessions: what gets filtered on the way in and what is escalated for a person to approve. It draws nothing live yet, and is listed so you can see where approvals will surface. `E` reviews prepared decisions. |
+| Sessions | Every session you have open on the current host, or on every host grouped under a header each, as a rail on the left, with the selected one's terminal beside it. This is where you spend your time. |
+| Workflows | Saved multi-step plans: a sidebar, a graph canvas, and a copilot that edits the graph. Pointed at a remote host, it shows that host's catalogue and runs. Present only in a build with the default `workflows` feature. See [Workflows](../features/workflows.md). |
+| Hosts | The other machines Medulla can drive: add one, get the one-line pairing command to run there, connect, and pick which host the two tabs before it are about. See [Hosts](../features/hosts.md). |
 | Feedback | The feedback board for the signed-in account, with the selected item's body and comments. The mock runtime shows a scripted board; a signed-out session shows a hint panel. |
 | Settings | Usage, Appearance, Subscriptions, Status line, Config, Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and About. |
 
-`Tab` and `Shift-Tab` walk the tabs. `Ctrl-C` quits.
+`Tab` and `Shift-Tab` walk the tabs, and `H` switches the current host from any of them. `Ctrl-C` quits.
 
 There is no chat composer. Medulla is not something you type at; you type into the sessions it holds.
 
@@ -24,7 +24,7 @@ The rail lists sessions. `↑↓` walk it (`Alt-↑`/`Alt-↓` for terminals tha
 
 `Ctrl-T` opens the picker from anywhere. It has three steps, and the first is skipped when there is only one host:
 
-1. **Host.** This machine, or a `[[remoteHosts]]` entry. Picking a remote host that is not yet connected runs the SSH bootstrap; the picker waits on this step until the host answers, because the harness list has to come from the host.
+1. **Host.** This machine, or a `[[remoteHosts]]` entry. Picking a remote host that is not yet connected runs the SSH bootstrap; the picker waits on this step until the host answers, because the harness list has to come from the host. When `H` has narrowed the view to one host, this step is skipped and the session starts there.
 2. **Harness.** The CLIs found on that host's `PATH`, then OpenHuman if installed, then custom presets, then shells. The first row is what `Enter` starts, so a coding agent leads and shells are the exception you scroll to.
 3. **Workspace.** Type to filter, `Tab` completes, `Enter` starts, `Esc` goes back. Recent directories, favourites from `[harness] favoriteWorkspaces`, and folders under the current directory are offered. A pasted path lands in the filter.
 
@@ -52,9 +52,15 @@ The glyph at the head of a row is its state: `⠋` spinning while a turn is in f
 
 The rest of the row is the status line, whose fields and positions are set under Settings › Status line or `[statusLine]`.
 
+## The Hosts tab
+
+The other machines Medulla can drive, one row each: a `[[remoteHosts]]` entry from the config, or a machine added here. `a` adds one, with a name, the address the TUI will dial, and optional SSH details; the tab then shows the one-line `medulla daemon HK1-…` command to run on that machine and copies it to the clipboard. `i` issues a fresh key, which is how a lost or leaked one is revoked. `s` runs the pairing command over `ssh` for a host whose entry has SSH details, `e` edits the host and its UDP port, and `Enter` connects. [Hosts](../features/hosts.md) covers pairing from the user's side and what the daemon on the far end needs.
+
+`H` opens the host switcher from any tab: **This device**, **All hosts**, or one machine. Only the Sessions and Workflows tabs follow the selection; Hosts, Feedback, Settings, and login are always about this device. With one host selected, `Ctrl-T` starts sessions there without asking which host, and the Workflows tab shows that machine's catalogue, runs, and history. The header names the current host whenever the view is narrowed.
+
 ## Remote hosts
 
-A `[[remoteHosts]]` entry becomes a group in the rail. Its status shows there: idle, connecting, live, or failed with the reason. Sessions on it are rows like any other, and their state, cues, and presence ride the reliable channel; the screen streams for the selected one. [Remote machines](../features/remote-hosts.md) covers the bootstrap and what the far side gets.
+A `[[remoteHosts]]` entry, or a machine paired on the Hosts tab, becomes a group in the rail. Its status shows there: idle, connecting, live, or failed with the reason. Sessions on it are rows like any other, and their state, cues, and presence ride the reliable channel; the screen streams for the selected one. [Remote machines](../features/remote-hosts.md) covers the SSH bootstrap and what the far side gets.
 
 ## Settings
 

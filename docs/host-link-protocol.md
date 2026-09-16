@@ -376,10 +376,16 @@ folds the confusables; the checksum rejects a truncated paste at entry.
 
 This key **is** accepted in argv, which the rule above forbids for the typed
 pair key. The trade is deliberate: a one-shot command that works in any shell
-on any box is what pairing this way is for; the exposure is one process start
-on a machine the operator already controls; and a key is revocable by issuing
-another, which replaces the host node id and the pair key together. The
-forwarder path's rule is unchanged.
+on any box is what pairing this way is for. The exposure is not limited to
+process startup: the key remains in shell history, and it stays visible in
+process arguments (via `ps` or `/proc`) for as long as the daemon runs with it
+un-scrubbed, not just for the one process start. Any local process able to
+read it during that window can forge authenticated direct-path datagrams
+against the host's services until the key is rotated. Direct pairing this way
+therefore assumes a trusted, single-user machine; rotating the key (§7.1.1)
+closes off future access but does not undo exposure that already happened.
+Where that assumption does not hold, use the forwarder path's TTY prompt
+instead. The forwarder path's rule is unchanged.
 
 ### 7.2 Enroll token and forwarder key
 
@@ -402,10 +408,11 @@ means re-enrolling the host.
 
 ### 7.3 State file
 
-`<home>/link/node.json`, mode `0600`, holding the node id, role, pair key,
-forwarder key, forwarder endpoint and the persisted sequence reservation (§3.1).
-Created and loaded under the same file lock used by the existing identity
-bootstrap.
+`<home>/link/node.json`, mode `0600`, holding the node id, role, the pair
+key(s) (a single `pair_key` for version 1, or per-peer keys in `peers[]` for
+version 2 — see below), forwarder key, forwarder endpoint and the persisted
+sequence reservation (§3.1). Created and loaded under the same file lock used
+by the existing identity bootstrap.
 
 `version` is `1` or `2`. A version-1 file holds one peer in `peer_node_id` /
 `pair_key`. A version-2 file holds every peer in `peers[]`, each with its own

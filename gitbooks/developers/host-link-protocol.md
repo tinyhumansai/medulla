@@ -8,73 +8,72 @@ description: >-
 
 The transport between the Medulla you are looking at and its remote hosts.
 Endpoints exchange UDP datagrams carrying mosh-style state synchronisation,
-either directly or through a backend that forwards bytes it cannot read.
+straight from one machine to the other. There is no relay, no backend in the
+path, and nothing to sign in to: the only thing the two ends share is a pair
+key, minted on one of them and carried to the other once.
 
 Two words in this specification are protocol role names, not product terms.
-The **orchestrator** is the client end: the machine you run `medulla` on, which
-opens sessions elsewhere. The **host** is the machine serving them. The names
-are fixed on the wire (`orchestratorNodeId` is a field in the enrollment
-exchange) and are kept here for that reason.
+The **owner** is the client end: the machine you run `medulla` on, which opens
+sessions elsewhere. The **host** is the machine serving them. The role is fixed
+when the pair is minted and decides the direction bit (section 4.2).
 
-This specification describes the forwarded topology, where a backend relays
-between two enrolled endpoints. The SSH-bootstrapped case, which is how a
-`[[remoteHosts]]` entry is reached, uses the same packet format, crypto, and
-state synchronisation with no forwarder in the path: the pair key is minted by
-`medulla daemon --direct` and carried back inside the SSH channel instead of
-being enrolled (section 7), and the outer header is authenticated under a path
-key both ends derive from the pair key, since there is no forwarder key. The
-`direct` module of the `medulla-link` crate documents the differences.
+Two bootstraps produce a pair, and both end in the same link:
 
-This document is normative. Three implementations code against it: the
-orchestrator endpoint, the host endpoint (both in the `medulla-link` crate) and
-the forwarder that relays between them. Where this document and an
-implementation disagree, this document is right.
+* **SSH-bootstrapped.** A `[[remoteHosts]]` entry is reached over SSH, the
+  client starts `medulla daemon --direct` there, the host mints the pair key and
+  prints it back up the SSH channel, and SSH is not used again.
+* **Paired.** The client mints a host key (section 7.2) and the operator pastes
+  it into `medulla daemon <key>` on the host, which then serves that one client
+  on the port the key names, across the client coming and going.
+
+This document is normative. Both endpoints live in the `medulla-link` crate and
+code against it. Where this document and the implementation disagree, this
+document is right.
 
 ## 1. Model
 
 ```
-  orchestrator ──┐                          ┌── host A
-   (endpoint)    ├─►  backend forwarder  ◄──┤
-                 │    (blind, UDP)          └── host B
-                 └──────────────────────────────┘
-                     opaque payload, cleartext header
+  owner ─────────────────────────────────────── host
+  (endpoint)      UDP, one socket, one peer      (endpoint)
+                  opaque payload, authenticated cleartext header
 ```
 
 Two layers, deliberately separated:
 
-| Layer | Key | Who can read it | Purpose |
-|---|---|---|---|
-| Outer header | forwarder key | backend and endpoints | routing, roaming, replay defence |
-| Inner payload | pair key | endpoints only | the actual messages |
+| Layer | Key | Purpose |
+|---|---|---|
+| Outer header | path key, derived from the pair key | addressing, roaming, cheap rejection of off-path junk |
+| Inner payload | pair key | the actual messages |
 
-The backend holds forwarder keys and never holds a pair key. It therefore knows
-who talks to whom, when, and how much, and nothing else. The pair key is
-generated on the orchestrator, displayed to the user, and typed in by hand on the
-host (section 7). It never appears in a request body, a response, a log line or
-the database.
+Both keys are held by the two endpoints and nobody else. The path key is not a
+second secret: it is derived from the pair key under its own label (section
+5), exactly as the AEAD key is, and anything that could forge it could already
+decrypt. Its job is to reject a datagram that is not from the peer before any
+AEAD work is done.
+
+The pair key never appears in a config file, a log line or a request body. It
+lives in the state file (section 7.3) on each end and nowhere else.
 
 ### Roles and direction
 
-Every endpoint is either the orchestrator or a host. The role is fixed at
-enrollment and determines the direction bit (section 4.2). It is not a property
+Every endpoint is either the owner or a host. The role is fixed when the pair
+is minted and determines the direction bit (section 4.2). It is not a property
 of a given datagram.
 
 ## 2. Identifiers
 
-`node_id` is 16 random bytes, issued by the backend at enrollment. This is what
-travels on the wire.
+`node_id` is 16 random bytes per endpoint, minted with the pair. This is what
+travels on the wire; a datagram naming a node id other than the two in the pair
+is dropped.
 
-`node_name` is human-readable, unique within a team, shown in the TUI and used as
-a `Bridge` address. It lives in the registry and never on the wire; endpoints
-resolve name to id once, at enrollment.
-
-`team` is the tenancy boundary. The forwarder refuses to move a datagram between
-teams (section 5, rule 6).
+`node_name` is human-readable, shown in the TUI and used as a `Bridge` address.
+It lives in local configuration (`[[remoteHosts]].name`, `[link].nodeName`) and
+never on the wire.
 
 ## 3. Outer header
 
-Fixed 66 bytes, big-endian, cleartext. These are the only bytes the forwarder
-parses.
+Fixed 66 bytes, big-endian, cleartext. These are the only bytes readable
+on the path.
 
 | Offset | Size | Field | Notes |
 |---:|---:|---|---|
@@ -84,8 +83,8 @@ parses.
 | 18 | 16 | `dst_node_id` | |
 | 34 | 8 | `seq` | section 3.1 |
 | 42 | 8 | `epoch` | random value minted for each endpoint process (section 6.4) |
-| 50 | 16 | `tag` | `HMAC-SHA256(forwarder_key, bytes[0..50])[0..16]` |
-| 66 | ... | `payload` | opaque to the forwarder (section 4) |
+| 50 | 16 | `tag` | `HMAC-SHA256(path_key, bytes[0..50])[0..16]` (section 5.1) |
+| 66 | ... | `payload` | opaque on the path (section 4) |
 
 ### 3.1 `seq`
 
@@ -96,7 +95,7 @@ a given node; the low 63 bits are the counter.
 
 `seq` has two purposes at once, which is why it is in the cleartext header:
 
-1. the forwarder's replay window and rebinding rule (section 5), and
+1. the receiver's replay defence and roaming rule (section 5), and
 2. the AEAD nonce for the payload (section 4.2).
 
 A node MUST persist enough of its counter to guarantee it never rewinds across
@@ -123,7 +122,7 @@ at the state layer (by sending a smaller diff), never at the datagram layer.
 header[0..50], plaintext = section 4.1)`.
 
 Binding the AAD to the outer header means a recipient can verify the datagram was
-addressed to it, by that sender, at that sequence. A forwarder that redirected a
+addressed to it, by that sender, at that sequence. Anything on the path that redirected a
 datagram to a different node would produce an authentication failure rather than
 a delivered message.
 
@@ -146,8 +145,8 @@ sample yet, and must not be read as an RTT of zero.
 `seq` as the outer header, direction bit included.
 
 ```
-DIRECTION_MASK = 1 << 63     set   = orchestrator → host
-                             clear = host → orchestrator
+DIRECTION_MASK = 1 << 63     set   = owner → host
+                             clear = host → owner
 ```
 
 The direction bit is what makes a single pair key safe for both directions: the
@@ -210,66 +209,57 @@ messages. A diff from `old_num` to `new_num` is exactly messages `old_num+1`
 through `new_num`. `apply_diff` appends.
 
 A sender MUST bound its outbound queue. On overflow the link surfaces a transport
-error rather than growing without limit; `hub/socket/task_run.rs::is_retryable`
-already treats that as retryable, so it rejoins the existing retry path.
+error rather than growing without limit; the hub's dispatch loop treats that as
+retryable, so it rejoins the existing retry path.
 
-## 5. Forwarder rules
+## 5. Path rules
 
-The forwarder is a pure function of the header plus its binding table. In order,
-dropping silently unless stated:
+With no relay in the path, the endpoint itself does the three jobs a relay
+would otherwise do: it authenticates the cleartext header, it decides which
+source addresses to believe, and it follows a peer that moves. Each has one
+rule.
 
-1. `len >= 66` and `version == 2`.
-2. `src_node_id` resolves to a known, non-revoked node. (Unknown: drop.)
-3. `tag` verifies against that node's forwarder key, compared in constant time.
-4. Replay window. Keep `highest_seq` and a 64-bit bitmap of the 64 sequences
-   below it. Drop if `seq <= highest_seq - 64`, or if `seq` is already marked.
-5. Rebind only when `seq > highest_seq`. Then set the node's source address to
-   the datagram's source address, advance `highest_seq`, and refresh
-   `lastSeenAt`.
+### 5.1 Path key
 
-   This rule is load-bearing. A forwarder that rebinds on any datagram with a
-   valid tag can have a node's binding stolen by an attacker replaying one
-   captured datagram from their own address, turning roaming support into a
-   traffic-hijacking primitive. Requiring a strictly-higher sequence means an
-   attacker must produce a datagram the legitimate node has not sent yet, which
-   the tag prevents.
-6. `dst_node_id` resolves to a node in the same team as the source. Cross-team:
-   drop and increment a counter; record it as a security event.
-7. `dst` has a live binding. If not, drop; the sender's SSP will retransmit.
-8. Forward `bytes` verbatim. The forwarder MUST NOT rewrite any field, including
-   `seq`. Rewriting would break both the AAD binding and the receiver's nonce.
+```
+path_key = SHA-256("medulla-link/1 direct-path" ‖ pair_key)
+```
 
-Bindings are in-memory with a TTL. Losing them (a forwarder restart) is
-self-healing: the next authenticated datagram from each node rebinds it, bounded
-by the heartbeat interval rather than by an operator.
+The label is different from the AEAD key's, so the two derivations can never
+collide and the construction is not silently reusable for anything else. The
+header `tag` (section 3) is `HMAC-SHA256(path_key, bytes[0..50])[0..16]` and is
+compared in constant time. A datagram whose tag does not verify is dropped
+before the payload is touched.
 
-### 5.1 Limits
+### 5.2 Accepting a source address
 
-Rate limiting has two layers, and which side of the HMAC each one falls on is a
-matter of correctness.
+An endpoint accepts a datagram from **any** source address and defers the
+decision to authentication. "A datagram from an address we have not seen
+before" is precisely what roaming looks like, so filtering on address would
+break the one property the design exists for.
+
+### 5.3 Roaming
+
+The peer's address starts where the bootstrap said and moves under exactly one
+rule: adopt the source address of a datagram that both authenticates (the tag
+verifies and the payload decrypts) **and** advances the highest sequence seen
+from that peer.
+
+The freshness half is load-bearing. An endpoint that moved on any authenticated
+datagram could have its peer address stolen by an attacker replaying one
+captured datagram from their own address, turning roaming support into a
+traffic-hijacking primitive. Requiring a strictly higher sequence means the
+attacker must produce a datagram the legitimate peer has not sent yet, which
+the tag and the AEAD prevent. This is mosh's rule.
+
+### 5.4 Limits
 
 The datagram size cap (section 3.2) is applied first, before anything else, and
-costs nothing.
-
-A per-source-address token bucket is charged before the HMAC. Everything up to
-the HMAC (a header parse and a node lookup) is attacker-triggerable work, so it
-must be metered by something available at that point. Set it well above the
-per-node rate: several of a user's hosts can share one NAT address.
-
-A per-node token bucket is charged after the HMAC verifies. Charging it earlier
-would mean anyone who learns a node id could exhaust that node's quota with
-forged packets, turning the rate limit into a denial of service against the very
-node it protects.
-
-A node id that does not resolve MUST be cached as unresolved, briefly. Otherwise
-a flood of random node ids costs one registry lookup each, and an unauthenticated
-flood converts directly into database load.
-
-Both of those caches are keyed by attacker-chosen values, so both MUST be bounded
-with eviction. An unbounded map lets an attacker exhaust memory, which is the
-denial of service the buckets are there to prevent.
-
-`online` is derived from recent traffic, not asserted by the endpoint.
+costs nothing. The tag check comes next; everything up to it (a header parse) is
+attacker-triggerable work and is bounded by being trivially cheap. An
+implementation MAY meter unauthenticated datagrams per source address; it MUST
+NOT charge anything keyed on the peer's node id before the tag verifies, since
+a forged flood naming the peer would otherwise exhaust that peer's quota.
 
 ## 6. Timing
 
@@ -291,8 +281,7 @@ the last send, subject to `SEND_INTERVAL_MIN`; and unconditionally every
 `HEARTBEAT` when idle.
 
 The heartbeat is not optional. A NAT mapping for an idle UDP flow typically
-expires in about 30 seconds, and both the mapping and the forwarder binding
-depend on traffic. 3 seconds is mosh's interval and there is no reason to differ.
+expires in about 30 seconds, and the mapping depends on traffic. 3 seconds is mosh's interval and there is no reason to differ.
 
 ### 6.2 Liveness
 
@@ -307,14 +296,14 @@ Derived from the last datagram received from the peer, and exposed on
 
 Liveness is advisory. SSP keeps retransmitting through all three states, so an
 `Offline` peer can still come back, and recovery requires no reconnect, handshake
-or re-enrollment. Nothing above the link may treat `Offline` as terminal on its
+or re-pairing. Nothing above the link may treat `Offline` as terminal on its
 own.
 
 ### 6.3 Timeouts above the link
 
 `TaskRunner` owns `ACK_WINDOW` (12 s) and `IDLE_WINDOW` (240 s). Those exist
-because the tiny.place mailbox could silently black-hole a frame. This protocol
-has no such failure mode.
+because an earlier store-and-forward relay could silently black-hole a frame.
+This protocol has no such failure mode.
 
 Both clocks MUST be paused while liveness is not `Live`. Otherwise a 30-second
 network blip fails a task that the transport was in the middle of recovering,
@@ -322,7 +311,7 @@ which would forfeit the entire reason for adopting SSP. They resume, rather than
 reset, when liveness returns to `Live`: `ACK_WINDOW` measures peer processing,
 and an unreachable peer is not processing anything.
 
-The gate is per peer, not per link. An orchestrator holds sessions with many
+The gate is per peer, not per link. An owner holds sessions with many
 hosts, and section 6.2 liveness is a property of one peer's session. Gating on an
 aggregate would let a single dead host pause every other host's clock, so a task
 dispatched to a healthy worker would stop timing out because an unrelated laptop
@@ -344,14 +333,15 @@ prevents the old state-n / state-0 mismatch from wedging the link while retainin
 work that was still awaiting delivery. The epoch is part of wire version 2;
 version-1 datagrams are rejected rather than ambiguously interpreted.
 
-## 7. Enrollment
+## 7. Pairing
 
-Two secrets, issued by different parties, deliberately never combined in one
-channel.
+One secret, the pair key, minted on one endpoint and carried to the other once.
+How it travels depends on the bootstrap, but it never travels through a third
+party and never sits in argv on the typed path.
 
 ### 7.1 Pair key
 
-128 bits, generated on the orchestrator, per host. Encoded for a human to retype:
+128 bits, generated per host. Encoded for a human to retype:
 
 ```
 payload   = 128-bit key ‖ 12-bit checksum        (140 bits)
@@ -366,43 +356,56 @@ and decoding folds the confusable characters, so `0`/`O` and `1`/`I`/`L` typos
 resolve rather than fail. The checksum catches the rest at entry, where the error
 is obvious, instead of surfacing later as an unexplained decrypt failure.
 
-The host reads it from its TTY, prompted. It MUST NOT be accepted as a
-command-line flag: argv is world-readable via `ps` and lands in shell history.
+On the SSH-bootstrapped path the host mints the key and prints it back inside
+the SSH channel; the client stores it and dials. When a pair key is typed, it is
+read from a TTY, prompted. It MUST NOT be accepted as a command-line flag: argv
+is world-readable via `ps` and lands in shell history.
 
-### 7.2 Enroll token and forwarder key
+### 7.2 Host key
+
+The paired bootstrap has no channel back to the client, so everything the host
+needs to come up is bundled into one string the operator pastes once:
 
 ```
-POST /medulla/v1/hosts/invite
-  → { token, expiresAt, orchestratorNodeId }
-
-POST /medulla/v1/hosts/enroll   { token, name }
-  → { nodeId, nodeName, forwarderKey, forwarderEndpoint, orchestratorNodeId }
+raw      = 0x01 ‖ owner node id (16) ‖ host node id (16) ‖ pair key (16) ‖ udp port (2, BE)
+           ‖ checksum (2) = SHA-256(raw[0..51])[0..2]                       (53 bytes)
+encoding = Crockford base32 of 424 bits                                     (85 chars)
+display  = "HK1-" + groups of 4, hyphen-separated
 ```
 
-* `token` is one-shot, short-TTL, and stored hashed.
-* `forwarderKey` is returned exactly once and stored hashed thereafter.
-* No enrollment request or response carries a pair key, in either direction. The
-  backend has no code path that could receive one, and there is a test asserting
-  it (section 9).
+The key is pasted, not typed — it lands on the clipboard when it is minted — so
+its length is not the constraint the pair key's is. It keeps the pair key's
+alphabet and folding so a copy that went through a chat window survives, and the
+checksum turns a truncated paste into an error at entry rather than a link that
+never comes up.
 
-There is no key recovery. Since the backend never holds the pair key, a lost key
-means re-enrolling the host.
+The pair key rides in argv here, which section 7.1 forbids for the typed key.
+The trade is deliberate: a one-shot command that works on any box is the whole
+point of pairing this way, the host can be re-paired with a fresh key at any
+time, and the exposure window is one process start on a machine the operator
+already controls. A re-issued key always carries a fresh host node id and pair
+key; re-pairing must not be a way to recover the old one.
 
 ### 7.3 State file
 
-`<home>/link/node.json`, mode `0600`, holding the node id, role, pair key,
-forwarder key, forwarder endpoint and the persisted sequence reservation
-(section 3.1). Created and loaded under the same file lock used by the existing
-identity bootstrap.
+`<home>/link/node.json`, mode `0600`, holding the node id, role, the peer's
+node id and pair key, and the persisted sequence reservation (section 3.1).
+Created and loaded under a file lock, and only ever one `Link` per state
+directory: a second link on the same node would draw sequences from a second
+counter under one AEAD key, which reuses nonces.
+
+There is no key recovery. A lost state file means pairing the host again.
 
 ## 8. Scope
 
-Every datagram goes through the forwarder. The protocol has no peer discovery, no
-NAT traversal and no direct path between endpoints, so it is a relay topology
-rather than a mesh.
+Each link is one socket talking to one peer. The protocol has no peer discovery
+and no NAT traversal beyond what roaming (section 5.3) and the heartbeat
+(section 6.1) give for free: a host behind a NAT is reached because the owner
+dials it, or because the paired daemon listens on a port the operator opened.
 
-Confidentiality covers payloads only. The backend sees the full social graph and
-traffic volumes, so the protocol offers no metadata privacy.
+Confidentiality covers payloads; the cleartext header exposes the two node ids,
+the sequence and the epoch to anyone on the path, so the protocol offers no
+metadata privacy against a network observer.
 
 Prediction sits outside this protocol. Mosh's local echo, where typed characters
 appear instantly and reconcile against server truth, belongs to a terminal layer
@@ -420,38 +423,33 @@ than in a test file because they are part of the contract.
 * An Instruction whose `old_num` does not match the held state is refused, and the
   held state is unchanged.
 * Convergence under 30% loss, reordering and duplication.
-* A 60-second total blackout mid-task completes without error and without
-  re-enrolling.
+* A 60-second total blackout mid-session completes without error and without
+  re-pairing.
 * Channel 1 catch-up after a 40-second outage converges in one diff to the
   current grid, rather than replaying the outage.
 * Outbound queue overflow surfaces a retryable transport error.
 
-### Forwarder
+### Path
 
-* A datagram with a bad tag is dropped.
-* A source-address change with `seq > highest_seq` rebinds and traffic resumes.
-* A captured datagram replayed from a different source address does not rebind
-  (section 5, rule 5).
-* A datagram addressed across teams is dropped and counted.
-* Given a captured datagram, the forwarder cannot recover the payload.
-* A flood of forged datagrams naming a real node does not consume that node's
-  quota, and the node keeps working throughout (section 5.1).
-* Per-source metering engages under a flood, and one flooding source does not
-  starve another source.
-* A node id repeatedly presented and never resolved is looked up once, not once
-  per datagram.
+* A datagram with a bad tag is dropped before any AEAD work.
+* A source-address change carried by a datagram with `seq > highest_seq`
+  moves the peer address and traffic resumes.
+* A captured datagram replayed from a different source address does not move
+  the peer address (section 5.3).
+* A datagram naming a node id outside the pair is dropped.
+* Both ends derive the same path key from the pair key, and it differs from the
+  AEAD key.
 
-### Enrollment
+### Pairing
 
-* The `HostNode` schema has no pair-key field, asserted against the schema itself
-  so a later field addition fails.
-* No enroll or invite validator accepts or returns a pair key.
 * A mistyped pair key is rejected by checksum at entry.
-* `join` refuses a pair key supplied as an argv flag.
+* A truncated host key is rejected by length and checksum at entry.
+* The typed pair key is refused when supplied as an argv flag.
+* A re-issued host key carries a fresh host node id and pair key.
 
 ### Integration
 
-* A transient outage longer than `ACK_WINDOW` does not fail the task.
+* A transient outage longer than `ACK_WINDOW` does not fail the session.
 * A genuinely hung peer on a `Live` link does still time out, proving section 6.3
   gates the clocks rather than disabling them.
 

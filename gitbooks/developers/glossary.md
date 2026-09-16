@@ -52,7 +52,7 @@ The one-to-three-line layout of a session row: state glyph, harness, control, th
 
 ## Daemon
 
-`medulla daemon`, the process that serves sessions on a machine to a Medulla elsewhere. `medulla daemon --direct` is the variant the SSH bootstrap starts on a remote host: one client, one pair key, no forwarder.
+`medulla daemon`, the process that serves sessions on a machine to a Medulla elsewhere. `medulla daemon --direct` is the variant the SSH bootstrap starts on a remote host, and `medulla daemon <key>` the paired variant the operator starts once from a host key: one client, one pair key, straight over UDP.
 
 ## Connect line
 
@@ -64,23 +64,31 @@ The transport between a Medulla and a remote host: `medulla-link/1`, UDP datagra
 
 ## Pair key
 
-The 128-bit key the two ends of a host link share. Minted per connection, carried once inside the SSH channel, stored only in `<stateDir>/node.json`, and never in config.
+The 128-bit key the two ends of a host link share. Minted per connection, carried once inside the SSH channel or inside a host key, stored only in `<stateDir>/node.json`, and never in config.
+
+## Host key
+
+The single `HK1-…` string minted on this device for a paired host: both node ids, the pair key, and the UDP port, pasted once into `medulla daemon <key>` on the far side. Re-issuing one mints a fresh pair.
 
 ## Node id
 
 A link endpoint's identity, 16 bytes, hex on the wire. The client passes its own as `--peer-node` so the daemon knows whom to serve.
 
-## Forwarder
-
-A backend relay that forwards host-link datagrams it cannot read, for enrolled peers that do not share a network. The SSH-bootstrapped case does not use one.
-
 ## Medulla home
 
 `~/.medulla` by default, or `MEDULLA_HOME`, or `./.medulla` under `MEDULLA_DEV=1`. Holds credentials, config, state, the link identity, and saved workflows.
 
-## Mock runtime
+## Mock backend
 
-The scripted offline runtime behind `medulla --mock`. No account, no network, every tab has something to draw.
+The scripted offline backend behind `medulla --mock`. No account, no network, every tab has something to draw.
+
+## Hub
+
+The device-local router that dispatches a task to an agent on this machine when a workflow step or an MCP `fleet_*` call asks for work to be run, rather than a person opening a session. It keeps a worker roster (`[hub].workers`) and an activity log, and talks to nothing outside the machine.
+
+## Backend
+
+The TinyHumans API. Medulla asks it four things: to sign in, whether the account's plan entitles it to run Medulla, the account's usage, and the feedback board. No session, task, or transcript content goes to it.
 
 ## Hook
 

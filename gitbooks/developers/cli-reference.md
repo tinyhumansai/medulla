@@ -43,7 +43,7 @@ medulla remote tower --exec "make" --config ~/other/config.toml
 
 The first non-flag argument is the host id from your config. `--exec` is required unless `--harness` names a harness to open, since a shell with nothing to run has nothing to report.
 
-It goes through the same chain the TUI does: the SSH bootstrap, identity enrollment, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
+It goes through the same chain the TUI does: the SSH bootstrap, the pair key minted on the far side, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
 
 ## `medulla daemon`
 
@@ -55,7 +55,7 @@ A process that serves sessions on this machine to a Medulla somewhere else. Ther
 medulla daemon --direct --peer-node <client node id> [--port <udp>] [--workspace <dir>] [--config <path>]
 ```
 
-This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no forwarder and no enrollment; the client is the only peer it will ever talk to.
+This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no relay and no backend; the client is the only peer it will ever talk to.
 
 `--workspace` is where sessions it serves start, and it is the most consequential flag: a harness serving a client edits files there. It defaults to the directory the daemon was launched in, so the shell that started it decides what the client can touch. The client passes its `[[remoteHosts]] workspace` here when one is set.
 

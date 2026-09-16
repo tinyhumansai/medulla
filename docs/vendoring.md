@@ -45,7 +45,7 @@ capability set and the graph store.
 
 `tinyhumans-sdk` is the shared TinyHumans HTTP transport (`TinyHumansClient`)
 that `src/sdk/src/client/` builds the typed Medulla surface on: auth, durable
-sessions, SSE event streaming, one-shot orchestration, and the public feedback
+sessions and the public feedback
 board. It owns credential headers, the `{success, data}` envelope, and path
 percent-encoding.
 

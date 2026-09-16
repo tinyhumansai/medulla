@@ -42,8 +42,13 @@ given datagram.
 
 ## 2. Identifiers
 
-`node_id` is 16 random bytes, issued by the backend at enrollment. This is what
-travels on the wire.
+`node_id` is 16 random bytes. This is what travels on the wire. On the
+forwarder path it is issued by the backend at enrollment (§7.2). On the direct
+path (§8.1) there is no backend in the loop: both node ids are minted locally
+by the client when it generates the host key (§7.1.1), and the host simply
+adopts the id it is given. The two are separate namespaces — a direct-path id
+is never registered with the backend and an implementation MUST NOT assume
+every `node_id` it sees resolves there.
 
 `node_name` is human-readable, unique within a team, shown in the TUI and used as
 a `Bridge` address. It lives in the registry and **never** on the wire; endpoints

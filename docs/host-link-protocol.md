@@ -447,6 +447,19 @@ than in a test file because they are part of the contract.
 * A genuinely hung peer on a `Live` link does still time out, proving section 6.3
   gates the clocks rather than disabling them.
 
+## Appendix A. Relayed route (test harness only)
+
+The `medulla-link` crate keeps a second route, `LinkPath::Forwarder`, in which
+both endpoints send every datagram to one fixed relay address and the relay
+routes on the cleartext header, authenticating the `tag` under a per-node relay
+key it shares with that node rather than under the path key. Nothing deployed
+implements that relay and there is no way to obtain a relay key: the route
+exists so the in-process coordination suite can put a blind relay between two
+endpoints and assert what it can and cannot see (`mock_link_forwarder` in the
+SDK examples). The payload layer, the sequence rules and the state
+synchronisation are identical on both routes; only section 5 differs, and the
+relayed variant of it is documented on the example itself.
+
 ## Read next
 
 * [e2e-live-harness.md](e2e-live-harness.md): the live end-to-end suite that drives this protocol.

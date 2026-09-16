@@ -44,9 +44,9 @@ ordinary builds, not just in tests. `host-caps` and `store` supply the host
 capability set and the graph store.
 
 `tinyhumans-sdk` is the shared TinyHumans HTTP transport (`TinyHumansClient`)
-that `src/sdk/src/client/` builds the typed Medulla surface on: auth, durable
-sessions and the public feedback
-board. It owns credential headers, the `{success, data}` envelope, and path
+that `src/sdk/src/client/` builds the typed Medulla surface on: sign-in, the
+plan entitlement on `/auth/me`, account usage, and the public feedback board.
+It owns credential headers, the `{success, data}` envelope, and path
 percent-encoding.
 
 ## One declaration style per crate

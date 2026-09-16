@@ -10,21 +10,18 @@ the offline demo runtime.
 
 | Tab | What it is for |
 | --- | --- |
-| Overview | The live event feed, the active cycle and its results, the task ledger, any pending decision, and a This device panel for what this machine is hosting. |
-| Sessions | The sessions running on this machine and the ones dispatched to it: a rail on the left, and the selected row's transcript, terminal, diff, or workflow run beside it. `Ctrl`+`]` attaches the live harness pane. |
-| Workflows | Authored multi-step plans: a sidebar, a graph canvas, and a copilot that edits it. See [Workflows](../features/workflows.md). |
-| Subconscious | A placeholder for the layer under the work: what it filters on intake, what it learns from the gap between expectation and outcome, and what it escalates for a human to approve. Nothing here is live yet. |
-| Changes | The session's Git changes: a rail of changed files, commits, patches, and review comments, with the selected unified patch beside it. `b` sets the baseline. |
-| Hosts | What capacity exists: Hosts, Harness Types, Hooks, Agent Templates, Add Host, Strategies. |
+| Sessions | The sessions running on the current host (or every host, grouped): a rail on the left, and the selected row's transcript, terminal, diff, or workflow run beside it. `Ctrl`+`]` attaches the live harness pane; `d` shows the session's Git changes. |
+| Workflows | Authored multi-step plans: a sidebar, a graph canvas, and a copilot that edits it. Pointed at a remote host, it shows that host's catalogue and runs. See [Workflows](../features/workflows.md). |
+| Hosts | The other machines Medulla can drive: add one, get the one-line pairing command to run there, connect, and pick which host the tabs above are about. See [Hosts](../features/hosts.md). |
 | Feedback | The feedback board for the active runtime, with the selected item's body and comments. The mock demo runtime always has a scripted board; a signed-out or unconfigured backend connection has none, and shows a single hint panel instead. |
 | Settings | Usage, Appearance, Status line, Config, Feedback, Trace, Context, Account, Help, grouped under General, Debug, and About. |
 
-`Tab` walks the top-level views. Within a tab, `↑↓` walk the left nav and `1`-`9`
-jump to a page. The Settings tab's Help subpage, or `/help`, lists the
+`Tab` walks the top-level views and `H` switches the current host from any of
+them. Within a tab, `↑↓` walk the left nav and `1`-`9` jump to a page. The Settings tab's Help subpage, or `/help`, lists the
 keybindings; `/usage`, `/config`, and `/theme` open the matching Settings pages.
 
 The Workflows tab exists only in a build with the default `workflows` feature. A
-slim build ships seven tabs instead of eight and no Workflows entry, because the
+slim build ships four tabs instead of five and no Workflows entry, because the
 tab would have nothing to draw.
 
 Three surfaces have render code in the crate but no entry in the tab bar of this

@@ -10,6 +10,7 @@ the host link, and self-updating.
 | `medulla run <instruction>` | [Headless one-shot](#medulla-run): submit one instruction and stream the cycle's events as JSON lines. |
 | `medulla login` / `logout` | [OAuth login](authentication.md), via the browser or `--code` for SSH and other browserless terminals; logout clears the session and keeps the account selected. |
 | `medulla daemon` | [Coding-agent worker daemon](#medulla-daemon) over the host link (`--headless` for a service process). |
+| `medulla daemon <key>` | [Pair this machine](#medulla-daemon-key) as a remote host of the TUI that minted the key; `--host` re-runs a pairing already on disk. |
 | `medulla codex` / `claude` / `opencode` | [Harness wrappers](#harness-wrappers): run a CLI, bridged to your orchestrator. |
 | `medulla sessions` | List recent claude/codex sessions as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run multi-step plans. |
@@ -44,8 +45,7 @@ TUI flags:
 | `--mock` | Force the scripted offline runtime and skip the token lookup and login screen. |
 | `--no-alt-screen` | Stay on the main screen buffer (useful for scrollback while debugging). |
 
-The tabs are Overview, Sessions, Workflows, Subconscious, Changes, Hosts,
-Feedback, and Settings. Workflows is present only in a build with the default
+The tabs are Sessions, Workflows, Hosts, Feedback, and Settings. Workflows is present only in a build with the default
 `workflows` feature. See [The TUI](the-tui.md#the-tabs) for what each one holds and for the
 surfaces that are not in the tab bar of this build.
 
@@ -172,6 +172,35 @@ OSC 52 needs a terminal that accepts it: tmux wants `set -g set-clipboard on`,
 and some terminals disable it for security. The copy is also skipped when the
 daemon's output is piped. The address is printed on a line of its own either way.
 Pass `--no-pair` when the output is being parsed by a script.
+
+## `medulla daemon <key>`
+
+Pairs this machine with one TUI, the way mosh pairs a session. The key comes
+from the TUI's Hosts tab (`a` to add a machine, `i` to issue a new key) and
+carries the TUI's node id, an id for this host, the shared secret and the UDP
+port to listen on. The daemon records the pairing under this machine's Medulla
+home, binds the port, and serves sessions and workflow calls to that one client
+over the direct host link — no SSH, no backend, no login on this machine.
+
+```
+medulla daemon HK1-…  [--workspace <dir>] [--workspaces <a,b>] [--config <path>]
+medulla daemon --host [--workspace <dir>]
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--host` | Serve every pairing already on disk, without a key. What to put in a service unit. |
+| `--workspace <dir>` | Where sessions on this host start (default: the current directory). |
+| `--workspaces <a,b>` | Other directories to offer on the client's workspace step. |
+| `--host-name <label>` | What the client's rail calls this machine (default: the hostname). |
+| `--config <path>` | Explicit config file for this host's own `[router]`, `[[hooks]]`, presets. |
+
+Re-running with the same key is a no-op; a different key for the same client
+replaces the pairing, which is what re-issuing from the Hosts tab means. If the
+port is taken the daemon says so and exits; edit the host in the TUI, pick
+another port, and issue a new key. Keeping the daemon running across reboots
+is left to the operator — a `systemd-run --user` unit, a launchd job or a tmux
+window all do — and the daemon prints that hint on start.
 
 ## Harness wrappers
 

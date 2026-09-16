@@ -75,11 +75,25 @@ The same direct link the SSH bootstrap sets up, minus the `ssh`. The key comes f
 | --- | --- |
 | `--host` | Serve every pairing already on disk, without a key. What to put in a service unit. |
 | `--workspace <dir>` | Where sessions on this host start (default: the current directory). |
-| `--workspaces <a,b>` | Other directories to offer on the client's workspace step. |
+| `--workspaces <a,b>` | Capability metadata only, not concurrent execution roots: other directories this host advertises so the client can pick one of them on its workspace step. Each session still runs in the single directory it picked, same as `--workspace`. |
 | `--host-name <label>` | What the client's rail calls this machine (default: the hostname). |
 | `--config <path>` | Explicit config file for this host's own `[router]`, `[[hooks]]`, presets. |
 
-Re-running with the same key is a no-op; a different key for the same client replaces the pairing, which is what re-issuing from the Hosts tab means. If the port is taken the daemon says so and exits; edit the host in the TUI, pick another port, and issue a new key. Keeping the daemon running across reboots is left to the operator, since a `systemd-run --user` unit, a launchd job, or a tmux window all do, and the daemon prints that hint on start.
+`medulla daemon <key>` reads the key, records the pairing, then immediately
+re-execs itself as `medulla daemon --host`, which is what actually keeps
+running — so the key never sits on the long-running daemon's command line,
+only on the instant it takes to record the pairing. Re-running with the same
+key is a true no-op. A *different* key for the same client fails outright
+while a daemon already holds that client's pairing: stop the daemon first,
+then pair again. Two different clients cannot share a port on one host — that
+is refused immediately when you pair, before anything tries to bind, with a
+message pointing you back to the Hosts tab to issue a key on another port.
+`--host` skips any individual pairing it genuinely cannot serve (a corrupted
+identity, or a port that turns out to be unavailable at bind time) and keeps
+serving the rest; it only fails outright when none of the pairings on disk
+could be served. Keeping the daemon running across reboots is left to the
+operator, since a `systemd-run --user` unit, a launchd job, or a tmux window
+all do, and the daemon prints that hint on start.
 
 ### The standing daemon
 

@@ -8,11 +8,11 @@ and each one transfers to other process combinations.
 ## What the suite proves
 
 One end-to-end round trip over the **host link** (`docs/host-link-protocol.md`),
-with no real keys and no network egress:
+with no real keys, no backend, and no network egress:
 
 ```
 owner driver (src/sdk/examples/coordination_owner/main.rs; a real medulla-link endpoint)
-  → mock link forwarder (src/sdk/examples/mock_link_forwarder.rs; blind UDP, §5)
+  → mock link relay (src/sdk/examples/mock_link_forwarder.rs; blind UDP, appendix A)
     → medulla daemon (real binary, `--providers <harness>`, the host end)
       → the real coding CLI (spawned by the daemon as its provider)
         → mock LLM (e2e/coordination/mock_llm.py)
@@ -21,8 +21,9 @@ owner driver (src/sdk/examples/coordination_owner/main.rs; a real medulla-link e
 ```
 
 Only the transport's *middle* is mocked, and it is mocked as a blind box: the
-forwarder authenticates the 58-byte cleartext header with each node's forwarder
-key and copies the ChaCha20-Poly1305 payload verbatim. Both endpoints run the
+relay authenticates the cleartext header and copies the ChaCha20-Poly1305
+payload verbatim, on the relayed route the link crate keeps for exactly this
+purpose (`host-link-protocol.md`, appendix A). Both endpoints run the
 real `medulla-link` crate, so every byte of payload encryption, every state
 diff and every retransmission is production code.
 
@@ -57,8 +58,8 @@ routed at the mock and which wire dialect it lands on.
 | `e2e/coordination/Dockerfile` | the harness image: a rust build stage layered onto that base |
 | `e2e/coordination/build-image.sh` | build (and optionally push) either image |
 | `e2e/coordination/run-docker.sh` | build + run the whole harness in a container |
-| `src/sdk/examples/mock_link_forwarder.rs` | blind UDP forwarder implementing protocol §5 rules 1-8 |
-| `src/sdk/examples/coordination_owner/main.rs` | owner-side driver: enrolls pairs, serves legs, prints terminal frame JSON |
+| `src/sdk/examples/mock_link_forwarder.rs` | blind UDP relay for the protocol's relayed route (appendix A) |
+| `src/sdk/examples/coordination_owner/main.rs` | owner-side driver: provisions pairs, serves legs, prints terminal frame JSON |
 
 ## Running
 
@@ -97,20 +98,20 @@ The daemon is **one workspace per process**: `RunTaskOptions.cwd` comes from
 `config.workspace`, and nothing on the wire overrides it per task. So a fleet is
 N daemon processes, not one daemon with N directories. `tests_multi.sh` boots two
 (`alpha`, `beta`), each with its own workspace, `MEDULLA_HOME` and separately
-enrolled link identity, against **one shared** forwarder and mock LLM:
+provisioned link identity, against **one shared** relay and mock LLM:
 
 ```
-mock forwarder ──┬── daemon alpha (work-alpha) ── CLI ──┐
-                 └── daemon beta  (work-beta)  ── CLI ──┴─→ mock LLM
+mock relay ──┬── daemon alpha (work-alpha) ── CLI ──┐
+             └── daemon beta  (work-beta)  ── CLI ──┴─→ mock LLM
 ```
 
 | Scenario | Asserts |
 | --- | --- |
-| fleet registration | two daemons serve as *distinct* enrolled hosts on one forwarder |
+| fleet registration | two daemons serve as *distinct* hosts through one relay |
 | workspace binding | each reports its own `cwd`; sentinels prove each read only its own dir |
 | concurrent routing | two parallel legs each get their own marker back, no cross-talk |
 | crash containment | killing `beta` mid-task leaves `alpha` serving |
-| crash recovery | restarting `beta` comes back on the *same* enrolled identity and serves again |
+| crash recovery | restarting `beta` comes back on the *same* link identity and serves again |
 
 Workspace binding is the subtle one. Asserting the reported `cwd` only proves the
 daemon *says* the right thing. To prove it *read* the right directory,
@@ -126,14 +127,14 @@ separate containers with separate volumes.
 
 ## The live suite (`run-live.sh`)
 
-Same fleet and the same assertions in spirit, with the two mocks swapped for real
-infrastructure: a deployed forwarder and OpenRouter. It exists because a green
-mocked suite can still break against real infrastructure.
+Same fleet and the same assertions in spirit, with the mock LLM swapped for
+OpenRouter. It exists because a green mocked suite can still break against a
+real model.
 
-The suite needs two things this repository does not carry, so it does not run
-here and says so rather than pretending. The transport half needs a deployed
-forwarder implementing §5 (`MEDULLA_LINK_FORWARDER=<host:port>`), and identities
-from §7.2 enrollment; there is no enrollment client here, so each end's
+The transport half has no infrastructure behind it, so the suite does not run
+here and says so rather than pretending. Nothing deployed implements the
+relayed route (`MEDULLA_LINK_FORWARDER=<host:port>` would have to name one), and
+there is no client that provisions a relayed identity, so each end's
 `node.json` has to be provisioned out of band and handed in via
 `MEDULLA_LINK_HOME_<name>` / `MEDULLA_LINK_OWNER_DIR_<name>`. Without them
 `preflight` exits 2 with that explanation. The scenarios are maintained so they
@@ -197,7 +198,7 @@ timeout`), keyed on a printed marker:
 - servers print `listening on …` at startup (see below);
 - the daemon prints `serving providers ... as <name> for <owner> ...`, and the
   harness scrapes the advertised *name* out of that line; the worker's node id
-  comes from enrollment, because only ids travel on the wire (§2);
+  comes from its provisioned `node.json`, because only ids travel on the wire (§2);
 - the TUI leg polls `capture-pane` for the editor prompt (`Ask anything`) before
   typing, and for the reply marker after.
 
@@ -211,10 +212,10 @@ the log. No fixed ports → suites can run concurrently and never collide with d
 servers. Config that needs the port (opencode.json) is a template with a
 `MOCK_LLM_PORT` placeholder substituted per run with `sed`.
 
-The forwarder is the exception: its address is written into every `node.json` at
-enrollment (§7.3) and the daemon has no flag to override it, so the address must
-be known *before* anything starts. The harness picks a free port itself
-(`free_port`), releases it, and lets the forwarder bind it a moment later; a lost
+The relay is the exception: its address is written into every `node.json` when
+the pair is provisioned and the daemon has no flag to override it, so the address
+must be known *before* anything starts. The harness picks a free port itself
+(`free_port`), releases it, and lets the relay bind it a moment later; a lost
 race fails the bind loudly rather than pointing endpoints at nothing.
 
 ### 4. Mock the LLM at the HTTP boundary, deterministically
@@ -239,11 +240,11 @@ deadlock a thread-per-request mock.
 
 ### 5. Give mocks a read surface, bounded by what they may see
 
-The forwarder logs one line per datagram it moves: source, destination, sequence,
+The relay logs one line per datagram it moves: source, destination, sequence,
 size, and heartbeat-or-not. `assert_bidirectional_delivery` counts those lines per
 direction, which turns "did both legs deliver?" into two greps.
 
-It stops exactly where the mock's knowledge stops. A blind forwarder cannot tell
+It stops exactly where the mock's knowledge stops. A blind relay cannot tell
 a task frame from an acknowledgement, so the assertion is "state-carrying
 datagrams crossed in both directions" and not "a reply frame came back"; that
 part is asserted from the owner's terminal-frame JSON instead. A debug surface
@@ -283,7 +284,7 @@ Over the host link the owner has to outlive a single leg. SSP state lives in
 memory, so an owner that exits and comes back is at state 0 while the daemon
 still holds state *n*, and from then on neither side's diffs apply: the link is
 wedged with no error anywhere. So the harness boots one
-`coordination_owner --serve` per enrolled pair and each leg is a request file
+`coordination_owner --serve` per provisioned pair and each leg is a request file
 dropped into its queue (one argument per line, written under a temporary name and
 renamed into place so a half-written request is never read).
 
@@ -291,10 +292,10 @@ The same asymmetry bites when a *host* restarts, which the crash-recovery
 scenario does deliberately. There is no in-band way for either end to discover
 that its peer lost its state, so the harness, which knows because it did the
 killing, calls `reset_owner_link <name>` between killing a daemon and starting
-its replacement. That rebuilds the orchestrator's link while nothing is
-listening, so frames the old session was still retransmitting cannot land on the
-new process. This matters outside the harness too: a real orchestrator needs
-some answer here, and today the answer is to restart both ends.
+its replacement. That rebuilds the owner's link while nothing is listening, so
+frames the old session was still retransmitting cannot land on the new process.
+This matters outside the harness too: a real owner needs some answer here, and
+today the answer is to restart both ends.
 
 ### 8. Scenario suites share one booted stack when isolation allows
 
@@ -343,7 +344,7 @@ A green run asserts all three legs, not just the final answer:
    shape.
 2. Input leg: the mock LLM journal contains ≥1 chat request embedding the
    task text.
-3. Transport leg: the forwarder log shows ≥1 state-carrying datagram in
+3. Transport leg: the relay log shows ≥1 state-carrying datagram in
    *each* direction between that pair's two node ids.
 
 ## Known caveats

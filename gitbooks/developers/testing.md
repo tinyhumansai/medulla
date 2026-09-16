@@ -57,11 +57,12 @@ Run all of them before handing work off. See
 
 A separate harness under `e2e/coordination/` drives real processes: the `medulla`
 daemon binary, a real coding CLI, and an interactive TUI, over the
-[host link](host-link-protocol.md), with no real keys and no network egress.
+[host link](host-link-protocol.md), with no real keys, no backend, and no
+network egress.
 
 ```
 owner driver (src/sdk/examples/coordination_owner; a real medulla-link endpoint)
-  → mock link forwarder (src/sdk/examples/mock_link_forwarder.rs; blind UDP)
+  → mock link relay (src/sdk/examples/mock_link_forwarder.rs; blind UDP)
     → medulla daemon (real binary, --providers <harness>, the host end)
       → the real coding CLI (spawned by the daemon as its provider)
         → mock LLM (e2e/coordination/mock_llm.py)
@@ -145,8 +146,9 @@ seeds the answers into a scratch `~/.claude.json` — headless runs never see it
 the TUI smoke leg would otherwise stall on it.
 
 Only the transport's middle is mocked, and it is mocked as a blind box: the
-forwarder authenticates the cleartext header with each node's forwarder key and
-copies the ChaCha20-Poly1305 payload verbatim. Both endpoints run the real
+relay authenticates the cleartext header and copies the ChaCha20-Poly1305
+payload verbatim, on the [relayed route](host-link-protocol.md#appendix-a-relayed-route-test-harness-only)
+the link crate keeps for exactly this purpose. Both endpoints run the real
 `medulla-link` crate, so every byte of payload encryption, every state diff and
 every retransmission is production code.
 
@@ -229,8 +231,8 @@ preset's endpoint sat unused beside it.
 
 Note that ACP runs report no token usage. ACP's `usage_update` carries the
 context window (`used` of `size`), not an input/output split, so there is
-nothing to fill `usage` with that would not be invented — an orchestrator that
-bills or throttles on reported tokens gets nothing from an ACP run.
+nothing to fill `usage` with that would not be invented — anything that bills
+or throttles on reported tokens gets nothing from an ACP run.
 
 ### The terminal suite
 
@@ -240,7 +242,7 @@ full-screen TUIs on a real pseudo-terminal, driven under tmux:
 | Scenario | Asserts |
 | --- | --- |
 | wrapper transparency | `medulla <harness> --no-bridge` paints the real CLI's own TUI and answers a prompt typed into it. |
-| wrapper bridging | An enrolled wrapper answers Medulla's worker-setup wizard, then forwards its session to the orchestrator — state datagrams leave the wrapper's own node. Claude and Codex only; the wrapper does not tail opencode transcripts. |
+| wrapper bridging | A wrapper with a link identity answers Medulla's worker-setup wizard, then forwards its session to the owner end — state datagrams leave the wrapper's own node. Claude and Codex only; the wrapper does not tail opencode transcripts. |
 | operator screen | `medulla daemon --tui` answers its setup menus, paints its worker screen, and still serves a dispatched task. For claude the task is also asserted to appear in the live embedded session pane. |
 
 These break in ways headless tests cannot see: a harness TUI refuses to start
@@ -264,16 +266,16 @@ The daemon is one workspace per process: `RunTaskOptions.cwd` comes from
 `config.workspace`, and nothing on the wire overrides it per task. A fleet is
 therefore N daemon processes, not one daemon with N directories.
 `tests_multi.sh` boots two (`alpha` and `beta`), each with its own workspace,
-`MEDULLA_HOME`, and separately enrolled link identity, against one shared
-forwarder and mock LLM.
+`MEDULLA_HOME`, and separately provisioned link identity, against one shared
+relay and mock LLM.
 
 | Scenario | Asserts |
 | --- | --- |
-| fleet registration | Two daemons serve as distinct enrolled hosts on one forwarder. |
+| fleet registration | Two daemons serve as distinct hosts through one relay. |
 | workspace binding | Each reports its own `cwd`; sentinels prove each read only its own directory. |
 | concurrent routing | Two parallel legs each get their own marker back, with no cross-talk. |
 | crash containment | Killing `beta` mid-task leaves `alpha` serving. |
-| crash recovery | Restarting `beta` comes back on the same enrolled identity and serves again. |
+| crash recovery | Restarting `beta` comes back on the same link identity and serves again. |
 
 Workspace binding is the subtle one. Asserting the reported `cwd` only proves the
 daemon says the right thing. To prove it read the right directory,
@@ -291,14 +293,14 @@ volumes.
    For `tests.sh`, `usage.inputTokens` and `outputTokens` must also be present.
 2. Input leg: the mock LLM journal contains at least one completion request embedding
    the task text, on the wire dialect the selected harness speaks.
-3. Transport leg: the forwarder log shows at least one state-carrying datagram in
+3. Transport leg: the relay log shows at least one state-carrying datagram in
    each direction between that pair's two node ids.
 
 ## The live suite
 
-`run-live.sh` runs the same fleet and the same assertions in spirit, with the two
-mocks swapped for real infrastructure: a deployed forwarder and OpenRouter. It
-exists because a green mocked suite can still break against real infrastructure.
+`run-live.sh` runs the same fleet and the same assertions in spirit, with the
+mock LLM swapped for OpenRouter. It exists because a green mocked suite can
+still break against a real model.
 
 ```sh
 E2E_LIVE=1 OPENROUTER_API_KEY=sk-or-... make e2e-live
@@ -312,16 +314,15 @@ It fails closed on every axis, so it cannot start by accident:
 | `OPENROUTER_API_KEY` | Required; billed per token. |
 | `E2E_ALLOW_PROD=1` | Required. The endpoint is pinned to production, so this suite has nowhere else to run; `MEDULLA_STAGING` no longer exists and the harness refuses if it is set. |
 | `LIVE_MODEL` | Defaults to a cheap small model. |
-| `MEDULLA_LINK_FORWARDER` | A deployed forwarder implementing section 5 of the [link protocol](host-link-protocol.md#5-forwarder-rules). |
+| `MEDULLA_LINK_FORWARDER` | A relay implementing the [relayed route](host-link-protocol.md#appendix-a-relayed-route-test-harness-only). |
 | `MEDULLA_LINK_HOME_<name>`, `MEDULLA_LINK_OWNER_DIR_<name>` | Provisioned `node.json` identity directories. |
 
-Two prerequisites do not exist in this repository, so the suite does not run here
-and says so rather than pretending. The transport half needs the deployed
-forwarder, and it needs identities from
-[enrollment](host-link-protocol.md#72-enroll-token-and-forwarder-key); there is
-no enrollment client here, so each end's `node.json` has to be provisioned out of
-band and handed in. Without them `preflight` exits 2 with that explanation. The
-scenarios are maintained so they can run the moment that infrastructure exists.
+The transport half has no infrastructure behind it: nothing deployed implements
+the relayed route, and there is no client that provisions a relayed identity, so
+each end's `node.json` would have to be provisioned out of band and handed in.
+Without them `preflight` exits 2 with that explanation. The scenarios are
+maintained so they can run the moment that infrastructure exists; the mocked
+suite above is the one that gates a change.
 
 Two assertions necessarily change shape against a real model. Routing is asserted
 on `taskId` correlation rather than a verbatim marker echo, because a real model

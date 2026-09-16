@@ -178,7 +178,7 @@ than silently leaving you authenticated.
 ## Logging in from the TUI
 
 When you start `medulla` with no usable credential, the TUI opens a login screen
-before the main app. There is no offline fallback: the mock runtime is reached
+before the main app. There is no offline fallback: the mock backend is reached
 only by asking for it with `--mock`.
 
 Everything is one list, navigated with `↑↓` and `Enter`; nothing is bound to a

@@ -33,9 +33,9 @@ it. See [Getting Started](getting-started.md#the-linux-glibc-floor).
 ### `medulla-tui requires an interactive terminal (TTY).`
 
 The TUI exits 1 when stdout is not a terminal. Run it in a real terminal, or use
-a non-interactive subcommand: `medulla run` for one instruction, `medulla daemon`
-(which selects headless automatically when stdout is not a terminal) for a
-worker.
+a non-interactive subcommand: `medulla remote <host> --exec <command>` for one
+command on a remote host, or `medulla daemon` (which selects headless
+automatically when stdout is not a terminal) for a worker.
 
 ## Login
 
@@ -166,15 +166,20 @@ means.
 
 ### The standing daemon: two peers never hear from each other
 
-For an enrolled `medulla daemon` (not the SSH-bootstrapped `--direct` case), the
-usual cause is that the two ends are pointed at different forwarders. The daemon
-states its identity and forwarder together on its first log line
-(`host link: <id> on <endpoint>`), and the client prints its own. Compare them.
+For a paired `medulla daemon <key>`, the usual cause is that the key the host
+was started with is not the one the client currently holds: re-issuing a key
+mints a fresh pair, so a host still running on the old one is a stranger. The
+daemon's first log line (`host link: <id>`) is its local host endpoint ID; the
+client prints its local owner endpoint ID, so those two values are expected to
+differ. Compare the daemon's ID with the client's stored host peer ID, and
+compare the client's ID with the owner ID in the host key used to start the
+daemon. Restart the host with the current key when either comparison differs.
 
 A peer being `Offline` is not terminal. The link keeps retransmitting through
-`Degraded` and `Offline`, and recovery needs no reconnect or re-enrollment. See
-[liveness](host-link-protocol.md#62-liveness). There is no key recovery: the
-backend never holds a pair key, so a lost key means re-enrolling the host.
+`Degraded` and `Offline`, and recovery needs no reconnect or re-pairing. See
+[liveness](host-link-protocol.md#62-liveness). There is no key recovery: nothing
+but the two endpoints holds a pair key, so a lost key means pairing the host
+again.
 
 ## Copying out of Medulla
 
@@ -256,7 +261,7 @@ a file.
 
 | Process | File |
 | --- | --- |
-| The TUI | `<medulla home>/logs/orchestrator.log` (the name is historical) |
+| The TUI | `<medulla home>/logs/medulla.log` |
 | The daemon | `<medulla home>/logs/worker.log` |
 
 `MEDULLA_LOG_DIR` overrides the directory. The default is deliberately not the

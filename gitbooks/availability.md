@@ -4,6 +4,6 @@ Any registered account can use Medulla for its first 30 days without paying. Aft
 
 The rule lives in the binary and only decides what the terminal shows. What an account may spend is metered by the backend.
 
-The client itself is open source under GPL-3.0-only at [`tinyhumansai/medulla-src`](https://github.com/tinyhumansai/medulla-src), and `medulla --mock` runs the whole terminal offline against a scripted runtime with no account at all. Signing in is what a live account adds: the hosted sign-in, usage meters, and the feedback board.
+The client itself is open source under GPL-3.0-only at [`tinyhumansai/medulla-src`](https://github.com/tinyhumansai/medulla-src), and `medulla --mock` runs the whole terminal offline against a scripted backend with no account at all. Signing in is what a live account adds: the hosted sign-in, usage meters, and the feedback board.
 
 Medulla is still early. If you run it on a workload we have not seen, tell us about it.

@@ -60,7 +60,7 @@ Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and 
 git clone https://github.com/tinyhumansai/medulla-src
 cd medulla-src
 make init                       # submodules, rustfmt/clippy, locked deps, pre-push hook
-cargo run                       # debug build, starts the TUI (mock runtime)
+cargo run                       # debug build, starts the TUI
 cargo run --release             # optimized build
 cargo install --path src/tui    # installs the `medulla` binary onto your PATH
 ```
@@ -76,7 +76,7 @@ medulla         # bare invocation starts the TUI
 
 `medulla login` opens your browser, captures the JWT the backend redirects back with, verifies it, and saves credentials under your [Medulla home](configuration.md#medulla-home). The next `medulla` run picks them up automatically. Over SSH, where the browser cannot reach back, use `medulla login --code`. Providers, headless tokens, and the security model are covered in [Authentication](authentication.md).
 
-If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen with the browser flow and a paste-a-token option. It does not offer the mock runtime; that is `medulla --mock`, so a failed sign-in cannot quietly land you in a demo.
+If you start `medulla` with no working credentials, the TUI shows an in-terminal login screen with the browser flow and a paste-a-token option. It does not offer the mock backend; that is `medulla --mock`, so a failed sign-in cannot quietly land you in a demo.
 
 Once in, press `Ctrl-T`, pick a harness, pick a directory, and the session is running. `Ctrl-]` attaches your keyboard to it and detaches again. [The TUI](the-tui.md) has every key.
 
@@ -98,7 +98,7 @@ The next `Ctrl-T` starts with a host step. Picking the new host runs your own `s
 cargo run -- --mock     # or: medulla --mock
 ```
 
-`medulla --mock` runs the mock runtime, a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab and its Help subpage for the keys. Usage, the effective config, and the theme editor live under Settings as well.
+`medulla --mock` runs against the mock backend, a scripted demo with no credentials and no network, and the fastest way to explore the interface. Open the Settings tab and its Help subpage for the keys. Usage, the effective config, and the theme editor live under Settings as well.
 
 ## Use the SDK from your own crate
 
@@ -126,5 +126,5 @@ The `Install scripts` workflow runs the supported matrix end to end on every cha
 ## Read next
 
 * [CLI Reference](cli-reference.md): the daemon, `remote`, and self-update.
-* [Configuration](configuration.md): home directory, layered config, runtimes.
+* [Configuration](configuration.md): home directory, layered config, sections.
 * [Architecture](architecture.md): how it all fits together.

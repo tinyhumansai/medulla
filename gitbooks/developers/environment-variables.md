@@ -138,7 +138,7 @@ readable.
 
 | Variable | What it does |
 | --- | --- |
-| `MEDULLA_LINK_FORWARDER` | The forwarder address the coordination owner driver enrolls against. |
+| `MEDULLA_LINK_FORWARDER` | The relay address the coordination owner driver provisions its pairs against (the protocol's test-only relayed route). |
 | `MEDULLA_LINK_STATE_DIR` | The link identity directory that driver uses. |
 | `MEDULLA_LINK_HOME_<name>`, `MEDULLA_LINK_OWNER_DIR_<name>` | Provisioned identity directories for the live suite. |
 | `MEDULLA_LIVE_COPILOT` | Opt-in for the live copilot suite, which otherwise skips loudly rather than starting a harness session nobody asked to pay for. |
@@ -146,12 +146,11 @@ readable.
 | `MEDULLA_BIN`, `FORWARDER_BIN`, `OWNER_BIN`, `OPENCODE_BIN` | Prebuilt binary overrides for the coordination harness. |
 | `MOCK_LLM_MARKER`, `MOCK_LLM_MODEL`, `MOCK_LLM_PORT`, `MOCK_LLM_LOG` | Mock LLM knobs for the coordination harness. |
 
-## Inert
+## Entry-point-specific variables
 
 | Variable | Status |
 | --- | --- |
-| `MEDULLA_HOST`, `MEDULLA_HUB`, `MEDULLA_HUB_POLL_MS`, `MEDULLA_HUB_WORKERS`, `MEDULLA_LINK_PEER`, `MEDULLA_WORKER_PROVIDER`, `MEDULLA_DEMO_FLEET` | Switches for the dispatching model that is no longer part of the product: the local host half, the hub uplink, and a stand-in fleet. Still parsed; nothing a session opened from the picker does reads them. |
-| `MEDULLA_CORE_SOCKET` | Named an external NDJSON socket the runtime was once reached over. There is no such socket now, and a `[core]` config section is inert. |
+| `MEDULLA_HOST`, `MEDULLA_HUB`, `MEDULLA_HUB_POLL_MS`, `MEDULLA_HUB_WORKERS`, `MEDULLA_LINK_PEER`, `MEDULLA_WORKER_PROVIDER`, `MEDULLA_DEMO_FLEET` | Active for the local dispatch hub and development/stand-in-fleet entrypoints: they control whether this device hosts tasks, whether the hub starts, its poll interval, a pre-seeded worker roster, and a demo roster. Picker sessions ignore them. |
 | `TINYPLACE_*` | The deprecated spelling of the harness knobs above. Still read, directly behind the `MEDULLA_*` name in each tier. |
 
 ## What an agent turn cannot see

@@ -9,8 +9,8 @@
 | Sessions | Every session you have open, local and remote, as a rail on the left, with the selected one's terminal beside it. This is where you spend your time. |
 | Workflows | Saved multi-step plans: a sidebar, a graph canvas, and a copilot that edits the graph. Present only in a build with the default `workflows` feature. See [Workflows](../features/workflows.md). |
 | Subconscious | A placeholder for a layer under the sessions: what gets filtered on the way in and what is escalated for a person to approve. It draws nothing live yet, and is listed so you can see where approvals will surface. `E` reviews prepared decisions. |
-| Feedback | The feedback board for the signed-in account, with the selected item's body and comments. The mock runtime shows a scripted board; a signed-out session shows a hint panel. |
-| Settings | Usage, Appearance, Subscriptions, Status line, Config, Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and About. |
+| Feedback | The feedback board for the signed-in account, with the selected item's body and comments. The mock backend (`--mock`) shows a scripted board; a signed-out session shows a hint panel. |
+| Settings | Usage, Appearance, Subscriptions, Status line, Config, Feedback, Account, and Help, grouped under General and About. |
 
 `Tab` and `Shift-Tab` walk the tabs. `Ctrl-C` quits.
 
@@ -58,7 +58,7 @@ A `[[remoteHosts]]` entry becomes a group in the rail. Its status shows there: i
 
 ## Settings
 
-`↑↓` move between subpages and `1`-`9` jump to one. Inside a subpage, `j`/`k` pick a row and `←/→` or `Enter` change it; Appearance, Subscriptions, and Status line save live and draw a preview beside the list. Config edits the loaded `config.toml` in place. Feedback has `u`/`d` to vote, `c` to comment, `n` and `b` to file a feature or a bug, `s` and `f` to sort and filter. Trace and Context (under Debug) page events and chunks with `j`/`k`. Account logs out with `Enter` twice. Usage refreshes with `r`. Help lists the keys.
+`↑↓` move between subpages and `1`-`9` jump to one. Inside a subpage, `j`/`k` pick a row and `←/→` or `Enter` change it; Appearance, Subscriptions, and Status line save live and draw a preview beside the list. Config edits the loaded `config.toml` in place. Feedback has `u`/`d` to vote, `c` to comment, `n` and `b` to file a feature or a bug, `s` and `f` to sort and filter. Account logs out with `Enter` twice. Usage refreshes with `r`. Help lists the keys.
 
 ## Mouse
 

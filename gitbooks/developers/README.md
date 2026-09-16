@@ -23,7 +23,7 @@ The [product overview](../) is the short story; these pages are the detail. Ever
 | [Troubleshooting](troubleshooting.md) | Install, login, and remote host failures, clipboard through tmux and SSH, and where the logs are. |
 | [Architecture](architecture.md) | How the SDK, the TUI, the PTY layer, and the host link fit together. |
 | [Glossary](glossary.md) | The vocabulary: session, harness, host, remote host, daemon, host link, workflow. |
-| [The Rust SDK](sdk.md) | The `medulla` crate: cargo features, the `Runtime` trait, examples, and the module tree. |
+| [The Rust SDK](sdk.md) | The `medulla` crate: cargo features, the `Backend` trait, examples, and the module tree. |
 | [Harness Integration](harness-integration.md) | How a coding CLI is launched, the ACP transport, and the shared-process Codex path. |
 | [Attribution and Routing](attribution-and-routing.md) | The loopback proxy that keeps the provider key out of the harness and routes through a gateway. |
 | [Host Link Protocol](host-link-protocol.md) | The normative `medulla-link/1` wire specification and its conformance tests. |

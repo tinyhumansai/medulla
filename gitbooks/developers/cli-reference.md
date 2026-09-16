@@ -7,7 +7,7 @@ The `medulla` binary is the terminal app plus a small set of subcommands: the da
 | `medulla` | Bare invocation starts the [TUI](#the-tui). |
 | `medulla login` / `logout` | [OAuth login](authentication.md), via the browser or `--code` for SSH and other browserless terminals; logout clears the session. |
 | `medulla remote <host> --exec <cmd>` | [Run one command](#medulla-remote) on a configured remote host and print what its screen showed. |
-| `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host. |
+| `medulla daemon` | [Serve sessions](#medulla-daemon) on this machine to a Medulla elsewhere. `--direct` is what the SSH bootstrap starts on a remote host; a host key starts the one-client paired variant. |
 | `medulla claude` / `codex` / `opencode` | [Wrappers](#harness-wrappers): run a CLI in this terminal, forwarding its transcript to a configured owner. |
 | `medulla sessions` | List recent Claude Code and Codex sessions on this machine as JSON. |
 | `medulla workflow <cmd>` | [Workflows](#medulla-workflow): author, inspect, and run saved multi-step plans. |
@@ -43,7 +43,7 @@ medulla remote tower --exec "make" --config ~/other/config.toml
 
 The first non-flag argument is the host id from your config. `--exec` is required unless `--harness` names a harness to open, since a shell with nothing to run has nothing to report.
 
-It goes through the same chain the TUI does: the SSH bootstrap, identity enrollment, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
+It goes through the same chain the TUI does: the SSH bootstrap, the pair key minted on the far side, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
 
 ## `medulla daemon`
 
@@ -55,7 +55,7 @@ A process that serves sessions on this machine to a Medulla somewhere else. Ther
 medulla daemon --direct --peer-node <client node id> [--port <udp>] [--workspace <dir>] [--config <path>]
 ```
 
-This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no forwarder and no enrollment; the client is the only peer it will ever talk to.
+This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no relay and no backend; the client is the only peer it will ever talk to.
 
 `--workspace` is where sessions it serves start, and it is the most consequential flag: a harness serving a client edits files there. It defaults to the directory the daemon was launched in, so the shell that started it decides what the client can touch. The client passes its `[[remoteHosts]] workspace` here when one is set.
 
@@ -90,6 +90,13 @@ A long-running daemon for a machine that serves work continuously. With a termin
 | `--config <path>` | Explicit config file. |
 
 The two permission flags point opposite ways on purpose. Headless, the bypass is opt-in and named for what it is. On the operator screen, sessions run unattended with the bypass on by default, because nobody is in the pane to answer a prompt and a task that stops on one hangs until it times out; `--no-skip-permissions` turns that off. The daemon's provider-spawn paths are unix-only.
+
+### Paired daemon
+
+`medulla daemon <host-key>` starts the one-client paired daemon described in the
+[host-link protocol](host-link-protocol.md#72-host-key). The host key is a
+one-shot bootstrap secret: its pair key is exposed in argv for that process
+start, so use it only where local argv and shell-history readers are trusted.
 
 ## Harness wrappers
 

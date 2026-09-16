@@ -44,7 +44,7 @@ After the bootstrap the two ends talk through `medulla-link` directly. The clien
 
 Two channels ride it. Channel 1 is a latest-wins screen grid, one per peer, which is why one remote session streams at a time. Channel 0 is an append-only message queue for control and presence, which is how every remote session's row stays current whether or not its screen is showing.
 
-The payload is ChaCha20-Poly1305 under a 128-bit pair key only the two endpoints hold. In the direct case there is nothing else. In the forwarder case, used for enrolled peers rather than SSH-bootstrapped ones, an outer header readable by the forwarder carries routing and replay defence, and the forwarder relays bytes it cannot read. The full specification is [Host link protocol](host-link-protocol.md).
+The payload is ChaCha20-Poly1305 under a 128-bit pair key only the two endpoints hold, and the cleartext header in front of it is authenticated under a path key both ends derive from that same pair key. Datagrams go straight from one machine to the other; there is no relay and no backend in the path. The full specification is [Host link protocol](host-link-protocol.md).
 
 ## The SDK
 
@@ -56,17 +56,17 @@ The modules a session touches:
 * [`inference_proxy/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/inference_proxy/): the loopback proxy behind custom presets and `[router]`. See [Attribution and routing](attribution-and-routing.md).
 * [`clipboard/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/clipboard/): writers for tmux's buffer, the platform binaries, and OSC 52, with the nested-tmux passthrough.
 * [`session_history/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/session_history/): reads the CLIs' own transcript directories for `medulla sessions` and resume.
-* [`auth/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/auth/) and [`client/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/client/): sign-in and the typed HTTP surface over the shared `tinyhumans-sdk` transport. See [Authentication](authentication.md).
+* [`auth/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/auth/), [`client/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/client/), and [`access/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/access/): sign-in, the typed HTTP surface over the shared `tinyhumans-sdk` transport, and the plan-entitlement verdict read from `/auth/me`. See [Authentication](authentication.md).
 * [`update/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/update/): the release check and self-update.
 * [`workflows/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/workflows/), [`flow_engine/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/), and [`mcp/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/mcp/): saved graphs, the adapter seam onto the vendored `tinyflows` engine, and the tool server offered to every launched harness. All behind the default `workflows` feature.
 
-`runtime/` holds the `Runtime` trait the UI's account-facing parts drive, with a `cloud` implementation for the signed-in case and a `mock` one for `--mock` and the test suites. It is what makes the whole app runnable offline.
+[`backend/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/backend/) holds the `Backend` trait the UI's account-facing parts drive: account usage, sign-out, and the feedback board, and nothing else. `CloudBackend` is the signed-in case, `MockBackend` backs `--mock` and the test suites, and `OfflineBackend` is what a signed-out run holds. It is what makes the whole app runnable offline. The backend is never in the path of a session: it is asked whether this account may run Medulla, and after that everything is local.
 
-Several modules are older than the current shape and are kept because they still build and still serve the standing daemon: `hub/`, `bridge/`, `harness_contract/`, `agent/`, `sessions/`, `init/`, and `wrapper/`. They describe a mode in which work was dispatched to workers as task frames rather than opened as sessions. Nothing a session opened from the picker goes through them.
+Dispatch, when a workflow step or an MCP `fleet_*` call asks for work to be run rather than a person opening a session, goes through [`hub/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/hub/): a device-local router with a worker roster, a `TaskRunner`, and an activity log, dispatching over the in-process bus to the agents on this machine. `bridge/`, `harness_contract/`, `agent/`, and `sessions/` are the pieces it is built on; `wrapper/` is the transparent harness wrapper behind `medulla claude`, `medulla codex`, and `medulla opencode`.
 
 ## Testing philosophy
 
-Because the UI depends on the `Runtime` trait rather than a backend, and a session is a process on a PTY, the whole system can be exercised offline. Unit tests live in a module's sibling `tests.rs`; cross-module suites live in the owning crate's `tests/` directory. The remote-host end-to-end suite runs `medulla remote --exec` between two containers. See [Testing](testing.md).
+Because the UI depends on the `Backend` trait rather than a live account API, and a session is a process on a PTY, the whole system can be exercised offline. Unit tests live in a module's sibling `tests.rs`; cross-module suites live in the owning crate's `tests/` directory. The remote-host end-to-end suite runs `medulla remote --exec` between two containers. See [Testing](testing.md).
 
 ## Read next
 

@@ -400,16 +400,20 @@ and folds the confusables; the checksum rejects a truncated paste at entry.
 
 This key is accepted in argv, which the rule above forbids for the typed pair
 key. The trade is deliberate: a one-shot command that works in any shell on
-any box is what pairing this way is for. The exposure is not limited to
-process startup: the key remains in shell history, and it stays visible in
-process arguments (via `ps` or `/proc`) for as long as the daemon runs with it
-un-scrubbed, not just for the one process start. Any local process able to
-read it during that window can forge authenticated direct-path datagrams
-against the host's services until the key is rotated. Direct pairing this way
-therefore assumes a trusted, single-user machine; rotating the key (section
-7.1.1) closes off future access but does not undo exposure that already
-happened. Where that assumption does not hold, use the forwarder path's TTY
-prompt instead. The forwarder path's rule is unchanged.
+any box is what pairing this way is for. The process that reads it records
+the pairing and immediately re-execs itself as `medulla daemon --host`, which
+re-derives everything from that pairing rather than from argv — so the key
+does not sit on the *running* daemon's command line, only on the
+initial-invocation process's, for the moment it takes to write the pairing to
+disk and hand off. That is still a real, if brief, exposure: any local
+process able to read `ps`/`/proc` during that moment, or the shell history of
+whoever typed the command, can recover the key and forge authenticated
+direct-path datagrams against the host's services until it is rotated.
+Direct pairing this way therefore assumes the invoking shell and the moment
+of invocation are trustworthy, even once the daemon itself is running clean;
+rotating the key (section 7.1.1) closes off future access but does not undo
+exposure that already happened. Where that assumption does not hold, use the
+forwarder path's TTY prompt instead. The forwarder path's rule is unchanged.
 
 ### 7.2 Enroll token and forwarder key
 

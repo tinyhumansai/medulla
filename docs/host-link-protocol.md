@@ -36,9 +36,11 @@ database.
 
 ### Roles and direction
 
-Every endpoint is either the **orchestrator** or a **host**. The role is fixed at
-enrollment and determines the direction bit (§4.2). It is not a property of a
-given datagram.
+Every endpoint is either the **orchestrator** or a **host**. The role
+determines the direction bit (§4.2) and is not a property of a given
+datagram. On the forwarder path it is fixed at enrollment (§7.2); on the
+direct path it is fixed at pairing (§7.1.1), where the client is always the
+orchestrator and the machine it pastes the key into is always the host.
 
 ## 2. Identifiers
 

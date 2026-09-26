@@ -1,0 +1,61 @@
+{
+  "name": "Review and fix",
+  "description": "Review the working tree, then fix what the review found — with a human gate between the two.",
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "start",
+      "config": { "trigger_kind": "manual" }
+    },
+    {
+      "id": "review",
+      "kind": "agent",
+      "name": "Review the diff",
+      "config": {
+        "prompt": "Review the uncommitted changes in this repository. Report only real defects — correctness, missing error handling, or a test that does not test what it claims. Reply with JSON: {\"findings\": [{\"file\": string, \"issue\": string}]}. Reply {\"findings\": []} if the diff is sound.",
+        "output_parser": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "file": { "type": "string" },
+                    "issue": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "gate",
+      "kind": "agent",
+      "name": "Approve the fixes",
+      "config": {
+        "requires_approval": true,
+        "prompt": "=\"Apply fixes for these findings: \" + (.item.json.json.findings | tostring)"
+      }
+    },
+    {
+      "id": "report",
+      "kind": "transform",
+      "name": "Report",
+      "config": {
+        "set": {
+          "outcome": "=.item.text"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from_node": "start", "to_node": "review" },
+    { "from_node": "review", "to_node": "gate" },
+    { "from_node": "gate", "to_node": "report" }
+  ]
+}

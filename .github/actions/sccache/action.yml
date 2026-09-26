@@ -1,0 +1,54 @@
+name: Compiler cache
+description: >-
+  Put sccache in front of rustc, backed by the GitHub Actions cache, so the
+  vendored OpenHuman core and its tiny* path dependencies are not recompiled
+  from cold on every run.
+
+# WHY THIS EXISTS, given `Swatinem/rust-cache` is already on every lane.
+#
+# rust-cache saves `target/`, but before saving it *prunes* it: `cleanProfileTarget`
+# keeps only entries in `target/<profile>/{deps,.fingerprint,build}` whose names
+# match packages returned by `Workspace::packagesOutsideWorkspaceRoot()`, i.e.
+# packages whose `manifest_path` does NOT start with the workspace root
+# (src/workspace.ts: `(pkg) => !pkg.manifest_path.startsWith(this.root)`).
+# Everything else is deleted on the assumption it is cheap first-party code.
+#
+# That assumption does not hold here. The crates under `vendor/` are path
+# dependencies living *inside* the workspace root, so rust-cache classifies them
+# as first-party and strips their rlibs and fingerprints out of the cache — so
+# every Rust lane recompiled them from scratch on each run, cache hit or not.
+# The volume is far smaller since the embedded OpenHuman core left (it alone was
+# ~497k compiled lines under medulla's feature set), but tinyagents and
+# tinyflows are still worth not rebuilding five times per run.
+#
+# sccache is the fix rather than a rust-cache option because rust-cache has no
+# way to exempt a path: its `cache-directories` input is saved *after* the same
+# prune, so naming `target/debug/deps` there saves an already-emptied directory.
+# sccache sidesteps the target dir entirely, keying each rustc (and cc)
+# invocation on its own inputs, so a vendored rlib is a cache fetch even when
+# rust-cache has thrown the artifact away. It also matches how these crates are
+# already built on developer machines, which run sccache as `rustc-wrapper`.
+#
+# Correctness does not depend on the key being right: sccache hashes the full
+# compiler invocation, so a changed flag, feature set, or source file is a miss,
+# never a stale hit. That is what makes it safe on the coverage lane, where
+# `cargo llvm-cov` adds `-C instrument-coverage` and gets its own entries.
+
+runs:
+  using: composite
+  steps:
+    - uses: mozilla-actions/sccache-action@v0.0.9
+      # The action starts the server in this step, so its GHA backend must be
+      # selected here instead of via GITHUB_ENV for the following steps.
+      env:
+        SCCACHE_GHA_ENABLED: "true"
+
+    - name: Route rustc through sccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        # sccache cannot cache incremental compilation and silently degrades to
+        # a pass-through when it is on. rust-cache already exports this, but
+        # relying on that couples this action to another action's internals.
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"

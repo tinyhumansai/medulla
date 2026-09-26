@@ -1,6 +1,6 @@
 # Configuration
 
-Medulla runs with no configuration at all: it finds the coding CLIs on your `PATH` and opens sessions in the directory you launched from. A config file is for remote hosts, custom model presets, hooks, and how the rail looks. The complete, commented shape of every section is in [`config.example.toml`](https://github.com/tinyhumansai/medulla-src/blob/main/config.example.toml) in the source repository; this page is the guided version.
+Medulla runs with no configuration at all: it finds the coding CLIs on your `PATH` and opens sessions in the directory you launched from. A config file is for remote hosts, custom model presets, hooks, and how the rail looks. The complete, commented shape of every section is in [`config.example.toml`](../../config.example.toml); this page is the guided version.
 
 ## Medulla home
 

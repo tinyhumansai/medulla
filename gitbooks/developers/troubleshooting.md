@@ -249,7 +249,7 @@ tmux is the layer that usually needs the change.
 
 | Path | Contents |
 | --- | --- |
-| [`src/sdk/src/clipboard/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/clipboard/) | The routes themselves. `tmux.rs` holds the passthrough wrapper, the `load-buffer` hop, and the OSC 52 parameter parsing. |
+| [`src/sdk/src/clipboard/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/clipboard/) | The routes themselves. `tmux.rs` holds the passthrough wrapper, the `load-buffer` hop, and the OSC 52 parameter parsing. |
 | `src/tui/src/worker/pty/manager/clipboard.rs` | Forwarding a harness's own copy out of its pane. |
 | `src/tui/src/ui/app/render/selection.rs` | The drag-to-select path. |
 

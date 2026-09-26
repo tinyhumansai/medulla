@@ -1,0 +1,230 @@
+//! Grants: the capability a spawned harness presents to reach the fleet.
+//!
+//! This is what makes the control plane *exclusive* rather than merely
+//! filesystem-private. Medulla mints a token immediately before spawning a
+//! harness and hands it to that one child in its environment. Everything the
+//! holder may do — how deep in a dispatch tree it sits, which tool families it
+//! may call, how many tasks it may hold at once — is recorded here and looked up
+//! by token.
+//!
+//! The consequence worth being explicit about: **the grant is the authority, and
+//! nothing the caller says about itself is.** A model that rewrites its own
+//! environment, or sends a request claiming a shallower depth, changes nothing —
+//! the server never reads those. It can only present a token that means less.
+//! That is the difference between a depth cap that holds and one that a single
+//! confused turn can talk its way past.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use uuid::Uuid;
+
+use super::types::ToolFamilies;
+
+/// What one spawned harness is permitted to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grant {
+    /// The task or session this was minted for, used to revoke it later.
+    pub session: String,
+    /// How deep in the dispatch tree its holder sits, counted from the
+    /// operator's own turn.
+    pub depth: u8,
+    /// The depth at which dispatching is withheld.
+    ///
+    /// Carried on the grant rather than read from config at check time so a
+    /// mid-session config edit cannot retroactively widen a running harness.
+    pub max_depth: u8,
+    /// Which tool families the holder may call.
+    pub families: ToolFamilies,
+    /// The most concurrent dispatches the holder may have in flight.
+    pub max_in_flight: usize,
+    /// The workflow-tool restriction delegated work must inherit.
+    ///
+    /// `None` is an ordinary authoring turn. Proposal turns carry their scoped
+    /// wire value so a reviewer cannot escape its read-only boundary by asking
+    /// another fleet worker to continue the review.
+    pub tool_mode: Option<String>,
+    /// Whether this grant is restricted to the one op that carries no
+    /// authority at all: `hook.report`.
+    ///
+    /// Set for the credential handed to a launched harness's *native* hook
+    /// commands (see `medulla::mcp::attach` and the `medulla hook` shim in the
+    /// `medulla-tui` crate), which — unlike the fleet grant the MCP subprocess
+    /// gets — is written straight into the harness's own environment and so is
+    /// inherited by every subprocess the harness starts, including a shell
+    /// command the model runs. That is exactly the leak the fleet grant's
+    /// module docs describe and refuse; it is safe only because a grant with
+    /// this flag set can attribute a fabricated lifecycle line to its own
+    /// session and nothing more — see the control socket's request dispatch,
+    /// which refuses every other op for it.
+    pub hook_only: bool,
+    /// Whether this grant has been narrowed to `run.report` alone because the
+    /// harness it was minted for has exited.
+    ///
+    /// A default `workflow_run` is asynchronous, and the MCP subprocess that
+    /// executes it deliberately outlives its parent harness. Revoking the
+    /// grant outright when the harness exits would silence the run's own
+    /// progress reports for the rest of its life, so
+    /// [`GrantRegistry::restrict_to_reporting`] sets this instead: the holder
+    /// keeps saying how the run it already started is going and loses
+    /// everything else, including dispatch. Cleared only by giving the grant
+    /// back, which happens when the last run settles.
+    pub report_only: bool,
+}
+
+impl Grant {
+    /// A grant for a harness spawned by `session` at `depth`.
+    pub fn new(session: impl Into<String>, depth: u8, max_depth: u8) -> Self {
+        Grant {
+            session: session.into(),
+            depth,
+            max_depth,
+            families: ToolFamilies::default(),
+            max_in_flight: 4,
+            tool_mode: None,
+            hook_only: false,
+            report_only: false,
+        }
+    }
+
+    /// A grant good for nothing but filing hook reports under `session`.
+    ///
+    /// Depth, family, and in-flight limits are meaningless for it — dispatch
+    /// and every other op are refused by [`Self::hook_only`] before any of
+    /// those fields are consulted — so they are left at harmless defaults
+    /// rather than given values that imply a capability this grant does not
+    /// carry.
+    pub fn hook_only(session: impl Into<String>) -> Self {
+        Grant {
+            hook_only: true,
+            ..Grant::new(session, 0, 0)
+        }
+    }
+
+    /// Set which tool families this grant covers.
+    pub fn with_families(mut self, families: ToolFamilies) -> Self {
+        self.families = families;
+        self
+    }
+
+    /// Set the concurrent-dispatch ceiling.
+    pub fn with_max_in_flight(mut self, max_in_flight: usize) -> Self {
+        self.max_in_flight = max_in_flight.max(1);
+        self
+    }
+
+    /// Restrict every task delegated with this grant to `tool_mode`.
+    pub fn with_tool_mode(mut self, tool_mode: Option<&str>) -> Self {
+        self.tool_mode = tool_mode.map(str::to_string);
+        self
+    }
+
+    /// Whether the holder may dispatch at all.
+    ///
+    /// False either because it was never granted the fleet family or because it
+    /// has reached the depth ceiling. Both cases withhold `fleet_dispatch` from
+    /// the advertised tool list rather than refusing it on call.
+    pub fn may_dispatch(&self) -> bool {
+        self.families.fleet && self.depth < self.max_depth
+    }
+
+    /// The depth a harness *this* grant's holder dispatches would sit at.
+    pub fn child_depth(&self) -> u8 {
+        self.depth.saturating_add(1)
+    }
+}
+
+/// The live set of grants this instance has minted.
+///
+/// Cheap to clone; every clone shares one table.
+#[derive(Clone, Default)]
+pub struct GrantRegistry {
+    inner: Arc<Mutex<HashMap<String, Grant>>>,
+}
+
+impl GrantRegistry {
+    /// An empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mint a token for `grant` and return it.
+    ///
+    /// 32 random bytes rendered as hex, from the same CSPRNG that backs v4
+    /// UUIDs. The token is the only copy: it is handed to exactly one child
+    /// process and never written to disk or logged.
+    pub fn mint(&self, grant: Grant) -> String {
+        let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        if let Ok(mut grants) = self.inner.lock() {
+            grants.insert(token.clone(), grant);
+        }
+        token
+    }
+
+    /// What `token` is permitted to do, or `None` if it is not a live grant.
+    ///
+    /// The lookup is not constant-time. That is a deliberate non-goal: reaching
+    /// this code at all requires connecting to a `0600` socket inside a `0700`
+    /// directory, so an attacker positioned to measure it can already read the
+    /// token from the environment of the process they would be attacking.
+    pub fn redeem(&self, token: &str) -> Option<Grant> {
+        self.inner.lock().ok()?.get(token).cloned()
+    }
+
+    /// Drop every grant minted for `session`.
+    ///
+    /// Called when an ACP session ends. Tasks the holder already dispatched keep
+    /// running — killing a working agent because the turn that asked for it
+    /// finished would discard real work — but nothing can poll or extend them
+    /// through this grant any more; they settle into the operator's task view.
+    pub fn revoke(&self, session: &str) {
+        if let Ok(mut grants) = self.inner.lock() {
+            grants.retain(|_, grant| grant.session != session);
+        }
+    }
+
+    /// Narrow every grant minted for `session` to `run.report` alone.
+    ///
+    /// The half-measure between keeping a session's capability and revoking it,
+    /// for the one case that needs one: the harness has exited, but the MCP
+    /// subprocess it spawned is still executing a detached workflow run and is
+    /// the only thing that can say how that run ends. A full
+    /// [`revoke`](Self::revoke) here would leave the run executing with its
+    /// rail row frozen on whatever it last managed to report.
+    ///
+    /// What survives is deliberately the least it can be. Dispatch, task
+    /// lifecycle, worker discovery, and child grants are all refused for a
+    /// [`report_only`](Grant::report_only) grant by the control socket's
+    /// request dispatch, the same way they are for a
+    /// [`hook_only`](Grant::hook_only) one — so an MCP subprocess that outlives
+    /// its parent cannot start anything new, only finish narrating what it
+    /// already had. The grant itself goes when the run settles; see
+    /// [`HarnessRunRegistry::retire`](super::runs::HarnessRunRegistry::retire).
+    /// A session's *hook-only* grant is dropped outright rather than narrowed.
+    /// It belongs to the harness's own lifecycle hooks, which died with the
+    /// harness — the run is reported by the MCP subprocess, which holds the
+    /// fleet grant — and narrowing it would leave a token refused by both
+    /// checks and redeemable for nothing.
+    pub fn restrict_to_reporting(&self, session: &str) {
+        if let Ok(mut grants) = self.inner.lock() {
+            grants.retain(|_, grant| grant.session != session || !grant.hook_only);
+            for grant in grants.values_mut() {
+                if grant.session == session {
+                    grant.report_only = true;
+                    grant.families = ToolFamilies::none();
+                    grant.max_in_flight = 1;
+                }
+            }
+        }
+    }
+
+    /// How many grants are live. For diagnostics and tests.
+    pub fn len(&self) -> usize {
+        self.inner.lock().map(|g| g.len()).unwrap_or(0)
+    }
+
+    /// Whether no grants are live.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}

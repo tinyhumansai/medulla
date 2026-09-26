@@ -1,0 +1,556 @@
+//! `agent` nodes, run on a real harness.
+//!
+//! This is where Medulla's integration differs from every other host embedding
+//! this engine. Elsewhere an `agent` node is a model call, or an in-process
+//! agent loop. Here it is a *task dispatched to a coding harness* — Claude Code,
+//! Codex, or OpenCode, local or on another machine — over the same bridge the
+//! orchestrator already uses. A workflow is therefore a plan whose steps are
+//! real harness sessions, not a chain of completions.
+//!
+//! Two routes, chosen by [`route_for_agent_ref`]:
+//!
+//! - **Template** — `agent_ref` names an agent template, whose id becomes the
+//!   worker address the task is sent to.
+//! - **Default** — no `agent_ref`, so the node runs on the host's default
+//!   worker.
+//!
+//! *Which* harness and model, as distinct from which machine, is a separate
+//! choice: `config.harness` and `config.model` on the node, falling back to the
+//! workflow's `defaults` and then to the host's config. See
+//! [`crate::flow_engine::harness_choice`] for how those layers combine.
+//!
+//! `agent_ref` — and, for the same reason, `harness` — is read from the node's
+//! *config*, never from model output. That is the engine's own guard and it
+//! matters more here than upstream: a prompt injection that could choose the
+//! `agent_ref` would be choosing which machine runs the next instruction, and
+//! one that could choose the harness would be choosing which binary and which
+//! credentials run it.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use tinyflows::caps::{AgentRunner, LlmProvider};
+use tinyflows::error::{EngineError, Result};
+
+use crate::flow_engine::agent_evidence::AgentEvidence;
+use crate::flow_engine::harness_choice::{HarnessChoice, HarnessPreference};
+use crate::flow_engine::observability::NodeProgressSink;
+use crate::flow_engine::settings::CapabilitySettings;
+use crate::harness_transcript::TranscriptEntry;
+use crate::hub::{RunError, TaskRequest};
+
+use super::dispatch::HarnessDispatch;
+
+/// Where an `agent` node's work should go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentRoute {
+    /// A named template, dispatched to the worker of that name.
+    Template(String),
+    /// The host's configured default worker.
+    Default,
+}
+
+/// Choose a route for an `agent_ref`.
+///
+/// An empty or absent reference is the default route rather than an error: a
+/// graph that just says "run this prompt" is the common case and should not
+/// require an operator to name a worker in every node.
+pub fn route_for_agent_ref(agent_ref: Option<&str>) -> AgentRoute {
+    match agent_ref.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(reference) => AgentRoute::Template(reference.to_string()),
+        None => AgentRoute::Default,
+    }
+}
+
+/// The instruction text an `agent` node carries.
+///
+/// `prompt` is the engine's own field name for it; `instruction` is accepted
+/// because that is what the rest of Medulla calls the same thing, and an author
+/// moving between the two surfaces should not be caught out.
+pub fn instruction_of(request: &Value) -> Result<String> {
+    for key in ["prompt", "instruction", "input"] {
+        if let Some(text) = request.get(key).and_then(Value::as_str) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return Ok(text.to_string());
+            }
+        }
+    }
+    Err(EngineError::Capability(
+        "agent node: no prompt — set `prompt` in the node config".to_string(),
+    ))
+}
+
+/// The graph node a resolved request came from, when the run tagged it.
+///
+/// The tag is Medulla's own, added to an in-memory clone of the graph rather
+/// than to the authored document — see
+/// [`crate::flow_engine::agent_evidence::instrumented`].
+fn node_id_of(request: &Value) -> Option<String> {
+    request
+        .get(crate::flow_engine::agent_evidence::NODE_ID_FIELD)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// Shape a harness reply into the value the `agent` node expects.
+///
+/// The engine wraps this in its `{ json, text, raw }` envelope and reads `text`
+/// out of a `text` field, so putting the reply there is what makes
+/// `=item.text` work downstream. A reply that happens to be JSON is *also*
+/// surfaced structurally, so `=item.json.…` works without a parser node.
+pub fn reply_to_value(reply: &str, worker: &str) -> Value {
+    let structured: Option<Value> = serde_json::from_str(reply.trim()).ok();
+    json!({
+        "text": reply,
+        "json": structured,
+        "worker": worker,
+    })
+}
+
+/// The harness name a dispatch is recorded under in the in-flight registry.
+///
+/// The *flavor*, not the bare provider: `codex` and `codex-server` are the same
+/// vendor over different transports, and reporting both as `codex` would point
+/// a reader of `workflow_run_detail` at the wrong process when they went
+/// looking for the session. A custom preset names itself and wins outright.
+///
+/// Empty when the node left the choice to the worker's own configured harness,
+/// which is the honest answer: this side does not know what the worker picked.
+fn dispatch_harness(request: &TaskRequest) -> String {
+    request
+        .custom_harness
+        .clone()
+        .or_else(|| {
+            request.provider.map(|provider| {
+                provider
+                    .flavor_name(request.transport.unwrap_or_default())
+                    .to_string()
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// Map a dispatch failure onto a capability error.
+///
+/// An abort keeps its identity in the message because it is the one failure a
+/// retry must not paper over: the orchestrator cancelled the work deliberately.
+fn dispatch_error(node_kind: &str, err: RunError) -> EngineError {
+    EngineError::Capability(format!("{node_kind}: {err}"))
+}
+
+/// An [`AgentRunner`] that dispatches each node to a harness.
+pub struct HarnessAgentRunner {
+    dispatch: Arc<dyn HarnessDispatch>,
+    settings: Arc<CapabilitySettings>,
+    /// The run this belongs to, used to build ids a `task_abort` can match.
+    run_id: String,
+    /// Distinguishes one dispatch from the next within this run.
+    ///
+    /// Two parallel nodes routed to the same worker — the common case, since
+    /// both may omit `agent_ref` — would otherwise share a wire id, and a
+    /// worker dedupes on `sender + taskId`. One of the two would be rejected as
+    /// a duplicate of the other.
+    ///
+    /// Shared across every runner built for the run (see
+    /// [`with_sequence`](Self::with_sequence)), for the same reason the limiter
+    /// is: the run builds an agent runner *and* an LLM provider wrapping a
+    /// second one, and two counters both starting at zero would mint the same
+    /// id for the same route.
+    sequence: Arc<AtomicU64>,
+    /// Caps how many harness tasks this run has in flight at once.
+    ///
+    /// A per-item node fans out into one dispatch per item, and on this host a
+    /// dispatch is a whole harness session. The engine bounds one node's width;
+    /// this bounds the run, since several nodes can fan out at the same time.
+    /// Shared across every runner built for the run (see
+    /// [`with_limiter`](Self::with_limiter)), so the ceiling is a property of
+    /// the run rather than of one node.
+    slots: Arc<Semaphore>,
+    /// Resolved prompts captured for the durable run inspector.
+    evidence: Option<Arc<AgentEvidence>>,
+    /// Where this node's harness progress is streamed, when anyone watches.
+    progress: Option<NodeProgressSink>,
+}
+
+impl HarnessAgentRunner {
+    /// A runner dispatching through `dispatch` under `settings`, tagging every
+    /// task with `run_id`.
+    pub fn new(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+    ) -> Self {
+        let slots = Arc::new(Semaphore::new(settings.max_parallel_agents.max(1)));
+        Self {
+            dispatch,
+            settings,
+            run_id: run_id.into(),
+            sequence: Arc::new(AtomicU64::new(0)),
+            slots,
+            evidence: None,
+            progress: None,
+        }
+    }
+
+    /// Build a runner that records resolved prompts for run inspection.
+    pub(crate) fn recording(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+        evidence: Arc<AgentEvidence>,
+    ) -> Self {
+        let settings_max_parallel = settings.max_parallel_agents.max(1);
+        Self {
+            dispatch,
+            settings,
+            run_id: run_id.into(),
+            sequence: Arc::new(AtomicU64::new(0)),
+            slots: Arc::new(Semaphore::new(settings_max_parallel)),
+            evidence: Some(evidence),
+            progress: None,
+        }
+    }
+
+    /// Share an existing limiter instead of this runner's own.
+    ///
+    /// The run builds an agent runner *and* an LLM provider (which wraps a
+    /// second runner), and both dispatch to the same worker pool. Left to
+    /// themselves they would hold independent semaphores and the run's real
+    /// ceiling would be double what the operator configured, so the caller
+    /// builds one limiter and hands it to both.
+    #[must_use]
+    pub(crate) fn with_limiter(mut self, slots: Arc<Semaphore>) -> Self {
+        self.slots = slots;
+        self
+    }
+
+    /// Share an existing task-id sequence instead of this runner's own.
+    ///
+    /// The run builds an agent runner *and* an LLM provider (which wraps a
+    /// second runner), and both mint task ids as `wf:{run}:{route}#{sequence}`.
+    /// Left to themselves each counts from zero, so the first dispatch of each
+    /// along the same route claims the *same* id — which a worker would reject
+    /// as a duplicate, and which collapses two live sessions into one wherever
+    /// the id is used to tell them apart (the run inspector's dispatch
+    /// registry, `fleet_abort`, a worker-side log search).
+    #[must_use]
+    pub(crate) fn with_sequence(mut self, sequence: Arc<AtomicU64>) -> Self {
+        self.sequence = sequence;
+        self
+    }
+
+    /// Stream every dispatched harness's progress into `sink`.
+    ///
+    /// Takes an `Option` so the caller can pass whatever the run was given
+    /// without branching; `None` leaves the dispatch asking for no status
+    /// channel, which is what a headless run wants.
+    #[must_use]
+    pub(crate) fn streaming_to(mut self, sink: Option<NodeProgressSink>) -> Self {
+        self.progress = sink;
+        self
+    }
+
+    /// Capture a resolved prompt when this request came from a tagged agent node.
+    fn record_prompt(&self, request: &Value, instruction: &str) {
+        if let Some(evidence) = &self.evidence {
+            evidence.record(request, instruction);
+        }
+    }
+
+    /// Capture the harness's account of a finished dispatch, when the run is
+    /// recording evidence and the dispatch produced one.
+    ///
+    /// Only the workflow dispatch collects a transcript; every other
+    /// implementation returns an empty one and this is a no-op. That is the
+    /// intended shape — a dispatch that sends the task over a bridge to another
+    /// machine never sees the harness's stream and has nothing to offer here.
+    /// Keyed by `node_id` rather than by the request the prompt pass uses: by
+    /// the time a transcript exists the request has been consumed into a task
+    /// frame, and the node id is the part [`run_on_harness`](Self::run_on_harness)
+    /// still holds.
+    fn record_transcript(&self, node_id: Option<&str>, transcript: Vec<TranscriptEntry>) {
+        let (Some(evidence), Some(node_id)) = (&self.evidence, node_id) else {
+            return;
+        };
+        evidence.record_transcript(node_id, transcript);
+    }
+
+    /// Build the task frame for one node.
+    ///
+    /// The task id carries the run and the route so a worker-side log, and an
+    /// operator reading it, can tell which workflow step a session belongs to.
+    ///
+    /// `choice` is the harness and model this node resolved to; see
+    /// [`crate::flow_engine::harness_choice`] for how the layers combine.
+    fn request(
+        &self,
+        route: &AgentRoute,
+        instruction: String,
+        choice: HarnessChoice,
+    ) -> TaskRequest {
+        let worker_address = match route {
+            AgentRoute::Template(name) => name.clone(),
+            AgentRoute::Default => self.settings.default_worker_address.clone(),
+        };
+        let suffix = match route {
+            AgentRoute::Template(name) => name.clone(),
+            AgentRoute::Default => "default".to_string(),
+        };
+        // The sequence is what keeps two concurrent nodes on one worker
+        // distinguishable; the route name is there so a worker-side log says
+        // which step it is looking at.
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let task_id = format!("wf:{}:{suffix}#{sequence}", self.run_id);
+        TaskRequest {
+            // Distinct ids on purpose: the worker dedupes on the wire id, while
+            // the orchestrator aborts by the run id — so aborting the run
+            // cancels whichever node is in flight.
+            task_id,
+            abort_id: self.run_id.clone(),
+            cycle_id: Some(self.run_id.clone()),
+            instruction,
+            worker_address,
+            provider: choice.provider,
+            transport: choice.transport,
+            custom_harness: choice.custom_harness,
+            model: choice.model,
+            // No conversation, deliberately. Each node is its own unit of work,
+            // and letting two share a harness session would make a graph's
+            // behaviour depend on the order its branches happened to run in —
+            // the same reason a task frame routes `Bounded` by default.
+            conversation: None,
+            fleet_depth: self.settings.fleet_depth,
+            // A node dispatches an instruction, never another workflow: nesting
+            // is expressed with a `sub_workflow` node, which the engine expands
+            // itself and applies its own depth limit to.
+            tool_mode: None,
+            workflow: None,
+            workflow_fingerprint: None,
+            workflow_inputs: Default::default(),
+        }
+    }
+
+    /// Resolve which harness and model this node's config asks for.
+    ///
+    /// The node's own preference sits over the run's standing one. A config that
+    /// names a harness this host cannot make sense of fails the node rather than
+    /// falling back to the default: an author who wrote `harness: cluade` meant
+    /// to change where the work runs, and silently running it somewhere else is
+    /// the one outcome that helps nobody.
+    ///
+    /// # Errors
+    ///
+    /// Returns a capability error naming the node kind and the correction.
+    fn choice_for(&self, node_kind: &str, config: &Value) -> Result<HarnessChoice> {
+        let node = HarnessPreference::from_config(config)
+            .map_err(|err| EngineError::Capability(format!("{node_kind}: {err}")))?;
+        Ok(HarnessChoice::resolve(&[
+            node,
+            self.settings.harness_preference(),
+        ]))
+    }
+
+    /// The status channel this dispatch should report on, if anyone is watching.
+    ///
+    /// Frames are forwarded on a spawned task rather than awaited inline: the
+    /// dispatch owns the sending half for the length of the harness session,
+    /// and draining it in step with the sink is what keeps a slow reader from
+    /// stalling the harness rather than itself.
+    fn stream_for(
+        &self,
+        node_id: Option<String>,
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<String>> {
+        let sink = self.progress.clone()?;
+        let node_id = node_id?;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Some(frame) = rx.recv().await {
+                sink(&node_id, &frame);
+            }
+        });
+        Some(tx)
+    }
+
+    /// Dispatch `instruction` along `route` and shape the reply.
+    ///
+    /// `node_id` is the graph node this dispatch belongs to, when the run
+    /// tagged one (see [`crate::flow_engine::agent_evidence`]). It is what a
+    /// streamed progress frame is attributed to — an untagged dispatch (a
+    /// repair pass, a bare completion) simply streams nothing, because there is
+    /// no step on the operator's graph for it to appear under.
+    async fn run_on_harness(
+        &self,
+        route: AgentRoute,
+        instruction: String,
+        choice: HarnessChoice,
+        node_id: Option<String>,
+    ) -> Result<Value> {
+        let request = self.request(&route, instruction, choice);
+        if request.worker_address.trim().is_empty() {
+            return Err(EngineError::Capability(
+                "agent node: no worker to dispatch to — set an `agent_ref` on the node or a \
+                 default worker in the workflows config"
+                    .to_string(),
+            ));
+        }
+        // Wait for a slot before dispatching. A fanned-out node can reach here
+        // once per input item simultaneously, and each dispatch occupies a
+        // harness session for the length of a coding task. Waiting throttles an
+        // over-wide fan-out; it never fails it.
+        let _permit = self.slots.acquire().await.map_err(|_| {
+            EngineError::Capability("agent node: run concurrency limiter closed".to_string())
+        })?;
+        let worker = request.worker_address.clone();
+        // Held across the await and dropped with it, so a run inspector asking
+        // "what is this run doing right now" gets an answer even when the
+        // dispatch went to the run's own embedded host — which no outer fleet
+        // roster can see. See [`crate::workflows::run::dispatches`].
+        let _recorded = crate::workflows::run::dispatches::record(
+            &self.run_id,
+            crate::workflows::run::InFlightDispatch {
+                task_id: request.task_id.clone(),
+                worker: worker.clone(),
+                // The dispatch's own answer first: a worker that does not offer
+                // the provider the node named substitutes its own, and an
+                // inspector told the *requested* harness would name one that is
+                // not executing. Falls back to the request for a dispatch that
+                // substitutes nothing.
+                harness: self
+                    .dispatch
+                    .effective_harness(&request)
+                    .unwrap_or_else(|| dispatch_harness(&request)),
+                workspace: Some(self.settings.workspace.clone())
+                    .filter(|workspace| !workspace.trim().is_empty()),
+            },
+        );
+        let status = self.stream_for(node_id.clone());
+        let outcome = match self.dispatch.dispatch_with_status(request, status).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                // The engine records a failed dispatch as an Error step, so it
+                // occupies a transcript-queue slot like any other activation.
+                // The workflow dispatch folds its collector's account into the
+                // failure (`RunError::WorkerWithTranscript`), and a failed step
+                // is exactly the one whose tool calls and error line the run
+                // view wants; every other dispatch has no transcript to offer,
+                // so an empty placeholder keeps the Nth slot aligned either way.
+                let transcript = match &err {
+                    RunError::WorkerWithTranscript { transcript, .. } => transcript.clone(),
+                    _ => Vec::new(),
+                };
+                self.record_transcript(node_id.as_deref(), transcript);
+                return Err(dispatch_error("agent node", err));
+            }
+        };
+        // After the dispatch, never before: the transcript is what the harness
+        // said, and it does not exist until the harness has stopped saying it.
+        // An empty transcript still queues a placeholder so the Nth activation
+        // keeps its slot — see [`record_transcript`](Self::record_transcript).
+        self.record_transcript(node_id.as_deref(), outcome.transcript);
+        Ok(reply_to_value(&outcome.reply, &worker))
+    }
+}
+
+#[async_trait]
+impl AgentRunner for HarnessAgentRunner {
+    async fn run_agent(
+        &self,
+        agent_ref: &str,
+        request: Value,
+        _conn: Option<&str>,
+    ) -> Result<Value> {
+        let instruction = instruction_of(&request)?;
+        self.record_prompt(&request, &instruction);
+        let choice = self.choice_for("agent node", &request)?;
+        self.run_on_harness(
+            route_for_agent_ref(Some(agent_ref)),
+            instruction,
+            choice,
+            node_id_of(&request),
+        )
+        .await
+    }
+}
+
+/// An [`LlmProvider`] that also dispatches to a harness.
+///
+/// The engine falls back to this when a node names no `agent_ref`, and uses it
+/// for `output_parser` repair passes. Both are "run this text somewhere and give
+/// me the answer", which on this host means the default worker — Medulla has no
+/// bare model client of its own, and inventing one would give a workflow a
+/// second, ungoverned way to reach a provider.
+pub struct HarnessLlm {
+    inner: HarnessAgentRunner,
+}
+
+impl HarnessLlm {
+    /// A provider over the same dispatch the agent runner uses.
+    pub fn new(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            inner: HarnessAgentRunner::new(dispatch, settings, run_id),
+        }
+    }
+
+    /// A provider that records resolved agent prompts for run inspection.
+    pub(crate) fn recording(
+        dispatch: Arc<dyn HarnessDispatch>,
+        settings: Arc<CapabilitySettings>,
+        run_id: impl Into<String>,
+        evidence: Arc<AgentEvidence>,
+    ) -> Self {
+        Self {
+            inner: HarnessAgentRunner::recording(dispatch, settings, run_id, evidence),
+        }
+    }
+
+    /// Share the run's dispatch limiter — see
+    /// [`HarnessAgentRunner::with_limiter`].
+    #[must_use]
+    pub(crate) fn with_limiter(mut self, slots: Arc<Semaphore>) -> Self {
+        self.inner = self.inner.with_limiter(slots);
+        self
+    }
+
+    /// Share a task-id sequence — see [`HarnessAgentRunner::with_sequence`].
+    #[must_use]
+    pub(crate) fn with_sequence(mut self, sequence: Arc<AtomicU64>) -> Self {
+        self.inner = self.inner.with_sequence(sequence);
+        self
+    }
+
+    /// Stream harness progress — see [`HarnessAgentRunner::streaming_to`].
+    #[must_use]
+    pub(crate) fn streaming_to(mut self, sink: Option<NodeProgressSink>) -> Self {
+        self.inner = self.inner.streaming_to(sink);
+        self
+    }
+}
+
+#[async_trait]
+impl LlmProvider for HarnessLlm {
+    async fn complete(&self, request: Value, _conn: Option<&str>) -> Result<Value> {
+        let instruction = instruction_of(&request)?;
+        self.inner.record_prompt(&request, &instruction);
+        let choice = self.inner.choice_for("agent node", &request)?;
+        self.inner
+            .run_on_harness(
+                AgentRoute::Default,
+                instruction,
+                choice,
+                node_id_of(&request),
+            )
+            .await
+    }
+}
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;

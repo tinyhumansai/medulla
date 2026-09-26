@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Tag current main version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read version and create tag
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Release tag ${tag} already exists" >&2
+            exit 1
+          fi
+          git tag -a "${tag}" -m "${tag}"
+          git push origin "refs/tags/${tag}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          submodules: false
+
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: ./.github/actions/native-deps
+        if: runner.os == 'Linux'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: release-${{ matrix.target }}-${{ hashFiles('.gitmodules', 'rust-toolchain.toml') }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          pkg="medulla-${{ needs.prepare.outputs.tag }}-${{ matrix.target }}"
+          mkdir "$pkg"
+          cp "target/${{ matrix.target }}/release/medulla" "$pkg/"
+          cp README.md config.example.toml "$pkg/"
+          tar -czf "${pkg}.tar.gz" "$pkg"
+          shasum -a 256 "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pkg = "medulla-${{ needs.prepare.outputs.tag }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $pkg | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/medulla.exe" "$pkg/"
+          Copy-Item README.md,config.example.toml "$pkg/"
+          Compress-Archive -Path $pkg -DestinationPath "$pkg.zip"
+          $hash = (Get-FileHash "$pkg.zip" -Algorithm SHA256).Hash.ToLower()
+          [System.IO.File]::WriteAllText("$pkg.zip.sha256", "$hash  $pkg.zip`n")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medulla-${{ matrix.target }}
+          path: |
+            medulla-*.tar.gz
+            medulla-*.tar.gz.sha256
+            medulla-*.zip
+            medulla-*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate latest.json
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime, glob, json, os
+
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          repo = os.environ["REPOSITORY"]
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+          prefix = f"medulla-{tag}-"
+          platforms = {}
+          for path in sorted(glob.glob("dist/*.sha256")):
+              asset = os.path.basename(path)[:-len(".sha256")]
+              digest = open(path, encoding="utf-8").read().split()[0]
+              stem = asset
+              for ext in (".tar.gz", ".zip"):
+                  if stem.endswith(ext):
+                      stem = stem[:-len(ext)]
+                      break
+              triple = stem[len(prefix):]
+              platforms[triple] = {"url": f"{base}/{asset}", "sha256": digest}
+          manifest = {
+              "version": version,
+              "tag": tag,
+              "pubDate": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "notes": f"https://github.com/{repo}/releases/tag/{tag}",
+              "platforms": platforms,
+          }
+          if len(platforms) != 4:
+              raise SystemExit(f"Expected 4 release platforms; found {len(platforms)}")
+          with open("dist/latest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Medulla ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/latest.json

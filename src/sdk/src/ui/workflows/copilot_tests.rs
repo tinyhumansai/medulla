@@ -1,0 +1,286 @@
+//! Tests for the copilot transcript model.
+
+use super::*;
+
+#[test]
+fn asking_records_the_instruction_and_marks_the_thread_busy() {
+    let mut state = CopilotState::new("sweep");
+
+    state.ask("add a slack step");
+
+    assert_eq!(state.turns[0].role, TurnRole::User);
+    assert_eq!(state.turns[0].text, "add a slack step");
+    assert!(state.busy);
+}
+
+#[test]
+fn one_of_two_overlapping_turns_finishing_keeps_the_thread_busy() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("operator edit");
+    state.ask("automatic failure review");
+
+    state.reply("edit done");
+
+    assert!(state.busy);
+    assert_eq!(state.in_flight, 1);
+    state.reply("review done");
+    assert!(!state.busy);
+    assert_eq!(state.in_flight, 0);
+}
+
+#[test]
+fn a_reply_ends_the_turn() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("go");
+
+    state.reply("added it");
+
+    assert!(!state.busy);
+    assert_eq!(state.turns.last().unwrap().role, TurnRole::Agent);
+}
+
+#[test]
+fn an_empty_reply_ends_the_turn_without_an_empty_line() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("go");
+
+    state.reply("   ");
+
+    assert!(!state.busy);
+    assert_eq!(
+        state.turns.len(),
+        1,
+        "nothing was said, so nothing is shown"
+    );
+}
+
+#[test]
+fn a_failure_ends_the_turn_and_says_why() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("go");
+
+    state.failed("no harness installed");
+
+    assert!(!state.busy);
+    assert_eq!(state.turns.last().unwrap().role, TurnRole::Error);
+}
+
+#[test]
+fn a_repeated_status_line_is_not_shown_twice_in_a_row() {
+    let mut state = CopilotState::new("sweep");
+
+    state.status("thinking");
+    state.status("thinking");
+
+    assert_eq!(state.turns.len(), 1);
+}
+
+#[test]
+fn the_same_status_after_something_else_is_shown_again() {
+    let mut state = CopilotState::new("sweep");
+
+    state.status("thinking");
+    state.reply("done");
+    state.status("thinking");
+
+    assert_eq!(state.turns.len(), 3);
+}
+
+#[test]
+fn status_chatter_is_trimmed_but_the_conversation_is_not() {
+    let mut state = CopilotState::new("sweep");
+    state.ask("go");
+    for index in 0..200 {
+        state.status(format!("step {index}"));
+    }
+    state.reply("done");
+
+    let statuses = state
+        .turns
+        .iter()
+        .filter(|turn| turn.role == TurnRole::Status)
+        .count();
+    assert!(statuses <= 40, "{statuses} status lines survived");
+    assert_eq!(state.turns.first().unwrap().role, TurnRole::User);
+    assert_eq!(state.turns.last().unwrap().role, TurnRole::Agent);
+    // The trim drops the *oldest* chatter, so the newest is what is on screen.
+    assert!(state.turns.iter().any(|turn| turn.text == "step 199"));
+}
+
+#[test]
+fn changes_are_their_own_kind_of_line() {
+    let mut state = CopilotState::new("sweep");
+
+    state.changed(["+ node notify (tool_call)".to_string()]);
+
+    assert_eq!(state.turns[0].role, TurnRole::Change);
+}
+
+#[test]
+fn a_progress_frame_naming_a_tool_becomes_a_tool_line() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running workflow_apply_ops: add node notify");
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    // The prefix is the producer's framing, not part of the call.
+    assert_eq!(state.turns[0].text, "workflow_apply_ops: add node notify");
+}
+
+#[test]
+fn ordinary_progress_frames_stay_status_lines() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("thinking");
+
+    assert_eq!(state.turns[0].role, TurnRole::Status);
+    assert_eq!(state.turns[0].text, "thinking");
+}
+
+#[test]
+fn streamed_thinking_snapshots_replace_one_compact_line() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("thinking · Checking the workflow.");
+    state.progress("thinking · Checking the workflow. It has four nodes.");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::Status);
+    assert_eq!(
+        state.turns[0].text,
+        "thinking · Checking the workflow. It has four nodes."
+    );
+}
+
+#[test]
+fn first_thinking_snapshot_is_bounded() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress(&format!("thinking · {}", "x".repeat(2_000)));
+
+    assert_eq!(state.turns.len(), 1);
+    assert!(state.turns[0].text.chars().count() <= MAX_THINKING_CHARS);
+    assert!(state.turns[0].text.starts_with("thinking · …"));
+}
+
+#[test]
+fn a_late_tool_detail_updates_the_matching_call_in_place() {
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running Terminal\u{1f}shell-1");
+    state.progress("running Terminal · $ cargo test\u{1f}shell-1");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].text, "Terminal · $ cargo test");
+}
+
+#[test]
+fn a_tool_result_settles_the_latest_call_in_place() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool completed · 2.4 KiB output");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::ToolSuccess);
+    assert_eq!(
+        state.turns[0].text,
+        "Terminal · $ cargo test · 2.4 KiB output"
+    );
+}
+
+#[test]
+fn a_failed_tool_result_marks_the_call_and_keeps_the_exit_code() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool failed · exit 101");
+
+    assert_eq!(state.turns.len(), 1);
+    assert_eq!(state.turns[0].role, TurnRole::ToolFailure);
+    assert!(state.turns[0].text.ends_with("exit 101"));
+}
+
+#[test]
+fn an_ambiguous_result_does_not_settle_the_wrong_overlapping_tool() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Read · first.rs");
+    state.progress("running Terminal · $ cargo test");
+
+    state.progress("tool failed · exit 2");
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    assert_eq!(state.turns[1].role, TurnRole::Tool);
+    assert_eq!(state.turns[2].role, TurnRole::Status);
+    assert_eq!(state.turns[2].text, "tool failed · exit 2");
+}
+
+#[test]
+fn call_ids_settle_the_matching_overlapping_tool() {
+    let mut state = CopilotState::new("sweep");
+    state.progress("running Read · first.rs\u{1f}read-1");
+    state.progress("running Terminal · $ cargo test\u{1f}shell-1");
+
+    state.progress("tool failed · exit 2\u{1f}shell-1");
+    state.progress("tool completed\u{1f}read-1");
+
+    assert_eq!(state.turns[0].role, TurnRole::ToolSuccess);
+    assert_eq!(state.turns[1].role, TurnRole::ToolFailure);
+    assert!(state.turns[1].text.ends_with("exit 2"));
+}
+
+#[test]
+fn the_same_tool_called_twice_is_two_lines() {
+    // Unlike a repeated status frame, which is a poll. Two calls are two things
+    // that happened, and collapsing them under-reports the work.
+    let mut state = CopilotState::new("sweep");
+
+    state.progress("running workflow_get: sweep");
+    state.progress("running workflow_get: sweep");
+
+    assert_eq!(state.turns.len(), 2);
+    assert!(state.turns.iter().all(|turn| turn.role == TurnRole::Tool));
+}
+
+#[test]
+fn tool_lines_survive_the_status_chatter_being_trimmed() {
+    // Tool calls are the record of what the turn did. Status lines are what it
+    // said on the way, and only those age out.
+    let mut state = CopilotState::new("sweep");
+
+    state.tool("workflow_get: sweep");
+    for i in 0..200 {
+        state.progress(&format!("thinking {i}"));
+    }
+
+    assert_eq!(state.turns[0].role, TurnRole::Tool);
+    assert!(
+        state
+            .turns
+            .iter()
+            .filter(|t| t.role == TurnRole::Status)
+            .count()
+            <= 40
+    );
+}
+
+#[test]
+fn every_role_has_a_glyph_and_a_colour_and_only_progress_is_dim() {
+    for role in [
+        TurnRole::User,
+        TurnRole::Agent,
+        TurnRole::Status,
+        TurnRole::Tool,
+        TurnRole::ToolSuccess,
+        TurnRole::ToolFailure,
+        TurnRole::Change,
+        TurnRole::Error,
+    ] {
+        assert!(!role.glyph().is_empty(), "{role:?}");
+        assert!(!role.color().is_empty(), "{role:?}");
+        // Chatter is secondary; a concrete tool operation is part of the
+        // durable record of what the turn actually did.
+        let secondary = role == TurnRole::Status;
+        assert_eq!(role.dim(), secondary, "{role:?}");
+    }
+}

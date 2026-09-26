@@ -1,0 +1,17 @@
+[toolchain]
+# This workspace's own pin, not derived from any vendored crate's toolchain
+# file. `rustup` resolves `rust-toolchain.toml` from the invocation directory
+# upward, so a pin here is what actually governs a build from this workspace
+# root regardless of what any `vendor/` crate ships.
+#
+# 1.96 is a hard floor, not a preference: rusqlite 0.40 / libsqlite3-sys 0.38
+# use `cfg_select!` in their build scripts, stabilized in 1.96 and unstable
+# through 1.95 (rust-lang/rust#115585). This workspace depends on both
+# (session persistence), so an older toolchain fails to build it at all.
+#
+# Without this pin, CI's `dtolnay/rust-toolchain@stable` would compile the
+# workspace on whatever stable happens to be current, which risks drifting
+# below that floor.
+channel = "1.96.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,10 @@
+# The client's global config. Global rather than project-local on purpose: a
+# project-local layer has [[remoteHosts]] stripped, and this suite would fail
+# with an empty host list if it were written in the wrong place — which is
+# itself worth knowing works.
+[[remoteHosts]]
+id = "buildbox"
+name = "buildbox"
+host = "host"
+user = "root"
+workspace = "/work"

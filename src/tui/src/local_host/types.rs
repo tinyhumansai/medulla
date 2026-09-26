@@ -1,0 +1,74 @@
+//! Data types for the `local_host` module.
+
+#[allow(unused_imports)]
+use super::*;
+use medulla::hub::WorkerSpec;
+
+/// A host running inside the TUI process, with the bus it shares with the hub.
+///
+/// Held by the TUI for the life of the session. Dropping it stops the host — the
+/// bus survives in the hub's relay, but nothing answers on the host's address,
+/// which is the honest state of affairs.
+#[derive(Debug)]
+pub(crate) struct LocalHost {
+    /// The running host. Kept private so the UI reads it through this type's
+    /// accessors rather than reaching into the SDK handle.
+    pub(super) daemon: EmbeddedDaemon,
+    /// One roster entry per agent declared on this host, for the hub to
+    /// advertise. Never empty: a host with no declarations is seeded from what
+    /// its daemon detected (see [`specs_for`](super::specs_for)).
+    pub(super) specs: Vec<WorkerSpec>,
+}
+
+impl LocalHost {
+    /// The device-local address the orchestrator dispatches to.
+    pub(crate) fn address(&self) -> &str {
+        self.daemon.address()
+    }
+
+    /// Where tasks this host accepts will run.
+    pub(crate) fn workspace(&self) -> &str {
+        self.daemon.workspace()
+    }
+
+    /// The coding-agent CLIs this machine actually has.
+    pub(crate) fn providers(&self) -> &[medulla::protocol::HarnessProvider] {
+        self.daemon.providers()
+    }
+
+    /// A cloneable read-only view for the UI, carrying both this host's identity
+    /// and its live counters.
+    ///
+    /// Handed to each session rather than the host itself: a session is rebuilt
+    /// on every relogin, and the host outlives all of them.
+    pub(crate) fn observation(&self) -> medulla::daemon::embedded::HostObservation {
+        self.daemon.observation()
+    }
+
+    /// The roster entries the hub should advertise for this host — one per
+    /// declared agent.
+    pub(crate) fn specs(&self) -> &[WorkerSpec] {
+        &self.specs
+    }
+
+    /// A clone of the host's task state machine.
+    ///
+    /// The UI needs exactly one thing from it —
+    /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task),
+    /// which answers "which live harness session is running the task the cursor
+    /// is on". Without it the Agents tab could only guess by matching labels,
+    /// and two sessions for one peer would make that guess wrong. Cheap to
+    /// clone (an `Arc`), and a clone does *not* keep the host alive.
+    pub(crate) fn runtime(&self) -> medulla::daemon::DaemonRuntime {
+        self.daemon.runtime().clone()
+    }
+}
+
+/// What Medulla imposes on every harness a host launches: commit attribution and
+/// the operator's lifecycle hooks.
+///
+/// The SDK owns the type, because the TUI's hosts are not the only doors that
+/// need it — a workflow run, the authoring copilot, and an evolution review each
+/// start an embedded host of their own inside the SDK, and all four must be able
+/// to say the same thing in the same words.
+pub(crate) use medulla::harness_hooks::LaunchPolicy;

@@ -413,8 +413,10 @@ direct-path datagrams against the host's services until it is rotated.
 Direct pairing this way therefore assumes the invoking shell and the moment
 of invocation are trustworthy, even once the daemon itself is running clean;
 rotating the key (section 7.1.1) closes off future access but does not undo
-exposure that already happened. Where that assumption does not hold, use the
-forwarder path's TTY prompt instead. The forwarder path's rule is unchanged.
+exposure that already happened. To replace a lost or leaked key, stop the
+paired daemon before running the newly issued key; the daemon refuses to replace
+a pairing while it is serving it. Where argv and shell history are not trusted,
+use the SSH bootstrap, which returns its pair key through the SSH channel.
 ### 7.2 SSH bootstrap
 
 For a `[[remoteHosts]]` entry, the client starts `medulla daemon --direct`

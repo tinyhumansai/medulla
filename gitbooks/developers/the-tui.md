@@ -11,6 +11,7 @@
 | Hosts | The other machines Medulla can drive: add one, get the one-line pairing command to run there, connect, and pick which host the two tabs before it are about. See [Hosts](../features/hosts.md). |
 | Feedback | The feedback board for the signed-in account, with the selected item's body and comments. The mock runtime shows a scripted board; a signed-out session shows a hint panel. |
 | Settings | Usage, Appearance, Subscriptions, Status line, Config, Feedback, Trace, Context, Account, and Help, grouped under General, Debug, and About. |
+
 `Tab` and `Shift-Tab` walk the tabs, and `H` switches the current host from any of them. `Ctrl-C` quits.
 
 There is no chat composer. Medulla is not something you type at; you type into the sessions it holds.

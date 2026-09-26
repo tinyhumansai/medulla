@@ -54,7 +54,7 @@ already decrypt. Its job is to reject a datagram that is not from the peer
 before any AEAD work is done.
 
 The pair key never appears in a config file, a log line or a request body. It
-lives in the state file (section 7.3) on each end and nowhere else.
+is persisted in the state file (section 7.3) on each end.
 
 ### Roles and direction
 

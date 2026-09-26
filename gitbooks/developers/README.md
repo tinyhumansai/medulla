@@ -8,7 +8,7 @@ description: >-
 
 This is the developer home for Medulla: how to install and run the terminal, how it is configured, how it is put together, and how to build it from source.
 
-The [product overview](../) is the short story; these pages are the detail. Everything here tracks the [`tinyhumansai/medulla-src`](https://github.com/tinyhumansai/medulla-src) repository, a three-crate Cargo workspace: the [`medulla`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) SDK library, the [`medulla-tui`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/) app crate that ships the `medulla` binary, and [`medulla-link`](https://github.com/tinyhumansai/medulla-src/tree/main/src/link/), the host link transport.
+The [product overview](../) is the short story; these pages are the detail. Everything here tracks the [`tinyhumansai/medulla`](https://github.com/tinyhumansai/medulla) repository, a three-crate Cargo workspace: the [`medulla`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/) SDK library, the [`medulla-tui`](https://github.com/tinyhumansai/medulla/tree/main/src/tui/) app crate that ships the `medulla` binary, and [`medulla-link`](https://github.com/tinyhumansai/medulla/tree/main/src/link/), the host link transport.
 
 ## Read next
 

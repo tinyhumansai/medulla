@@ -1,0 +1,53 @@
+{
+  "_comment": "Fixture stand-in for the model catalog Codex normally fetches from its own API and caches at $CODEX_HOME/models_cache.json. The e2e stack runs with no network, so nothing would ever write this file — and without it a codexOverrides preset cannot derive its catalog entry (see src/sdk/src/codex_overrides/catalog.rs) and the run fails before it reaches the mock LLM. Only the fields that derivation reads or Codex requires are present, and the instructions template is a deliberately short stand-in rather than a copy of the vendor's system prompt.",
+  "fetched_at": "2026-01-01T00:00:00Z",
+  "client_version": "e2e-fixture",
+  "models": [
+    {
+      "slug": "e2e-template",
+      "display_name": "E2E Template",
+      "description": "Template entry the e2e harness derives its routed model from.",
+      "default_reasoning_level": "low",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Fast responses with lighter reasoning" },
+        { "effort": "medium", "description": "Balances speed and reasoning depth" },
+        { "effort": "high", "description": "Greater reasoning depth for complex problems" }
+      ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "You are Codex, a coding agent running under the Medulla end-to-end harness. Answer the user's request directly.",
+        "instructions_variables": null,
+        "approvals": null,
+        "collaboration_modes": null,
+        "auto_review": null,
+        "permissions": null,
+        "token_budget": null
+      },
+      "include_skills_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": true,
+      "default_verbosity": "low",
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text",
+      "truncation_policy": { "mode": "tokens", "limit": 10000 },
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": false,
+      "context_window": 272000,
+      "max_context_window": 272000,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text"],
+      "supports_search_tool": true,
+      "use_responses_lite": false,
+      "tool_mode": "code_mode_only",
+      "multi_agent_version": "v2"
+    }
+  ]
+}

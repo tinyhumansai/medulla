@@ -1,0 +1,8 @@
+# Build output and git metadata never belong in the image context.
+#
+# This used to also exclude `vendor/openhuman/{app,target,gitbooks,docs}` — a
+# desktop app and its docs that the e2e image never compiled but still paid to
+# transfer. The embedded core is gone, and the three crates that replaced it
+# carry nothing of the sort.
+**/.git
+**/target

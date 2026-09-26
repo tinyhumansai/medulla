@@ -1,0 +1,60 @@
+//! Operator-declared fleet capacity and its UI-facing projections.
+
+use super::*;
+
+/// Operator-declared capacity: the `Host → Harness → Workspace → Agent`
+/// containment chain plus the agent templates that may be provisioned into it.
+///
+/// Declared, never probed — this is what the client *offers* the orchestrator
+/// when it attaches to `medulla-serve`, and what the TUI's Fleet page renders
+/// when no backend supplies a fleet of its own. The default declares only the
+/// built-in coding template catalog; it provisions no agents and advertises no
+/// host capacity. An explicit empty template list opts out of that catalog.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FleetConfig {
+    /// Machines this client declares.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostDescriptor>,
+    /// Agent CLI runtimes installed on those machines.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub harnesses: Vec<HarnessDescriptor>,
+    /// Folders those runtimes expose.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<WorkspaceDescriptor>,
+    /// Durable agent identities deployed into them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentDescriptor>,
+    /// The agents this operator has declared on their own machines.
+    ///
+    /// Distinct from [`agents`](Self::agents), which is the *manager's*
+    /// descriptor for an agent it already knows about — a roster shape, read
+    /// from a fleet somebody else published. This list is the writable one: it
+    /// is what this client declares, and the local roster is built from it
+    /// rather than synthesized from whatever CLIs happened to be installed
+    /// (spec §2.1, "declared, never discovered"). See
+    /// [`crate::config::declare_agent`] for the read/write path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent_declarations: Vec<AgentDeclaration>,
+}
+
+impl FleetConfig {
+    /// Whether the operator declared nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.hosts.is_empty()
+            && self.harnesses.is_empty()
+            && self.workspaces.is_empty()
+            && self.agents.is_empty()
+            && self.agent_declarations.is_empty()
+    }
+
+    /// The declared chain as the UI-facing roll-up (agents excluded — they reach
+    /// the UI through the snapshot roster).
+    pub fn capacity(&self) -> CapacitySnapshot {
+        CapacitySnapshot {
+            hosts: self.hosts.clone(),
+            harnesses: self.harnesses.clone(),
+            workspaces: self.workspaces.clone(),
+        }
+    }
+}

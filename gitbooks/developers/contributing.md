@@ -87,7 +87,7 @@ remainder.
   and not the mechanically obvious.
 
 The authoritative rules live in the repository's
-[`AGENTS.md`](https://github.com/tinyhumansai/medulla-src/blob/main/AGENTS.md).
+[`AGENTS.md`](https://github.com/tinyhumansai/medulla/blob/main/AGENTS.md).
 
 ## Commits and pull requests
 
@@ -99,24 +99,11 @@ Include screenshots only for visible TUI changes.
 
 ## Releasing
 
-Releases are one-click: run the **Release** workflow (Actions → Release → Run
-workflow) and pick a [semver](https://semver.org/) bump. It bumps
-`Cargo.toml`/`Cargo.lock`, commits and tags on `main`, builds all targets, and
-publishes the GitHub Release with the `latest.json` update manifest that
-[`medulla update`](cli-reference.md#medulla-update) reads.
+The **Release** workflow is dispatched from `main`. It reads the workspace
+version, creates the matching `vX.Y.Z` tag, builds the supported platform
+binaries, and publishes the packages and `latest.json` as a GitHub Release in
+this repository. It uses the repository's standard `GITHUB_TOKEN` and requires
+no organization-only app secrets. Bump the workspace version and lockfile in a
+reviewed pull request before dispatching a release.
 
-`main` is branch-protected (the four CI checks are required), and the workflow's
-default `GITHUB_TOKEN` cannot bypass that, so the version-bump push would be
-rejected. The `tag` job therefore runs against the `Production` environment
-and authenticates as the org's GitHub App: it mints a short-lived installation
-token from the `XGITHUB_APP_ID` / `XGITHUB_APP_PRIVATE_KEY` environment secrets
-and pushes the bump commit and tag with it. The app needs Contents: read and
-write, and must be able to bypass the protection rule; every other path to `main`
-still goes through a PR with green checks.
-
-## Security and configuration
-
-Never commit tokens, `.env`, `medulla.tui.json` secrets, or runtime state. Prefer
-`MEDULLA_TOKEN` and documented environment variables over inline credentials.
-Treat Unix-socket paths and provider binary overrides as untrusted configuration
-and validate them at boundaries.
+See [DEVELOPING.md](../../DEVELOPING.md) for the repository development overview.

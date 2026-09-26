@@ -57,8 +57,8 @@ Prebuilt binaries ship for Linux (x86\_64, aarch64), macOS (Apple Silicon), and 
 ## Build from source
 
 ```sh
-git clone https://github.com/tinyhumansai/medulla-src
-cd medulla-src
+git clone https://github.com/tinyhumansai/medulla
+cd medulla
 make init                       # submodules, rustfmt/clippy, locked deps, pre-push hook
 cargo run                       # debug build, starts the TUI
 cargo run --release             # optimized build
@@ -106,10 +106,10 @@ Add the SDK as a git dependency (the repo vendors its path deps, so no extra set
 
 ```toml
 [dependencies]
-medulla = { git = "https://github.com/tinyhumansai/medulla-src", tag = "v0.3.0" }
+medulla = { git = "https://github.com/tinyhumansai/medulla", tag = "v0.3.0" }
 ```
 
-The [`medulla` SDK crate](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/) is a UI-free logic library: config, auth, the backend client, harness detection and launch, the clipboard writers, the inference proxy, workflows, and the daemon. See [Architecture](architecture.md) for how the pieces fit together.
+The [`medulla` SDK crate](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/) is a UI-free logic library: config, auth, the backend client, harness detection and launch, the clipboard writers, the inference proxy, workflows, and the daemon. See [Architecture](architecture.md) for how the pieces fit together.
 
 ## Platform support
 

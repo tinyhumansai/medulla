@@ -15,9 +15,9 @@ network, and no real coding-agent CLI is spawned unless a test writes one itself
 | --- | --- |
 | Unit tests for a directory module | `foo/tests.rs`, declared from `foo/mod.rs` with `#[cfg(test)] mod tests;` |
 | Unit tests for a single-file leaf module | a sibling `foo_tests.rs`, until the module becomes a directory |
-| Cross-module and end-to-end tests for the SDK | [`src/sdk/tests/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/tests/) |
-| Cross-module and end-to-end tests for the app crate | [`src/tui/tests/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui/tests/) |
-| Shared stand-ins | [`src/sdk/tests/support/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/tests/support/) |
+| Cross-module and end-to-end tests for the SDK | [`src/sdk/tests/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/tests/) |
+| Cross-module and end-to-end tests for the app crate | [`src/tui/tests/`](https://github.com/tinyhumansai/medulla/tree/main/src/tui/tests/) |
+| Shared stand-ins | [`src/sdk/tests/support/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/tests/support/) |
 
 Integration files are named by the behavior they cover, not by the module they
 touch: `e2e_daemon.rs`, `feature_workers.rs`, `e2e_login.rs`. The `e2e_` prefix

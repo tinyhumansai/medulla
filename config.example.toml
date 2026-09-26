@@ -1,0 +1,776 @@
+# Medulla configuration (example).
+#
+# Copy this to one of the discovered locations, or point `--config` at it.
+# All keys are optional; anything omitted takes a built-in default.
+#
+# ---------------------------------------------------------------------------
+# Where this file can live (config discovery), and how values combine.
+# ---------------------------------------------------------------------------
+#
+# Precedence, highest wins:
+#
+#   1. CLI flags                    (e.g. --config, --core, --no-alt-screen)
+#   2. environment variables        (MEDULLA_API_URL, MEDULLA_TOKEN via tokenEnv,
+#                                     MEDULLA_STAGING, MEDULLA_STATE_DIR, MEDULLA_*
+#                                     harness knobs; the old TINYPLACE_* spelling
+#                                     of those is deprecated but still read)
+#   3. project-local config file    ./.medulla/config.toml  or  ./medulla.toml
+#   4. user-global config file      <medulla_home>/config.toml
+#   5. built-in defaults            (production endpoints)
+#
+# Files are merged field-by-field (a project-local file can override just
+# `backend.baseUrl` without discarding the rest of a global file). An explicit
+# `--config <path>` (either .toml or .json) bypasses discovery of files 3 and 4,
+# but environment variables and CLI flags still override it.
+#
+# ---------------------------------------------------------------------------
+# Medulla home  (where all config/data lives)
+# ---------------------------------------------------------------------------
+#
+#   default              ~/.medulla
+#   MEDULLA_DEV=1         ./.medulla          (relative to the cwd; for local dev)
+#   MEDULLA_HOME=<path>   <path>              (explicit; beats both of the above)
+#
+# Under the home:
+#   <home>/credentials.json     saved by `medulla login`  (mode 0600)
+#   <home>/config.toml          the user-global config file
+#   <home>/state                default stateDir          (chats, serve.sock)
+#   <home>/link                 default host-link identity dir
+#
+# `.env` in the cwd is loaded at startup (KEY=VALUE, `#` comments, optional
+# `export `, quotes stripped). It never overrides variables already set in the
+# environment — this is the usual way to set `MEDULLA_DEV=1` for local dev.
+
+# ---------------------------------------------------------------------------
+# backend — the Medulla HTTP API
+# ---------------------------------------------------------------------------
+[backend]
+# Base URL. Env override: MEDULLA_API_URL. `MEDULLA_STAGING=1` flips the default
+# to https://staging-api.tinyhumans.ai. Default: https://api.tinyhumans.ai
+baseUrl = "https://api.tinyhumans.ai"
+# Name of the env var holding the bearer JWT. Default: MEDULLA_TOKEN
+tokenEnv = "MEDULLA_TOKEN"
+# Inline token (discouraged; prefer the env var or `medulla login`).
+# token = "eyJ..."
+
+# ---------------------------------------------------------------------------
+# host — run the work on this machine, not only orchestrate it
+# ---------------------------------------------------------------------------
+# A plain `medulla` is both halves of the system: the orchestrator that decides
+# what work to hand out, and a host that runs it. The host binds an address on
+# an in-process bus the orchestrator dispatches over, so a task for this machine
+# never touches the network — no link identity, no enrollment, no second
+# `medulla daemon` process. Remote workers still go over the host link, and the
+# orchestrator picks per address.
+#
+# It is on by default and needs no configuration: it serves whichever coding
+# agent CLIs it finds (claude / codex / opencode), in the directory you launched
+# from. The Overview tab's "This device" panel shows what it is doing.
+#
+# Env override: MEDULLA_HOST=0 turns hosting off for one run (MEDULLA_HOST=1
+# forces it on). This mirrors MEDULLA_HUB=0, which turns the orchestrator half
+# off — set both and you have a plain chat client.
+# [host]
+# Whether this device hosts tasks. Default: true
+# enabled = true
+# The address the orchestrator dispatches to. Local to this process; it never
+# goes on a wire, so it is a readable name rather than a key. Default: this-device
+# address = "this-device"
+# Where tasks run. Empty (the default) means the directory `medulla` was
+# launched from — the repo you are looking at. Anything a task edits, it edits
+# here, so this is the most consequential key in the section.
+# workspace = "/absolute/path/to/repo"
+# Which agent CLIs to serve. Empty (the default) detects whatever is installed.
+# An explicit list is still filtered by what is actually on PATH.
+# providers = ["claude", "codex"]
+# The CLI used when a task names none. Empty takes the first detected.
+# defaultProvider = "claude"
+# Maximum tasks run at once on this machine. Default: 2
+# concurrency = 2
+# Per-task execution timeout, in ms. Default: 600000 (10 minutes)
+# taskTimeoutMs = 600000
+# Default model hint passed to the harness. Empty leaves the CLI's own default.
+# model = "claude-sonnet-4-5"
+# Whether the harness runs with its permission prompts bypassed. On by default
+# because a hosted task is unattended: nobody is in the pane to answer a prompt,
+# so a task that hits one has hung until it times out.
+# skipPermissions = true
+
+# ---------------------------------------------------------------------------
+# [[hosts]] — extra hosted directories on this same machine (optional)
+# ---------------------------------------------------------------------------
+# One laptop routinely holds several unrelated repos, and [host] can only name
+# one working directory — its `workspaces` list is advisory, so a task still
+# runs in the primary one. Each [[hosts]] entry binds its own device-local
+# address and registers as its own agent, so the orchestrator can be told
+# *which project* to work in, not only *which machine*. Additive: [host] keeps
+# its own meaning, and a config with no [[hosts]] behaves exactly as before.
+# Every field below is the same one documented under [host] above.
+# [[hosts]]
+# enabled = true
+# name = "sidecar"
+# address = "sidecar"
+# workspace = "/absolute/path/to/other/repo"
+# providers = ["claude", "codex"]
+# defaultProvider = "claude"
+# concurrency = 2
+# taskTimeoutMs = 600000
+# model = "claude-sonnet-4-5"
+# skipPermissions = true
+
+# ---------------------------------------------------------------------------
+# [[remoteHosts]] — other machines, reached over SSH (optional)
+# ---------------------------------------------------------------------------
+# The other axis from [[hosts]] above. Those are several hosts on *this*
+# machine, told apart by working directory; these are other machines entirely,
+# told apart by login. A local host has a bus address and no login, a remote
+# host has login details and no bus address — which is why they are separate
+# sections rather than one with half its fields blank.
+#
+# How a connection is made, and when: SSH is only the bootstrap. It starts a
+# medulla daemon on the far side and carries its key back inside the SSH
+# channel, after which datagrams go straight to the machine over UDP, mosh-style
+# — so the session survives a suspended laptop or a change of network with no
+# reconnect. One connection is shared by every session on that host, and it is
+# opened the first time you actually start a session there, not at startup.
+#
+# SECURITY: this whole section is ignored in a project-local config file
+# (./medulla.toml or ./.medulla/config.toml) and honoured only in your global
+# <medulla_home>/config.toml or an explicit --config. `sshOptions` accepts
+# `-o ProxyCommand=…`, which runs a command on *your* machine, so a checked-in
+# config could otherwise execute anything the moment you opened the session
+# picker. Same rule, and same reason, as [[hooks]].
+#
+# [[remoteHosts]]
+# host = "tower.local"          # required: hostname, IP, or a ~/.ssh/config alias
+# name = "Tower"                # display name; defaults to `host`
+# id = "tower"                  # stable id for sessions and the rail lane;
+#                               # defaults to a slug of `name`, then of `host`
+# user = "steven"               # omit to let ssh and ~/.ssh/config decide
+# port = 22                     # 0 or omitted leaves ssh's own default
+# identityFile = "~/.ssh/id_ed25519"
+# sshOptions = ["-o", "ProxyJump=bastion"]   # appended to the ssh argv verbatim
+# sshBinary = "ssh"             # the ssh client to run
+# remoteCommand = "medulla"     # how medulla is invoked on the far side
+# udpHost = ""                  # only when UDP cannot follow where SSH went,
+#                               # e.g. SSH goes via ProxyJump but UDP goes direct
+# workspace = "/home/steven/src/repo"        # default directory for sessions there
+# workspaces = ["/home/steven/src/other"]    # also offered on the workspace step;
+#                               # a remote directory cannot be completed from
+#                               # here, so this list is what the picker can show
+# enabled = true                # false keeps the entry but stops offering it
+#
+# What a session on a remote host gets: whatever *that machine* is configured
+# for. Its [router], its [[hooks]], its [attribution], its [[customHarnesses]],
+# and the coding CLIs actually installed there — resolved from its own config
+# file, never shipped from here. So a preset defined only on the build box is
+# offerable to a laptop that has never heard of it, and a laptop cannot make the
+# build box run a hook command it never agreed to. The remote daemon binds its
+# own control socket, so an agent it starts gets its tools, its managed skills
+# and somewhere to report, exactly as a local one does.
+
+# ---------------------------------------------------------------------------
+# harness — how harnesses the operator starts themselves behave (optional)
+# ---------------------------------------------------------------------------
+# Distinct from [host]/[[hosts]] above, which are about harnesses the
+# *orchestrator* starts to serve tasks. These are the ones an operator opens by
+# hand from the manual launcher, and the orchestrator never touches them.
+# [harness]
+# Whether an operator-started harness launches with its provider's
+# permission-bypass flag. Off by default — deliberately the opposite of
+# [host]'s skipPermissions, because this session is by definition attended, so
+# there is always someone to answer a prompt. Default: false
+# skipPermissions = false
+# Recently chosen directories in the manual harness launcher, newest first.
+# Picker history only; it never changes where orchestrated tasks may run.
+# Default: []
+# recentWorkspaces = ["/absolute/path/to/repo"]
+# Saved directory shortcuts for the manual harness launcher. A favorite is an
+# operator's named destination, kept separate from recent history so it stays
+# useful even after it falls out of the recent list. Default: []
+# favoriteWorkspaces = [{ name = "medulla", path = "/absolute/path/to/repo" }]
+
+# ---------------------------------------------------------------------------
+# App-persisted state — written by the TUI, never hand-authored
+# ---------------------------------------------------------------------------
+# [hub].workers and [onboarding].welcomeCompleted also live in this file, but
+# both are app-persisted state the TUI writes (the worker roster, and whether
+# the welcome flow has run) rather than something to hand-author, so neither
+# gets an example block here.
+
+# ---------------------------------------------------------------------------
+# customHarnesses — OpenRouter models through a coding CLI
+# ---------------------------------------------------------------------------
+# When OPENROUTER_API_KEY is present, these presets are declared here, in
+# config, as `[[customHarnesses]]` entries — there is no longer a page to add
+# or edit them from. The coding CLI remains the agent harness while OpenRouter
+# supplies the model. This makes, for example, DeepSeek through Claude Code
+# available as named capacity on one fleet host.
+#
+# apiKeyEnv stores only the environment-variable name; never put the key value
+# in this file. Claude presets map the main model onto Opus and fastModel onto
+# the Sonnet/Haiku tiers so sub-agents keep using OpenRouter. Codex and OpenCode
+# receive the model through their normal -m argument.
+#
+# OpenRouter-bound runs do not reach openrouter.ai directly: Medulla starts a
+# loopback proxy and points the harness at it, so the attribution headers on the
+# wire are Medulla's rather than the harness's. The harness is handed a
+# machine-local token and never the real key. See docs/attribution-proxy.md.
+# [[customHarnesses]]
+# id = "deepseek"
+# name = "DeepSeek via Claude"
+# baseHarness = "claude"              # claude | codex | opencode | openhuman
+# model = "deepseek/deepseek-chat"
+# fastModel = "deepseek/deepseek-chat"
+# hostId = "this-device"               # must match [host].address
+# default = false
+# apiKeyEnv = "OPENROUTER_API_KEY"
+# baseUrl = "https://openrouter.ai/api" # optional; defaults per base harness
+# contextWindow = 114000                # optional; Claude auto-compaction window
+#
+# providerOnly restricts which of OpenRouter's serving providers may answer.
+# One model is offered by many providers at prices that differ by more than an
+# order of magnitude, and OpenRouter's default weighs price against uptime and
+# throughput rather than pinning one — so an unpinned preset's cost can move
+# without the config changing. Slugs are OpenRouter's own, lowercased; the
+# order is your preference order.
+#
+# This is the only way to state the choice: it travels in the request body, so
+# neither a model-id suffix nor baseUrl can express it. A suffix such as
+# "z-ai/glm-5.2:streamlake" is accepted by OpenRouter and silently ignored.
+#
+# The pin is applied only when the request body is a JSON object within the
+# rewrite limit (32 MiB). A larger body, a non-object body (e.g. streamed file
+# uploads), or one that already names its own "provider.only" is forwarded
+# unchanged — the pin is skipped rather than refusing the request.
+# providerOnly = ["streamlake"]
+
+# baseHarness = "openhuman" runs the turn in-process on the vendored
+# tinyagents agent loop with Medulla's own tools, rather than spawning a CLI,
+# so there is nothing to install. There is no embedded OpenHuman core anymore
+# and nothing for the model or endpoint to fall back to: both are resolved
+# entirely from this preset and the environment. The order (highest first) is
+# MEDULLA_OPENHUMAN_MODEL / MEDULLA_HARNESS_MODEL, then the workflow node's own
+# model, then this preset's model, then `[workflows] defaultModel`. The
+# endpoint and key travel the same loopback proxy a spawned CLI's would.
+#
+# Unlike the other base harnesses, an "openhuman" preset with no key present
+# under apiKeyEnv is not advertised at all — it used to be exempted because the
+# embedded core authenticated as the signed-in account, but this harness is an
+# ordinary chat-completions client and an unusable preset should be absent
+# rather than offered and then rejected once a task is delegated to it.
+# [[customHarnesses]]
+# id = "deepseek-oh"
+# name = "DeepSeek via OpenHuman"
+# baseHarness = "openhuman"
+# model = "deepseek/deepseek-chat"
+# hostId = "this-device"
+# apiKeyEnv = "OPENROUTER_API_KEY"
+
+# ---------------------------------------------------------------------------
+# router — a custom OpenAI-compatible router for every harness (optional)
+# ---------------------------------------------------------------------------
+# Router-wide, distinct from the per-preset baseUrl/apiKeyEnv/providerOnly
+# documented under customHarnesses above: this steers *every* harness the
+# worker spawns (not just OpenRouter-bound presets) at one gateway or proxy,
+# so inference is centralized, metered, and re-routable without hand-editing
+# each harness's own on-disk config. Absent entirely (the default) is zero
+# behaviour change. Matches the contract served at
+# GET/PUT /medulla/v1/router, so one document round-trips across clients and
+# the backend.
+# [router]
+# Top-level OpenAI-compatible (or Anthropic-passthrough) endpoint for every
+# provider without its own override below.
+# baseUrl = "https://router.example.com"
+# Env-var NAME holding the API key — never the secret itself.
+# apiKeyEnv = "ROUTER_API_KEY"
+# Tier → model/SKU mapping. A missing tier falls through to the harness's own
+# configuration.
+# models = { reasoning = "deepseek/deepseek-chat", compress = "deepseek/deepseek-chat-mini" }
+# Per-provider endpoint overrides, keyed by provider id (claude / codex /
+# opencode); takes precedence over the top-level baseUrl for that provider.
+# [router.providers.claude]
+# baseUrl = "https://router.example.com/anthropic"
+# providerOnly restricts which upstream serving provider may answer, honored
+# only for OpenRouter-bound routes — see the customHarnesses providerOnly note
+# above for why this has to live in the request body rather than the URL.
+# providerOnly = ["streamlake"]
+
+# ---------------------------------------------------------------------------
+# budget — operator-declared per-provider token budgets (optional)
+# ---------------------------------------------------------------------------
+# Absent entirely (the default) means every installed, usable harness
+# advertises a best-effort estimate with no invented numbers. An entry here
+# promotes that provider's advertised descriptor to a configured source with
+# your exact numbers, so a hosted orchestrator can size tasks against a real
+# allowance. Keyed by provider id, mirroring [router.providers.<p>].
+# [budget.providers.claude]
+# Opaque seat/subscription label you recorded (never a credential).
+# seat = "team-plan"
+# The metering window the allowance renews on: "daily" | "weekly" | "five_hour" | "unknown".
+# window = "five_hour"
+# limitTokens = 1000000
+# usedTokens = 240000
+# Only needed if you want to record it directly rather than let it be derived
+# from limitTokens - usedTokens.
+# remainingTokens = 760000
+# Unix seconds until which the seat is parked.
+# cooldownUntil = 1735689600
+
+# ---------------------------------------------------------------------------
+# core — the medulla-serve NDJSON orchestration socket (optional)
+# ---------------------------------------------------------------------------
+# [core]
+# Explicit NDJSON Unix socket path. When unset the socket is resolved from
+# $XDG_RUNTIME_DIR/medulla/serve.sock, then <stateDir>/serve.sock.
+# The core runtime is attach-only and unix-only; on Windows a --core / [core]
+# request logs a note and falls through to the backend→mock chain.
+# socketPath = "/run/user/1000/medulla/serve.sock"
+
+# ---------------------------------------------------------------------------
+# update — background release-update check (optional)
+# ---------------------------------------------------------------------------
+# The TUI checks GitHub for a newer release ~10s after startup, then every 6h,
+# and shows an "update vX.Y.Z available" banner. Run `medulla update` to install
+# (or `medulla update --check` to only report). Disable with `check = false`
+# here, or the MEDULLA_NO_UPDATE_CHECK=1 env var. Override the manifest URL with
+# MEDULLA_UPDATE_URL.
+# [update]
+# check = true
+
+# ---------------------------------------------------------------------------
+# stateDir — TUI state (chats, resolved serve socket). Default: <home>/state
+# Env override: MEDULLA_STATE_DIR.
+# ---------------------------------------------------------------------------
+# stateDir = "/absolute/path/to/state"
+
+# ---------------------------------------------------------------------------
+# workflows — authored workflow capabilities (optional)
+# ---------------------------------------------------------------------------
+# Definitions are saved under <home>/workflows and runtime state under
+# <home>/state/workflows. Code execution is on by default but is not sandboxed;
+# set allowCode = false before loading workflows you do not trust. HTTP and
+# third-party tools remain deny-by-default.
+# [workflows]
+# Whether workflows may be listed and run at all.
+# enabled = true
+# The worker `agent` nodes dispatch to when they name no agentRef. Empty means
+# a node must name one, and a run fails saying so.
+# defaultWorker = "medulla-claude"
+# The harness hint sent with each dispatch. Absent uses the worker's own
+# default. Must be a dispatchable harness (not a manual-only one).
+# defaultProvider = "claude"
+# The model hint sent with each dispatch.
+# defaultModel = "claude-sonnet-4-5"
+# allowCode = true
+# The interpreter a `shell` script node runs under. Empty keeps bash. "user"
+# follows the operator's login shell ($SHELL) — pair it with shellArgs =
+# ["-l"] since a script otherwise runs non-login and sources none of their
+# startup files.
+# shell = "user"
+# shellArgs = ["-l"]
+# runTimeoutSecs = 600
+# toolAllowlist = []
+# httpAllowlist = []
+# The most harness tasks one run may have in flight at once, across every
+# per_item fan-out. A graph asking for more is clamped to this, not refused.
+# maxParallelAgents = 4
+# The ceiling on any one loop node's max_iterations. Like maxParallelAgents,
+# an over-ask is clamped rather than refused.
+# maxLoopIterations = 25
+# How many of a workflow's runs the Workflows page lists under it, newest
+# first. Only the listing: every run stays in the store, and `medulla workflow
+# list-runs` still shows the lot. Settings › Config edits this live.
+# maxListedRuns = 15
+#
+# evolve — whether and how a workflow reviews its own run history. On by
+# default because a pass cannot change anything by itself: it only records
+# notes and produces proposals an operator has to accept.
+# [workflows.evolve]
+# enabled = true
+# Whether a failed run starts a review by itself. The one worth turning off —
+# it spends a harness session per failed workflow.
+# autoOnFailure = true
+# How many recent runs reach the review's brief.
+# maxRuns = 5
+# How many current notes reach the review's brief.
+# maxNotes = 40
+
+# ---------------------------------------------------------------------------
+# mcp — Medulla's tool server, as offered to the harnesses it spawns
+# ---------------------------------------------------------------------------
+# Medulla drives Claude Code and Codex over ACP as a client, so offering an MCP
+# server is the only way it can hand a spawned harness anything to call. That
+# server is this binary in a subprocess. Nothing here writes to another
+# program's config, and nothing it enables is reachable by a process Medulla did
+# not spawn: the socket path and grant token are minted per session and handed
+# to exactly one child.
+# [mcp]
+# Offer the fleet_* tools — see the fleet, dispatch work to it, poll and abort.
+# Turning this off leaves the workflow_* tools untouched.
+#
+# These only exist on a host that is running a fleet — in practice the machine
+# you drive Medulla from. A harness dispatched to a remote worker is run by that
+# worker's daemon, which has no hub of its own, so it gets the workflow_* tools
+# and is never shown the fleet ones. The same instruction therefore reaches a
+# harness with a different tool surface depending on where the task landed.
+# fleetTools = true
+# How deep a dispatch tree may go before fleet_dispatch is withheld, counted
+# from the operator's own turn. 0 lets no spawned harness dispatch; 1 lets only
+# those the orchestrator spawned directly. Enforced against the grant Medulla
+# minted, not against anything the harness claims about itself.
+# maxDepth = 2
+# Most concurrent MCP-dispatched tasks one grant may hold. Absent follows
+# workflows.maxParallelAgents.
+# maxInFlight = 4
+# Override the control socket path. Absent uses an account-scoped path under the
+# Medulla home, which is what keeps two accounts on one machine from sharing a
+# fleet.
+# socketPath = "/absolute/path/to/control.sock"
+
+# ---------------------------------------------------------------------------
+# workflow — daemon worker workspace allowlist
+# ---------------------------------------------------------------------------
+# [workflow]
+# Local roots the daemon TUI may expose to operator-managed worker sessions.
+# workspaces = ["/absolute/path/to/workspace"]
+
+# ---------------------------------------------------------------------------
+# link — the host link to remote machines (optional)
+# ---------------------------------------------------------------------------
+# The transport between this endpoint and the machines it talks to. See
+# docs/host-link-protocol.md.
+#
+# The pair key is deliberately absent and must stay absent. It is generated on
+# the orchestrator, carried to the host by hand, and lives only in
+# <stateDir>/node.json — never in a config file, which gets copied, shared and
+# pasted into issues.
+# [link]
+# Backend fronting the forwarder and the host registry. Defaults to whatever
+# backend.baseUrl resolved to — the forwarder is served by the same backend, so
+# moving one moves the other. Set this only for a deliberately split deployment.
+# forwarderUrl = "https://api.tinyhumans.ai"
+# This endpoint's node name, as issued at enrollment.
+# nodeName = "my-orchestrator"
+# Link identity directory. Default: <home>/link
+# stateDir = "/absolute/path/to/link"
+# The enrolled peers. `nodeId` is the 16-byte wire id, hex, issued at enrollment.
+# peers = []                   # [{ id, nodeId, handle, name, address, tags, description, protocol }]
+
+# ---------------------------------------------------------------------------
+# opencode — coding-agent worker defaults (optional)
+# ---------------------------------------------------------------------------
+# [opencode]
+# command = "opencode"
+# model = ""
+# agent = "build"
+# workspace = "."
+# maxConcurrency = 4
+
+# ---------------------------------------------------------------------------
+# medulla — orchestration knobs (all optional)
+# ---------------------------------------------------------------------------
+# [medulla]
+# maxPasses = 8
+# maxSteps = 24
+# maxDepth = 2
+# maxTasksPerDelegate = 8
+# maxTokens = 4096
+# contextWindowTokens = 32000
+
+# ---------------------------------------------------------------------------
+# theme — TUI colors (optional). Values are ratatui color names
+# (case-insensitive: cyan, lightblue, magenta, darkgray, …) or #rrggbb hex.
+# Any missing field falls back to the default. The Settings › Appearance
+# subpage edits these live and writes them back here.
+# ---------------------------------------------------------------------------
+# [theme]
+# primary = "red"         # selection highlight + brand/panel titles/accents
+# accent = "magenta"      # inline overlay borders (prompt / resume picker)
+# selectionFg = "white"   # text drawn on top of the primary selection background
+# dimBorder = "darkgray"  # panel borders
+#
+# A harness that needs you is drawn in `attention` and pulses: bright for half a
+# cycle, dim for the other half, at `attentionBlinkSeconds`. The pulse is driven
+# by Medulla's own frame clock rather than the terminal's blink attribute, which
+# most terminals and every multiplexer ignore — so it looks the same everywhere.
+# A harness that *failed* pulses red instead, whatever `attention` is set to, so
+# a question and a breakage are never the same colour.
+# attention = "yellow"          # ⚠ rows, the tab badge, "N waiting on you"
+# attentionBlink = true         # false holds those cues steady and bright
+# attentionBlinkSeconds = 1.0   # one full pulse; clamped to 0.2–10.0
+
+# ---------------------------------------------------------------------------
+# appearance — how the Agents sidebar arranges itself, plus the legacy
+# harness-row toggles. Settings › Appearance edits all of these live.
+#
+# sidebarGrouping picks what heads the sidebar's sections:
+#   "host"     one section per machine, drawn only once a second host exists
+#              (the default)
+#   "path"     one per workspace directory, so a checkout's agents read together
+#   "harness"  one per coding-agent CLI
+#   "none"     one flat list, no headers
+#
+# sidebarSort orders the agents in a section and the sessions under an agent:
+#   "created"  declaration order for agents, oldest-first for sessions (default)
+#   "recent"   most recently active first
+#   "name"     alphabetical
+#
+# Grouping only moves the headers: every agent keeps its own sessions, so no row
+# disappears whichever way these are set.
+#
+# showHarnessBranch/showHarnessPath are legacy, kept so an older config keeps
+# working. They are read only when [statusLine] below is absent, in which case
+# `false` means that field is hidden. Settings › Status line writes
+# [statusLine] and takes over.
+#
+# showSessionTitles toggles whether orchestrator-managed harness titles appear
+# in the Agents sidebar at all.
+#
+# The six resource fields choose how one local-process or whole-device
+# resource is drawn in the Agents sidebar. Each is "off" (default; not drawn),
+# "percent", "value" (native units — bytes, bytes/sec), or "bar" (a compact bar
+# with a percentage or rate beside it). cpu/ram/diskIo are this Medulla
+# process's own usage; deviceCpu/deviceRam/deviceDisk are whole-machine
+# pressure, useful when a host is close to a real ceiling rather than only
+# curious about its own footprint.
+# ---------------------------------------------------------------------------
+# [appearance]
+# sidebarGrouping = "host"
+# sidebarSort = "created"
+# showHarnessBranch = true
+# showHarnessPath = true
+# showSessionTitles = true
+# cpu = "off"
+# ram = "off"
+# diskIo = "off"
+# deviceCpu = "off"
+# deviceRam = "off"
+# deviceDisk = "off"
+
+# ---------------------------------------------------------------------------
+# subscriptions — how much of each paid allowance is already spent, metered in
+# the Agents sidebar under the device readings. Settings › Subscriptions edits
+# all of these live, shows each meter's current reading beside its setting, and
+# is the easier way to arrive at a set you want on screen.
+#
+# Every meter takes one of:
+#   "off"      not shown, and — this is the point — not sampled either
+#   "percent"  the share of the window or cap already used
+#   "bar"      a compact bar with that percentage beside it
+#   "value"    money left; balance meters only, since a window has no amount
+#
+# Where the numbers come from:
+#   claude*        claude.ai, read with the local Claude CLI's own login. No
+#                  second credential, and nothing is asked for while every
+#                  Claude meter is "off".
+#   codex*         the newest Codex transcript on this machine, which records
+#                  the rate limits the server returned. No network call, and no
+#                  fresher than the last Codex turn here.
+#   openRouter*    OpenRouter's credits endpoint, read with the key held in the
+#                  environment variable openRouterKeyEnv names (default
+#                  OPENROUTER_API_KEY). The key itself is never written here.
+#   tinyhumans*    the same account balance Settings › Usage loads, not a second
+#                  request for it.
+#
+# claudeScoped is Claude's seven-day window for one model; the sidebar labels it
+# with whichever model the account reports, e.g. "Claude Fable".
+#
+# refreshSeconds is how often the switched-on meters are re-read. These windows
+# move over hours, so the default of five minutes is already generous; `r` on
+# the settings page re-reads immediately when you want to know now. Values below
+# 60 seconds are sampled at the 60-second minimum.
+# ---------------------------------------------------------------------------
+# [subscriptions]
+# claudeSession = "bar"          # rolling five-hour window
+# claudeWeekly = "bar"           # seven-day window, all models
+# claudeScoped = "off"           # seven-day window for one model
+# claudeCredits = "off"          # usage credits against their monthly cap
+# codexSession = "off"           # Codex's shorter rate-limit window
+# codexWeekly = "bar"            # Codex's weekly rate-limit window
+# openRouterCredits = "value"    # prepaid balance
+# tinyhumansBalance = "off"      # portal balance
+# refreshSeconds = 300
+# openRouterKeyEnv = "OPENROUTER_API_KEY"
+
+# ---------------------------------------------------------------------------
+# statusLine — how one operator-started harness row on the Agents rail is laid
+# out. Settings › Status line edits these live and previews the result, which
+# is by far the easier way to arrive at a layout you like.
+#
+# Every field answers the same three questions, which are the rows the settings
+# page shows under each field's name:
+#   position "line1" | "line2" | "line3" | "hidden"  (at most three lines)
+#   shown    "always" | "active" (only the selected row) | "alert" (only a
+#            harness that failed, exited non-zero, or recorded an error)
+#   spelled  per-field, see below
+#
+# The defaults below are the identifying line plus the thread beneath it:
+#   ● codex · unmanaged · main · ~/work/medulla
+#     Ship the status line
+# ---------------------------------------------------------------------------
+# [statusLine]
+# state = "line1"                # State glyph: what the session is doing, one of
+#                                #   ⠋ spinning — a turn is in flight
+#                                #   ●          — alive, idle at its composer
+#                                #   ⚠          — waiting on you (pulses)
+#                                #   ✕          — failed or exited non-zero (pulses red)
+#                                #   ✓          — exited cleanly, or finished and held
+# stateWhen = "always"
+# harness = "line1"              # Harness name: which CLI is driving the session
+# harnessWhen = "always"
+# harnessStyle = "short"         # "long" (Claude Code) | "short" (claude) | "icon"
+# control = "line1"              # Managed / unmanaged: Medulla's session or yours
+# controlWhen = "always"
+# controlStyle = "text"          # "text" (unmanaged) | "icon" (⊘ / ⊙)
+# thread = "line2"               # Thread name: the conversation being worked on
+# threadWhen = "always"
+# branch = "line1"               # Git branch: the branch the checkout is on
+# branchWhen = "always"
+# worktree = "line1"             # Linked worktree's name, when the session has one
+# worktreeWhen = "always"        # Costs nothing on a session with no worktree to name
+# path = "line1"                 # Working path: the checkout it is running in
+# pathWhen = "always"
+# pathStyle = "shortened"        # "full" | "shortened" (~/…/tail) | "last"
+
+# ---------------------------------------------------------------------------
+# fleet — operator-declared capacity: the Host → Harness → Workspace → Agent
+# containment chain. Declared, never probed. The terminal app declares this to
+# a local orchestration server at handshake time, and the Agents rail renders
+# it whenever the runtime itself reports no capacity of its own.
+#
+# Every level names exactly one parent (hostId on a harness, harnessId on a
+# workspace, workspaceId on an agent). An agent with no workspaceId is a local
+# agent and may name a hostId directly instead. There is no agent-template
+# catalog any more: a harness's or workspace's templateIds, if present, is
+# preserved as opaque labels but narrows nothing, since nothing resolves them.
+#
+# To see the surfaces with no fleet at all, set MEDULLA_DEMO_FLEET=1 (here or in
+# .env) for a small stand-in fleet. It is opt-in and never overrides a real one.
+# ---------------------------------------------------------------------------
+# [[fleet.hosts]]
+# id = "workshop"
+# name = "workshop"
+# availability = "online"
+# resources = { cpuCores = 10, availableMemoryBytes = 12884901888 }
+
+# [[fleet.harnesses]]
+# id = "workshop-claude"
+# hostId = "workshop"
+# kind = "claude-code"       # claude-code · codex · opencode · …
+# availability = "online"
+# ready = true
+# providers = ["anthropic"]
+# budgets = [{ provider = "anthropic", window = "5h", limitTokens = 1000000, remainingTokens = 760000, source = "configured" }]
+
+# [[fleet.workspaces]]
+# id = "medulla"
+# name = "medulla"
+# path = "/srv/repos/medulla"
+# harnessId = "workshop-claude"
+
+# [[fleet.agents]]
+# id = "dev-1"
+# name = "dev-1"
+# description = "Implements scoped changes in the medulla repo."
+# availability = "online"
+# workspaceId = "medulla"
+
+# agentDeclarations — the agents *you* declare on your own machines, and the
+# source of this client's roster. One per (harness × workspace): a machine with
+# claude and codex in two checkouts declares four, and each is separately
+# addressable by the orchestrator. Distinct from [[fleet.agents]] above, which
+# describes a fleet somebody else published.
+#
+# hostId matches the local bus address of the [host] / [[hosts]] entry that runs
+# it ("this-device" by default). strategy = "checkout" is the only implemented
+# one: sessions share the directory, so one runs at a time and the next queues.
+# Declare nothing and each host seeds one agent per CLI it detects, so an
+# install that predates this keeps exactly the roster it had.
+# [[fleet.agentDeclarations]]
+# agentId = "medulla-claude"
+# hostId = "this-device"
+# harness = "claude"           # claude · codex · opencode · a custom harness id
+# name = "medulla"             # optional; the rail falls back to the host's name
+# strategy = "checkout"
+# workspace = { path = "/srv/repos/medulla", type = "checkout" }
+
+# ---------------------------------------------------------------------------
+# attribution — whether a Medulla-launched harness says so in its commits
+# ---------------------------------------------------------------------------
+# A `Co-authored-by: Medulla` trailer on the commit *message* only — never a
+# change of git author or committer identity, so blame, `git log --author`,
+# and the GitHub contribution graph are unaffected. On by default: a harness
+# commit that does not name the tool that wrote it is the surprising case.
+# [attribution]
+# commit = true
+
+# ---------------------------------------------------------------------------
+# hookDefaults — Medulla's own lifecycle reporting hooks (optional)
+# ---------------------------------------------------------------------------
+# On by default, for the same reason attribution is: a harness Medulla started
+# should be one Medulla can see. These built-ins only report — they never deny
+# a tool call or rewrite an input — so leaving them on changes what Medulla
+# knows, not what the session does. Turning them off leaves your own
+# [[hooks]] below untouched.
+# [hookDefaults]
+# enabled = true
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks
+# ---------------------------------------------------------------------------
+#
+# Commands Medulla installs into every harness it launches. Declared once here
+# rather than once per harness, in each harness's own config language: a hook
+# written here reaches Claude Code (through `--settings`) and Codex (through a
+# `-c` override) from the same three lines, and cannot drift between them.
+#
+# These are *Medulla's* hooks. Your own `~/.claude/settings.json` hooks keep
+# running exactly as they do outside Medulla — nothing here replaces them.
+#
+# event    — required. Both spellings are accepted: the canonical PascalCase
+#            name the harnesses themselves use, and its camelCase form, which
+#            is what the rest of this file's key style would lead you to write.
+#            "PostToolUse" and "postToolUse" mean the same thing.
+#
+#            PreToolUse · PostToolUse · PermissionRequest · UserPromptSubmit
+#            Stop · SubagentStart · SubagentStop · PreCompact · PostCompact
+#            SessionStart · SessionEnd · Notification
+#
+#            Notification is Claude Code only. A hook on an event a harness
+#            does not implement is dropped for that harness, with a line in
+#            the log saying which and why — never silently.
+#
+# type     — required, and "command" is the only handler. The command runs
+#            through your shell, receives the harness's native hook payload on
+#            stdin, and speaks the harness's native decision protocol back on
+#            stdout.
+#
+# command  — required. The command line to run.
+#
+# matcher  — optional, default "*". A tool-name pattern for the tool-scoped
+#            events; ignored by events that carry no tool.
+#
+# timeout  — optional. Seconds before the harness gives up on the hook. The
+#            harness's own default when omitted.
+#
+# harnesses — optional, default every harness that supports the event. Note
+#            these are lowercase (claude · codex · opencode · openhuman),
+#            unlike the event names.
+#
+# An event name that is neither spelling fails the whole config load, naming
+# the value it rejected. That is deliberate: a hook you believe is installed
+# and is not is worse than a startup that stops and tells you.
+#
+# [[hooks]]
+# event = "PostToolUse"
+# matcher = "Edit|Write"
+# type = "command"
+# command = "just fmt"
+#
+# [[hooks]]
+# event = "sessionStart"        # camelCase is accepted too
+# type = "command"
+# command = "git fetch --all --prune"
+# timeout = 30
+# harnesses = ["claude"]        # this one only, and lowercase

@@ -1,0 +1,290 @@
+//! Data model and trivial construction/mutation seams for the scripted mock
+//! runtime.
+//!
+//! Holds the in-memory [`State`] (threads, roster, presence, sessions) and its
+//! per-thread [`Thread`] records, the [`MockRuntime`] handle plus its scripted
+//! feedback board, and the small helpers (id generation, event emission,
+//! thread summarisation) shared by the behaviour submodules. The
+//! `Runtime` trait impl lives in [`super::runtime_impl`] and the populated demo
+//! scenario in [`super::scenario`]; both reach the internals here through
+//! `pub(super)` items.
+
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::broadcast;
+
+use crate::runtime::event_log::ThreadEventLog;
+use crate::runtime::{
+    AgentDescriptor, AgentPresence, CycleResultSummary, LinkIdentity, PeerSession, ThreadSummary,
+    WorkerInfo,
+};
+use crate::ui::chat_store::ChatMessage;
+use crate::ui::events::{EventEnvelope, TuiEvent};
+
+/// One conversation thread: its chat transcript, event log, and run state.
+pub(super) struct Thread {
+    /// Stable thread id (e.g. `t1`).
+    pub(super) id: String,
+    /// Parent thread id when this thread was forked, else `None`.
+    /// Human-facing thread name.
+    pub(super) name: String,
+    /// Session id assigned to this thread.
+    pub(super) session_id: String,
+    /// Chat messages exchanged in the thread.
+    pub(super) messages: Vec<ChatMessage>,
+    /// Shared bounded event history and chat-visible projection.
+    pub(super) event_log: ThreadEventLog,
+    /// Whether a cycle is currently running in this thread.
+    pub(super) running: bool,
+    /// Summary of the last completed cycle, if any.
+    pub(super) last_result: Option<CycleResultSummary>,
+}
+
+impl Deref for Thread {
+    type Target = ThreadEventLog;
+
+    /// Expose event projections without adapter-specific forwarding methods.
+    fn deref(&self) -> &Self::Target {
+        &self.event_log
+    }
+}
+
+impl DerefMut for Thread {
+    /// Expose mutable event projections to runtime operations.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.event_log
+    }
+}
+
+/// The whole scripted world: every thread plus shared roster/presence data.
+pub(super) struct State {
+    /// All threads, in creation order.
+    pub(super) threads: Vec<Thread>,
+    /// Id of the currently active thread.
+    pub(super) active_id: String,
+    /// Monotonic event sequence counter.
+    seq: u64,
+    /// Monotonic cycle counter used to mint cycle ids.
+    pub(super) cycle_seq: u64,
+    /// Whether tracing is enabled.
+    pub(super) tracing: bool,
+    /// The scripted agent roster.
+    pub(super) roster: Vec<AgentDescriptor>,
+    /// The scripted declared capacity: the containment chain and template
+    /// catalog the scripted roster sits in. Empty by default so the fleet
+    /// surfaces degrade to "nothing declared".
+    pub(super) capacity: crate::runtime::CapacitySnapshot,
+    /// The scripted worker registry, as `Runtime::workers` reports it. Distinct
+    /// from `roster`: the registry is the fleet this process can delegate to,
+    /// which is not necessarily what a backend advertises.
+    pub(super) workers: Vec<WorkerInfo>,
+    /// Presence keyed by agent id.
+    pub(super) presence: HashMap<String, AgentPresence>,
+    /// Peer sessions keyed by agent id.
+    pub(super) sessions: HashMap<String, Vec<PeerSession>>,
+    /// The host-link identity, when configured.
+    pub(super) link: Option<LinkIdentity>,
+    /// Scripted agent-harness status, when a scenario exercises the harness
+    /// task board. `None` by default so the Agents view degrades to nothing.
+    pub(super) harness: Option<crate::harness_contract::HarnessStatus>,
+}
+
+impl State {
+    /// Mutable handle to the active thread. Panics if it is missing (an invariant
+    /// of the mock, which always keeps the active id pointing at a live thread).
+    pub(super) fn active_mut(&mut self) -> &mut Thread {
+        let id = self.active_id.clone();
+        self.threads
+            .iter_mut()
+            .find(|t| t.id == id)
+            .expect("active thread")
+    }
+
+    /// Shared handle to the active thread. Panics if it is missing.
+    pub(super) fn active(&self) -> &Thread {
+        self.threads
+            .iter()
+            .find(|t| t.id == self.active_id)
+            .expect("active thread")
+    }
+
+    /// Append `event` to the active thread with a fresh sequence and timestamp,
+    /// mirroring it into the chat log when it is a chat-visible event and
+    /// trimming both logs to their caps.
+    pub(super) fn emit(&mut self, event: TuiEvent) {
+        self.seq += 1;
+        let env = EventEnvelope {
+            seq: self.seq,
+            at: now_millis(),
+            event,
+        };
+        let thread = self.active_mut();
+        thread.event_log.push(env);
+    }
+}
+
+/// Current wall-clock time in milliseconds, via the chat-store clock.
+pub(super) fn now_millis() -> i64 {
+    crate::ui::chat_store::now_millis()
+}
+
+/// Mint an id of the form `{prefix}-{millis}-{hex}` for sessions and threads.
+pub(super) fn gen_id(prefix: &str) -> String {
+    format!("{prefix}-{}-{:04x}", now_millis(), rand_suffix())
+}
+
+/// Cheap, dependency-free pseudo-random suffix derived from the clock.
+fn rand_suffix() -> u16 {
+    // Cheap, dependency-free pseudo-random from the clock.
+    (now_millis() as u64)
+        .wrapping_mul(2654435761)
+        .rotate_left(13) as u16
+}
+
+/// A scripted runtime. Construct with [`MockRuntime::demo`] for a populated
+/// snapshot or [`MockRuntime::empty`] for a bare one.
+pub struct MockRuntime {
+    /// The scripted world behind a mutex.
+    pub(super) state: Arc<Mutex<State>>,
+    /// Change-notification channel; every mutation pings it.
+    pub(super) tx: broadcast::Sender<()>,
+    /// Ordered log of runtime methods invoked (test seam).
+    calls: Arc<Mutex<Vec<String>>>,
+    /// Scripted feedback board, mutated in place by votes and comments so the
+    /// offline demo's controls behave like the real thing.
+    pub(super) board: Arc<Mutex<super::feedback::MockBoard>>,
+    /// Handoff briefs this runtime was asked to send.
+    ///
+    /// The briefs themselves, not just that the method was called: what a
+    /// handoff is *for* is the note and the transcript, so a test that could
+    /// only assert "it happened" would pass while the operator's note was
+    /// dropped on the floor.
+    handoffs: Arc<Mutex<Vec<crate::hub::HarnessHandoff>>>,
+}
+
+impl MockRuntime {
+    /// Wrap a fully-built [`State`] into a runtime handle with fresh channels.
+    fn from_state(state: State) -> Self {
+        let (tx, _rx) = broadcast::channel(256);
+        MockRuntime {
+            state: Arc::new(Mutex::new(state)),
+            tx,
+            calls: Arc::new(Mutex::new(Vec::new())),
+            board: super::feedback::demo_board(),
+            handoffs: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Record a runtime method invocation in the call log.
+    pub(super) fn record(&self, name: &str) {
+        self.calls.lock().unwrap().push(name.to_string());
+    }
+
+    /// The ordered log of runtime methods invoked on this mock. Test seam.
+    pub fn recorded_calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    /// Record a handoff brief this runtime was asked to send.
+    pub(super) fn record_handoff(&self, brief: crate::hub::HarnessHandoff) {
+        self.handoffs.lock().unwrap().push(brief);
+    }
+
+    /// The handoff briefs sent through this mock, in order. Test seam.
+    pub fn recorded_handoffs(&self) -> Vec<crate::hub::HarnessHandoff> {
+        self.handoffs.lock().unwrap().clone()
+    }
+
+    /// Emit an arbitrary event into the active thread and notify subscribers.
+    /// Test/demo scripting seam.
+    pub fn script_event(&self, event: TuiEvent) {
+        {
+            self.state.lock().unwrap().emit(event);
+        }
+        self.ping();
+    }
+
+    /// Script the registry returned by [`Runtime::workers`](crate::runtime::Runtime::workers).
+    ///
+    /// The worker registry is a separate surface from the snapshot roster — a
+    /// locally-added host-link worker is in the former and not the latter —
+    /// so views that read both need a mock that can populate them apart.
+    pub fn set_workers(&self, workers: Vec<WorkerInfo>) {
+        {
+            self.state.lock().unwrap().workers = workers;
+        }
+        self.ping();
+    }
+
+    /// Force the active thread's running flag. Test/demo scripting seam.
+    pub fn set_running(&self, running: bool) {
+        {
+            self.state.lock().unwrap().active_mut().running = running;
+        }
+        self.ping();
+    }
+
+    /// A bare runtime: one empty main thread, no roster.
+    pub fn empty() -> Self {
+        let session_id = gen_id("tui");
+        let state = State {
+            threads: vec![Thread {
+                id: "t1".into(),
+                name: "main".into(),
+                session_id,
+                messages: Vec::new(),
+                event_log: ThreadEventLog::default(),
+                running: false,
+                last_result: None,
+            }],
+            active_id: "t1".into(),
+            seq: 0,
+            cycle_seq: 0,
+            tracing: false,
+            roster: Vec::new(),
+            capacity: Default::default(),
+            workers: Vec::new(),
+            presence: HashMap::new(),
+            sessions: HashMap::new(),
+            link: None,
+            harness: None,
+        };
+        MockRuntime::from_state(state)
+    }
+
+    /// Notify subscribers that state changed.
+    pub(super) fn ping(&self) {
+        let _ = self.tx.send(());
+    }
+
+    /// Fold each thread's event log into a [`ThreadSummary`] (turn count, open
+    /// tasks, and items needing attention) for the snapshot.
+    pub(super) fn thread_summaries(state: &State) -> Vec<ThreadSummary> {
+        state
+            .threads
+            .iter()
+            .map(|t| {
+                let mut running_tasks = 0i64;
+                let mut attention = 0usize;
+                for env in &t.events {
+                    match &env.event {
+                        TuiEvent::TaskStart { .. } => running_tasks += 1,
+                        TuiEvent::TaskComplete { .. } => running_tasks -= 1,
+                        TuiEvent::TaskAttention { .. } | TuiEvent::Error { .. } => attention += 1,
+                        _ => {}
+                    }
+                }
+                ThreadSummary {
+                    id: t.id.clone(),
+                    name: t.name.clone(),
+                    running: t.running,
+                    turns: t.messages.len().div_ceil(2),
+                    running_tasks: running_tasks.max(0) as usize,
+                    attention,
+                }
+            })
+            .collect()
+    }
+}

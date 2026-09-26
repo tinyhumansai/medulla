@@ -1,0 +1,596 @@
+//! Tests for the env module.
+
+use super::*;
+
+fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn dm_recipient_per_provider_beats_generic_beats_owner_fallbacks() {
+    // Owner fallback chain, from lowest to highest precedence.
+    let e = env(&[("OPENHUMAN_OWNER_AGENT", "legacy")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("legacy")
+    );
+
+    let e = env(&[
+        ("OPENHUMAN_OWNER_AGENT", "legacy"),
+        ("MEDULLA_OPENHUMAN_OWNER", "owner"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("owner")
+    );
+
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_OWNER", "owner"),
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("harness")
+    );
+
+    let e = env(&[
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
+        ("MEDULLA_CODEX_DM_TO", "codex"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("codex")
+    );
+    // A per-provider key for a different provider does not leak.
+    assert_eq!(
+        dm_recipient(HarnessProvider::Claude, &e).as_deref(),
+        Some("harness")
+    );
+
+    assert_eq!(dm_recipient(HarnessProvider::Codex, &env(&[])), None);
+}
+
+#[test]
+fn empty_values_are_skipped() {
+    let e = env(&[
+        ("MEDULLA_CODEX_DM_TO", ""),
+        ("MEDULLA_HARNESS_DM_TO", "harness"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("harness")
+    );
+}
+
+#[test]
+fn receive_from_falls_back_to_recipient() {
+    // No receive-from keys → falls back to the passed recipient.
+    assert_eq!(
+        receive_from(HarnessProvider::Codex, &env(&[]), Some("owner")).as_deref(),
+        Some("owner")
+    );
+    // Generic override wins over the recipient.
+    let e = env(&[("MEDULLA_HARNESS_RECEIVE_FROM", "generic")]);
+    assert_eq!(
+        receive_from(HarnessProvider::Codex, &e, Some("owner")).as_deref(),
+        Some("generic")
+    );
+    // Per-provider beats generic.
+    let e = env(&[
+        ("MEDULLA_HARNESS_RECEIVE_FROM", "generic"),
+        ("MEDULLA_CODEX_RECEIVE_FROM", "codex"),
+    ]);
+    assert_eq!(
+        receive_from(HarnessProvider::Codex, &e, Some("owner")).as_deref(),
+        Some("codex")
+    );
+    // No recipient and no keys → None.
+    assert_eq!(receive_from(HarnessProvider::Codex, &env(&[]), None), None);
+}
+
+#[test]
+fn receive_enabled_default_on_and_explicit_off() {
+    assert!(receive_enabled(HarnessProvider::Claude, &env(&[])));
+    // Generic off.
+    let e = env(&[("MEDULLA_HARNESS_RECEIVE", "0")]);
+    assert!(!receive_enabled(HarnessProvider::Claude, &e));
+    // Per-provider off beats a generic that is on.
+    let e = env(&[
+        ("MEDULLA_HARNESS_RECEIVE", "1"),
+        ("MEDULLA_CLAUDE_RECEIVE", "0"),
+    ]);
+    assert!(!receive_enabled(HarnessProvider::Claude, &e));
+    // Per-provider on beats a generic that is off.
+    let e = env(&[
+        ("MEDULLA_HARNESS_RECEIVE", "0"),
+        ("MEDULLA_CLAUDE_RECEIVE", "1"),
+    ]);
+    assert!(receive_enabled(HarnessProvider::Claude, &e));
+}
+
+#[test]
+fn provider_bin_override_and_default() {
+    assert_eq!(provider_bin(HarnessProvider::Codex, &env(&[])), "codex");
+    let e = env(&[("MEDULLA_CODEX_BIN", "/opt/codex")]);
+    assert_eq!(provider_bin(HarnessProvider::Codex, &e), "/opt/codex");
+    // Ordering for claude is MEDULLA_ > the legacy TINYVERSE_ > the deprecated
+    // TINYPLACE_; values are trimmed.
+    let e = env(&[
+        ("TINYVERSE_CLAUDE_BIN", "  /opt/claude  "),
+        ("TINYPLACE_CLAUDE_BIN", "/oldest/claude"),
+    ]);
+    assert_eq!(provider_bin(HarnessProvider::Claude, &e), "/opt/claude");
+    let e = env(&[
+        ("MEDULLA_CLAUDE_BIN", "  /new/claude  "),
+        ("TINYVERSE_CLAUDE_BIN", "/opt/claude"),
+    ]);
+    assert_eq!(provider_bin(HarnessProvider::Claude, &e), "/new/claude");
+    // Whitespace-only override falls back to the default.
+    let e = env(&[("MEDULLA_CODEX_BIN", "   ")]);
+    assert_eq!(provider_bin(HarnessProvider::Codex, &e), "codex");
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &env(&[])),
+        "openhuman-core"
+    );
+    let e = env(&[("OPENHUMAN_BIN", " /opt/openhuman ")]);
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &e),
+        "/opt/openhuman"
+    );
+    // The conventional namespaced spelling outranks the bare legacy one, which
+    // is kept so a host configured before the convention keeps working.
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_BIN", "/new/openhuman"),
+        ("OPENHUMAN_BIN", "/opt/openhuman"),
+    ]);
+    assert_eq!(
+        provider_bin(HarnessProvider::Openhuman, &e),
+        "/new/openhuman"
+    );
+}
+
+#[test]
+fn model_override_prefers_the_provider_key_then_the_generic_one() {
+    use crate::protocol::env::model_override;
+
+    assert!(model_override(HarnessProvider::Openhuman, &env(&[])).is_none());
+    // Generic alone applies to every provider.
+    let e = env(&[("MEDULLA_HARNESS_MODEL", "generic/model")]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("generic/model")
+    );
+    assert_eq!(
+        model_override(HarnessProvider::Claude, &e).as_deref(),
+        Some("generic/model")
+    );
+    // Per-provider beats generic.
+    let e = env(&[
+        ("MEDULLA_HARNESS_MODEL", "generic/model"),
+        ("MEDULLA_OPENHUMAN_MODEL", "deepseek/deepseek-v4-pro"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("deepseek/deepseek-v4-pro")
+    );
+    // …and leaves another provider on the generic value.
+    assert_eq!(
+        model_override(HarnessProvider::Codex, &e).as_deref(),
+        Some("generic/model")
+    );
+    // The deprecated spelling is read directly behind each MEDULLA_ name.
+    let e = env(&[("TINYPLACE_OPENHUMAN_MODEL", "  legacy/model  ")]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("legacy/model")
+    );
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_MODEL", "new/model"),
+        ("TINYPLACE_OPENHUMAN_MODEL", "legacy/model"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("new/model")
+    );
+    // Exported but blank is a shell accident, not a request for "".
+    let e = env(&[("MEDULLA_OPENHUMAN_MODEL", "   ")]);
+    assert!(model_override(HarnessProvider::Openhuman, &e).is_none());
+    // A blank higher-precedence value must not mask a usable fallback.
+    let e = env(&[
+        ("MEDULLA_OPENHUMAN_MODEL", "   "),
+        ("TINYPLACE_OPENHUMAN_MODEL", "legacy/model"),
+        ("MEDULLA_HARNESS_MODEL", "generic/model"),
+    ]);
+    assert_eq!(
+        model_override(HarnessProvider::Openhuman, &e).as_deref(),
+        Some("legacy/model")
+    );
+}
+
+#[test]
+fn bin_is_overridden_only_when_the_resolved_binary_actually_differs() {
+    // The default itself, as `provider_bin` would resolve it with no override
+    // set: not overridden.
+    assert!(!bin_is_overridden(HarnessProvider::Claude, "claude"));
+    // A real override: this is exactly the case attach_cli must withhold the
+    // fleet grant for.
+    assert!(bin_is_overridden(
+        HarnessProvider::Claude,
+        "/opt/untrusted/claude"
+    ));
+    // An override that merely spells out the default's own name — an operator
+    // setting it redundantly, or a launcher that always sets the variable —
+    // must not count as an override: nothing about the resolved binary
+    // differs, so there is nothing to withhold anything from.
+    let resolved = provider_bin(
+        HarnessProvider::Claude,
+        &env(&[("TINYVERSE_CLAUDE_BIN", "claude")]),
+    );
+    assert!(!bin_is_overridden(HarnessProvider::Claude, &resolved));
+    // Same, through the whitespace `provider_bin` itself trims away — and
+    // trimmed again here, so a caller that resolved the binary some other way
+    // cannot slip padding past the comparison.
+    assert!(!bin_is_overridden(HarnessProvider::Codex, "  codex  "));
+    // OpenHuman's binary keeps its historical name, which is the one case
+    // where the default is not the provider's own spelling.
+    assert!(!bin_is_overridden(
+        HarnessProvider::Openhuman,
+        "openhuman-core"
+    ));
+    assert!(bin_is_overridden(HarnessProvider::Openhuman, "openhuman"));
+}
+
+#[test]
+fn provider_args_whitespace_split() {
+    assert!(provider_args(HarnessProvider::Codex, &env(&[])).is_empty());
+    let e = env(&[("MEDULLA_CODEX_ARGS", "  --foo   bar --baz ")]);
+    assert_eq!(
+        provider_args(HarnessProvider::Codex, &e),
+        vec!["--foo", "bar", "--baz"]
+    );
+    // A different provider's args do not leak.
+    assert!(provider_args(HarnessProvider::Claude, &e).is_empty());
+}
+
+#[test]
+fn sessions_dir_precedence() {
+    // Per-provider beats TINYVERSE beats HARNESS.
+    let e = env(&[
+        ("MEDULLA_CLAUDE_SESSIONS_DIR", "/p"),
+        ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
+    ]);
+    assert_eq!(
+        sessions_dir(HarnessProvider::Claude, &e),
+        PathBuf::from("/p")
+    );
+
+    let e = env(&[
+        ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
+    ]);
+    assert_eq!(
+        sessions_dir(HarnessProvider::Claude, &e),
+        PathBuf::from("/tv")
+    );
+
+    // TINYVERSE is claude-only; codex ignores it and uses HARNESS.
+    let e = env(&[
+        ("TINYVERSE_CLAUDE_SESSIONS_DIR", "/tv"),
+        ("MEDULLA_HARNESS_SESSIONS_DIR", "/h"),
+    ]);
+    assert_eq!(
+        sessions_dir(HarnessProvider::Codex, &e),
+        PathBuf::from("/h")
+    );
+
+    // Default when nothing set (ends with the provider-specific suffix).
+    assert!(sessions_dir(HarnessProvider::Codex, &env(&[])).ends_with("sessions"));
+    assert!(sessions_dir(HarnessProvider::Claude, &env(&[])).ends_with("projects"));
+}
+
+#[test]
+fn timings_defaults_and_numeric_fallback() {
+    let empty = env(&[]);
+    assert_eq!(session_poll_ms(HarnessProvider::Codex, &empty), 500);
+    assert_eq!(receive_poll_ms(HarnessProvider::Codex, &empty), 1_500);
+    assert_eq!(status_heartbeat_ms(HarnessProvider::Codex, &empty), 15_000);
+    assert_eq!(status_idle_ms(HarnessProvider::Codex, &empty), 30_000);
+
+    // Per-provider beats generic.
+    let e = env(&[
+        ("MEDULLA_HARNESS_SESSION_POLL_MS", "800"),
+        ("MEDULLA_CODEX_SESSION_POLL_MS", "250"),
+    ]);
+    assert_eq!(session_poll_ms(HarnessProvider::Codex, &e), 250);
+    // Generic applies when no per-provider key.
+    assert_eq!(session_poll_ms(HarnessProvider::Claude, &e), 800);
+
+    // Non-numeric / zero / negative → default silently.
+    for bad in ["abc", "0", "-5", "  "] {
+        let e = env(&[("MEDULLA_CODEX_RECEIVE_POLL_MS", bad)]);
+        assert_eq!(receive_poll_ms(HarnessProvider::Codex, &e), 1_500);
+    }
+    // Whitespace-padded numeric parses.
+    let e = env(&[("MEDULLA_CODEX_STATUS_IDLE_MS", " 12345 ")]);
+    assert_eq!(status_idle_ms(HarnessProvider::Codex, &e), 12_345);
+}
+
+/// Deserialize a `RouterConfig` from a JSON literal for the resolver tests.
+fn router(json: &str) -> RouterConfig {
+    serde_json::from_str(json).expect("valid router config")
+}
+
+#[test]
+fn router_env_no_config_is_empty_for_every_provider() {
+    // An empty router (no baseUrl anywhere) injects nothing — the child spawns
+    // exactly as it would with no [router] section at all.
+    let cfg = RouterConfig::default();
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
+        let injection = router_env(provider, &cfg);
+        assert!(injection.is_empty(), "{provider:?} must inject nothing");
+        assert!(injection.env.is_empty());
+        assert!(injection.secret_env.is_empty());
+        assert!(injection.args.is_empty());
+    }
+}
+
+#[test]
+fn router_env_codex_emits_openai_base_and_key_by_name() {
+    let cfg = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
+    let injection = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    // The key is referenced by env-var NAME, never the value.
+    assert_eq!(
+        injection.secret_env,
+        vec![(
+            "OPENAI_API_KEY".to_string(),
+            "MEDULLA_ROUTER_KEY".to_string()
+        )]
+    );
+    assert!(injection.args.is_empty());
+}
+
+#[test]
+fn router_env_opencode_uses_openai_compatible_env() {
+    let cfg = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":"OC_KEY"}"#);
+    let injection = router_env(HarnessProvider::Opencode, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    assert_eq!(
+        injection.secret_env,
+        vec![("OPENAI_API_KEY".to_string(), "OC_KEY".to_string())]
+    );
+}
+
+#[test]
+fn router_env_claude_emits_anthropic_base_and_auth_token() {
+    // Claude speaks the Anthropic wire format: base URL + AUTH_TOKEN (by name).
+    let cfg = router(r#"{"baseUrl":"https://gw/anthropic","apiKeyEnv":"MEDULLA_ROUTER_KEY"}"#);
+    let injection = router_env(HarnessProvider::Claude, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://gw/anthropic".to_string()
+        )]
+    );
+    assert_eq!(
+        injection.secret_env,
+        vec![(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "MEDULLA_ROUTER_KEY".to_string()
+        )]
+    );
+}
+
+#[test]
+fn router_env_provider_override_beats_top_level() {
+    // providers.claude.baseUrl (Anthropic-passthrough) wins for claude, while
+    // codex inherits the top-level OpenAI-compatible endpoint.
+    let cfg = router(
+        r#"{
+            "baseUrl":"https://top/v1",
+            "apiKeyEnv":"K",
+            "providers":{"claude":{"baseUrl":"https://gw/anthropic"}}
+        }"#,
+    );
+    let claude = router_env(HarnessProvider::Claude, &cfg);
+    assert_eq!(
+        claude.env,
+        vec![(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://gw/anthropic".to_string()
+        )]
+    );
+    let codex = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        codex.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://top/v1".to_string())]
+    );
+}
+
+#[test]
+fn router_env_without_api_key_env_injects_endpoint_only() {
+    // A router with an endpoint but no apiKeyEnv steers the base URL and leaves
+    // the harness's own credentials in place (no secret_env binding).
+    let cfg = router(r#"{"baseUrl":"https://gw/v1"}"#);
+    let injection = router_env(HarnessProvider::Codex, &cfg);
+    assert_eq!(
+        injection.env,
+        vec![("OPENAI_BASE_URL".to_string(), "https://gw/v1".to_string())]
+    );
+    assert!(
+        injection.secret_env.is_empty(),
+        "no apiKeyEnv → no key binding"
+    );
+
+    // An empty apiKeyEnv name is treated as unset.
+    let blank = router(r#"{"baseUrl":"https://gw/v1","apiKeyEnv":""}"#);
+    assert!(router_env(HarnessProvider::Codex, &blank)
+        .secret_env
+        .is_empty());
+}
+
+#[test]
+fn router_env_key_without_base_url_injects_nothing() {
+    // apiKeyEnv set but no baseUrl (for this provider) → the router is not
+    // routing here, so nothing is injected and the child keeps its own endpoint.
+    let cfg = router(r#"{"apiKeyEnv":"K"}"#);
+    assert!(router_env(HarnessProvider::Codex, &cfg).is_empty());
+}
+
+// ------------------------------------------- deprecated TINYPLACE_* names ---
+
+#[test]
+fn the_deprecated_tinyplace_names_still_resolve() {
+    // These are what deployed hosts and shell profiles already set. Dropping
+    // them would not fail loudly: a worker whose owner stopped resolving runs as
+    // a plain passthrough, serving nobody, which reads as a broken harness
+    // rather than as a config that needs renaming.
+    let e = env(&[("TINYPLACE_HARNESS_DM_TO", "old")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old")
+    );
+    let e = env(&[("TINYPLACE_CODEX_DM_TO", "old-codex")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-codex")
+    );
+    let e = env(&[("TINYPLACE_OPENHUMAN_OWNER", "old-owner")]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-owner")
+    );
+
+    let e = env(&[("TINYPLACE_HARNESS_RECEIVE_FROM", "old")]);
+    assert_eq!(
+        receive_from(HarnessProvider::Codex, &e, None).as_deref(),
+        Some("old")
+    );
+    assert!(!receive_enabled(
+        HarnessProvider::Codex,
+        &env(&[("TINYPLACE_HARNESS_RECEIVE", "0")])
+    ));
+    assert_eq!(
+        provider_bin(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_BIN", "/old")])
+        ),
+        "/old"
+    );
+    assert_eq!(
+        provider_args(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_ARGS", "--a --b")])
+        ),
+        vec!["--a".to_string(), "--b".to_string()]
+    );
+    assert_eq!(
+        sessions_dir(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_SESSIONS_DIR", "/old")])
+        ),
+        PathBuf::from("/old")
+    );
+    assert_eq!(
+        session_poll_ms(
+            HarnessProvider::Codex,
+            &env(&[("TINYPLACE_CODEX_SESSION_POLL_MS", "77")])
+        ),
+        77
+    );
+}
+
+#[test]
+fn the_medulla_name_wins_over_the_deprecated_one_at_every_tier() {
+    // Within a precedence tier the new spelling must win, or a host that set
+    // both during a migration would keep silently using the old value.
+    let e = env(&[
+        ("MEDULLA_HARNESS_DM_TO", "new"),
+        ("TINYPLACE_HARNESS_DM_TO", "old"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("new")
+    );
+
+    // ...and a per-provider *deprecated* name still beats a generic new one:
+    // the provider/generic split is the outer precedence, spelling the inner.
+    let e = env(&[
+        ("TINYPLACE_CODEX_DM_TO", "old-codex"),
+        ("MEDULLA_HARNESS_DM_TO", "new-generic"),
+    ]);
+    assert_eq!(
+        dm_recipient(HarnessProvider::Codex, &e).as_deref(),
+        Some("old-codex")
+    );
+
+    let e = env(&[
+        ("MEDULLA_CODEX_BIN", "/new"),
+        ("TINYPLACE_CODEX_BIN", "/old"),
+    ]);
+    assert_eq!(provider_bin(HarnessProvider::Codex, &e), "/new");
+}
+
+// ── scrub_core_state ─────────────────────────────────────────────────────────
+
+/// The regression: a `claude`/`codex`/`opencode` session inherited the embedded
+/// core's workspace, and anything it ran there (a `cargo test`, most sharply)
+/// resolved the developer's live credential store as its own keyring.
+#[test]
+fn scrub_core_state_strips_the_core_workspace_from_coding_harnesses() {
+    for provider in [
+        HarnessProvider::Claude,
+        HarnessProvider::Codex,
+        HarnessProvider::Opencode,
+    ] {
+        let mut e = env(&[
+            ("OPENHUMAN_WORKSPACE", "/home/dev/.medulla/uid/workspace"),
+            ("PATH", "/usr/bin"),
+        ]);
+        scrub_core_state(&mut e, provider);
+        assert!(
+            !e.contains_key("OPENHUMAN_WORKSPACE"),
+            "{provider:?} kept the core workspace"
+        );
+        assert_eq!(
+            e.get("PATH").map(String::as_str),
+            Some("/usr/bin"),
+            "{provider:?} lost an unrelated variable"
+        );
+    }
+}
+
+/// The OpenHuman harness *is* the core: stripping this would point it at
+/// `~/.openhuman`, a different account's agents, memory, and credentials than
+/// the Medulla process that started it.
+#[test]
+fn scrub_core_state_leaves_the_openhuman_harness_alone() {
+    let mut e = env(&[("OPENHUMAN_WORKSPACE", "/home/dev/.medulla/uid/workspace")]);
+    scrub_core_state(&mut e, HarnessProvider::Openhuman);
+    assert_eq!(
+        e.get("OPENHUMAN_WORKSPACE").map(String::as_str),
+        Some("/home/dev/.medulla/uid/workspace")
+    );
+}
+
+#[test]
+fn scrub_core_state_is_a_no_op_when_nothing_is_set() {
+    let mut e = env(&[("PATH", "/usr/bin")]);
+    scrub_core_state(&mut e, HarnessProvider::Claude);
+    assert_eq!(e.len(), 1);
+}

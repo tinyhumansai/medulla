@@ -105,11 +105,11 @@ Then commit the gitlink.
 
 Because `tinyflows` is pre-1.0 and still changing its `engine` entry points,
 expect the adapter seam in
-[`src/sdk/src/flow_engine/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/flow_engine/)
+[`src/sdk/src/flow_engine/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/flow_engine/)
 to need attention on an update; the rest of the SDK should not. `tinyagents`
-upgrades surface in [`src/sdk/src/agent/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/agent/),
+upgrades surface in [`src/sdk/src/agent/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/agent/),
 and `tinyhumans-sdk` upgrades in
-[`src/sdk/src/client/`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/client/).
+[`src/sdk/src/client/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/client/).
 
 ## Coverage and the vendored tree
 

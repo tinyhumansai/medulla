@@ -18,7 +18,7 @@ are independent of each other:
 
 ## Providers
 
-Five [`HarnessProvider`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/protocol/frames/types.rs)
+Five [`HarnessProvider`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/protocol/frames/types.rs)
 values exist, and only three of them are CLIs the daemon can detect and
 auto-select: `claude`, `codex`, and `opencode` (`daemon::providers::DAEMON_PROVIDERS`).
 The other two are named explicitly or not reached at all.
@@ -49,7 +49,7 @@ harness, its JSON crosses the wire to this client. The SDK represents those
 public wire shapes as serde types so the SDK and TUI decode them consistently.
 
 The mirrors live in
-[`medulla::harness_contract`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/harness_contract/). Field names
+[`medulla::harness_contract`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/harness_contract/). Field names
 match the public JSON contract: every struct is
 `#[serde(rename_all = "camelCase")]` and the status and state enums are
 lowercase. Round-trip tests in `harness_contract/tests.rs` assert those names
@@ -107,7 +107,7 @@ The task board appears when the backend runtime surfaces a `HarnessStatus`
 (`RuntimeSnapshot::harness`). The Sessions transcript header then shows a compact
 board: a per-status count summary (`tasks · open 2 · active 1 · done 3`) followed
 by one `glyph title` row per task. The pure helpers live in
-[`medulla::ui::harness`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk/src/ui/harness/).
+[`medulla::ui::harness`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/ui/harness/).
 
 The seat budget appears when a selected lane's agent descriptor carries a
 `metadata.budget` stamp (`AgentBudgetMetadata`). The header then shows a one-line

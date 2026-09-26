@@ -1,0 +1,115 @@
+[workspace]
+resolver = "2"
+members = ["src/link", "src/sdk", "src/tui"]
+# Vendored path deps must not become workspace members: they carry their own
+# lints/tests and would otherwise fall under the CI clippy/test gates.
+#
+# `worktrees` is excluded for a different reason: feature worktrees are checked
+# out *inside* this directory, so each one carries its own nested
+# `vendor/`. Cargo walks up from that nested manifest, finds no
+# workspace claiming it (the worktree's own `exclude = ["vendor"]` is relative
+# to the worktree), and reaches this manifest instead — making `cargo fmt --all`
+# fail from every worktree with "current package believes it's in a workspace
+# when it's not". Excluding `worktrees` stops the walk here.
+exclude = ["vendor", "worktrees"]
+
+[workspace.package]
+version = "0.13.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/tinyhumansai/medulla"
+
+[workspace.dependencies]
+medulla = { path = "src/sdk", default-features = false }
+# The host-link transport (docs/host-link-protocol.md). A plain path dep: it is
+# ours, has no registry coordinate, and is not vendored.
+medulla-link = { path = "src/link" }
+# The agent harness lives in the split `tinyagents-harness` package inside the
+# direct `tinyagents` submodule. Keep the dependency key as `tinyagents` so the
+# host code can migrate independently of the upstream package rename.
+#
+# `sqlite` brings the durable session store (`tinyagents::session`) that backs
+# Medulla's session surface; `tools` brings the builtin tool family the agent
+# loop dispatches. Neither is on by default in the crate.
+tinyagents = { package = "tinyagents-harness", path = "vendor/tinyagents/crates/tinyagents-harness", features = ["sqlite", "tools"] }
+# TinyAgents exposes provider messages and tool wire types through its
+# companion inference package; Medulla uses those types at its tool boundary.
+tinyinference = { path = "vendor/tinyagents/vendor/tinyinference/crates/tinyinference" }
+# The shared TinyHumans backend client. A direct submodule at
+# `vendor/tinyhumans-sdk`; it has no registry coordinate, so unlike the tiny*
+# crates around it, it is a plain path dep rather than declared-then-patched.
+tinyhumans-sdk = { path = "vendor/tinyhumans-sdk" }
+# The workflow engine is the package nested inside the direct `tinyflows`
+# submodule; the repository root is now its workspace manifest.
+# `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
+# deterministic capability stand-ins in ordinary builds.
+tinyflows = { path = "vendor/tinyflows/crates/tinyflows", features = ["mock", "host-caps", "store"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# The comment-preserving half of the same TOML stack: `toml` 0.8 already builds
+# `toml_edit` 0.22 (it is its parser), so declaring it explicitly links no new
+# crate. Needed because `toml::Table` models values only — round-tripping an
+# operator's hand-written `~/.codex/config.toml` through it silently deletes
+# their comments and key order.
+toml_edit = "0.22"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "process", "fs", "signal", "net"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+# The server half of the loopback inference proxy. reqwest 0.12 already resolves
+# hyper 1.x, http 1.x and bytes, so these pin the same versions rather than
+# introducing a second HTTP stack. `hyper-util` supplies only the tokio IO
+# adapter (`TokioIo`) — no connection pool, no service router.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+# Depended on only to pick a TLS backend explicitly. rustls 0.23 refuses to
+# guess when more than one provider is compiled in, and this workspace has two:
+# `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs` with the vendored
+# `tinyagents` harness (`vendor/tinyagents`, via its `rustls-platform-verifier`
+# dependency). Neither wins by default, so every TLS handshake panicked on
+# whichever tokio worker reached it first.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+portable-pty = "0.9"
+# Terminal emulator: parses a PTY's VT/ANSI stream into a screen grid so a live
+# harness CLI can be rendered inside a ratatui pane.
+vt100 = "0.15"
+# Inspect terminal modes that vt100 parses but does not expose, such as xterm's
+# alternate-scroll mode (DECSET 1007).
+vte = "0.11"
+# Minted session ids: a harness told which id to use writes a transcript we can
+# find by name, instead of one we have to guess by mtime.
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+tracing = "0.1"
+base64 = "0.22"
+async-trait = "0.1"
+agent-client-protocol = "2"
+dirs = "6"
+sysinfo = { version = "0.37.2", default-features = false, features = ["disk", "system"] }
+# Advisory file locks that work on both unix (flock) and Windows (LockFileEx)
+# and are released by the OS when the holding process dies — what lets a
+# crashed daemon's identity slot be reclaimed without a stale-pidfile dance.
+fs2 = "0.4"
+regex = "1"
+sha2 = "0.10"
+tempfile = "3"
+# Terminal-cell width for wide characters (CJK, emoji), matching how ratatui's
+# own `Line::width()` measures — a char-count wrap would clip or over-wrap a
+# row containing wide glyphs.
+unicode-width = "0.2"
+
+# The vendored engines are nested workspaces, so depend on their concrete
+# packages above rather than attempting to patch their virtual roots.
+# Vendored code stays out of `members` via `exclude`, so each nested workspace
+# keeps its own lints and tests instead of joining this workspace's CI gates.
+# Keep these package paths in lockstep with scripts/init-submodules.sh.
+# Dependency DWARF dominates target/ size and link time, so third-party crates
+# compile without it while this workspace's own crates keep full debuginfo.
+[profile.dev.package."*"]
+debug = false

@@ -1,0 +1,622 @@
+//! Unit tests for recent-session scanning, summary parsing, label extraction,
+//! and current-folder-first ranking.
+
+use super::scan::{collect_session_files, is_here, is_session_file, sessions_dir_for};
+use super::summary::{
+    as_message_content, codex_index_map, codex_thread_label, codex_thread_label_for_cwd,
+    extract_text, first_prompt_text, read_claude_summary, read_codex_summary, slug_label,
+};
+use super::*;
+use crate::ui::util::SLUG_MAX_CHARS;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn write_session(dir: &Path, name: &str, contents: &str) -> PathBuf {
+    let path = dir.join(name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&path, contents).unwrap();
+    path
+}
+
+#[test]
+fn ranks_current_cwd_first_then_recency() {
+    let tmp = std::env::temp_dir().join(format!("medulla-sh-{}", std::process::id()));
+    let claude_dir = tmp.join("claude");
+    let codex_dir = tmp.join("codex").join("sessions");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::create_dir_all(&codex_dir).unwrap();
+
+    let here = tmp.join("workspace");
+    fs::create_dir_all(&here).unwrap();
+    let here_str = here.to_string_lossy().into_owned();
+
+    // A session in a different cwd.
+    write_session(
+        &claude_dir,
+        "a.jsonl",
+        &format!(
+            "{}\n",
+            serde_json::json!({"sessionId":"claude-a","cwd":"/elsewhere","type":"user","message":{"role":"user","content":"do A"}})
+        ),
+    );
+    // A session in the current cwd — ranks first regardless of recency.
+    write_session(
+        &codex_dir,
+        "rollout-b.jsonl",
+        &format!(
+            "{}\n{}\n",
+            serde_json::json!({"type":"session_meta","payload":{"session_id":"codex-b","cwd":here_str}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"do B here"}]}})
+        ),
+    );
+    fs::write(
+        tmp.join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-b","thread_name":"Named Codex thread"}).to_string(),
+    )
+    .unwrap();
+
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        claude_dir.to_string_lossy().into_owned(),
+    );
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex_dir.to_string_lossy().into_owned(),
+    );
+
+    let sessions = list_recent_sessions(&env, &here_str, None, None);
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0].id, "codex-b", "current-cwd session ranks first");
+    assert_eq!(sessions[0].agent, SessionAgentKind::Codex);
+    assert_eq!(
+        sessions[0].label, "named-codex-thread",
+        "Codex's persisted thread name takes precedence over its prompt"
+    );
+    assert_eq!(sessions[1].id, "claude-a");
+    assert_eq!(sessions[1].label, "do-a");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn skips_bracketed_system_prompts_for_label() {
+    assert_eq!(
+        first_prompt_text(Some(Value::String(
+            "<command-name>foo</command-name>".into()
+        ))),
+        None
+    );
+    assert_eq!(
+        first_prompt_text(Some(Value::String("real prompt".into()))).as_deref(),
+        Some("real-prompt")
+    );
+}
+
+#[test]
+fn label_slugs_the_prompt_and_drops_control_bytes() {
+    let noisy = "hello\u{001b}[31m world \u{0007}".to_string();
+    assert_eq!(slug_label(&noisy), "hello-31m-world");
+    assert_eq!(
+        slug_label("okay so can you please fix the session handoff flow"),
+        "fix-session-handoff"
+    );
+    let long = "x".repeat(100);
+    assert!(slug_label(&long).chars().count() <= SLUG_MAX_CHARS);
+}
+
+#[test]
+fn extract_text_from_string_and_blocks() {
+    assert_eq!(
+        extract_text(Some(&Value::String("plain".into()))).as_deref(),
+        Some("plain")
+    );
+    // Claude text block.
+    let claude = serde_json::json!([{"type":"text","text":"hello claude"}]);
+    assert_eq!(extract_text(Some(&claude)).as_deref(), Some("hello claude"));
+    // Codex input_text block.
+    let codex = serde_json::json!([{"type":"input_text","text":"hello codex"}]);
+    assert_eq!(extract_text(Some(&codex)).as_deref(), Some("hello codex"));
+    // Unhandled shapes → None.
+    assert_eq!(extract_text(Some(&serde_json::json!({"x":1}))), None);
+    assert_eq!(extract_text(None), None);
+    // A block array with no text block → None.
+    let empty = serde_json::json!([{"type":"image"}]);
+    assert_eq!(extract_text(Some(&empty)), None);
+}
+
+#[test]
+fn first_prompt_text_rejects_empty_and_whitespace() {
+    assert_eq!(first_prompt_text(Some(Value::String("   ".into()))), None);
+    assert_eq!(first_prompt_text(None), None);
+}
+
+#[test]
+fn collect_session_files_recurses_and_filters() {
+    let dir = tempfile::tempdir().unwrap();
+    // A matching top-level file, a non-matching one, and a nested match.
+    fs::write(dir.path().join("a.jsonl"), "{}").unwrap();
+    fs::write(dir.path().join("notes.txt"), "x").unwrap();
+    let nested = dir.path().join("deep").join("er");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("b.jsonl"), "{}").unwrap();
+    // A subagents dir is excluded for claude transcripts.
+    let subagents = dir.path().join("subagents");
+    fs::create_dir_all(&subagents).unwrap();
+    fs::write(subagents.join("c.jsonl"), "{}").unwrap();
+
+    let files = collect_session_files(SessionAgentKind::Claude, dir.path());
+    let names: Vec<String> = files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.contains(&"a.jsonl".to_string()));
+    assert!(names.contains(&"b.jsonl".to_string()));
+    assert!(!names.contains(&"c.jsonl".to_string()));
+    assert!(!names.contains(&"notes.txt".to_string()));
+
+    // An absent directory yields nothing.
+    assert!(collect_session_files(SessionAgentKind::Claude, &dir.path().join("nope")).is_empty());
+}
+
+#[test]
+fn sessions_dir_for_honors_env_override() {
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        "/tmp/custom-claude".to_string(),
+    );
+    assert_eq!(
+        sessions_dir_for(&env, SessionAgentKind::Claude),
+        PathBuf::from("/tmp/custom-claude")
+    );
+}
+
+#[test]
+fn discover_newest_session_file_matches_cwd_and_skips_old_and_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+
+    // A session recorded in a different cwd is skipped; one with no cwd matches.
+    write_session(
+        dir.path(),
+        "wrong.jsonl",
+        &serde_json::json!({"sessionId":"wrong","cwd":"/somewhere/else","type":"user","message":{"role":"user","content":"x"}}).to_string(),
+    );
+    let matching = write_session(
+        dir.path(),
+        "match.jsonl",
+        &serde_json::json!({"sessionId":"match-1","type":"user","message":{"role":"user","content":"hi"}}).to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+    let found = discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/does/not/matter",
+        0,
+        &ignored,
+        None,
+    )
+    .expect("a cwd-less session should be discovered");
+    assert_eq!(found.id, "match-1");
+
+    // Ignoring the matching file leaves nothing to discover.
+    let mut ignored = std::collections::HashSet::new();
+    ignored.insert(std::fs::canonicalize(&matching).unwrap());
+    assert!(
+        discover_session_file(&env, SessionAgentKind::Claude, "/x", 0, &ignored, None).is_none()
+    );
+
+    // A min_mtime far in the future skips every file.
+    assert!(discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/x",
+        i64::MAX,
+        &std::collections::HashSet::new(),
+        None,
+    )
+    .is_none());
+}
+
+#[test]
+fn is_here_needs_both_sides() {
+    assert!(!is_here(None, Some("/x")));
+    assert!(!is_here(Some("/x"), None));
+}
+
+#[test]
+fn as_message_content_only_for_user_role() {
+    let user = serde_json::json!({"role":"user","content":"hi"});
+    assert_eq!(
+        as_message_content(Some(&user)),
+        Some(Value::String("hi".into()))
+    );
+    let assistant = serde_json::json!({"role":"assistant","content":"hi"});
+    assert_eq!(as_message_content(Some(&assistant)), None);
+}
+
+#[test]
+fn codex_summary_uses_id_fallback_and_no_prompt_label() {
+    // No `session_id`, only `id`; and no user message → "(no prompt)".
+    let lines = vec![serde_json::json!({
+        "type":"session_meta",
+        "payload":{"id":"codex-x","cwd":"/here"}
+    })
+    .to_string()];
+    let summary = read_codex_summary(&lines).unwrap();
+    assert_eq!(summary.id, "codex-x");
+    assert_eq!(summary.cwd.as_deref(), Some("/here"));
+    assert_eq!(summary.label, "(no prompt)");
+}
+
+#[test]
+fn codex_thread_label_reads_the_persisted_rename() {
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("ship-sidebar")
+    );
+    assert_eq!(codex_thread_label(&env, "missing"), None);
+}
+
+#[test]
+fn codex_thread_label_and_index_map_agree_on_duplicate_ids() {
+    // The index is append-only: a second /rename for the same id appends a
+    // second record. Both the single-id lookup and the batch map must surface
+    // the newest (last) record, or the rail and the Sessions tab diverge.
+    let home = tempfile::tempdir().unwrap();
+    let codex = home.path().join("codex");
+    fs::create_dir_all(codex.join("sessions")).unwrap();
+    fs::write(
+        codex.join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-1","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-1","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        codex.join("sessions").to_string_lossy().into_owned(),
+    );
+
+    let map = codex_index_map(&env);
+    assert_eq!(
+        map.get("codex-1").map(String::as_str),
+        Some("land-auth-flow")
+    );
+    assert_eq!(
+        codex_thread_label(&env, "codex-1").as_deref(),
+        Some("land-auth-flow")
+    );
+}
+
+#[test]
+fn codex_thread_label_for_cwd_finds_the_newest_rollout_in_the_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}).to_string(),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(
+        codex_thread_label_for_cwd(&env, &project_str).as_deref(),
+        Some("ship-sidebar")
+    );
+    // A cwd with no session in it has no label to read.
+    let elsewhere = home.path().join("elsewhere").to_string_lossy().into_owned();
+    assert_eq!(codex_thread_label_for_cwd(&env, &elsewhere), None);
+}
+
+#[test]
+fn codex_thread_label_for_cwd_needs_an_unambiguous_folder() {
+    // Two sessions sharing a directory: the cwd cannot prove which rollout
+    // produced this label, so the fallback must decline rather than put one
+    // session's name on the other's row.
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("codex").join("sessions");
+    let project = home.path().join("project");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let project_str = project.to_string_lossy().into_owned();
+
+    write_session(
+        &sessions,
+        "rollout-a.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-a","cwd": project_str}
+        })
+        .to_string(),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_session(
+        &sessions,
+        "rollout-b.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-b","cwd": project_str}
+        })
+        .to_string(),
+    );
+    fs::write(
+        home.path().join("codex").join("session_index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"id":"codex-a","thread_name":"Ship the sidebar"}),
+            serde_json::json!({"id":"codex-b","thread_name":"Land the auth flow"})
+        ),
+    )
+    .unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        sessions.to_string_lossy().into_owned(),
+    );
+
+    assert_eq!(codex_thread_label_for_cwd(&env, &project_str), None);
+    // A transcript with no recorded cwd is not a candidate either, nor is one
+    // whose head window yields no summary at all.
+    write_session(
+        &sessions,
+        "rollout-cwdless.jsonl",
+        &serde_json::json!({
+            "type":"session_meta",
+            "payload":{"session_id":"codex-c"}
+        })
+        .to_string(),
+    );
+    write_session(
+        &sessions,
+        "rollout-nonesummary.jsonl",
+        &serde_json::json!({"type":"response_item"}).to_string(),
+    );
+    let alone = home.path().join("solo").to_string_lossy().into_owned();
+    fs::create_dir_all(&alone).unwrap();
+    assert_eq!(codex_thread_label_for_cwd(&env, &alone), None);
+}
+
+#[test]
+fn codex_summary_without_meta_is_none() {
+    let lines = vec![serde_json::json!({"type":"response_item"}).to_string()];
+    assert!(read_codex_summary(&lines).is_none());
+}
+
+#[test]
+fn claude_summary_without_session_id_is_none() {
+    let lines = vec![
+        serde_json::json!({"type":"user","message":{"role":"user","content":"hi"}}).to_string(),
+    ];
+    assert!(read_claude_summary(&lines).is_none());
+}
+
+#[test]
+fn session_file_matching_rules() {
+    let claude_ok = Path::new("/x/proj/abc.jsonl");
+    assert!(is_session_file(
+        SessionAgentKind::Claude,
+        claude_ok,
+        "abc.jsonl"
+    ));
+    // A subagents transcript is excluded.
+    let sep = std::path::MAIN_SEPARATOR;
+    let sub = PathBuf::from(format!("/x{sep}subagents{sep}abc.jsonl"));
+    assert!(!is_session_file(
+        SessionAgentKind::Claude,
+        &sub,
+        "abc.jsonl"
+    ));
+    // Codex requires the rollout- prefix.
+    let codex_ok = Path::new("/x/rollout-1.jsonl");
+    assert!(is_session_file(
+        SessionAgentKind::Codex,
+        codex_ok,
+        "rollout-1.jsonl"
+    ));
+    assert!(!is_session_file(
+        SessionAgentKind::Codex,
+        Path::new("/x/other.jsonl"),
+        "other.jsonl"
+    ));
+}
+
+#[test]
+fn agent_kind_as_str() {
+    assert_eq!(SessionAgentKind::Claude.as_str(), "claude");
+    assert_eq!(SessionAgentKind::Codex.as_str(), "codex");
+}
+
+#[test]
+fn missing_dirs_yield_no_sessions() {
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        "/no/such/claude/dir".to_string(),
+    );
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        "/no/such/codex/dir".to_string(),
+    );
+    let sessions = list_recent_sessions(&env, "/tmp", None, None);
+    assert!(sessions.is_empty());
+}
+
+#[test]
+fn env_dir_overrides_resolve() {
+    let mut env = HashMap::new();
+    env.insert(
+        "TINYVERSE_CLAUDE_SESSIONS_DIR".to_string(),
+        "/custom/claude".to_string(),
+    );
+    assert_eq!(claude_sessions_dir(&env), PathBuf::from("/custom/claude"));
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        "/custom/codex".to_string(),
+    );
+    assert_eq!(codex_sessions_dir(&env), PathBuf::from("/custom/codex"));
+    // Empty values are ignored (fall through to the home default).
+    let mut empty = HashMap::new();
+    empty.insert("MEDULLA_CODEX_SESSIONS_DIR".to_string(), String::new());
+    assert!(codex_sessions_dir(&empty).ends_with("sessions"));
+}
+
+#[test]
+fn dedupe_keeps_the_freshest_file_for_an_id() {
+    let tmp = std::env::temp_dir().join(format!("medulla-dedupe-{}", std::process::id()));
+    let claude_dir = tmp.join("claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    // Two files, same sessionId; the newer one (by mtime) wins its label.
+    let old = write_session(
+        &claude_dir,
+        "old.jsonl",
+        &format!(
+            "{}\n",
+            serde_json::json!({"sessionId":"dup","cwd":"/x","type":"user","message":{"role":"user","content":"old label"}})
+        ),
+    );
+    let new = write_session(
+        &claude_dir,
+        "new.jsonl",
+        &format!(
+            "{}\n",
+            serde_json::json!({"sessionId":"dup","cwd":"/x","type":"user","message":{"role":"user","content":"new label"}})
+        ),
+    );
+    let _ = (&old, &new);
+
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        claude_dir.to_string_lossy().into_owned(),
+    );
+    env.insert(
+        "MEDULLA_CODEX_SESSIONS_DIR".to_string(),
+        tmp.join("codex").to_string_lossy().into_owned(),
+    );
+    let sessions = list_recent_sessions(&env, "/tmp", None, None);
+    assert_eq!(sessions.len(), 1, "the two files dedupe to one session");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn a_pinned_session_id_beats_recency() {
+    // The bug this prevents: two sessions running in one working directory. With
+    // recency alone the newest file wins every poll, so a tailer following
+    // session A silently starts reading session B — and the peer waiting on A
+    // receives B's answer.
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+
+    // `wanted` is written first, so `rival` is strictly newer.
+    write_session(
+        dir.path(),
+        "wanted.jsonl",
+        &serde_json::json!({"sessionId":"wanted-1","type":"user","message":{"role":"user","content":"a"}})
+            .to_string(),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_session(
+        dir.path(),
+        "rival.jsonl",
+        &serde_json::json!({"sessionId":"rival-9","type":"user","message":{"role":"user","content":"b"}})
+            .to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+
+    // Unpinned: recency wins, which is the pre-existing single-session contract.
+    let newest =
+        discover_session_file(&env, SessionAgentKind::Claude, "/any", 0, &ignored, None).unwrap();
+    assert_eq!(newest.id, "rival-9");
+
+    // Pinned: identity wins, however new the rival is.
+    let pinned = discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/any",
+        0,
+        &ignored,
+        Some("wanted-1"),
+    )
+    .expect("the pinned session must be found");
+    assert_eq!(pinned.id, "wanted-1");
+}
+
+#[test]
+fn a_pin_that_matches_nothing_stays_unlocated_rather_than_taking_the_newest() {
+    // Falling back to "newest" on a miss would reintroduce the very ambiguity
+    // the pin exists to remove, at exactly the moment it matters.
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = HashMap::new();
+    env.insert(
+        "MEDULLA_CLAUDE_SESSIONS_DIR".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    );
+    write_session(
+        dir.path(),
+        "other.jsonl",
+        &serde_json::json!({"sessionId":"other-1","type":"user","message":{"role":"user","content":"x"}})
+            .to_string(),
+    );
+
+    let ignored = std::collections::HashSet::new();
+    assert!(discover_session_file(
+        &env,
+        SessionAgentKind::Claude,
+        "/any",
+        0,
+        &ignored,
+        Some("not-present"),
+    )
+    .is_none());
+}

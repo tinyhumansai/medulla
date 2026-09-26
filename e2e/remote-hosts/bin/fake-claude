@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# A stand-in coding agent for the remote-host suite.
+#
+# It is not pretending to be Claude Code — it is pretending to be *a harness
+# Medulla launched*, which is the only part under test here. It reports what it
+# was actually given, so the suite can assert that a session opened from another
+# machine arrives with the same environment a local one would: a hook socket and
+# grant to report through, managed skills on its argv, and the router's
+# attribution in its environment.
+#
+# Then it sits on a read loop, because a harness that exits immediately is not a
+# session and the relay would have nothing to show.
+echo "AGENT-ARGV: $*"
+echo "AGENT-HOOK-SOCKET: ${MEDULLA_HOOK_SOCKET:-<unset>}"
+echo "AGENT-HOOK-GRANT: ${MEDULLA_HOOK_GRANT:+<set>}${MEDULLA_HOOK_GRANT:-<unset>}"
+echo "AGENT-CWD: $(pwd)"
+echo "AGENT-HOST: $(hostname)"
+echo "AGENT-READY"
+while IFS= read -r line; do
+  case "$line" in
+    exit) exit 0 ;;
+    *) echo "AGENT-ECHO: $line" ;;
+  esac
+done

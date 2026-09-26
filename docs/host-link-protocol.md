@@ -7,18 +7,26 @@ path, and nothing to sign in to: the only thing the two ends share is a pair
 key, minted on one of them and carried to the other once.
 
 Two words in this specification are protocol role names, not product terms.
-The **owner** is the client end: the machine you run `medulla` on, which opens
+The **orchestrator** is the client end: the machine you run `medulla` on, which opens
 sessions elsewhere. The **host** is the machine serving them. The role is fixed
 when the pair is minted and decides the direction bit (section 4.2).
 
-Two bootstraps produce a pair, and both end in the same link:
+Two bootstrap flows establish the direct link, and they use different pairing
+material:
 
-* **SSH-bootstrapped.** A `[[remoteHosts]]` entry is reached over SSH, the
-  client starts `medulla daemon --direct` there, the host mints the pair key and
-  prints it back up the SSH channel, and SSH is not used again.
-* **Paired.** The client mints a host key (section 7.2) and the operator supplies
-  it to the paired-daemon invocation on the host, which then serves that one
-  client on the port the key names, across the client coming and going.
+* **SSH-bootstrapped.** A `[[remoteHosts]]` entry starts
+  `medulla daemon --direct` over SSH. The host mints its pair key and returns
+  connection data through the SSH channel. This flow does not use an HK1 host
+  key or the pasted `medulla daemon <key>` command. SSH is not used after setup.
+* **Hosts-tab pairing.** The client mints an HK1 host key containing both node
+  ids, the pair key, and the UDP port. The operator supplies it to
+  `medulla daemon <key>` on the host, which serves that one client directly.
+
+Both flows use the same packet format, cryptography, and state synchronisation.
+The `direct` module of the `medulla-link` crate documents their shared transport.
+This specification focuses on these production direct links. The crate also
+retains a forwarder route for coordination tests; it is not a deployed
+bootstrap, as described in Appendix A.
 
 This document is normative. Both endpoints live in the `medulla-link` crate and
 code against it. Where this document and the implementation disagree, this
@@ -27,7 +35,7 @@ document is right.
 ## 1. Model
 
 ```
-  owner ─────────────────────────────────────── host
+  orchestrator ─────────────────────────────────────── host
   (endpoint)      UDP, one socket, one peer      (endpoint)
                   opaque payload, authenticated cleartext header
 ```
@@ -46,20 +54,25 @@ already decrypt. Its job is to reject a datagram that is not from the peer
 before any AEAD work is done.
 
 The pair key never appears in a config file, a log line or a request body. It
-lives in the state file (section 7.3) on each end and nowhere else.
+is persisted in the state file (section 7.3) on each end.
 
 ### Roles and direction
 
-Every endpoint is either the owner or a host. The role is fixed when the pair
-is minted and determines the direction bit (section 4.2). It is not a property
-of a given datagram.
+Every endpoint is either the **orchestrator** or a **host**. The role
+determines the direction bit (§4.2) and is not a property of a given
+datagram. On the forwarder path it is fixed at enrollment; on the
+direct path it is fixed at pairing (§7.1.1), where the client is always the
+orchestrator and the machine it pastes the key into is always the host.
 
 ## 2. Identifiers
 
-`node_id` is 16 random bytes per endpoint, minted with the pair. This is what
-travels on the wire; a datagram naming a node id other than the two in the pair
-is dropped.
-
+`node_id` is 16 random bytes. This is what travels on the wire. On the
+forwarder path it is issued by the backend at enrollment. On the Hosts-tab
+direct path (§7.1.1), both node ids are minted locally by the client when it
+generates the HK1 host key, and the host adopts the id it is given. In the SSH
+bootstrap (§7.2), the host mints its own node id and returns it with the pair
+key over SSH. Direct-path ids are not registered with the backend, and an
+implementation MUST NOT assume every `node_id` it sees resolves there.
 `node_name` is human-readable, shown in the TUI and used as a `Bridge` address.
 It lives in local configuration (`[[remoteHosts]].name`, `[link].nodeName`) and
 never on the wire.
@@ -146,8 +159,8 @@ sample yet, and must not be read as an RTT of zero.
 `seq` as the outer header, direction bit included.
 
 ```
-DIRECTION_MASK = 1 << 63     set   = owner → host
-                             clear = host → owner
+DIRECTION_MASK = 1 << 63     set   = orchestrator → host
+                             clear = host → orchestrator
 ```
 
 The direction bit is what makes a single pair key safe for both directions: the
@@ -312,7 +325,7 @@ which would forfeit the entire reason for adopting SSP. They resume, rather than
 reset, when liveness returns to `Live`: `ACK_WINDOW` measures peer processing,
 and an unreachable peer is not processing anything.
 
-The gate is per peer, not per link. An owner holds sessions with many
+The gate is per peer, not per link. An orchestrator holds sessions with many
 hosts, and section 6.2 liveness is a property of one peer's session. Gating on an
 aggregate would let a single dead host pause every other host's clock, so a task
 dispatched to a healthy worker would stop timing out because an unrelated laptop
@@ -357,55 +370,109 @@ and decoding folds the confusable characters, so `0`/`O` and `1`/`I`/`L` typos
 resolve rather than fail. The checksum catches the rest at entry, where the error
 is obvious, instead of surfacing later as an unexplained decrypt failure.
 
-On the SSH-bootstrapped path the host mints the key and prints it back inside
-the SSH channel; the client stores it and dials. When a pair key is typed, it is
-read from a TTY, prompted. It MUST NOT be accepted as a command-line flag: argv
-is world-readable via `ps` and lands in shell history.
+On the forwarder path the host reads it **from its TTY**, prompted. It MUST NOT
+be accepted as a command-line flag there: argv is world-readable via `ps` and
+lands in shell history.
 
-### 7.2 Host key
+### 7.1.1 Host key (direct path)
 
-The paired bootstrap has no channel back to the client, so everything the host
-needs to come up is bundled into one string the operator pastes once:
+The Hosts-tab pairing flow (§8.1) has no forwarder or SSH channel. The
+client bundles everything both ends need into one HK1 host key that the
+operator supplies with `medulla daemon <key>`. This is separate from the SSH
+bootstrap, where the host mints the pair key and returns it over SSH; that
+flow does not use an HK1 host key.
 
 ```
-raw      = 0x01 ‖ owner node id (16) ‖ host node id (16) ‖ pair key (16) ‖ udp port (2, BE)
-           ‖ checksum (2) = SHA-256(raw[0..51])[0..2]                       (53 bytes)
-encoding = Crockford base32 of 424 bits                                     (85 chars)
+raw      = 0x01 ‖ client node id (16) ‖ host node id (16) ‖ pair key (16)
+           ‖ udp port (2, big-endian) ‖ checksum (2)               (53 bytes)
+checksum = SHA-256(raw[0..51])[0..2]
+encoding = Crockford base32 of 424 bits                             (85 chars)
 display  = "HK1-" + groups of 4, hyphen-separated
 ```
 
-The key is pasted, not typed — it lands on the clipboard when it is minted — so
-its length is not the constraint the pair key's is. It keeps the pair key's
-alphabet and folding so a copy that went through a chat window survives, and the
-checksum turns a truncated paste into an error at entry rather than a link that
-never comes up.
+Both node ids are minted on the client, so the peer table is known on both
+sides before the first datagram: the host binds `udp port` and learns the
+client's address from its first authenticated datagram; the client dials the
+host's address at `udp port`. Decoding ignores case, whitespace and hyphens and
+folds the confusables; the checksum rejects a truncated paste at entry.
 
-The pair key rides in argv here, which section 7.1 forbids for the typed key.
-The trade is deliberate: a one-shot command that works on any box is the whole
-point of pairing this way, but local processes that can inspect argv and readers
-of shell history MUST be trusted for that start. On hosts that cannot meet that
-assumption, use a supported protected input channel such as stdin or a
-permission-restricted file descriptor. A re-issued key always carries a fresh host node id
-and pair key; re-pairing must not be a way to recover the old one.
+This key **is** accepted in argv, which the rule above forbids for the typed
+pair key. The trade is deliberate: a one-shot command that works in any shell
+on any box is what pairing this way is for. The process that reads it records
+the pairing and immediately re-execs itself as `medulla daemon --host`, which
+re-derives everything from that pairing rather than from argv — so the key
+does not sit on the *running* daemon's command line, only on the
+initial-invocation process's, for the moment it takes to write the pairing to
+disk and hand off. The re-exec removes only the host key; other options such as
+`--workspace`, `--workspaces`, `--host-name`, and `--config` are passed through
+to the serving `--host` process. That is still a real, if brief, exposure: any local
+process able to read `ps`/`/proc` during that moment, or the shell history of
+whoever typed the command, can recover the key and forge authenticated
+direct-path datagrams against the host's services until it is rotated. Direct
+pairing this way therefore assumes the invoking shell and the moment of
+invocation are trustworthy, even once the daemon itself is running clean;
+rotating the key (§7.1.1) closes off future access but does not undo exposure
+that already happened. To replace a lost or leaked key, stop the paired daemon before running
+the newly issued key; the daemon refuses to replace a pairing while it is
+serving it. Where argv and shell history are not trusted, use the SSH bootstrap,
+which returns its pair key through the SSH channel.
+### 7.2 SSH bootstrap
+
+For a `[[remoteHosts]]` entry, the client starts `medulla daemon --direct`
+over SSH. The host mints the pair key, sends it and its node id back through
+the SSH channel, and then serves the client over the direct UDP link. This
+bootstrap does not use the HK1 host key or the pasted `medulla daemon <key>`
+command. SSH is needed for setup only; it is not part of the running link.
 
 ### 7.3 State file
 
-`<home>/link/node.json`, mode `0600`, holding the node id, role, the peer's
-node id and pair key, and the persisted sequence reservation (section 3.1).
-Created and loaded under a file lock, and only ever one `Link` per state
-directory: a second link on the same node would draw sequences from a second
-counter under one AEAD key, which reuses nonces.
+`<home>/link/node.json`, mode `0600`, holding the node id, role, the pair
+key(s) (a single `pair_key` for version 1, or per-peer keys in `peers[]` for
+version 2 — see below), forwarder key, forwarder endpoint and the persisted
+sequence reservation (§3.1). Created and loaded under the identity file lock.
+An endpoint MUST hold that exclusive lock for the lifetime of its `Link`;
+only one live process may use an identity directory at a time. Releasing the
+lock while the endpoint is running can let another process reserve overlapping
+sequence numbers under the same pair key.
 
-There is no key recovery. A lost state file means pairing the host again.
+`version` is `1` or `2`. A version-1 file holds one peer in `peer_node_id` /
+`pair_key`. A version-2 file holds every peer in `peers[]`, each with its own
+pair key, and an empty list there means *no peers* — a client identity is
+minted before its first host is paired, and an implementation MUST NOT fall
+back to the legacy single-peer fields for a version-2 file. Direct-path
+pairings (§7.1.1) keep one identity directory per peer:
+`<home>/remote/clients/<host id>/` on the client and
+`<home>/remote/hosts/<client node id>/` on the host, the latter beside a
+`pairing.json` recording the port so the daemon can be restarted without the key.
 
 ## 8. Scope
 
-Each link is one socket talking to one peer. The protocol has no peer discovery
-or NAT traversal. Roaming and the heartbeat preserve an already reachable path;
-they do not create a NAT mapping. A host behind a NAT therefore needs an opened
-or forwarded UDP port, or an existing compatible outbound mapping, before the
-owner can reach it.
+On the forwarder path every datagram goes through the forwarder. The protocol
+has no peer discovery and no NAT traversal, so it is a relay topology rather
+than a mesh.
 
+### 8.1 Direct path
+
+The same payload layer (§4) also runs with no forwarder: one socket, one peer,
+the outer header authenticated by a key both ends derive from the pair key
+(`SHA-256("medulla-link/1 direct-path" ‖ pair_key)`) rather than by a
+forwarder key. The host binds a fixed UDP port. Each endpoint adopts its peer's
+address from any datagram that authenticates *and* advances the highest
+sequence seen. This address learning is symmetric in the implementation; a
+host address change can therefore be learned from its next accepted datagram
+without a separate re-dial mechanism. Pairing for this path is either the HK1 host key
+(§7.1.1) or the distinct SSH bootstrap (§7.2). The requirement it adds is
+mosh's: the host must be reachable on that port from wherever the client is.
+
+This is mosh's own address-learning trade-off, not a gap introduced here: an
+on-path attacker who captures a datagram and replays it from another address
+before the genuine one arrives, with a sequence number that still advances the
+watermark, can win the race and get the host to adopt their address. They hold
+no key, so they cannot decrypt or forge new traffic — the result is a
+blackhole for the legitimate peer (denial of service), not a compromise of
+confidentiality or integrity. There is no equivalent to the forwarder's
+"replay from another source does not rebind" rule (§5, rule 5) on the direct
+path, because there is no forwarder to enforce it centrally.
 Confidentiality covers payloads; the cleartext header exposes the two node ids,
 the sequence and the epoch to anyone on the path, so the protocol offers no
 metadata privacy against a network observer.

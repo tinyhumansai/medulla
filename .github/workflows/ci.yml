@@ -218,8 +218,10 @@ jobs:
           if [ -n "$dupes" ]; then
             echo "Duplicate packages that must be unified:"; echo "$dupes"; exit 1
           fi
-          for crate in tinyagents tinyflows; do
-            if ! cargo tree -i "$crate" | head -1 | grep -q "vendor/$crate"; then
+          for crate in tinyagents-harness tinyflows; do
+            vendor=tinyagents
+            if [ "$crate" = tinyflows ]; then vendor=tinyflows; fi
+            if ! cargo tree -i "$crate" | head -1 | grep -q "vendor/$vendor"; then
               echo "$crate did not resolve to the vendored tree:"
               cargo tree -i "$crate" | head -1
               exit 1

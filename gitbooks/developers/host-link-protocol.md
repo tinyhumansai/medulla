@@ -13,7 +13,7 @@ path, and nothing to sign in to: the only thing the two ends share is a pair
 key, minted on one of them and carried to the other once.
 
 Two words in this specification are protocol role names, not product terms.
-The **owner** is the client end: the machine you run `medulla` on, which opens
+The **orchestrator** is the client end: the machine you run `medulla` on, which opens
 sessions elsewhere. The **host** is the machine serving them. The role is fixed
 when the pair is minted and decides the direction bit (section 4.2).
 
@@ -41,7 +41,7 @@ document is right.
 ## 1. Model
 
 ```
-  owner ─────────────────────────────────────── host
+  orchestrator ─────────────────────────────────────── host
   (endpoint)      UDP, one socket, one peer      (endpoint)
                   opaque payload, authenticated cleartext header
 ```
@@ -166,8 +166,8 @@ sample yet, and must not be read as an RTT of zero.
 `seq` as the outer header, direction bit included.
 
 ```
-DIRECTION_MASK = 1 << 63     set   = owner → host
-                             clear = host → owner
+DIRECTION_MASK = 1 << 63     set   = orchestrator → host
+                             clear = host → orchestrator
 ```
 
 The direction bit is what makes a single pair key safe for both directions: the
@@ -332,7 +332,7 @@ which would forfeit the entire reason for adopting SSP. They resume, rather than
 reset, when liveness returns to `Live`: `ACK_WINDOW` measures peer processing,
 and an unreachable peer is not processing anything.
 
-The gate is per peer, not per link. An owner holds sessions with many
+The gate is per peer, not per link. An orchestrator holds sessions with many
 hosts, and section 6.2 liveness is a property of one peer's session. Gating on an
 aggregate would let a single dead host pause every other host's clock, so a task
 dispatched to a healthy worker would stop timing out because an unrelated laptop

@@ -1,0 +1,29 @@
+name: Native build dependencies
+description: >-
+  Install the system libraries the vendored OpenHuman core's build scripts link
+  against. Every Linux lane needs these: the core is a default feature, so any
+  job that compiles the workspace at all compiles it.
+
+runs:
+  using: composite
+  steps:
+    # Kept in one place deliberately. These were originally installed only by
+    # the lane that opted into the core, which was correct while the feature was
+    # default-OFF; the moment it became default-ON every other Linux lane needed
+    # them too, and the first to notice was a coverage run that died in 52s.
+    # A shared step is what stops the next lane from being added without them.
+    #
+    #   - libssl: openssl-sys, reached via native-tls <- hyper-tls <- reqwest,
+    #     which an OpenHuman dependency enables. Linux only — Windows uses
+    #     schannel through the same native-tls.
+    #   - X11 set: `rdev`, `enigo` and `arboard` are NON-optional OpenHuman
+    #     dependencies (input events, synthetic input, clipboard), so they are
+    #     in the graph on a headless build too and their build scripts fail
+    #     without these. Not needed by medulla itself.
+    #   - libgit2 needs nothing: libgit2-sys builds vendored C via cc.
+    - name: Install native build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config libssl-dev libx11-dev libxi-dev libxtst-dev libxdo-dev

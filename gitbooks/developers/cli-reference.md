@@ -44,7 +44,7 @@ medulla remote tower --exec "make" --config ~/other/config.toml
 
 The first non-flag argument is the host id from your config. `--exec` is required unless `--harness` names a harness to open, since a shell with nothing to run has nothing to report.
 
-It goes through the same chain the TUI does: the SSH bootstrap, identity enrollment, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
+It goes through the same chain the TUI does: the SSH bootstrap, the pair key minted on the far side, the direct UDP link, a session open, keystrokes up, frames down, and the screen folded into text. It is the smallest thing that exercises every link, so the remote-host test suite is built on it, and it answers "what does the build box say" without opening the TUI. A stable `<host>-exec` identity is reused across invocations so each call does not strand another daemon on the far side.
 
 ## `medulla daemon`
 
@@ -56,7 +56,7 @@ A process that serves sessions on this machine to a Medulla somewhere else. Ther
 medulla daemon --direct --peer-node <client node id> [--port <udp>] [--workspace <dir>] [--config <path>]
 ```
 
-This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no forwarder and no enrollment; the client is the only peer it will ever talk to.
+This is the command Medulla runs over `ssh` when you open a session on a remote host, and you rarely type it yourself. It mints a pair key for the one client named by `--peer-node`, binds a UDP port (`--port`, default ephemeral), prints one connect line to stdout, closes its stdio so the SSH channel can end, and keeps serving. There is no relay and no backend; the client is the only peer it will ever talk to.
 
 `--workspace` is where sessions it serves start, and it is the most consequential flag: a harness serving a client edits files there. It defaults to the directory the daemon was launched in, so the shell that started it decides what the client can touch. The client passes its `[[remoteHosts]] workspace` here when one is set.
 
@@ -65,11 +65,11 @@ The daemon reads the far machine's own config (`~/.medulla/config.toml` there, o
 ### `<key>`: pairing from the Hosts tab
 
 ```sh
-medulla daemon HK1-…  [--workspace <dir>] [--workspaces <a,b>] [--host-name <label>] [--config <path>]
-medulla daemon --host [--workspace <dir>]
+medulla daemon HK1-… [--workspace <dir>] [--workspaces <a,b>] [--host-name <label>] [--config <path>]
+medulla daemon --host [--workspace <dir>] [--workspaces <a,b>] [--host-name <label>] [--config <path>]
 ```
 
-The same direct link the SSH bootstrap sets up, minus the `ssh`. The key comes from the TUI's [Hosts tab](the-tui.md#the-hosts-tab) (`a` to add a machine, `i` to issue a new key) and carries the TUI's node id, an id for this host, the shared secret, and the UDP port to listen on, so this machine needs nothing else and never talks to anyone but that one client: no SSH, no backend, no login here. The daemon records the pairing under this machine's Medulla home, binds the port, and serves sessions and workflow calls to that client over the direct host link. [Hosts](../features/hosts.md) covers the pairing flow from the TUI side.
+This is the Hosts-tab pairing flow over the direct link. The `HK1-…` host key carries the TUI's node id, an id for this host, the shared secret, and the UDP port. It is not used by the `[[remoteHosts]]` SSH bootstrap: that path starts `medulla daemon --direct` over SSH, and the host returns its connection data through the SSH channel. After pairing, the host records the identity locally, binds the port, and serves sessions and workflow calls to that one client without SSH, a backend, or a login. The packet header is authenticated and the payload encrypted; sequence checks reject replays after acceptance. The direct path's initial address-learning race and its denial-of-service limit are described in the [protocol's path rules](host-link-protocol.md#5-path-rules). [Hosts](../features/hosts.md) covers pairing from the TUI.
 
 | Flag | Effect |
 | --- | --- |
@@ -81,19 +81,21 @@ The same direct link the SSH bootstrap sets up, minus the `ssh`. The key comes f
 
 `medulla daemon <key>` reads the key, records the pairing, then immediately
 re-execs itself as `medulla daemon --host`, which is what actually keeps
-running — so the key never sits on the long-running daemon's command line,
-only on the instant it takes to record the pairing. Re-running with the same
-key is a true no-op. A *different* key for the same client fails outright
-while a daemon already holds that client's pairing: stop the daemon first,
-then pair again. Two different clients cannot share a port on one host — that
+running — so the key never sits on the long-running daemon's command line.
+The other options are passed through to the re-exec and still apply to the
+serving daemon. Re-running with the same key is a true no-op. To replace a
+lost or leaked key, stop the paired daemon first, then run the newly issued
+pairing command; it records the replacement and starts serving again. Two
+different clients cannot share a port on one host — that
 is refused immediately when you pair, before anything tries to bind, with a
 message pointing you back to the Hosts tab to issue a key on another port.
 `--host` skips any individual pairing it genuinely cannot serve (a corrupted
 identity, or a port that turns out to be unavailable at bind time) and keeps
 serving the rest; it only fails outright when none of the pairings on disk
-could be served. Keeping the daemon running across reboots is left to the
-operator, since a `systemd-run --user` unit, a launchd job, or a tmux window
-all do, and the daemon prints that hint on start.
+could be served. A configured user service or launchd job can start the daemon
+after reboot. A tmux window keeps it running across terminal disconnects, but
+does not survive a reboot. Configure the service manager to start
+`medulla daemon --host` automatically.
 
 ### The standing daemon
 
@@ -124,6 +126,13 @@ A long-running daemon for a machine that serves work continuously. With a termin
 | `--config <path>` | Explicit config file. |
 
 The two permission flags point opposite ways on purpose. Headless, the bypass is opt-in and named for what it is. On the operator screen, sessions run unattended with the bypass on by default, because nobody is in the pane to answer a prompt and a task that stops on one hangs until it times out; `--no-skip-permissions` turns that off. The daemon's provider-spawn paths are unix-only.
+
+### Paired daemon
+
+`medulla daemon <host-key>` starts the one-client paired daemon described in the
+[host-link protocol](host-link-protocol.md#72-host-key). The host key is a
+one-shot bootstrap secret: its pair key is exposed in argv for that process
+start, so use it only where local argv and shell-history readers are trusted.
 
 ## Harness wrappers
 

@@ -1,4 +1,24 @@
-.DS_Store
+# Rust
+target/
+
+# Node
 node_modules/
-/worktrees/*
-!/worktrees/.gitkeep
+
+# Local state
+.env
+.medulla-state/
+.medulla/
+
+# OS
+.DS_Store
+
+# Claude worktrees (concurrent sessions)
+.claude/worktrees/
+
+# Feature worktrees (keep the dir, ignore its checkouts)
+worktrees/*
+!worktrees/.gitkeep
+
+# Python bytecode from the e2e harness mock (e2e/coordination/mockllm/)
+__pycache__/
+*.pyc

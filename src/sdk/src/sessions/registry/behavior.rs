@@ -1,0 +1,325 @@
+//! Binding lifecycle and per-conversation turn serialization.
+//!
+//! The registry stores *bindings*, not processes. A binding is the harness's own
+//! session id captured from a completed turn, remembered so the next turn on
+//! that conversation can resume it. Processes live in
+//! [`SessionManager`](crate::sessions::manager::SessionManager).
+//!
+//! Two invariants this module exists to hold:
+//!
+//! - **Capture, never preset.** `claude --session-id <uuid>` can preset an id,
+//!   but a second start with the same id errors `Session ID … is already in
+//!   use`. Capturing the id the CLI announces is symmetric with codex's
+//!   `thread_id` and has no reuse hazard.
+//! - **Reset drops the binding; it never prompts.** Sending a literal `/clear`
+//!   would be read as task text by `codex exec`, which has no slash commands.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::Mutex as AsyncMutex;
+
+use super::types::{
+    Inner, SessionBinding, SessionIdentity, SessionRegistry, TurnPlan, WorkspaceContext,
+};
+use crate::sessions::routing::can_resume;
+use crate::sessions::types::{SessionClass, SessionKey};
+
+/// How many conversation bindings to remember before evicting the least recently
+/// used. Bindings are cheap (two short strings) but unbounded growth over a
+/// long-lived daemon is not.
+pub const DEFAULT_MAX_BINDINGS: usize = 256;
+
+impl TurnPlan {
+    /// A plan for a turn that neither resumes nor binds.
+    fn stateless(class: SessionClass) -> Self {
+        TurnPlan {
+            class,
+            resume_session_id: None,
+            workspace_context: WorkspaceContext::default(),
+            identity: SessionIdentity::default(),
+            bind: false,
+        }
+    }
+}
+
+impl Inner {
+    fn get(&self, key: &str) -> Option<&SessionBinding> {
+        self.bindings.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    /// Insert or refresh a binding, moving it to the most-recent end and
+    /// evicting from the front while over `max`.
+    fn record(&mut self, key: String, binding: SessionBinding, max: usize) {
+        self.bindings.retain(|(k, _)| k != &key);
+        self.bindings.push((key, binding));
+        while self.bindings.len() > max.max(1) {
+            self.bindings.remove(0);
+        }
+    }
+
+    fn forget(&mut self, key: &str) -> bool {
+        let before = self.bindings.len();
+        self.bindings.retain(|(k, _)| k != key);
+        before != self.bindings.len()
+    }
+}
+
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_BINDINGS)
+    }
+}
+
+impl SessionRegistry {
+    /// Build a registry remembering at most `max_bindings` conversations.
+    pub fn new(max_bindings: usize) -> Self {
+        SessionRegistry {
+            inner: Arc::new(Mutex::new(Inner::default())),
+            chains: Arc::new(Mutex::new(HashMap::new())),
+            max_bindings: max_bindings.max(1),
+        }
+    }
+
+    /// Decide what one turn should do about continuity.
+    ///
+    /// A [`SessionClass::Bounded`] turn returns immediately with nothing to
+    /// resume and nothing to bind — a one-shot run is already context-free, and
+    /// touching the map would leak task context into a conversation.
+    pub fn plan(&self, key: &SessionKey, class: SessionClass) -> TurnPlan {
+        if class == SessionClass::Bounded {
+            return TurnPlan::stateless(class);
+        }
+        if !can_resume(key.provider) {
+            // No resume flag on this CLI: every turn runs fresh. Recording a
+            // binding we can never act on would only mislead the UI.
+            return TurnPlan::stateless(class);
+        }
+        let map_key = key.map_key();
+        let existing = self.inner.lock().unwrap().get(&map_key).cloned();
+        match existing {
+            Some(binding) => TurnPlan {
+                class,
+                resume_session_id: Some(binding.session_id),
+                workspace_context: binding.workspace_context,
+                identity: binding.identity.unwrap_or_default(),
+                bind: false,
+            },
+            None => TurnPlan {
+                class,
+                resume_session_id: None,
+                workspace_context: WorkspaceContext::default(),
+                identity: SessionIdentity::default(),
+                bind: true,
+            },
+        }
+    }
+
+    /// Remember `session_id` as `key`'s binding, refreshing its recency.
+    pub fn record(&self, key: &SessionKey, session_id: impl Into<String>) {
+        self.record_with_workspace_context(key, session_id, WorkspaceContext::default());
+    }
+
+    /// Remember a session id and its mapper workspace state atomically.
+    pub fn record_with_workspace_context(
+        &self,
+        key: &SessionKey,
+        session_id: impl Into<String>,
+        workspace_context: WorkspaceContext,
+    ) {
+        let session_id = session_id.into();
+        if session_id.trim().is_empty() {
+            return;
+        }
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        // Identity outlives the harness session id it is recorded beside: a
+        // conversation that rebinds — a reset, or a codex rollout announcing a
+        // new id — is the same session to the person who named it. Rebuilding
+        // the binding from scratch would silently rename their session back to
+        // nothing, so the existing identity is carried across.
+        let identity = inner
+            .get(&map_key)
+            .and_then(|binding| binding.identity.clone());
+        inner.record(
+            map_key,
+            SessionBinding {
+                session_id,
+                workspace_context,
+                identity,
+            },
+            self.max_bindings,
+        );
+    }
+
+    /// Record who a bound session belongs to and what it is called.
+    ///
+    /// A no-op when nothing is bound yet, exactly like
+    /// [`record_workspace_context`](Self::record_workspace_context): the binding
+    /// *is* the session here, and there is nothing to attach an identity to
+    /// before one exists. Returns whether it landed.
+    ///
+    /// **The origin is established once and never rewritten.** The first call
+    /// after a binding appears sets it — that is the creating path copying the
+    /// session's provenance across — and every later call keeps the origin
+    /// already stored, taking only the name. So a caller cannot move a
+    /// dispatched session into somebody's personal list, or a person's session
+    /// into the dispatch pool, by re-recording an identity with the other
+    /// origin. [`rename`](Self::rename) is the honest way to say "only the
+    /// label changed".
+    pub fn record_identity(&self, key: &SessionKey, identity: SessionIdentity) -> bool {
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .bindings
+            .iter_mut()
+            .find_map(|(k, binding)| (k == &map_key).then_some(binding))
+        {
+            Some(binding) => {
+                binding.identity = Some(match binding.identity.take() {
+                    Some(held) => SessionIdentity::new(held.origin(), identity.name),
+                    None => identity,
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Rename `key`'s bound session, leaving whose it is alone.
+    ///
+    /// The name-only half of [`record_identity`](Self::record_identity), for the
+    /// caller that has a new display name and no business asserting an origin.
+    /// Returns whether a binding took it.
+    pub fn rename(&self, key: &SessionKey, name: Option<String>) -> bool {
+        let map_key = key.map_key();
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .bindings
+            .iter_mut()
+            .find_map(|(k, binding)| (k == &map_key).then_some(binding))
+        {
+            Some(binding) => {
+                binding
+                    .identity
+                    .get_or_insert_with(SessionIdentity::default)
+                    .rename(name);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The identity attached to `key`'s binding, if it has one.
+    ///
+    /// A binding whose creating path recorded nothing reads as the
+    /// auto-creation default — an unnamed orchestrator session — which is what
+    /// it is: the registry binds for a dispatch before anybody claims it.
+    pub fn identity(&self, key: &SessionKey) -> Option<SessionIdentity> {
+        self.inner
+            .lock()
+            .unwrap()
+            .get(&key.map_key())
+            .map(|binding| binding.identity.clone().unwrap_or_default())
+    }
+
+    /// Replace the workspace state attached to an existing binding.
+    pub fn record_workspace_context(&self, key: &SessionKey, context: WorkspaceContext) {
+        if let Some(binding) = self
+            .inner
+            .lock()
+            .unwrap()
+            .bindings
+            .iter_mut()
+            .find_map(|(map_key, binding)| (map_key == &key.map_key()).then_some(binding))
+        {
+            binding.workspace_context = context;
+        }
+    }
+
+    /// The harness session id currently bound to `key`, if any.
+    pub fn bound(&self, key: &SessionKey) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .get(&key.map_key())
+            .map(|binding| binding.session_id.clone())
+    }
+
+    /// Drop `key`'s binding so the next turn starts a fresh session. This is
+    /// what "reset"/"clear" means here — the binding is the conversation.
+    ///
+    /// Returns whether a binding was actually dropped.
+    pub fn reset(&self, key: &SessionKey) -> bool {
+        self.inner.lock().unwrap().forget(&key.map_key())
+    }
+
+    /// Drop every binding for `conversation` across all providers.
+    ///
+    /// Matching is exact on the provider-prefixed key's conversation half, never
+    /// a substring scan: resetting `bob` must not wipe `alicebob`.
+    pub fn reset_conversation(&self, conversation: &str) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        let before = inner.bindings.len();
+        inner.bindings.retain(|(k, _)| {
+            // `map_key` is "<provider> <conversation>"; split once and compare
+            // the conversation half exactly.
+            k.split_once(' ').map(|(_, c)| c) != Some(conversation)
+        });
+        before - inner.bindings.len()
+    }
+
+    /// How many conversations currently hold a binding.
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().bindings.len()
+    }
+
+    /// Whether no conversation holds a binding.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Acquire the turn chain for `key` when `class` requires serialization.
+    ///
+    /// Returns a guard the caller holds for the duration of the turn, or `None`
+    /// for a [`SessionClass::Bounded`] turn, which must **not** serialize —
+    /// queueing independent task work behind an unrelated conversation would
+    /// convert a concurrency budget into a single file.
+    ///
+    /// The chain is keyed per conversation, so two different peers never wait on
+    /// each other.
+    pub async fn acquire_turn(
+        &self,
+        key: &SessionKey,
+        class: SessionClass,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        if !class.serializes() {
+            return None;
+        }
+        let lock = {
+            let mut chains = self.chains.lock().unwrap();
+            chains
+                .entry(key.map_key())
+                .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+                .clone()
+        };
+        Some(lock.lock_owned().await)
+    }
+
+    /// Drop the turn chain for `key` when nobody is waiting on it.
+    ///
+    /// Called after a session closes. Pruning while a turn is queued would drop
+    /// a chain a later turn is still waiting on, so this only removes a chain
+    /// whose `Arc` the registry alone holds.
+    pub fn prune_chain(&self, key: &SessionKey) {
+        let mut chains = self.chains.lock().unwrap();
+        let map_key = key.map_key();
+        let drop_it = chains
+            .get(&map_key)
+            .map(|lock| Arc::strong_count(lock) == 1)
+            .unwrap_or(false);
+        if drop_it {
+            chains.remove(&map_key);
+        }
+    }
+}

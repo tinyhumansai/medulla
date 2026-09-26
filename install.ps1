@@ -46,9 +46,7 @@ $ErrorActionPreference = 'Stop'
 # ---- Constants ---------------------------------------------------------------
 
 $Repo = 'tinyhumansai/medulla'
-# Releases are published to $Repo above; the source lives in a separate
-# repository. Only the cargo fallback below reaches for it.
-$SourceRepo = if ($env:MEDULLA_SOURCE_REPO) { $env:MEDULLA_SOURCE_REPO } else { 'tinyhumansai/medulla-src' }
+$SourceRepo = if ($env:MEDULLA_SOURCE_REPO) { $env:MEDULLA_SOURCE_REPO } else { 'tinyhumansai/medulla' }
 $DefaultManifest = "https://github.com/$Repo/releases/latest/download/latest.json"
 $BinName = 'medulla.exe'
 

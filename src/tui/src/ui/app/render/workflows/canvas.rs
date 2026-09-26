@@ -1,0 +1,587 @@
+//! The graph canvas: node markers, routed wires, and the cursor.
+//!
+//! Geometry only lives here; the *ordering* — which node sits in which layer and
+//! lane — is the SDK's ([`medulla::ui::workflows::GraphLayout`]). This module
+//! turns that ordering into cells: a marker and a label per node, a wire per
+//! edge, and a viewport that scrolls to keep the cursor visible.
+//!
+//! Wires are routed rather than drawn straight. An edge leaves its source's
+//! right edge into the gutter after that layer, runs vertically to its target's
+//! lane, and comes back in horizontally — which is legible for a fan-out and
+//! survives an edge that spans several layers, because the painter tunnels
+//! behind any box in the way rather than writing over it.
+//!
+//! Every band runs left to right, so an edge that folds onto the next band runs
+//! back across the pane to reach it. That wire is the price of the graph reading
+//! the same way everywhere, and it is worth paying.
+//!
+//! Wires also carry a moving highlight, so a plan reads as something work flows
+//! through rather than as a static diagram. With a run overlaid the highlight is
+//! literal — it only travels the edges that run actually took — and with no run
+//! it is an idle drift that makes the shape of the graph easier to follow.
+
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Color;
+use ratatui::text::{Line as TLine, Span, Text};
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
+
+use medulla::ui::workflows::{GraphLayout, PlacedNode, RunOverlay};
+
+use super::super::super::types::App;
+use super::paint::{Canvas, CellStyle};
+use super::{GUTTER_GAP, GUTTER_SPAN, MAX_NODE_WIDTH};
+
+/// Columns of a node's slot that its name is allowed to fill before a wire is
+/// routed around it, leaving a gap between the longest label and the wire that
+/// leaves it.
+const NODE_GAP: usize = 1;
+
+/// How many columns a port label has: the cells strictly between the gutter's
+/// vertical run and the arrowhead at the target's leading edge.
+///
+/// Three come off the span rather than two — the gutter's own column, the
+/// arrowhead's, and the blank [`NODE_GAP`] leaves before the name. A label sized
+/// to include the arrowhead's cell is written after the arrow and simply
+/// replaces it.
+const LABEL_WIDTH: usize = GUTTER_SPAN - GUTTER_GAP - 3;
+
+/// The row inside a node that wires attach to. A node is one row tall, so this
+/// is that row.
+const ATTACH_ROW: usize = 0;
+
+/// Radians per frame of the nodes' idle sway. About a nine-second cycle at the
+/// app's draw rate — slow enough to read as drift rather than as movement.
+const DRIFT_RATE: f64 = 0.06;
+
+/// How many cells the flow highlight advances per drawn frame.
+///
+/// Well under one: at the ~11fps the app redraws at, a whole cell per frame is
+/// a blur rather than a signal.
+const FLOW_SPEED: f64 = 0.45;
+
+impl App {
+    /// Draw the graph of the selected workflow, and the step under the cursor.
+    ///
+    /// The graph is given what it needs and the preview what it has to say,
+    /// rather than each a fixed share: the preview used to take half the pane
+    /// whatever was in it, so a fifteen-step graph folded into four bands above
+    /// a twenty-row box describing a manual trigger. Now the graph is served
+    /// first, up to the rows it actually occupies, and the preview takes what is
+    /// left up to its own content — which for a trigger is three lines.
+    pub(in crate::ui::app::render) fn draw_workflow_canvas(&mut self, f: &mut Frame, area: Rect) {
+        let preview = if self.selected_graph_node().is_some() {
+            self.preview_split(area)
+        } else {
+            0
+        };
+        let panes = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(preview)])
+            .split(area);
+        if self.outline_view() {
+            self.draw_workflow_outline(f, panes[0]);
+        } else {
+            self.draw_workflow_graph(f, panes[0]);
+        }
+        if panes[1].height > 0 {
+            self.draw_workflow_node_preview(f, panes[1]);
+        }
+    }
+
+    /// How many rows the step preview gets under the graph.
+    ///
+    /// Zero when the graph itself would be left with too little to read — a pane
+    /// too short for both shows the graph, because the preview is one keystroke
+    /// away (`i`) and the graph is what the tab is for.
+    fn preview_split(&self, area: Rect) -> u16 {
+        const BORDERS: u16 = 2;
+        /// The fewest rows worth drawing a preview in: a border pair and two
+        /// lines of content.
+        const MIN_PREVIEW: u16 = 4;
+        /// The most of the pane the preview may take even when it has more to
+        /// say. Past this the graph is the thing being starved.
+        const MAX_SHARE: u16 = 3;
+
+        let graph_needs = if self.outline_view() {
+            self.outline_rows().len() as u16 + BORDERS
+        } else {
+            self.folded_rows() as u16 + BORDERS
+        };
+        let wants = self.workflow_preview_height(area.width as usize) as u16;
+        let spare = area.height.saturating_sub(graph_needs.max(MIN_PREVIEW + 1));
+        let room = wants
+            .min(spare)
+            .min(area.height * (MAX_SHARE - 1) / MAX_SHARE);
+        if room < MIN_PREVIEW {
+            0
+        } else {
+            room
+        }
+    }
+
+    /// Draw only the graph panel, leaving pane allocation to the canvas view.
+    fn draw_workflow_graph(&mut self, f: &mut Frame, area: Rect) {
+        let focused = matches!(
+            self.wf.focus,
+            super::super::super::types::WorkflowFocus::Canvas
+        );
+        let block = crate::ui::widgets::panel(&self.theme, self.workflow_title(), focused);
+        let inner = block.inner(area);
+        self.wf.graph_rows = inner.height as usize;
+        // A width change can refold the selected node onto another row. Anchor
+        // the viewport to that recomputed row before painting the new layout.
+        self.scroll_canvas_to_cursor();
+        f.render_widget(block, area);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let layout = self.workflow_layout();
+        if layout.nodes.is_empty() {
+            f.render_widget(Paragraph::new(Text::from(self.empty_canvas_lines())), inner);
+            return;
+        }
+
+        let overlay = self.selected_workflow_run().map(RunOverlay::new);
+        let mut canvas = Canvas::new(inner.width as usize, inner.height as usize);
+        // Nodes first, because that is what the canvas's cell locking is for: a
+        // wire routed across a name then tunnels behind it. Painted the other
+        // way round the lock has nothing to protect yet, and a label's own
+        // spaces come out as wire — `↺ Until green and clean` reading
+        // `↺─Until─green─and clean` wherever an edge happened to cross it.
+        self.paint_nodes(&mut canvas, layout, overlay.as_ref());
+        self.paint_edges(&mut canvas, layout, overlay.as_ref());
+        f.render_widget(Paragraph::new(Text::from(canvas.into_lines())), inner);
+    }
+
+    /// The graph panel's title: the workflow, and what is overlaid on it.
+    ///
+    /// Shared with the outline, which is the same graph drawn another way and
+    /// should not be titled as if it were another thing.
+    pub(in crate::ui::app::render) fn workflow_title(&self) -> String {
+        let Some(workflow) = self.selected_workflow() else {
+            return "Graph".to_string();
+        };
+        let layout = self.workflow_layout();
+        let mut title = format!(
+            "{} · {} node{}",
+            workflow.name,
+            layout.nodes.len(),
+            if layout.nodes.len() == 1 { "" } else { "s" }
+        );
+        if let Some(run) = self.selected_workflow_run() {
+            title.push_str(&format!(
+                " · run {} {}",
+                medulla::ui::workflows::rows::short_run_id(&run.id),
+                medulla::ui::workflows::status_label(run.status)
+            ));
+        }
+        title
+    }
+
+    /// What the canvas says when there is no graph to draw.
+    pub(in crate::ui::app::render) fn empty_canvas_lines(&self) -> Vec<TLine<'static>> {
+        let dim = ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM);
+        let message = if self.workflows.is_empty() {
+            vec![
+                "No workflows installed.",
+                "",
+                "Create one with medulla workflow create. It will be saved under",
+                "your Medulla home; the copilot beside this pane can then edit",
+                "it, but it needs a selected workflow on disk first.",
+                "",
+                "r re-reads the store.",
+            ]
+        } else {
+            vec![
+                "This workflow has no nodes.",
+                "",
+                "Ask the copilot for a first step, or add one with",
+                "medulla workflow apply-ops.",
+            ]
+        };
+        message
+            .into_iter()
+            .map(|line| TLine::from(Span::styled(line, dim)))
+            .collect()
+    }
+
+    /// Paint one marker and label per visible node.
+    fn paint_nodes(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
+        for (index, node) in layout.nodes.iter().enumerate() {
+            let Some((x, y)) = self.cell_of(node) else {
+                continue;
+            };
+            let run = overlay.map(|overlay| overlay.node(&node.id));
+            // A run recolours the box by how the node fared: reading "which step
+            // failed" off the plan is the whole reason for overlaying a run onto
+            // it, and the node's kind is still in the glyph.
+            let color = match &run {
+                Some(state) => color_named(state.state.color()),
+                None => color_named(medulla::ui::workflows::graph::color_for_kind(&node.kind)),
+            };
+            let style = CellStyle::colored(color).selected(index == self.wf.node_index);
+            // A node the run never reached is dimmed, so the path the run
+            // actually took stands out from the rest of the plan.
+            let style = match &run {
+                Some(state) if state.state == medulla::ui::workflows::NodeRunState::Pending => {
+                    style.dimmed()
+                }
+                _ => style,
+            };
+
+            // A node is its marker, its name, and — under a run — the state
+            // glyph. The marker carries the kind and the colour carries the run
+            // state, so the box, the border and the kind subtitle the box used
+            // to hold are all saying something already said elsewhere.
+            //
+            // Written at its own length rather than padded out to the column:
+            // the wires attach to the text, so padding would only push every
+            // connector a few cells away from the name it belongs to.
+            let mark = run.as_ref().map(|state| state.state.glyph()).unwrap_or("");
+            let label = label_of(node, mark, self.column_width(node.layer));
+            canvas.text(x, y, &label, style.bold());
+        }
+    }
+
+    /// Route and paint one wire per edge whose ends are both placed.
+    fn paint_edges(&self, canvas: &mut Canvas, layout: &GraphLayout, overlay: Option<&RunOverlay>) {
+        for (index, edge) in layout.edges.iter().enumerate() {
+            let (Some(from), Some(to)) = (
+                layout.index_of(&edge.from).and_then(|i| layout.node(i)),
+                layout.index_of(&edge.to).and_then(|i| layout.node(i)),
+            ) else {
+                continue;
+            };
+            let (Some((fx, fy)), Some((tx, ty))) = (self.cell_of(from), self.cell_of(to)) else {
+                // Both ends off screen in the same direction means the wire is
+                // off screen too; one end off screen still draws the visible
+                // part, which is what tells the operator there is more graph
+                // that way.
+                continue;
+            };
+            // A back edge is a loop, and a loop drawn as a rightward arrow reads
+            // as a mistake in the graph rather than in the drawing.
+            //
+            // Everything else takes its source node's colour, dimmed: a wire
+            // that belongs to the box it leaves is far easier to follow out of a
+            // branch than one more grey line among several.
+            let wire_color = if edge.is_back_edge() {
+                Color::Yellow
+            } else {
+                color_named(medulla::ui::workflows::graph::color_for_kind(&from.kind))
+            };
+            let style = CellStyle::colored(wire_color).dimmed();
+
+            let folds = self.band_of(to.layer) != self.band_of(from.layer);
+
+            // Wires leave and arrive at the *text*, not at the column slot: a
+            // connector that started a few cells past the end of a short name
+            // is what made the graph look ragged, however well the columns
+            // themselves lined up. The column a wire turns down in is still on
+            // the slot grid, so the turns of a whole column agree.
+            //
+            // Clamped to the canvas on the right, because the columns are sized
+            // to fill the pane and the last one of a band therefore has no
+            // gutter left to turn in. Buying it one by making every band
+            // narrower costs most of a layer per band on a narrow pane, so the
+            // fold turns against the frame instead — the wire stays whole and
+            // still says which way the graph continues.
+            let (from_width, to_width) = (
+                self.label_width(from, overlay),
+                self.label_width(to, overlay),
+            );
+            let right = canvas.width().saturating_sub(1);
+            let exit = (fx + from_width + NODE_GAP).min(right);
+            let gutter = (fx + self.column_width(from.layer) + GUTTER_GAP).min(right);
+            let (from_row, to_row) = (fy + ATTACH_ROW, ty + ATTACH_ROW);
+            // Whether the target sits behind the source in the plan — a loop's
+            // closing arm. Compared by layer rather than by column: the sway
+            // moves a node a cell either way, and a wire that changed which end
+            // of its target it aimed at as the graph breathed would twitch.
+            let backward = to.layer <= from.layer;
+            // The cell an arrowhead lands on: one clear cell outside the edge of
+            // the target it arrives at. Every band runs left to right, so a
+            // forward edge arrives at the target's left. A loop's closing arm
+            // arrives at the *trailing* edge instead, so it comes back in the
+            // side the work left by rather than crossing the whole box to reach
+            // its front. The blank between the arrowhead and the marker is what
+            // stops a wire and a name reading as one run of characters.
+            let (entry, head) = if backward {
+                ((tx + to_width + NODE_GAP).min(right), '◀')
+            } else {
+                (tx.saturating_sub(1 + NODE_GAP), '▶')
+            };
+
+            // The blank row a wire crosses the pane on when it cannot go
+            // straight to its target: the row beside the target's lane, on the
+            // side the wire arrives from. A fold coming down from the band above
+            // turns in on the row above; a loop climbing back up turns in on the
+            // row below.
+            let link_row = if folds || (backward && from_row == to_row) {
+                Some(if from_row < to_row {
+                    to_row - 1
+                } else {
+                    to_row + 1
+                })
+            } else {
+                None
+            };
+
+            // The wire as a polyline, corner to corner. Building it up front is
+            // what lets the flow highlight ride the path that was actually
+            // drawn rather than the straight line between the two nodes, which
+            // is not where the wire is.
+            let points: Vec<(usize, usize)> = match link_row {
+                // Out to the gutter, down or up to the link row, back across the
+                // pane to the target's column, then in. A fold is a run back to
+                // the left margin, which is the cost of every band reading the
+                // same way; a same-row loop takes the blank row under the lane
+                // rather than running straight back along a row full of the very
+                // steps it repeats.
+                Some(link_row) => vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, link_row),
+                    (entry, link_row),
+                    (entry, to_row),
+                ],
+                None => vec![
+                    (exit, from_row),
+                    (gutter, from_row),
+                    (gutter, to_row),
+                    (entry, to_row),
+                ],
+            };
+            // A fold's long run back across the pane is drawn dashed: it is the
+            // drawing turning a corner rather than a stretch of the plan, and
+            // solid at pane width it read as a rule with the port name as its
+            // heading.
+            let route = paint_route(canvas, &points, style, link_row.filter(|_| folds));
+            canvas.arrow(entry, to_row, head, style);
+
+            // The moving highlight. Undimmed against the dim wire, so the eye
+            // follows it without the wire itself competing with the nodes.
+            if let Some((x, y)) = self.flow_cell(index, &route, overlay, edge) {
+                canvas.pulse(x, y, brightened(wire_color));
+            }
+
+            // The port label is what tells a reader which arm of a branch they
+            // are following, so it is written along the run into the target —
+            // one label per target row, rather than every arm of a branch
+            // fighting for the source's single exit row.
+            //
+            // A loop's closing arm carries no choice to report — it is the one
+            // way back — so it is left unlabelled rather than writing a port
+            // name across the run it returns along.
+            if let (Some(label), false) = (&edge.label, backward) {
+                let (caption, x, row) = match link_row {
+                    Some(link_row) => self.fold_caption(label, entry, gutter, link_row),
+                    // Between two columns of one band there is only the gutter,
+                    // so the name is squeezed into it and clipped rather than
+                    // dropped: its first letters still tell it from its
+                    // siblings, which is the one thing it exists to say.
+                    None => (port_caption(label, LABEL_WIDTH), gutter + 1, to_row),
+                };
+                canvas.label(x, row, &caption, style);
+            }
+        }
+    }
+
+    /// Where a folded edge's port name goes, and what fits there.
+    ///
+    /// The same caption an inline branch gets — [`port_caption`] builds both, so
+    /// a `false` arm is written the same way whether the wire it labels crosses
+    /// a gutter or a band boundary. Only the placement differs, because the
+    /// geometry does: a fold has no horizontal run into its target to write on,
+    /// so the name sits at the corner the run turns down at, which is directly
+    /// above the arrowhead and therefore still read together with the step it
+    /// names.
+    fn fold_caption(
+        &self,
+        label: &str,
+        entry: usize,
+        gutter: usize,
+        link_row: usize,
+    ) -> (String, usize, usize) {
+        // Two blanks and at least one cell of wire left over, so the caption
+        // cannot swallow the run it is captioning.
+        let room = gutter.abs_diff(entry).saturating_sub(4).min(MAX_NODE_WIDTH);
+        if room == 0 {
+            return (String::new(), entry, link_row);
+        }
+        let caption = port_caption(label, room);
+        // Inside the run, on the side it comes across from — which is the right
+        // for a fold turning down at the left margin, and the left for one whose
+        // target sits further along its band.
+        let x = if gutter > entry {
+            entry + 1
+        } else {
+            entry.saturating_sub(caption.width())
+        };
+        (caption, x, link_row)
+    }
+
+    /// How many columns a node's label actually occupies on screen.
+    ///
+    /// The wires attach here, so this has to agree exactly with what
+    /// [`paint_nodes`](Self::paint_nodes) drew — hence both going through
+    /// [`label_of`].
+    fn label_width(&self, node: &PlacedNode, overlay: Option<&RunOverlay>) -> usize {
+        let mark = overlay
+            .map(|overlay| overlay.node(&node.id).state.glyph())
+            .unwrap_or("");
+        label_of(node, mark, self.column_width(node.layer)).width()
+    }
+
+    /// Where this edge's flow highlight sits on `route` this frame, if it is
+    /// flowing at all.
+    ///
+    /// With a run overlaid only the edges that run actually travelled flow — a
+    /// highlight on a branch the run never took would claim something untrue.
+    /// Edges are offset from one another by an irrational stride so a fan-out
+    /// does not pulse in lockstep.
+    fn flow_cell(
+        &self,
+        index: usize,
+        route: &[(usize, usize)],
+        overlay: Option<&RunOverlay>,
+        edge: &medulla::ui::workflows::PlacedEdge,
+    ) -> Option<(usize, usize)> {
+        if route.is_empty() {
+            return None;
+        }
+        if let Some(overlay) = overlay {
+            let source = overlay.node(&edge.from).state;
+            let target = overlay.node(&edge.to).state;
+            let reached = |state| state != medulla::ui::workflows::NodeRunState::Pending;
+            if !reached(source) || !reached(target) {
+                return None;
+            }
+        }
+        let offset = (index as f64 * 0.618_034).fract();
+        let step = (self.frame as f64 * FLOW_SPEED + offset * route.len() as f64) as usize;
+        Some(route[step % route.len()])
+    }
+
+    /// The top-left cell of `node`, or `None` when it is scrolled out.
+    ///
+    /// The horizontal position comes from the fold, so it is never off the side;
+    /// only the vertical scroll can put a node out of view.
+    fn cell_of(&self, node: &PlacedNode) -> Option<(usize, usize)> {
+        let (x, row) = self.graph_cell(node.layer, node.lane);
+        Some((x + self.drift(node), row.checked_sub(self.wf.canvas_row)?))
+    }
+
+    /// A slow one-cell sway, so the graph breathes instead of sitting still.
+    ///
+    /// One cell is the whole budget: the wires are re-routed from these
+    /// positions every frame, so a node that wandered further would drag its
+    /// wires into its neighbours, and a label that moves while it is being read
+    /// is worse than a static diagram. Each node has its own phase, which is
+    /// what makes it read as drift rather than as the panel juddering.
+    fn drift(&self, node: &PlacedNode) -> usize {
+        // The node under the cursor never moves. It is the one an operator is
+        // looking at, and it is the anchor everything else is judged against.
+        if self.selected_graph_node().map(|selected| &selected.id) == Some(&node.id) {
+            return 0;
+        }
+        let phase = (node.layer * 7 + node.lane * 3) as f64 * 0.9;
+        let sway = (self.frame as f64 * DRIFT_RATE + phase).sin();
+        usize::from(sway > 0.5)
+    }
+}
+
+/// A node's drawn label: its marker, its name, and the run's state glyph.
+///
+/// Clipped to the column width, never padded — the caller draws it at its own
+/// length and the wires meet it there.
+fn label_of(node: &PlacedNode, mark: &str, width: usize) -> String {
+    let label = super::super::super::workflows::node_label(node);
+    format!("{}{mark}", crate::ui::util::clip(&label, width))
+}
+
+/// A port name as it is written onto a wire.
+///
+/// One builder for both placements, so the two are the same caption rather than
+/// two conventions for one thing. The blanks are what separate a name from the
+/// run it sits on — `╭false────────` reads as part of the drawing — and are
+/// dropped rather than eating into the name when the room is only a gutter
+/// wide: five columns is exactly `false`, and a clipped case name says less
+/// than a tight one.
+fn port_caption(label: &str, room: usize) -> String {
+    let clipped = crate::ui::util::clip(label, room);
+    if clipped.width() + 2 <= room {
+        format!(" {clipped} ")
+    } else {
+        clipped
+    }
+}
+
+/// Paint a polyline as axis-aligned runs, returning the cells it covers in
+/// flow order.
+///
+/// Every segment must be horizontal or vertical; a diagonal is a bug in the
+/// caller's routing, and is dropped rather than approximated.
+fn paint_route(
+    canvas: &mut Canvas,
+    points: &[(usize, usize)],
+    style: CellStyle,
+    dashed_row: Option<usize>,
+) -> Vec<(usize, usize)> {
+    let mut route: Vec<(usize, usize)> = Vec::new();
+    for pair in points.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if y0 == y1 {
+            let style = if dashed_row == Some(y0) {
+                style.dashed()
+            } else {
+                style
+            };
+            canvas.horizontal(x0, x1, y0, style);
+            let step: Box<dyn Iterator<Item = usize>> = if x0 <= x1 {
+                Box::new(x0..=x1)
+            } else {
+                Box::new((x1..=x0).rev())
+            };
+            route.extend(step.map(|x| (x, y0)));
+        } else if x0 == x1 {
+            canvas.vertical(x0, y0, y1, style);
+            let step: Box<dyn Iterator<Item = usize>> = if y0 <= y1 {
+                Box::new(y0..=y1)
+            } else {
+                Box::new((y1..=y0).rev())
+            };
+            route.extend(step.map(|y| (x0, y)));
+        }
+    }
+    route
+}
+
+/// The light variant of a colour, for the flow highlight.
+///
+/// The wire is drawn dim in its own colour, so the highlight has to be more than
+/// the same colour undimmed to be visible at a glance — but it also has to stay
+/// recognisably that wire's colour, or it reads as a separate thing crawling
+/// over the graph. The light variant is both. Colours with no lighter twin fall
+/// back to white, which is still clearly a highlight.
+fn brightened(color: Color) -> Color {
+    match color {
+        Color::Black | Color::DarkGray => Color::Gray,
+        Color::Red => Color::LightRed,
+        Color::Green => Color::LightGreen,
+        Color::Yellow => Color::LightYellow,
+        Color::Blue => Color::LightBlue,
+        Color::Magenta => Color::LightMagenta,
+        Color::Cyan => Color::LightCyan,
+        Color::Gray => Color::White,
+        _ => Color::White,
+    }
+}
+
+/// Map a colour name from the SDK's vocabulary to a ratatui colour.
+fn color_named(name: &str) -> Color {
+    super::super::color(name)
+}

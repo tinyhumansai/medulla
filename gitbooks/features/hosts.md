@@ -40,14 +40,16 @@ that *dials in*, just not be the paired host on the other end.
 
 The key carries everything both ends need to agree on — your device's id, an id
 for the host, a shared secret, and the UDP port — so the host needs nothing
-else and never talks to anyone but you. If a key is lost or leaked, `i` on the
-Hosts tab issues a fresh one; the old daemon stops being reachable the moment
-you run the new command.
+else and never talks to anyone but you. If a key is lost or leaked, stop the
+paired daemon on the host first. Then press `i` on the Hosts tab to issue a
+fresh key and run its command on the host. The old pairing is replaced when
+that command records the new key and starts the daemon again.
 
 If the host's entry has SSH details, `s` runs the command over `ssh` for you
 (key or agent authentication only). Either way, pairing is a one-time step:
-`medulla daemon --host` brings a paired machine back up without the key, which
-is what to put in a service unit or a tmux window.
+`medulla daemon --host` brings a paired machine back up without the key.
+Configure a user service or launchd job to start it after reboot; a tmux window
+only keeps it running across terminal disconnects.
 
 ## Reachability
 

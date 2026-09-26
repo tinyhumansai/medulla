@@ -1,0 +1,72 @@
+{
+  "name": "Fix until tests pass",
+  "description": "Run the test suite and hand failures to a harness, repeating until the suite is green or the loop hits its cap.",
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "start",
+      "config": { "trigger_kind": "manual", "max_node_visits": 20 }
+    },
+    {
+      "id": "attempt",
+      "kind": "loop",
+      "name": "Until green",
+      "config": {
+        "max_iterations": 4,
+        "on_exceeded": "continue",
+        "condition": "=.item.json.failing"
+      }
+    },
+    {
+      "id": "test",
+      "kind": "tool_call",
+      "name": "Run the tests",
+      "config": {
+        "slug": "medulla:shell",
+        "args": {
+          "language": "shell",
+          "script": "cargo test --quiet 2>&1 | tail -40 || true"
+        }
+      }
+    },
+    {
+      "id": "triage",
+      "kind": "transform",
+      "name": "Still failing?",
+      "config": {
+        "set": {
+          "failing": "=(.item.json.output | tostring | test(\"test result: FAILED|error\\\\[\") )",
+          "log": "=.item.json.output"
+        }
+      }
+    },
+    {
+      "id": "fix",
+      "kind": "agent",
+      "name": "Fix what failed",
+      "config": {
+        "prompt": "=\"The test suite is failing. Fix the cause, do not change the tests to pass. This is attempt \" + (.nodes.attempt.iteration | tostring) + \" of 4. Output:\\n\" + (.nodes.triage.item.log | tostring)"
+      }
+    },
+    {
+      "id": "report",
+      "kind": "transform",
+      "name": "Report",
+      "config": {
+        "set": {
+          "attempts": "=.nodes.attempt.iteration",
+          "green": "=(.nodes.triage.item.failing | not)"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from_node": "start", "to_node": "attempt" },
+    { "from_node": "attempt", "from_port": "body", "to_node": "test" },
+    { "from_node": "test", "to_node": "triage" },
+    { "from_node": "triage", "to_node": "fix" },
+    { "from_node": "fix", "to_node": "attempt" },
+    { "from_node": "attempt", "from_port": "done", "to_node": "report" }
+  ]
+}

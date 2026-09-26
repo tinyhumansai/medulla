@@ -1,6 +1,6 @@
 # Configuration
 
-Medulla runs with no configuration at all: it finds the coding CLIs on your `PATH` and opens sessions in the directory you launched from. A config file is for remote hosts, custom model presets, hooks, and how the rail looks. The complete, commented shape of every section is in [`config.example.toml`](https://github.com/tinyhumansai/medulla-src/blob/main/config.example.toml) in the source repository; this page is the guided version.
+Medulla runs with no configuration at all: it finds the coding CLIs on your `PATH` and opens sessions in the directory you launched from. A config file is for remote hosts, custom model presets, hooks, and how the rail looks. The complete, commented shape of every section is in [`config.example.toml`](../../config.example.toml); this page is the guided version.
 
 ## Medulla home
 
@@ -315,15 +315,14 @@ The host link identity. The pair key is deliberately absent from config: it is g
 
 ```toml
 [link]
-forwarderUrl = "https://api.tinyhumans.ai"   # defaults to the pinned backend URL
 nodeName = "my-laptop"
 stateDir = "/absolute/path/to/link"          # default <home>/link
-peers = []                                   # enrolled forwarder peers, if any
+peers = []                                   # link peers by node id, if any
 ```
 
-## Sections you can leave alone
+## Sections for the local hub
 
-`config.example.toml` also documents `[host]`, `[[hosts]]`, `[budget]`, `[core]`, `[workflow]` (singular), `[opencode]`, `[medulla]`, and the `[[fleet.*]]` tables. Those describe capacity for a dispatching model that is no longer part of the product. They are still parsed so an older file loads, but a session you open from the picker does not read them.
+`config.example.toml` also documents `[host]`, `[[hosts]]`, `[budget]`, `[workflow]` (singular), `[opencode]`, `[hub]`, and the `[[fleet.*]]` tables. Those describe the agents declared on this machine and the worker roster the local hub dispatches to when a workflow step or an MCP `fleet_*` call asks for work to be run. A session you open from the picker does not read them.
 
 ## Read next
 

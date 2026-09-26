@@ -21,9 +21,7 @@ set -eu
 # ---- Constants ---------------------------------------------------------------
 
 REPO="tinyhumansai/medulla"
-# Releases are published to REPO above; the source lives in a separate
-# repository. Only the cargo fallback below reaches for it.
-SOURCE_REPO="${MEDULLA_SOURCE_REPO:-tinyhumansai/medulla-src}"
+SOURCE_REPO="${MEDULLA_SOURCE_REPO:-tinyhumansai/medulla}"
 DEFAULT_MANIFEST="https://github.com/${REPO}/releases/latest/download/latest.json"
 BIN_NAME="medulla"
 

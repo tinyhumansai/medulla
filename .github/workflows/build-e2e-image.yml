@@ -1,0 +1,97 @@
+---
+# Build and publish the coordination e2e harness's **tools base** to GHCR.
+#
+#   ghcr.io/tinyhumansai/medulla_e2e_base:latest
+#   ghcr.io/tinyhumansai/medulla_e2e_base:oc<ver>-cc<ver>-cx<ver>-node<major>
+#
+# The base carries tmux, python3, node and all three real coding CLIs, plus the
+# primed ACP npm cache — roughly 600 MB of downloads that do not change when the
+# source does. `e2e/coordination/Dockerfile` layers this run's compiled binaries
+# onto it, so CI pulls this image instead of re-fetching every CLI on a cold
+# layer cache.
+#
+# Manual, and on changes to the base Dockerfile itself. Not on every push: the
+# CLI versions are pinned build args, so a rebuild is a deliberate act — a
+# version bump, or a base-image refresh — rather than something that should
+# follow a source change.
+#
+# After a CLI bump: run this, then point `Dockerfile`'s `BASE_IMAGE` default at
+# the new version tag. Both steps, deliberately; a base that moved under a green
+# branch would leave the harness testing something other than what it reported.
+name: Build E2E Image
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Extra tag to publish alongside the derived ones
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - e2e/coordination/Dockerfile.base
+      - .github/workflows/build-e2e-image.yml
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build-image:
+    name: Build and push the e2e tools base
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derived from the CLI versions the Dockerfile pins, by the same helper
+      # the local build script uses — so the tag and the contents cannot
+      # disagree about which CLIs are inside.
+      - name: Derive the version tag
+        id: version
+        run: |
+          set -euo pipefail
+          tag="$(python3 - e2e/coordination/Dockerfile.base <<'PY'
+          import re, sys
+          text = open(sys.argv[1], encoding="utf-8").read()
+
+          def arg(name):
+              match = re.search(rf"^ARG {name}=(\S+)", text, re.M)
+              if not match:
+                  raise SystemExit(f"Dockerfile.base has no ARG {name}")
+              return match.group(1)
+
+          print("oc{}-cc{}-cx{}-node{}".format(
+              arg("OPENCODE_VERSION"),
+              arg("CLAUDE_VERSION"),
+              arg("CODEX_VERSION"),
+              arg("NODE_VERSION").split(".")[0],
+          ))
+          PY
+          )"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publishing ghcr.io/tinyhumansai/medulla_e2e_base:$tag"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # The base fetches everything it contains, so it needs no source in
+          # its context — only the directory holding its Dockerfile.
+          context: e2e/coordination
+          file: e2e/coordination/Dockerfile.base
+          push: true
+          provenance: false
+          tags: |-
+            ghcr.io/tinyhumansai/medulla_e2e_base:latest
+            ghcr.io/tinyhumansai/medulla_e2e_base:${{ steps.version.outputs.tag }}
+            ${{ inputs.tag && format('ghcr.io/tinyhumansai/medulla_e2e_base:{0}', inputs.tag) || '' }}

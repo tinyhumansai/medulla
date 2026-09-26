@@ -1,0 +1,210 @@
+//! Pure URL/query helpers shared by the loopback flow, the CLI, and tests: build
+//! the loopback redirect and backend login URLs, mint the state nonce,
+//! percent-encode/decode query values, parse a request target, and summarize the
+//! `/auth/me` response. No sockets or I/O — every function is a pure
+//! transformation over its inputs.
+
+use std::collections::HashMap;
+
+use super::types::Provider;
+
+/// The loopback redirect URI the backend sends the browser back to. The `state`
+/// nonce is appended to the URI (`?state=<nonce>`) *before* it reaches the
+/// backend, which preserves the loopback `redirectUri` verbatim and appends
+/// `&token=`/`&error=` — so the callback query carries both the token and the
+/// nonce we can validate against.
+pub fn redirect_uri(port: u16, state: &str) -> String {
+    format!("http://127.0.0.1:{port}/auth?state={state}")
+}
+
+/// Build the backend login URL for a provider, loopback port, and state nonce.
+pub fn login_url(base_url: &str, provider: Provider, port: u16, state: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    format!(
+        "{base}/auth/{}/login?redirect=app&redirectUri={}",
+        provider.as_str(),
+        percent_encode(&redirect_uri(port, state)),
+    )
+}
+
+/// Build the backend login URL for the terminal ("paste a code") flow.
+///
+/// The counterpart to [`login_url`] for a terminal that cannot host the loopback
+/// listener. There is no `redirectUri`: `redirect=cli` tells the backend to end
+/// the OAuth round-trip on a page that displays a one-time login token, which
+/// the operator copies into the terminal and this crate redeems via
+/// [`crate::client::MedullaClient::consume_login_token`].
+///
+/// # Why this exists at all
+///
+/// Over SSH the loopback flow is not merely inconvenient, it is wrong: the
+/// browser runs on the operator's laptop, so the backend's redirect to
+/// `http://127.0.0.1:<port>` reaches *that* machine's loopback interface and the
+/// listener bound on the remote host never sees it. The URL below is the only
+/// part of the flow that has to cross the gap, and it is device-independent —
+/// it can be opened on a phone.
+pub fn code_login_url(base_url: &str, provider: Provider) -> String {
+    let base = base_url.trim_end_matches('/');
+    format!("{base}/auth/{}/login?redirect=cli", provider.as_str())
+}
+
+/// A cryptographically random 32-hex-char nonce (~124 bits of entropy).
+///
+/// Drawn from two v4 UUIDs: `uuid`'s v4 generator reads the operating system's
+/// CSPRNG through `getrandom`. Each contributes its trailing eight bytes, of
+/// which only the two variant bits in the first are fixed.
+///
+/// This has to be a CSPRNG and not merely "varies per call": the value is both
+/// the OAuth `state` the loopback callback is validated against and, in
+/// [`crate::inference_proxy`], the `mdl-<nonce>` bearer token that authorizes
+/// redeeming the operator's upstream API key through the loopback proxy. A
+/// nonce an attacker can predict is a nonce they can present.
+pub fn random_state_nonce() -> String {
+    let mut bytes = [0u8; 16];
+    for chunk in bytes.chunks_mut(8) {
+        let uuid = uuid::Uuid::new_v4();
+        chunk.copy_from_slice(&uuid.as_bytes()[8..16]);
+    }
+    hex_encode(&bytes)
+}
+
+/// Lowercase hex-encode a byte slice.
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Id keys an `/auth/me` response has been observed to use, most specific
+/// first.
+///
+/// `_id` is what the live backend actually sends: `/auth/me` returns a Mongoose
+/// document's `toJSON()`, and with no `virtuals: true` transform configured that
+/// document carries `_id` and no `id` at all. It is listed last only because a
+/// deployment that sends both an explicit `id` and the raw `_id` means the
+/// former as the public identifier.
+const ID_KEYS: [&str; 3] = ["id", "userId", "_id"];
+
+/// The id under `obj`, whichever spelling this deployment uses.
+///
+/// A Mongo `_id` is usually a plain hex string once serialized, but drivers and
+/// proxies that emit MongoDB Extended JSON send `{"$oid": "…"}` instead — so a
+/// one-key object wrapping the id is unwrapped rather than read as absent, which
+/// is the difference between signing in and being told there is nowhere to store
+/// the session.
+fn id_field(obj: &serde_json::Value) -> Option<&str> {
+    ID_KEYS.iter().find_map(|key| {
+        let value = obj.get(key)?;
+        value
+            .as_str()
+            .or_else(|| value.get("$oid").and_then(|v| v.as_str()))
+    })
+}
+
+/// The account id in an `/auth/me` response, when it carries one.
+///
+/// This is what scopes the Medulla home to an account (see
+/// [`crate::home::user`]), so it is read here — before the core boots — rather
+/// than from the core's auth state, which lives inside the directory the id
+/// selects. Both the flat and `{"user": …}` shapes are accepted, and every id
+/// spelling in [`ID_KEYS`], because which one a deployment returns has changed
+/// before.
+pub fn user_id_from_me(me: &serde_json::Value) -> Option<String> {
+    let obj = me.get("user").unwrap_or(me);
+    id_field(obj)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+/// Summarize an `/auth/me` response for the "who am I" line.
+pub fn describe_me(me: &serde_json::Value) -> String {
+    let obj = me.get("user").unwrap_or(me);
+    let email = obj.get("email").and_then(|v| v.as_str());
+    let id = id_field(obj);
+    match (email, id) {
+        (Some(e), Some(i)) => format!("Logged in as {e} ({i})"),
+        (Some(e), None) => format!("Logged in as {e}"),
+        (None, Some(i)) => format!("Logged in as {i}"),
+        (None, None) => "Logged in.".to_string(),
+    }
+}
+
+/// Percent-encode a string, escaping everything outside the unreserved set.
+pub(super) fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Percent-decode a query value (`%XX` and `+` → space).
+pub(super) fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                (Some(h), Some(l)) => {
+                    out.push(h * 16 + l);
+                    i += 3;
+                }
+                _ => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Split a request target into `(path, query)`, percent-decoding query values.
+pub(super) fn parse_target(target: &str) -> (String, HashMap<String, String>) {
+    let (path, query) = match target.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (target, ""),
+    };
+    let params = query
+        .split('&')
+        .filter_map(|pair| {
+            if pair.is_empty() {
+                return None;
+            }
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            if k.is_empty() {
+                return None;
+            }
+            Some((percent_decode(k), percent_decode(v)))
+        })
+        .collect();
+    (path.to_string(), params)
+}

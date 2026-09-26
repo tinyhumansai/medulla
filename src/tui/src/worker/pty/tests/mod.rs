@@ -1,0 +1,113 @@
+//! Tests for the PTY session layer, split so no file exceeds the repo's
+//! 500-line ceiling: [`session`] covers allocation, the reader thread, emulator
+//! parsing, resize, input and reaping; [`identity`] which harnesses get a minted
+//! session id and how one is learned back; [`attention`] cue recognition — a
+//! live screen becoming the flag that makes a row blink, permission prompts
+//! and dialogs, and the screen/hook classification a bell is checked against;
+//! [`settlement`] the turn-to-turn handoff `attention` does not cover —
+//! `settle_turn`/`claim_idle`/`release` and the bell watermark and
+//! completion-chime debt that carry across them; [`hooks`] the harness's own
+//! lifecycle reports layered onto that same screen-and-bell machinery — the
+//! staleness grace, its open-ended exemption, and the output-quiet
+//! corroboration; [`clipboard`] a harness's own copy being carried out of the
+//! pane; [`types`] the row model on its own, which needs no child at all.
+//!
+//! The rest drive a real child on a real pseudo-terminal — `/bin/sh`, not a coding
+//! agent, so they stay fast, offline, and deterministic while still exercising
+//! the parts that actually break. The launch spec and the polling helpers are
+//! here because both submodules use them.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use medulla::protocol::HarnessProvider;
+
+use super::manager::PtyManager;
+use super::types::{LaunchSpec, PtyState, SessionControl};
+
+mod attention;
+mod checkout;
+mod clipboard;
+mod control;
+mod hooks;
+mod identity;
+mod scrollback;
+mod session;
+mod settlement;
+mod types;
+
+#[test]
+fn child_repository_override_is_retained_for_transcript_mapping() {
+    let manager = PtyManager::new();
+    let mut spec = sh("sleep 30");
+    spec.env
+        .insert("GH_REPO".to_string(), "other/project".to_string());
+    let id = manager.open(spec).unwrap();
+    assert_eq!(manager.gh_repo_is_set(&id), Some(true));
+    manager.close(&id);
+}
+
+/// A spec that runs `sh -c <script>` on a pty.
+fn sh(script: &str) -> LaunchSpec {
+    let mut env = HashMap::new();
+    // A pty child with no PATH cannot exec anything useful.
+    if let Ok(path) = std::env::var("PATH") {
+        env.insert("PATH".to_string(), path);
+    }
+    env.insert("TERM".to_string(), "xterm-256color".to_string());
+    LaunchSpec {
+        // Codex, not Claude: claude now gets a minted `--session-id`, which
+        // `/bin/sh` would reject as an unknown option. Codex takes no preset id,
+        // so its interactive argv is empty and the script is the whole command.
+        provider: HarnessProvider::Codex,
+        preset: None,
+        bin: "/bin/sh".to_string(),
+        cwd: "/".to_string(),
+        env,
+        extra_args: vec!["-c".to_string(), script.to_string()],
+        skip_permissions: false,
+        label: "test".to_string(),
+        session_id: None,
+        model: None,
+        control: SessionControl::Orchestrator,
+        origin: crate::worker::pty::SessionOrigin::Orchestrator,
+        name: None,
+        mcp_grant_session: None,
+    }
+}
+
+/// Spin until `check` passes or the deadline expires.
+///
+/// The budget is deliberately far larger than the milliseconds these conditions
+/// actually need. Real children on real ptys are at the mercy of machine load,
+/// and a tight deadline turns "the box was busy" into a red test — which is
+/// worse than useless, because it trains you to re-run rather than read.
+fn wait_for(what: &str, mut check: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if check() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out after 30s waiting for: {what}");
+}
+
+/// The whole screen as one string.
+fn screen_text(manager: &PtyManager, id: &str) -> String {
+    manager
+        .screen_rows(id)
+        .expect("the session has a screen")
+        .cells
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| c.text.as_str())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}

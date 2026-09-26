@@ -1,0 +1,35 @@
+# Two machines on one network, which is the smallest arrangement that can tell
+# the truth about this feature: an in-process bridge proves the protocol, but
+# only a second container proves the SSH bootstrap, the UDP path, and that a
+# session really does run somewhere else.
+services:
+  # The remote machine. Runs sshd and nothing else — medulla is started *by* the
+  # client's ssh command, exactly as it would be in real use.
+  host:
+    build: .
+    container_name: medulla-e2e-host
+    hostname: buildbox
+    command: ["/usr/sbin/sshd", "-D", "-e"]
+    volumes:
+      - ../../target/debug:/opt/medulla:ro
+      - ./workspace:/work:ro
+    networks: [remote]
+
+  # The machine an operator sits at.
+  client:
+    build: .
+    container_name: medulla-e2e-client
+    depends_on: [host]
+    volumes:
+      - ../../target/debug:/opt/medulla:ro
+      - ./run-e2e.sh:/run-e2e.sh:ro
+      # `<home>/local/…` because nobody is signed in: medulla files a home per
+      # account and `local` is the pre-login one. Dropping it one level up is a
+      # silently ignored config, which is exactly the bug this suite caught.
+      - ./medulla.toml:/root/.medulla/local/config.toml:ro
+    command: ["/bin/bash", "/run-e2e.sh"]
+    networks: [remote]
+
+networks:
+  remote:
+    driver: bridge

@@ -1,0 +1,76 @@
+{
+  "name": "Fan out per file",
+  "description": "Split a list of files, hand each to its own harness in parallel, then collect every verdict into one report.",
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "trigger",
+      "name": "start",
+      "config": { "trigger_kind": "manual" }
+    },
+    {
+      "id": "survey",
+      "kind": "agent",
+      "name": "List the files to review",
+      "config": {
+        "prompt": "List the source files changed in the working tree that are worth reviewing. Reply with JSON: {\"files\": [{\"path\": string}]}. Reply {\"files\": []} if nothing changed.",
+        "output_parser": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "path": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "each",
+      "kind": "split_out",
+      "name": "One item per file",
+      "config": { "path": "json.files" }
+    },
+    {
+      "id": "review",
+      "kind": "agent",
+      "name": "Review each file in parallel",
+      "config": {
+        "execution": "per_item",
+        "concurrency": 4,
+        "on_item_error": "collect",
+        "input_context": "=item",
+        "prompt": "Review the single file named in the input context. Report only real defects. Reply with JSON: {\"path\": string, \"issues\": [string]}."
+      }
+    },
+    {
+      "id": "collect",
+      "kind": "merge",
+      "name": "Collect every verdict"
+    },
+    {
+      "id": "report",
+      "kind": "transform",
+      "name": "Report",
+      "config": {
+        "set": {
+          "reviewed": "=[.items[] | .json.path] | length",
+          "failed": "=[.items[] | select(.json.failed == true)] | length",
+          "issues": "=[.items[] | select(.json.issues != null) | .json]"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from_node": "start", "to_node": "survey" },
+    { "from_node": "survey", "to_node": "each" },
+    { "from_node": "each", "to_node": "review" },
+    { "from_node": "review", "to_node": "collect" },
+    { "from_node": "collect", "to_node": "report" }
+  ]
+}

@@ -1,0 +1,317 @@
+//! Data model for headless provider runs: the callback aliases, the cooperative
+//! [`Abort`] handle, and the input/output records ([`RunTaskOptions`],
+//! [`RunTaskResult`]) plus the injectable executor alias [`RunTaskFn`] and the
+//! bounded-reader outcome enum [`LineRead`]. The detection and execution logic
+//! lives in the sibling `detect`/`execute` modules.
+
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, Notify};
+
+use crate::config::RouterConfig;
+use crate::protocol::{HarnessProvider, HarnessTransport};
+use crate::sessions::{SessionClass, WorkspaceContext};
+use std::collections::HashMap;
+
+use super::super::mappers::HarnessSemanticEvent;
+
+/// A per-event status callback (drives daemon status frames).
+pub type OnEvent = Box<dyn FnMut(&HarnessSemanticEvent) + Send>;
+/// A one-shot registration of a child-stdin sender for `input` forwarding.
+pub type OnStdin = Box<dyn FnOnce(mpsc::UnboundedSender<String>) + Send>;
+
+/// Called once with the worker-local session id, as soon as the executor has
+/// opened (or claimed) the session that will run the task.
+///
+/// Reported early rather than with the result: the point of knowing it is to
+/// watch the task *while* it runs, which a session id delivered at the end
+/// cannot serve.
+pub type OnSession = Box<dyn FnOnce(String) + Send>;
+/// Reports the final workspace state accumulated by the stream mapper.
+pub type OnWorkspaceContext = Box<dyn Fn(WorkspaceContext) + Send + Sync>;
+
+/// A PATH-lookup predicate (injectable for tests).
+pub type ExistsOnPath = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// A cooperative abort handle shared between the daemon and a running task.
+/// Aborting sets the flag and wakes any waiter; a task selects on
+/// [`Abort::cancelled`] to terminate its child (SIGTERM).
+#[derive(Clone, Default)]
+pub struct Abort {
+    flag: Arc<AtomicBool>,
+    terminate: Arc<AtomicBool>,
+    notify: Arc<Notify>,
+}
+
+impl Abort {
+    /// Create a fresh, un-signalled abort handle.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Signal cancellation.
+    pub fn abort(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    /// Signal cancellation that must also terminate the serving harness.
+    pub fn terminate(&self) {
+        self.terminate.store(true, Ordering::SeqCst);
+        self.abort();
+    }
+
+    /// Whether cancellation requested termination of the serving harness.
+    pub fn is_terminated(&self) -> bool {
+        self.terminate.load(Ordering::SeqCst)
+    }
+
+    /// Whether cancellation has been signalled.
+    pub fn is_aborted(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+
+    /// Resolve once cancellation is signalled (immediately if already aborted).
+    pub async fn cancelled(&self) {
+        loop {
+            if self.is_aborted() {
+                return;
+            }
+            let notified = self.notify.notified();
+            if self.is_aborted() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// Inputs for one headless run.
+pub struct RunTaskOptions {
+    /// The coding-agent CLI to spawn.
+    pub provider: HarnessProvider,
+    /// The dispatch path that requested this run.
+    ///
+    /// Providers normally treat this as observability context. The embedded
+    /// OpenHuman adapter uses it as a security boundary: only an authored
+    /// workflow node may receive unattended automation trust.
+    pub origin: RunTaskOrigin,
+    /// The flavor of `provider` this run uses.
+    ///
+    /// [`Cli`](HarnessTransport::Cli) — the default — forks the provider's
+    /// binary for this task alone.
+    /// [`AppServer`](HarnessTransport::AppServer) opens a thread on a pooled
+    /// `codex app-server` instead, so this run shares one process with every
+    /// other lane that can safely share it.
+    ///
+    /// Stated by the caller rather than inferred, exactly as `session_class` is:
+    /// the operator chose a flavor and a run that quietly used another would be
+    /// indistinguishable from the feature working.
+    pub transport: HarnessTransport,
+    /// The task text handed to the provider.
+    pub prompt: String,
+    /// Working directory for the child process.
+    pub cwd: String,
+    /// The full environment the child runs with (the parent env is cleared).
+    pub env: HashMap<String, String>,
+    /// Idle watchdog budget in ms; each observed event pushes the deadline out.
+    pub timeout_ms: u64,
+    /// Optional model override.
+    pub model: Option<String>,
+    /// Optional agent selector (opencode).
+    pub agent: Option<String>,
+    /// Extra provider argv appended to the built base args.
+    pub extra_args: Vec<String>,
+    /// Whether to pass the provider's skip-permissions flag.
+    pub skip_permissions: bool,
+    /// Who this run is for — the authenticated sender of the task, or an
+    /// operator label for a locally-opened one.
+    ///
+    /// The headless executor ignores it: a one-shot run is context-free by
+    /// construction. A session-backed executor cannot work without it, because
+    /// "which session serves this task" is a question about *whose* work it is.
+    ///
+    /// Ownership only. Whether two runs may *share* context is
+    /// [`session_class`](Self::session_class), which is a separate question with
+    /// a separate answer — see that field for why conflating them was a bug.
+    pub conversation: String,
+    /// Whether this run gets its own session or continues the sender's.
+    ///
+    /// Stated by the caller rather than inferred, because the inference this
+    /// replaces was wrong in the one case that matters. A session-backed
+    /// executor used to read `conversation.is_empty()` as "bounded" — but the
+    /// daemon sets `conversation` to the *authenticated sender* for every
+    /// inbound run, so it is never empty in practice. Every task frame therefore
+    /// classified as unbound and reclaimed the sender's idle session, and two
+    /// unrelated delegated tasks from one orchestrator ran in the same harness,
+    /// each able to see and act on the other's prompt and tool context.
+    ///
+    /// A task frame is discrete work and gets [`SessionClass::Bounded`]; a
+    /// conversational message continues the sender's session and gets
+    /// [`SessionClass::Unbound`]. The headless executor ignores this — a
+    /// one-shot run has no session to share either way.
+    pub session_class: SessionClass,
+    /// A previously captured harness session id to resume, giving this run the
+    /// conversation's prior context.
+    ///
+    /// Honored only for providers that can resume (see
+    /// [`can_resume`](crate::sessions::routing::can_resume)); ignored otherwise,
+    /// which degrades continuity but never correctness. The id must have been
+    /// *captured* from a prior run's stream — presetting an id of our own
+    /// choosing makes `claude` refuse the second start with "Session ID … is
+    /// already in use".
+    pub resume_session_id: Option<String>,
+    /// Workspace state restored when resuming the bound harness session.
+    pub workspace_context: WorkspaceContext,
+    /// The cooperative abort handle.
+    pub abort: Abort,
+    /// Optional custom OpenAI-compatible router. When `Some`, the executor layers
+    /// the provider's endpoint env (and, if `apiKeyEnv` is set, its key resolved
+    /// from this run's `env` by name) into the child's environment at spawn.
+    /// `None` (the default) means routing is off and the child spawns unchanged.
+    pub router: Option<RouterConfig>,
+    /// Whether commits this run makes are attributed to Medulla — the resolved
+    /// `attribution.commit` config value (on by default; see
+    /// [`crate::config::AttributionConfig`]).
+    pub attribution: bool,
+    /// Lifecycle hooks carried to the provider-specific launch adapter.
+    pub hooks: crate::harness_hooks::HooksConfig,
+    /// Fired for each parsed semantic event — drives periodic status frames.
+    pub on_event: Option<OnEvent>,
+    /// Register a stdin channel for `input`-frame forwarding into the child.
+    pub on_stdin: Option<OnStdin>,
+    /// Reports the session serving this task, once it exists.
+    pub on_session: Option<OnSession>,
+    /// Persists repository context for a later resumed turn.
+    pub on_workspace_context: Option<OnWorkspaceContext>,
+}
+
+/// The Medulla entry point that dispatched a provider task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTaskOrigin {
+    /// A node in an operator-authored workflow graph.
+    Workflow,
+    /// An authenticated peer's discrete delegated task.
+    DelegatedTask,
+    /// A conversational message from an authenticated peer.
+    Conversation,
+    /// An interactive local session turn.
+    Interactive,
+    /// Medulla's own provider-capability probe.
+    CapabilityProbe,
+    /// A workflow-evolution review the daemon spawned after a run failed.
+    ///
+    /// Restricted to proposal tools rather than granted workflow authority —
+    /// it is not an authored workflow node — which is why it is not
+    /// [`Workflow`](Self::Workflow). But nothing awaits it either: it is
+    /// spawned detached, and what it produces lands in the evolution store for
+    /// an operator to find later, not on a pane anyone is watching live. That
+    /// makes it distinct from [`DelegatedTask`](Self::DelegatedTask) too, which
+    /// otherwise means exactly "detached but somebody can still attach to it" —
+    /// see [`has_operator_in_the_loop`](Self::has_operator_in_the_loop).
+    UnattendedReview,
+}
+
+impl RunTaskOrigin {
+    /// Whether a person asked for this run and may come looking at what it did.
+    ///
+    /// Not "did a human type it" — an orchestrator relaying a delegated task is
+    /// acting for somebody, and that somebody can attach to the session it runs
+    /// in. The question is whether *anyone* is in the loop at all, because a
+    /// surface that holds a finished session open for a reader is holding it for
+    /// nobody when the answer is no.
+    ///
+    /// [`Workflow`](Self::Workflow) is the case that matters: a graph node runs
+    /// unattended by construction. [`CapabilityProbe`](Self::CapabilityProbe) is
+    /// Medulla asking this machine about itself, on no peer's behalf — the same
+    /// reasoning that already denies it the operator's hooks.
+    ///
+    /// No catch-all arm, deliberately: a new origin should fail this build and
+    /// be made to state its answer, rather than inheriting one.
+    pub fn has_operator_in_the_loop(self) -> bool {
+        match self {
+            RunTaskOrigin::Workflow
+            | RunTaskOrigin::CapabilityProbe
+            | RunTaskOrigin::UnattendedReview => false,
+            RunTaskOrigin::DelegatedTask
+            | RunTaskOrigin::Conversation
+            | RunTaskOrigin::Interactive => true,
+        }
+    }
+}
+
+/// The outcome of a headless run.
+#[derive(Debug, Clone)]
+pub struct RunTaskResult {
+    /// The provider that produced this result.
+    pub provider: HarnessProvider,
+    /// The agent's final answer (concatenated assistant text, or a fallback).
+    pub reply: String,
+    /// Count of semantic events observed.
+    pub events: usize,
+    /// Latest token usage the child reported on its stream, if any.
+    pub usage: Option<crate::protocol::TokenUsage>,
+    /// The harness's own session id, captured from this run's stream (claude
+    /// `session_id`, codex `thread_id`).
+    ///
+    /// Feeding it back as [`RunTaskOptions::resume_session_id`] is what gives a
+    /// one-shot transport continuity across turns. It is ephemeral —
+    /// observability and resume only, never a durable key.
+    pub session_id: Option<String>,
+}
+
+/// The injectable executor signature (the daemon runtime defaults to
+/// [`run_provider_task`](super::run_provider_task); tests supply a fake).
+pub type RunTaskFn = Arc<
+    dyn Fn(RunTaskOptions) -> Pin<Box<dyn Future<Output = Result<RunTaskResult, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// The plain-data slice of a run (no callbacks), so it stays `Send + Sync` and a
+/// borrow of it can live across the child-process awaits.
+///
+/// Raised to `pub(super)` (from a private struct) so the sibling `execute`
+/// module can construct it and read its fields.
+pub(super) struct RunSpec {
+    pub(super) provider: HarnessProvider,
+    pub(super) prompt: String,
+    pub(super) cwd: String,
+    pub(super) env: HashMap<String, String>,
+    pub(super) timeout_ms: u64,
+    pub(super) model: Option<String>,
+    pub(super) agent: Option<String>,
+    pub(super) extra_args: Vec<String>,
+    pub(super) skip_permissions: bool,
+    pub(super) resume_session_id: Option<String>,
+    pub(super) workspace_context: WorkspaceContext,
+    pub(super) abort: Abort,
+    pub(super) router: Option<RouterConfig>,
+    pub(super) attribution: bool,
+    pub(super) hooks: crate::harness_hooks::HooksConfig,
+    pub(super) on_workspace_context: Option<OnWorkspaceContext>,
+}
+
+/// What one bounded line read produced.
+///
+/// The `execute` module's bounded reader returns this to say whether a record
+/// was kept whole, dropped as oversized, or the stream ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LineRead {
+    /// A complete line at or under the cap, appended to the caller's buffer.
+    Line,
+    /// The line exceeded the cap. With a retained tail the trailing bytes of the
+    /// record are in the caller's buffer; otherwise nothing was buffered and the
+    /// rest of the line was discarded, so the next read starts on the following
+    /// record.
+    Oversized,
+    /// The stream ended with nothing buffered.
+    Eof,
+}
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod tests;

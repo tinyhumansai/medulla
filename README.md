@@ -65,15 +65,15 @@ Any registered account can use Medulla free for its first 30 days. After that it
 
 ## Open source
 
-The client is the Rust workspace at [`tinyhumansai/medulla-src`](https://github.com/tinyhumansai/medulla-src): the [`medulla`](https://github.com/tinyhumansai/medulla-src/tree/main/src/sdk) SDK crate and the [`medulla-tui`](https://github.com/tinyhumansai/medulla-src/tree/main/src/tui) crate that ships the binary, both under GPL-3.0-only. Read it, build it, and run the whole client offline against the mock runtime. Start with [Contributing](https://tinyhumans.gitbook.io/medulla/developers/contributing).
+The open-source Rust workspace is in this repository: the [`medulla-link`](src/link) transport, [`medulla`](src/sdk) SDK, and [`medulla-tui`](src/tui) application that ships the binary. They are licensed under GPL-3.0-only. Build the client and run it offline with `medulla --mock`. Start with [Contributing](gitbooks/developers/contributing.md).
 
 ## What is in this repository
 
-This is Medulla's documentation and distribution surface:
+This repository contains Medulla's client source, documentation, and distribution:
 
 - `docs/`: engineering specs and protocol documents.
 - `gitbooks/`: the sources behind [tinyhumans.gitbook.io/medulla](https://tinyhumans.gitbook.io/medulla).
 - `install.sh` / `install.ps1`: the installers the commands above run.
 - [Releases](https://github.com/tinyhumansai/medulla/releases): every published binary, its checksum, and the `latest.json` manifest `medulla update` reads.
 
-The Rust workspace that produces those binaries is developed in `medulla-src`; its release pipeline publishes here.
+The Rust workspace in this repository produces those binaries; its release pipeline publishes them as GitHub Releases here.

@@ -1,0 +1,274 @@
+//! Data types for the `harness_pane` module: the handle onto this device's
+//! live sessions, and where the operator's keyboard is pointed.
+
+#[allow(unused_imports)]
+use super::*;
+
+/// One harness type the operator may start a session on.
+///
+/// Native entries point directly at an installed CLI. Custom entries retain
+/// the registered preset so spawning can apply its model, endpoint, and
+/// non-secret environment without flattening it back into the base CLI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessChoice {
+    /// The CLI process that implements this choice.
+    pub provider: medulla::protocol::HarnessProvider,
+    /// The configured preset, absent for a native CLI entry.
+    pub preset: Option<medulla::config::CustomHarnessConfig>,
+    /// Which shell to run, set only when
+    /// [`provider`](Self::provider) is
+    /// [`Shell`](medulla::protocol::HarnessProvider::Shell).
+    ///
+    /// A shell is the one choice whose binary is not implied by its provider:
+    /// `bash` and `zsh` are the same entry as far as the enum is concerned, and
+    /// the operator is picking between them. Carried here so the picker row and
+    /// the spawn agree on which one was picked.
+    pub shell: Option<super::shells::ShellChoice>,
+    /// The identity this choice has on the machine that offered it.
+    ///
+    /// `None` for anything on this device. Set for a row a remote host
+    /// advertised, and it takes precedence in [`id`](Self::id) and
+    /// [`display_name`](Self::display_name) — because those two are exactly what
+    /// travel back when the session is opened, and the far side resolves the id
+    /// against its *own* list. Deriving them locally instead would be guessing
+    /// at another machine's vocabulary: two shells there both come back as
+    /// `Shell` here, and a preset's id cannot be reconstructed from its provider
+    /// at all.
+    pub remote: Option<RemoteChoice>,
+}
+
+/// What a remote host called one of its own launchable harnesses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteChoice {
+    /// The id to send back, resolved against the host's own offer list.
+    pub id: String,
+    /// What the host called it, for the picker row.
+    pub display_name: String,
+}
+
+impl HarnessChoice {
+    /// Build a choice for an installed provider with its ordinary configuration.
+    pub fn native(provider: medulla::protocol::HarnessProvider) -> Self {
+        Self {
+            provider,
+            preset: None,
+            shell: None,
+            remote: None,
+        }
+    }
+
+    /// Build a choice for a previously registered custom harness.
+    pub fn custom(preset: medulla::config::CustomHarnessConfig) -> Self {
+        Self {
+            provider: preset.base_harness,
+            preset: Some(preset),
+            shell: None,
+            remote: None,
+        }
+    }
+
+    /// Build a choice for a plain interactive shell.
+    pub fn shell(shell: super::shells::ShellChoice) -> Self {
+        Self {
+            provider: medulla::protocol::HarnessProvider::Shell,
+            preset: None,
+            shell: Some(shell),
+            remote: None,
+        }
+    }
+
+    /// Build a choice for a harness another machine advertised.
+    ///
+    /// `provider` is only a hint here — it decides the row's glyph and nothing
+    /// else, because the launch happens over there and is resolved by
+    /// [`id`](Self::id).
+    pub fn remote(provider: medulla::protocol::HarnessProvider, remote: RemoteChoice) -> Self {
+        Self {
+            provider,
+            preset: None,
+            shell: None,
+            remote: Some(remote),
+        }
+    }
+
+    /// Whether this choice opens a terminal rather than a coding agent.
+    ///
+    /// The one question the spawn path asks before deciding what a session is
+    /// owed: a shell gets no MCP registration, no managed skills, no router,
+    /// and no commit attribution, because none of those describe a person
+    /// typing at a prompt. See [`open_unmanaged_named`].
+    ///
+    /// [`open_unmanaged_named`]: LocalSessions::open_unmanaged_named
+    pub fn is_shell(&self) -> bool {
+        self.provider == medulla::protocol::HarnessProvider::Shell
+    }
+
+    /// The binary this choice launches, resolved against `env`.
+    pub fn bin(&self, env: &std::collections::HashMap<String, String>) -> String {
+        match &self.shell {
+            Some(shell) => shell.bin.clone(),
+            None => medulla::protocol::env::provider_bin(self.provider, env),
+        }
+    }
+
+    /// Human-readable picker label.
+    pub fn display_name(&self) -> &str {
+        if let Some(remote) = &self.remote {
+            return remote.display_name.as_str();
+        }
+        if let Some(shell) = &self.shell {
+            return shell.name.as_str();
+        }
+        self.preset.as_ref().map_or_else(
+            || self.provider.display_name(),
+            |preset| preset.name.as_str(),
+        )
+    }
+
+    /// Stable identifier used in session labels and status messages.
+    pub fn id(&self) -> &str {
+        if let Some(remote) = &self.remote {
+            return remote.id.as_str();
+        }
+        if let Some(shell) = &self.shell {
+            return shell.name.as_str();
+        }
+        self.preset
+            .as_ref()
+            .map_or_else(|| self.provider.as_str(), |preset| preset.id.as_str())
+    }
+}
+
+/// The live sessions this device is running — what the Sessions tab reads and
+/// types into.
+///
+/// Two halves that are only useful together: [`sessions`](Self::sessions) holds
+/// the screens and the write side, and [`runtime`](Self::runtime) answers which
+/// session is serving a given task. Selecting a task in the Sessions tab resolves
+/// through the runtime and then renders through the manager.
+///
+/// Cheap to clone — both fields are `Arc`-backed — and a clone does *not* keep
+/// the host alive. When the host goes away the sessions simply stop being
+/// resolvable, which is the truth the pane should be showing.
+#[derive(Clone)]
+pub struct LocalSessions {
+    /// Every PTY-backed harness running on this device.
+    pub sessions: PtyManager,
+    /// Each host's task state machine, for
+    /// [`session_for_task`](medulla::daemon::DaemonRuntime::session_for_task).
+    ///
+    /// One per host on this device. A task belongs to exactly one of them, so
+    /// resolving means asking each until one claims it — which is cheap, since
+    /// a machine hosts a handful of directories, not a fleet.
+    ///
+    /// Shared rather than owned because a host can be added while the app runs.
+    /// This value is cloned into the session, so a plain `Vec` would leave the
+    /// pane reading a snapshot taken at startup: the new host would run, and its
+    /// screen would be unwatchable for the rest of the session.
+    pub runtimes: std::sync::Arc<std::sync::Mutex<Vec<medulla::daemon::DaemonRuntime>>>,
+    /// The address local work is dispatched *from* — the `from` half of the
+    /// `(sender, task id)` key `session_for_task` is keyed on.
+    ///
+    /// Locally dispatched work carries the hub's own bus address, not the
+    /// operator's identity, because the hub is what put the frame on the bus.
+    pub hub_address: String,
+    /// The environment an operator-started harness is spawned with.
+    ///
+    /// The same map the host's executor uses, so a harness the operator starts
+    /// by hand sees exactly what one started for a task would. Anything else
+    /// would make "it works when I run it myself" a real and confusing
+    /// difference rather than a figure of speech.
+    pub env: std::collections::HashMap<String, String>,
+    /// The host's workspace, used as the default directory for a new session.
+    pub workspace: String,
+    /// The coding-agent CLIs this device actually has, in the order the picker
+    /// should offer them.
+    pub providers: Vec<medulla::protocol::HarnessProvider>,
+    /// Registered presets attached to this local host.
+    pub custom_harnesses: Vec<medulla::config::CustomHarnessConfig>,
+    /// The configured `[router]`, injected into an operator-started session the
+    /// same way the executor injects it into a task's.
+    pub router: Option<medulla::config::RouterConfig>,
+    /// Whether commits made in an operator-started session are attributed to
+    /// Medulla — the resolved `attribution.commit` config value (on by
+    /// default).
+    ///
+    /// Held here for the same reason `router` is: this is the one spawn seam
+    /// the executor does not own, and a setting that applied to dispatched work
+    /// but not to a session the operator opened by hand would make attribution
+    /// depend on which door the session came through.
+    pub attribution: bool,
+    /// Lifecycle hooks supplied to a supported operator-started harness — the resolved
+    /// `[[hooks]]` config section. Carried here for the same reason
+    /// `attribution` is: a policy that applied to a dispatched task but not to a
+    /// harness the operator opened by hand would silently depend on which door
+    /// the session came through.
+    pub hooks: medulla::harness_hooks::HooksConfig,
+    /// TUI-safe diagnostic sink for hook coverage warnings.
+    pub log: Option<medulla::daemon::LogFn>,
+}
+
+impl LocalSessions {
+    /// Every launchable native CLI and registered preset in picker order.
+    pub fn choices(&self) -> Vec<HarnessChoice> {
+        let openhuman = medulla::protocol::HarnessProvider::Openhuman;
+        let openhuman_bin = medulla::protocol::env::provider_bin(openhuman, &self.env);
+        let lookup = medulla::daemon::providers::make_path_lookup(&self.env);
+        self.providers
+            .iter()
+            .copied()
+            .map(HarnessChoice::native)
+            // OpenHuman is part of this host, not a delegated coding provider,
+            // so probe it independently of the daemon's detected list.
+            .chain(lookup(&openhuman_bin).then_some(HarnessChoice::native(openhuman)))
+            .chain(
+                self.custom_harnesses
+                    .iter()
+                    .cloned()
+                    .map(HarnessChoice::custom),
+            )
+            // Last, and deliberately: the picker's first row is what Enter
+            // starts, and that should stay the coding agent an operator opens
+            // this modal for. A shell is the exception they scroll to.
+            .chain(
+                super::shells::available(&self.env, &lookup)
+                    .into_iter()
+                    .map(HarnessChoice::shell),
+            )
+            .collect()
+    }
+}
+
+/// Where the operator's keystrokes are going.
+///
+/// The orchestrator TUI is a chrome *around* a real terminal, so at any moment
+/// exactly one of the two owns the keyboard. Leaving that implicit is what makes
+/// embedded terminals infuriating: the operator types `q` meaning "quit the
+/// harness" and quits the wrapper instead, or presses Escape expecting to get
+/// out and cancels the harness's turn. So it is explicit, modal, and shown.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum HarnessFocus {
+    /// The TUI owns the keyboard. Harness screens still paint live; they just
+    /// do not receive input.
+    #[default]
+    Chrome,
+    /// The named session owns the keyboard. Every key is encoded and written to
+    /// its PTY except the detach chord, which is the one key the chrome keeps
+    /// for itself — without a reserved key there is no way back out.
+    Attached(String),
+}
+
+impl HarnessFocus {
+    /// The session currently receiving keystrokes, if any.
+    pub fn attached_to(&self) -> Option<&str> {
+        match self {
+            HarnessFocus::Chrome => None,
+            HarnessFocus::Attached(id) => Some(id.as_str()),
+        }
+    }
+
+    /// Whether `id` is the session the keyboard is pointed at.
+    pub fn is_attached_to(&self, id: &str) -> bool {
+        self.attached_to() == Some(id)
+    }
+}

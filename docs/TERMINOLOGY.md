@@ -1,16 +1,32 @@
 # Terminology
 
-This document defines the core terms used across the Medulla orchestrator: the
-system prompt vocabulary, the Rust type system, the wire protocol, and the TUI.
+This document defines the core terms used across Medulla: the Rust type
+system, the wire protocol, and the TUI. Medulla is a terminal UI for running
+coding agents across several surfaces, remote machines, and instances. There is
+no reasoning model above the agents: every session is driven by the operator,
+by a workflow, or by another agent through the local hub.
 
 ---
 
-## Orchestrator
+## Session
 
-The root reasoning model that drives a **cycle**. It receives user input, plans
-the work, delegates to managers, and produces the final reply. The orchestrator is
-the only component that talks directly to the user; every other agent in the
-system works on its behalf.
+One running process on its own pseudo-terminal: a coding agent in a directory,
+or a shell. A session has a row in the rail, a screen kept live in the
+background, and a state (in flight, idle, waiting on you, failed, finished).
+Sessions exist on this machine and on remote hosts, and the rail shows both.
+
+A session carries a `sessionId`, its launch anchor and workspace context, and
+two facts that are independent of each other. Its `origin` is either `task`
+(created by a dispatch, labelled from its task) or `user` (opened from the UI
+and named by the operator). Origin never changes. Its `owner` is whoever may
+drive it right now, and ownership moves: `ctrl-g` takes a dispatched session
+over, handing it back returns it, and dispatch skips any session the operator
+holds.
+
+The word also names the transport-level conversation the SDK keys by
+`(conversation × provider)`. The class is either `Bounded` (one turn) or
+`Unbound` (long-lived, spanning many turns). The driver is either `Task` frames
+(request/reply) or `Envelope` streams (continuous).
 
 ## Agent
 
@@ -21,13 +37,8 @@ somebody declared it, not because a process happens to be running. One host runs
 as many agents as you declare.
 
 Declaring one is a config-only operation: `[fleet].agentDeclarations` is edited
-by hand, and the TUI reports the resulting tree on the Hosts tab. The TUI has no
-flow that writes a declaration for you.
-
-The orchestrator delegates **tasks** to agents and lists them in `agent_list`;
-each agent has a set of **tools**, an MCP server inventory, and a health snapshot
-(consecutive-ok / consecutive-failed). An agent is **idle** when it has no running
-**sessions** and **busy** otherwise. A manager _manages_ agents.
+by hand, and the TUI reports the resulting tree on the Hosts tab. An agent is
+**idle** when it has no running **sessions** and **busy** otherwise.
 
 ## Harness
 
@@ -43,10 +54,10 @@ that CLI:
 | Harness type   | Transport                                                      |
 | -------------- | -------------------------------------------------------------- |
 | Claude Code    | ACP (Agent Client Protocol) over stdio, or legacy JSONL         |
-| Codex          | ACP over stdio                                                  |
+| Codex          | ACP over stdio                                                 |
 | `codex-server` | JSON-RPC over stdio to a shared, long-lived `codex app-server`  |
-| OpenCode       | ACP over stdio                                                  |
-| OpenHuman      | In-process: no binary spawned, no transport. The wire value is `HarnessProvider::Openhuman`; the agent turn runs inside the `medulla` process on the vendored `tinyagents` crate with Medulla's own tools (`src/sdk/src/daemon/providers/local/mod.rs`). Never auto-selected by provider detection — a node reaches it only by naming it. |
+| OpenCode       | ACP over stdio                                                 |
+| OpenHuman      | In-process: no binary spawned, no transport. The wire value is `HarnessProvider::Openhuman`; the agent turn runs inside the `medulla` process on the vendored `tinyagents` crate with Medulla's own tools. Never auto-selected by provider detection — a node reaches it only by naming it. |
 | Shell          | None: a plain interactive shell (`bash`, `zsh`, whatever `$SHELL` names), not a coding agent. Never detected as an available provider and never dispatchable; it exists so an operator can open a terminal beside their agents in the same pane, host, and working directory. |
 
 `codex-server` is a **flavor** of Codex rather than a separate harness type: it
@@ -56,7 +67,7 @@ process serves every lane instead of one being forked per task. See
 
 The adapter surfaces a **status** (idle / running / stopped), a **task board**
 (tracked tasks with status open → active → blocked → done / cancelled), and an
-**event stream** (instruction queued, cycle start/end, task-board changes). The
+**event stream** (instruction queued, turn start/end, task-board changes). The
 public wire shapes live in the `harness_contract` module and are versioned
 independently of any implementation.
 
@@ -70,91 +81,40 @@ the top of the containment chain:
 Host → Agent → Session
 ```
 
-The local host is always present; a remote host is added by tiny.place address
-and contributes the agents declared over there. The Hosts tab renders this tree
-in full, and its union is what the hub advertises to the backend. The Sessions
-tab resolves the same projection but draws only `Host → Session`: the agent tier
-decides which lane a session belongs to and where it sorts, and then gets no row
-of its own.
-
-*(The legacy `[fleet]` capacity snapshot still carries an older
-`Host → Harness → Workspace → Agent` chain in its own types. That describes
-declared capacity, not the entity model above.)*
+The local host is always present; a remote host is a `[[remoteHosts]]` entry
+reached over SSH for the bootstrap and then directly over UDP, or a paired
+host started with `medulla daemon <key>`. The Hosts tab renders this tree in
+full. The Sessions tab resolves the same projection but draws only
+`Host → Session`: the agent tier decides which lane a session belongs to and
+where it sorts, and then gets no row of its own.
 
 ## Workspace
 
 A filesystem directory an **agent** works in, declared as part of that agent
 together with its `strategy`: `checkout` (every session of the agent shares the
-directory, so they run serially; the v1 default) or `worktree` (a carved
-per-session copy, so they run in parallel; a follow-up). A workspace is where
-agents read, write, and run code. Each workspace can carry a `MEDULLA.md`
-**profile**, a short frontmatter and prose summary that tells the orchestrator
-what the directory _is_ and how to route work over it.
+directory, so they run serially; the default) or `worktree` (a carved
+per-session copy, so they run in parallel). A workspace is where agents read,
+write, and run code, and it is the third step of the session picker.
 
 ## Hub
 
-The central coordination point for outbound task dispatch. When the orchestrator
-wants work done, the **hub** delivers a `TaskRequest` (carrying a `task_id`,
-`cycle_id`, `worker_address`, and optional `workflow` identifier) to the target
-**worker** and collects the `TaskOutcome`. It is the outbound half of the
-daemon's task loop.
-
-The hub also carries the **workflow plane** (`src/sdk/src/hub/plane/`): the wire
-contract with the Medulla orchestration backend for saved workflow graphs —
-Socket.IO shapes and `medulla:*` event names (`payloads.rs`) — and the
-store-side `WorkflowBridge` trait (`bridge.rs`) an embedding host installs to
-answer them. It used to be re-exported from the embedded OpenHuman core; with
-that core removed, Medulla is the only host left that speaks it.
-
-## Cycle
-
-One orchestrator turn: **user input → reasoning → tool calls → reply**. A cycle
-begins when the orchestrator receives a prompt, runs its reasoning loop (which
-may fan out **tasks** and read **context**), and ends when it emits its final
-report. The final message is the only output the caller sees; intermediate
-tool calls and agent delegation are internal to the cycle.
-
-## Session
-
-**An agent session** is one running instance of an **agent**: what a **task**
-actually executes in, and the row the Sessions rail draws. It carries a
-`sessionId`, its launch anchor and workspace context, and two facts that are
-independent of each other.
-
-Its `origin` is either `orchestrator` (auto-created by a dispatch, labelled from
-its task) or `user` (opened from the UI and named by the operator). Origin never
-changes. Its `owner` is whoever may drive it right now, and ownership moves:
-`ctrl-g` takes a session from the orchestrator, handing it back returns it, and
-dispatch skips any session the operator holds.
-
-A task **is** an agent session; the two differ only by origin. Sessions are never
-roster entries; only their control state rides the advert.
-
-The word also names the transport-level conversation the SDK keys by
-`(conversation × provider)`. Those come in two orthogonal axes. The class is
-either `Bounded` (one turn, a single cycle) or `Unbound` (long-lived, spanning
-multiple cycles). The driver is either `Task` frames (request/reply) or
-`Envelope` streams (continuous).
-
-A session key is a `(conversation × provider)` pair. Sessions carry configuration
-(model, budget, routing), a transcript, and phase tracking.
+The device-local coordination point for task dispatch. When a workflow step, an
+MCP `fleet_dispatch` call, or the operator asks for work to be run somewhere,
+the **hub** delivers a `TaskRequest` (carrying a `task_id`, `worker_address`,
+and optional `workflow` identifier) to the target **worker** and collects the
+`TaskOutcome`. It keeps the worker roster (`[hub].workers`), the activity log,
+and the `TaskRunner` that owns dispatch timeouts. It runs inside the `medulla`
+process and talks to nothing outside the machine except the workers it
+dispatches to.
 
 ## Task
 
-A unit of work delegated to an **agent**. A task is a self-contained instruction
-with an optional tool allowlist and a **budget** (max steps / max tokens). Tasks
-run concurrently when fanned out; a dependent chain (A → B → C) stays inside one
+A unit of work delegated to an **agent**: a self-contained instruction with an
+optional tool allowlist and a **budget** (max steps / max tokens). Tasks run
+concurrently when fanned out; a dependent chain (A → B → C) stays inside one
 task, while independent units become separate tasks. Every task settles with a
-status of done, failed, or cancelled, and its result is recorded in the
-**ledger**.
-
-## Ledger
-
-The record of every **task** ever delegated: its id, instruction, assigned agent,
-status, timings, event count, and budget consumption. The ledger is the system's
-audit trail: `agent_status` queries it, and task digests surface in the TUI's
-Sessions view. It is the source of truth for what happened, regardless of whether
-the agent that ran the task is still connected.
+status of done, failed, or cancelled. A task **is** an agent session; the two
+differ only by origin.
 
 ## Budget
 
@@ -164,31 +124,13 @@ consume). Seat budgets track provider-level usage windows (tokens consumed
 against window capacity, with reset timestamps) and render in the TUI as a
 one-line summary (e.g. "seat Claude Max 5× · 1.2M left").
 
-## Chunk / environment
-
-The **context storage system** shared across a **cycle**. When the orchestrator
-reads files, delegates tasks, or receives agent results, the output lands in the
-environment as named chunks. The orchestrator pages through it with
-`context_list`, `context_search`, `context_peek`, and `context_summarize`. Other
-managers working the same cycle share the same environment, so chunks must be
-read with care; a chunk another manager wrote may not be yours to interpret.
-
 ## Capability probing
 
 Asking an **agent** what it can _actually_ do before routing work to it. A probe
 returns the agent's working directory, accessible directories, git project and
 branch, available tools, MCP servers, and provider backends. The result is cached
-and shown under the agent in `agent_list`. Probing once per agent lets the
-orchestrator match tasks to agents by what they can reach, rather than guessing.
-
-## Deployment
-
-Placing a **manager** at a specific **host** + **workspace**. A deployment is
-the concrete instantiation of the fleet's declared containment chain. The
-orchestrator selects a host and workspace from the fleet registry, spawns the
-manager there, and the manager then picks an agent and begins delegating. Once
-placed, a deployment is fixed for the cycle: a manager cannot move to a
-different host or workspace.
+and shown under the agent on the Hosts tab, so a workflow or an operator can
+match tasks to agents by what they can reach rather than guessing.
 
 ## Workflow
 
@@ -199,32 +141,35 @@ runs as a real **agent session** on the harness type it names (Claude Code,
 Codex, or OpenCode). Workflows are authored as JSON files, stored in layered
 directories (personal + per-repository), run through the vendored `tinyflows`
 engine, and surfaced in the TUI's Workflows tab with a canvas, run overlay, and
-copilot.
+copilot. See [workflows.md](./workflows.md).
 
 ## Host link
 
-The transport that carries encrypted task frames between the orchestrator and
-workers, specified in [`host-link-protocol.md`](host-link-protocol.md). Two
-endpoints exchange UDP datagrams through a **forwarder**, served by the same
-backend as the rest of the API, which routes bytes it cannot read. It supersedes
-the tiny.place mailbox, a store-and-forward relay this codebase no longer talks
-to. All coordination e2e tests drive it in-process to keep suites deterministic
-and offline.
+The transport that carries encrypted frames between a Medulla and its remote
+hosts, specified in [`host-link-protocol.md`](host-link-protocol.md). Two
+endpoints exchange UDP datagrams straight to each other under a **pair key**
+that only they hold; there is no relay in the production path. Offline
+coordination e2e suites instead use an in-process relayed route, keeping those
+suites deterministic and offline; the direct path is covered separately by the
+live harness.
+
+## Pair key and host key
+
+The **pair key** is the 128-bit secret the two ends of a host link share. On the
+SSH-bootstrapped path it is minted by `medulla daemon --direct` and carried back
+once inside the SSH channel. On the paired path it rides inside the **host
+key**, a single `HK1-…` string minted on the client that also names both node
+ids and the UDP port, and is pasted once into `medulla daemon <key>`. Either
+way it is stored only in `<home>/link/node.json` and never in config.
 
 ## ACP (Agent Client Protocol)
 
 The [Agent Client Protocol](https://agentclientprotocol.com/) is a versioned,
 harness-agnostic wire protocol for coding agents. Medulla uses ACP v1 to talk to
 Claude Code, Codex, and OpenCode through one lifecycle and event stream, rather
-than teaching the orchestration layer each harness's private JSONL format.
-
-## MEDULLA.md
-
-A **workspace profile** file at a repository root. It carries a short summary
-(roughly 100 to 200 tokens) and optional frontmatter preferences (harnesses,
-models, routing hints, file layout). The orchestrator reads it on every cycle to
-understand what the directory _is_ and how to decompose work within it. Created
-with `medulla init` and registered with `medulla workspace add`.
+than teaching the session layer each harness's private JSONL format. Because
+Medulla is the client, the only way to hand a harness tools is to offer it an
+MCP server, which is what `medulla mcp` is for.
 
 ## Provider
 
@@ -247,14 +192,24 @@ two are modelled separately.
 
 ## Daemon
 
-A long-running background process (`medulla daemon --headless`) that listens for
-inbound **task frames** from the **hub**, spawns **providers** through their
-harness adapters, and streams results back. One daemon = one **workspace**; a fleet
-is N daemon processes, not one daemon with N directories.
+`medulla daemon`, the process that serves sessions on a machine to a Medulla
+elsewhere. `medulla daemon --direct` is the variant the SSH bootstrap starts on
+a remote host; `medulla daemon <key>` is the paired variant the operator starts
+once from a host key. Both serve the one client that holds the pair key, over
+UDP.
+
+## Backend
+
+The TinyHumans API at `api.tinyhumans.ai`. Signing in and plan entitlement
+(`/auth/me`, which decides whether the account may run Medulla) are separate
+account flows. The SDK's `Backend` trait (`backend` module) covers account usage,
+logout, and the feedback board. No session, task, transcript, or workspace
+content goes to it. `medulla --mock` swaps in a scripted `MockBackend`, and a
+signed-out run uses an `OfflineBackend`.
 
 ## TUI
 
-The terminal UI shipped as the `medulla` binary. It renders the fleet, agent
-lanes, task transcripts, workflow canvas, settings, and routing, all driven
-through the same `Runtime` trait that backs the headless daemon and the mock
-demo.
+The terminal UI shipped as the `medulla` binary. It renders the session rail,
+agent lanes, transcripts, workflow canvas, hosts, and settings. It holds a
+`Backend` for the account-side calls and a hub slot for local dispatch, and
+everything else is local state.

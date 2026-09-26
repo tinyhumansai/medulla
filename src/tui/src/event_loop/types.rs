@@ -1,0 +1,326 @@
+//! Data exchanged by the interactive event loop and its background tasks.
+
+use medulla::runtime::ContextItem;
+
+/// One harness progress frame's place in the sink's backlog.
+///
+/// `AppMsg` is delivered over an unbounded channel, which is right for the
+/// lifecycle messages on it — losing `WorkflowRunFinished` would leave a row
+/// spinning forever. Harness progress is the opposite: an `agent` step emits
+/// thousands of frames, the pane shows a tail of them, and a frame the loop has
+/// not reached yet is one nobody will ever read. Without a bound, an agent that
+/// out-talks a busy event loop grows the queue with frames whose only effect is
+/// to delay the settle message behind them.
+///
+/// So the sink counts what it has queued and stops queueing past
+/// [`MAX_PENDING_FRAMES`](super::cmd_dispatch::workflows::MAX_PENDING_FRAMES).
+/// Dropping this token is what marks a frame taken, which happens when the loop
+/// destructures the message — no bookkeeping at the consumer, and no way for a
+/// message dropped on shutdown to leak a slot.
+#[cfg(feature = "workflows")]
+pub(super) struct PendingFrame(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(feature = "workflows")]
+impl PendingFrame {
+    /// Claim a backlog slot, if the sink is not already at its bound.
+    ///
+    /// `None` means the frame is dropped rather than queued.
+    ///
+    /// The reservation is one compare-and-exchange rather than a load followed
+    /// by an add: a workflow fans out, so several sinks call this at once, and
+    /// separate steps let all of them read a depth under the bound and then
+    /// every one of them queue — the overshoot growing with the fan-out, which
+    /// is precisely when the bound matters.
+    pub(super) fn claim(
+        depth: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        limit: usize,
+    ) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let mut current = depth.load(Ordering::Relaxed);
+        loop {
+            if current >= limit {
+                return None;
+            }
+            match depth.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self(depth.clone())),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "workflows")]
+impl Drop for PendingFrame {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Messages sent from spawned async tasks back to the event loop.
+pub(super) enum AppMsg {
+    /// A status-line update.
+    Status(String),
+    /// Fresh context-inspection rows.
+    Contexts(Vec<ContextItem>),
+    /// A remote host answered, and this is what it can do.
+    RemoteHostConnected {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// What it advertised.
+        capabilities: Box<medulla::protocol::RemoteCapabilities>,
+    },
+    /// A remote host's connection task has started; this is how to reach it.
+    ///
+    /// Carried through the same channel as everything else so the App is the
+    /// sole owner of the handle — a connection nothing can talk to is worse than
+    /// no connection, because it looks like one.
+    RemoteHostDialling {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// The task's request channel.
+        requests: tokio::sync::mpsc::UnboundedSender<medulla_tui::remote::client::RemoteRequest>,
+    },
+    /// A remote host's session list changed.
+    RemoteHostSessions {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// Every session on it.
+        rows: Vec<medulla::protocol::RemoteSessionRow>,
+    },
+    /// A session started on a remote host.
+    RemoteSessionOpened {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// The new session's id, as that host knows it.
+        session_id: String,
+    },
+    /// The watched remote session's screen moved.
+    RemoteScreen {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// Which session, as that host knows it.
+        session_id: String,
+        /// The screen, ready for the ordinary renderer.
+        snapshot: Box<medulla_tui::worker::pty::ScreenSnapshot>,
+    },
+    /// A remote host could not be reached, and this is why.
+    ///
+    /// The reason is carried rather than reduced to a flag because the useful
+    /// cases — an unknown host key, a missing binary, a refused login — have
+    /// different fixes, and "could not connect" is not one an operator can act
+    /// on.
+    RemoteHostFailed {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// What went wrong, in the operator's terms.
+        reason: String,
+    },
+    /// A remote host refused to start a session, and this is why.
+    ///
+    /// Distinct from `RemoteHostFailed`: the *connection* is fine, only the
+    /// `Open` was refused (an invalid workspace, a harness that failed to
+    /// launch), so this must not touch the host's connection status — only say
+    /// why, where the operator was waiting for an answer.
+    RemoteOpenFailed {
+        /// Which `[[remoteHosts]]` entry.
+        host_id: String,
+        /// What the host said went wrong.
+        reason: String,
+    },
+    /// Chats to display in the resume picker.
+    OpenResume(Vec<medulla::ui::chat_store::MainChatSummary>),
+    /// Confirmation that a chat was resumed.
+    Resumed(String),
+    /// The session was cleared; quit back to the login screen.
+    LoggedOut,
+    /// Account usage returned by the runtime, or the fetch failure.
+    ///
+    /// Failure stays in this message rather than arriving as a separate status
+    /// so a subscription refresh waiting on usage is always released exactly
+    /// once and no unrelated command can consume a trailing notification.
+    UsageLoaded(Result<Option<serde_json::Value>, String>),
+    /// A fresh subscription-usage sample. Boxed because it is the largest
+    /// variant by some way and every message would otherwise carry its width.
+    SubscriptionsLoaded(Box<medulla::subscriptions::SubscriptionSnapshot>),
+    /// A newer release was detected by the background update checker.
+    UpdateAvailable(String),
+    /// An automatic review began outside the selected pane.
+    #[cfg(feature = "workflows")]
+    CopilotStarted {
+        /// The workflow whose automatic review started.
+        workflow: String,
+        /// The synthetic user turn shown in its transcript.
+        instruction: String,
+    },
+    /// A page of the feedback board. `None` = this runtime has no board.
+    FeedbackLoaded {
+        /// The query that produced it, so a superseded load can be dropped.
+        query: medulla::client::FeedbackQuery,
+        /// The page itself.
+        page: Option<medulla::client::FeedbackPage>,
+    },
+    /// Comments for one board item.
+    FeedbackComments {
+        /// The item the comments belong to.
+        id: String,
+        /// The item's comments, oldest first.
+        comments: Vec<medulla::client::FeedbackComment>,
+    },
+    /// A board item the server re-tallied after a vote.
+    FeedbackItemUpdated(medulla::client::FeedbackItem),
+    /// A feedback action finished; reload the board and report `status`.
+    FeedbackChanged(String),
+    /// A run started from this TUI began executing.
+    #[cfg(feature = "workflows")]
+    WorkflowRunStarted {
+        /// The workflow being run.
+        workflow: String,
+        /// The engine run id, which the live output is keyed by.
+        run_id: String,
+    },
+    /// One progress frame from a harness a running workflow dispatched.
+    #[cfg(feature = "workflows")]
+    WorkflowRunOutput {
+        /// The run it belongs to.
+        run_id: String,
+        /// The graph node whose harness emitted it.
+        node: String,
+        /// The frame, in the vocabulary `medulla::daemon::status_detail` writes.
+        line: String,
+        /// Keeps this frame counted against the sink's backlog until the loop
+        /// has taken it. See [`PendingFrame`].
+        pending: PendingFrame,
+    },
+    /// A run started from this TUI settled.
+    #[cfg(feature = "workflows")]
+    WorkflowRunFinished {
+        /// The run that settled.
+        run_id: String,
+    },
+    /// A progress line from a running copilot turn.
+    #[cfg(feature = "workflows")]
+    CopilotStatus {
+        /// The workflow whose turn reported it.
+        workflow: String,
+        /// The progress line.
+        line: String,
+    },
+    /// A copilot turn finished.
+    #[cfg(feature = "workflows")]
+    CopilotDone {
+        /// The workflow the turn was scoped to.
+        workflow: String,
+        /// The agent's reply.
+        reply: String,
+        /// What the turn changed in the stored graph.
+        changes: Vec<String>,
+        /// The workflow the turn created, for a create turn that made one.
+        created: Option<String>,
+        /// Whether the workflow the turn was scoped to no longer exists, so its
+        /// conversation can be closed down with it.
+        removed: bool,
+    },
+    /// A copilot turn failed.
+    #[cfg(feature = "workflows")]
+    CopilotFailed {
+        /// The workflow the turn was scoped to.
+        workflow: String,
+        /// The instruction belonging to this specific failed turn.
+        instruction: String,
+        /// Why it failed.
+        error: String,
+    },
+    /// A manually deleted workflow no longer has a graph or conversation to retain.
+    #[cfg(feature = "workflows")]
+    WorkflowDeleted {
+        /// The removed workflow, used to stop and forget its copilot thread.
+        id: String,
+    },
+    /// The workflow store was written to by something other than a copilot turn,
+    /// so the catalogue on screen is stale.
+    ///
+    /// Carries no payload: what changed is whatever the store now holds, and a
+    /// re-read is both cheaper and more honest than describing the edit twice.
+    #[cfg(feature = "workflows")]
+    WorkflowsChanged,
+}
+
+/// Why the event loop stopped.
+///
+/// A logout is not an exit: it tears the authenticated session down but expects
+/// the caller to return to the login screen rather than to the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionExit {
+    /// The user quit; the process should exit.
+    Quit,
+    /// The user logged out; re-authenticate and start a fresh session.
+    Relogin,
+}
+
+/// Everything a session needs besides the terminal and the runtime.
+///
+/// Bundled rather than passed positionally: these are all "wire this into the
+/// app" values, and a session is started afresh on every relogin, so the call
+/// site reads better as one named record than as eight arguments.
+pub(crate) struct SessionWiring {
+    /// The loaded configuration for this session.
+    pub loaded: medulla::config::LoadedConfig,
+    /// The custom harnesses this device's primary host declares, for a
+    /// workflow `agent` step to resolve a harness name against. `None` when this
+    /// device is not hosting — there are then no host options to read them from.
+    pub local_hosts: Option<crate::local_host::LocalHostHarnesses>,
+    /// A note to show on the status line at startup, if any.
+    pub startup_status: Option<String>,
+    /// The host-link presence observation, when that service is running.
+    /// Where appearance/config edits are persisted.
+    pub config_path: std::path::PathBuf,
+    /// Where hook edits are persisted — see `App::hooks_config_path` (in
+    /// `medulla_tui::ui::app`) for why this can differ from
+    /// [`Self::config_path`]: a project-local config is exactly the layer
+    /// `medulla::config::load_config` strips `[[hooks]]` from, so a hook saved
+    /// against it would be silently ignored on the next launch.
+    pub hooks_config_path: std::path::PathBuf,
+    /// The Medulla home: where user-level application state is kept.
+    pub medulla_home: std::path::PathBuf,
+    /// The account the embedded core is signed in as, when it is.
+    ///
+    /// Resolved once at startup rather than polled: the session cannot change
+    /// under a running app — logging out quits it.
+    pub account: Option<medulla::auth::AuthState>,
+    /// Live events from a history share the welcome flow left running.
+    pub sharing:
+        Option<tokio::sync::mpsc::UnboundedReceiver<medulla_tui::ui::welcome::WelcomeEvent>>,
+    /// Where to record onboarding once a backgrounded share settles.
+    pub onboarding_path: std::path::PathBuf,
+    /// The background host-link service's shared observation: this endpoint's
+    /// identity, its peer roster and per-peer presence, merged into every
+    /// snapshot refresh. `None` when no link is configured.
+    pub link_obs:
+        Option<std::sync::Arc<std::sync::Mutex<medulla::protocol::service::LinkObservation>>>,
+    /// A read-only view of the host running on this device, when one is. `None`
+    /// means this machine orchestrates but does not run the work itself.
+    pub host: Option<medulla::daemon::embedded::HostObservation>,
+    /// The live sessions this device is running, and the state machine
+    /// that says which task each one serves.
+    ///
+    /// `None` when this machine does not host: there are no local sessions to
+    /// show, and the Agents tab falls back to a remote worker's streamed screen
+    /// or to the transcript. Shared with the host's executor — the sessions it
+    /// opens are the ones rendered here.
+    pub local_sessions: Option<medulla_tui::ui::harness_pane::LocalSessions>,
+    /// Workflow runs reported by harnesses this device spawned, as the control
+    /// plane records them. Empty when no control socket was bound — a build
+    /// without workflows, or a host with fleet tools switched off.
+    pub harness_runs: medulla::control_socket::HarnessRunRegistry,
+    /// Lifecycle reports from the harnesses this Medulla launched, as their
+    /// hooks file them.
+    ///
+    /// The same log the control socket writes into, shared rather than copied:
+    /// the Hooks page renders what is arriving right now.
+    pub hook_log: medulla::harness_hooks::HookEventLog,
+}

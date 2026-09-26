@@ -1,13 +1,5 @@
 name: CI
 
-# Everything in this repository is published: the docs feed the GitBook site and
-# the installers are piped into strangers' shells. There is nothing to compile,
-# so CI is the two checks that actually protect that surface — the public
-# boundary guard, and a markdown-link check over the documentation tree.
-#
-# The installers have their own workflow (`install-scripts.yml`), which runs them
-# against the real published release on every supported platform.
-
 on:
   push:
     branches: [main]
@@ -21,67 +13,414 @@ permissions:
   contents: read
 
 jobs:
-  public-boundary:
-    name: Public boundary
+  rust-sdk:
+    name: Rust SDK
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - run: bash scripts/check-public-boundary.sh
+        with:
+          persist-credentials: false
+          submodules: false
 
-  links:
-    name: Documentation links
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
 
-      # Relative links only. The source tree lives in another repository, so a
-      # `../../src/…` link here is always a mistake — this is what catches one
-      # before the GitBook site publishes it as a dead link.
-      - name: No links into a source tree that is not here
+      - uses: ./.github/actions/native-deps
+
+      # `cargo build --all-targets` over this workspace does not fit in a stock
+      # runner's free space alongside the caches.
+      - uses: ./.github/actions/free-disk
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          # Submodule SHAs are part of the build input but not of Cargo.lock,
+          # so without this a submodule bump reuses a stale cache.
+          key: ${{ hashFiles('.gitmodules') }}-${{ hashFiles('rust-toolchain.toml') }}
+          cache-on-failure: true
+
+      - uses: ./.github/actions/sccache
+
+      # The e2e suite exercises the real opencode CLI when it is on PATH.
+      # Install the pinned release artifact rather than the development
+      # monorepo: old frozen lockfiles can reference ephemeral pkg.pr.new
+      # packages that disappear even though the tagged release remains valid.
+      - name: Install opencode release
         run: |
           set -euo pipefail
-          if grep -rn -E '\]\(\.\./(\.\./)?src/' docs gitbooks; then
-            echo "::error::relative link into src/ — the source lives in tinyhumansai/medulla-src; link to it by URL"
-            exit 1
+          curl -fsSL \
+            https://github.com/anomalyco/opencode/releases/download/v1.17.18/opencode-linux-x64.tar.gz \
+            -o /tmp/opencode-linux-x64.tar.gz
+          echo "e149d32ee5667c0cd5fb84d0bf8393b312e93782eeb4d74d29bbb0392de7133c  /tmp/opencode-linux-x64.tar.gz" \
+            | sha256sum --check -
+          sudo tar -xzf /tmp/opencode-linux-x64.tar.gz -C /usr/local/bin
+          opencode --version
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        timeout-minutes: 20
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --locked --all-targets
+
+      # Surfaces a regression that is otherwise invisible: if the hit rate goes
+      # to zero the lane still passes, just slowly.
+      - name: Compiler cache stats
+        if: always()
+        run: sccache --show-stats
+
+  coverage:
+    name: Coverage (>= 80% lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: ./.github/actions/native-deps
+
+      # `-C instrument-coverage` builds a second, larger copy of the whole
+      # workspace into target/llvm-cov-target, so this is the lane with the
+      # least headroom of any.
+      - uses: ./.github/actions/free-disk
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          # Submodule SHAs are part of the build input but not of Cargo.lock,
+          # so without this a submodule bump reuses a stale cache.
+          key: ${{ hashFiles('.gitmodules') }}-${{ hashFiles('rust-toolchain.toml') }}
+          cache-on-failure: true
+
+      - uses: ./.github/actions/sccache
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # Gate reusable SDK and UI logic at 95%. The excluded files are the
+      # process/terminal/network drivers themselves: they depend on OS terminal
+      # state or a live Socket.IO/tiny.place connection and are exercised
+      # separately by the binary subprocess + direct-PTY E2E suite (`e2e_cli`)
+      # and the live staging hub run, while their pure state machines, routing,
+      # and data types remain counted. The orchestrator-hub split keeps the
+      # dispatch runner + roster resolution + data types counted; only the
+      # connect/boot/relay/handle IO drivers and the TUI hub wiring are excluded.
+      # Daemon entry/transport, backend worker operations, wrapper run/bridge,
+      # and the harness PTY module are likewise process or network adapters;
+      # their reusable types and helpers remain counted in their sibling modules.
+      # `worker_loop` joins them for the same reason `app_loop`/`event_loop` are
+      # there: it is the worker TUI's entry point and tick loop, driving a real
+      # terminal and real PTYs, and it is covered by the E2E suite instead.
+      # `main` is the binary entry point — the thin dispatcher that wires the
+      # four already-excluded drivers together — so it is excluded with them.
+      # `executor_tests/live.rs` is the interactive-codex smoke/acceptance suite:
+      # every test in it is `#[ignore]` because it needs a real authed `codex`
+      # binary plus network, so it never runs in CI and its lines can only be
+      # exercised by the live run — the same reason the drivers above are excluded.
+      # rust-cache here runs with cache-on-failure, so a red run saves its
+      # target/llvm-cov-target as-is — including any half-written .profraw the
+      # failure left behind. Restoring one of those poisons the next run at the
+      # very end, after the whole workspace has been built and every test has
+      # passed:
+      #
+      #   warning: ...profraw: invalid instrumentation profile data
+      #            (file header is corrupt)
+      #   error: no profile can be merged
+      #
+      # `clean` drops the profile data and leaves the compiled artifacts alone,
+      # so the cache still does its job.
+      - name: Drop stale profile data
+        run: cargo llvm-cov clean --workspace
+
+      - name: Coverage gate
+        timeout-minutes: 100
+        env:
+          # llvm-cov reads its line data from the coverage map `-C
+          # instrument-coverage` embeds, not from DWARF, so the default
+          # `debuginfo=2` on every instrumented test binary is pure disk cost
+          # here — several GB of it across the workspace's test targets.
+          CARGO_PROFILE_DEV_DEBUG: none
+          CARGO_PROFILE_TEST_DEBUG: none
+        run: >-
+          cargo llvm-cov --locked
+          --ignore-filename-regex '(^|/)vendor/|src/tui/src/(app_loop|commands|main)(/.*)?\.rs|src/tui/src/(event_loop|terminal|hub_relay|worker_loop)(/.*)?\.rs|src/tui/src/harness_pty/mod\.rs|src/tui/src/ui/onboarding/run(/.*)?\.rs|src/tui/src/worker/executor_tests/live\.rs|src/sdk/src/daemon/(entry\.rs|transport/mod\.rs)|src/sdk/src/wrapper/(run|bridge)/mod\.rs|src/sdk/src/hub/(socket|relay)\.rs|src/sdk/src/hub/(boot|handle)(/.*)?\.rs'
+          --fail-under-lines 80
+          --summary-only
+
+      # Surfaces a regression that is otherwise invisible: if the hit rate goes
+      # to zero the lane still passes, just slowly.
+      - name: Compiler cache stats
+        if: always()
+        run: sccache --show-stats
+
+  vendored-crates:
+    name: Vendored crate resolution
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: ${{ hashFiles('.gitmodules') }}-${{ hashFiles('rust-toolchain.toml') }}-vendored
+          cache-on-failure: true
+
+      - uses: ./.github/actions/sccache
+
+      - uses: ./.github/actions/native-deps
+
+      # Duplicates what every other lane compiles. It stays because the guards
+      # below are what this lane is really for, and they need a resolved graph
+      # to inspect.
+      - name: Check the workspace
+        run: cargo check --locked
+
+      # Guards the failure modes that do not announce themselves: two copies of
+      # a vendored crate (an E0308 where the types look identical), a patched
+      # crate that silently resolved from the registry instead of the vendored
+      # tree, and duplicate ratatui/crossterm (two raw-mode state machines on one
+      # tty). Both patched crates are checked, not just one: an entry dropped
+      # from `[patch.crates-io]` fails exactly this way and nothing else notices.
+      - name: Guard against duplicate and misresolved vendored crates
+        run: |
+          set -euo pipefail
+          dupes=$(cargo tree -d | grep -E '^(tiny[a-z]+|ratatui|crossterm|rustls|ring|aws-lc-rs) v' || true)
+          if [ -n "$dupes" ]; then
+            echo "Duplicate packages that must be unified:"; echo "$dupes"; exit 1
           fi
-          echo "no source-tree links"
+          for crate in tinyagents-harness tinyflows; do
+            vendor=tinyagents
+            if [ "$crate" = tinyflows ]; then vendor=tinyflows; fi
+            if ! cargo tree -i "$crate" | head -1 | grep -q "vendor/$vendor"; then
+              echo "$crate did not resolve to the vendored tree:"
+              cargo tree -i "$crate" | head -1
+              exit 1
+            fi
+          done
+          echo "OK: one copy of each vendored crate, resolved from vendor/."
 
-      - name: Relative links resolve
+      # Surfaces a regression that is otherwise invisible: if the hit rate goes
+      # to zero the lane still passes, just slowly.
+      - name: Compiler cache stats
+        if: always()
+        run: sccache --show-stats
+
+  rust-sdk-windows:
+    name: Rust SDK (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          # Submodule SHAs are part of the build input but not of Cargo.lock,
+          # so without this a submodule bump reuses a stale cache.
+          key: ${{ hashFiles('.gitmodules') }}-${{ hashFiles('rust-toolchain.toml') }}
+          cache-on-failure: true
+
+      - uses: ./.github/actions/sccache
+
+      # No bun/opencode leg here: the core-socket runtime and the `/bin/sh`
+      # e2e suites are unix-only (gated `#[cfg(unix)]`), so Windows just needs
+      # the crate to compile and its cross-platform lib tests to pass.
+      - name: Check
+        run: cargo check --locked --all-targets
+
+      # 40, not 20: this step compiles as well as runs, and on a cold sccache
+      # (0% hit rate after any Cargo.lock change — a release bump does it) the
+      # Windows compile alone eats most of a 20-minute budget. It has been
+      # killed at 20 with tests still streaming results seconds earlier, which
+      # reads as a hang rather than as a step that needed four more minutes.
+      # The job cap stays 60, so a genuine hang is still bounded.
+      - name: Test (lib)
+        timeout-minutes: 40
+        run: cargo test --locked --lib
+
+      # Surfaces a regression that is otherwise invisible: if the hit rate goes
+      # to zero the lane still passes, just slowly.
+      - name: Compiler cache stats
+        if: always()
+        run: sccache --show-stats
+
+  # ── end-to-end harness ─────────────────────────────────────────────────────
+  # Does this change need the docker/tmux harness run at all?
+  #
+  # The suites are the most expensive thing in this workflow, and most pull
+  # requests cannot affect them. Rather than gate the whole workflow on paths —
+  # every other job here must run unconditionally — this job answers the
+  # question once and the e2e matrix reads its verdict.
+  #
+  # A push to main always runs them: main is what the release builds from, so it
+  # is the branch that has to be known good at all times.
+  e2e-relevant:
+    name: E2E relevance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The `decide` step fetches the base branch to scope expensive e2e runs.
+          submodules: false
+          # Needed to diff against the base branch, which a shallow clone of the
+          # merge commit alone cannot reach.
+          fetch-depth: 0
+
+      - id: decide
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          python3 - <<'EOF'
-          import os, re, sys, urllib.parse
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request — running the harness"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --prune origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          changed="$(git diff --name-only "origin/$BASE_REF...HEAD")"
+          printf 'changed files:\n%s\n' "$changed"
+          # Anything that can change what the harness observes: the crates it
+          # compiles, the vendored core they link, the harness itself, and this
+          # workflow. Documentation and the other workflows cannot.
+          if printf '%s\n' "$changed" | grep -Eq \
+              '^(src/|e2e/|vendor/|scripts/|Cargo\.(toml|lock)$|\.gitmodules$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no harness-relevant paths changed — skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          # Markdown inline links whose target is not a URL, anchor, or mailto.
-          link = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
-          bad = []
-          for root, dirs, files in os.walk('.'):
-              dirs[:] = [d for d in dirs if d not in {'.git', '.github', 'node_modules'}]
-              for name in files:
-                  if not name.endswith('.md'):
-                      continue
-                  path = os.path.join(root, name)
-                  with open(path, encoding='utf-8') as fh:
-                      text = fh.read()
-                  for target in link.findall(text):
-                      target = target.split(' ')[0]
-                      if re.match(r'^(https?:|mailto:|#)', target):
-                          continue
-                      target = urllib.parse.unquote(target.split('#')[0])
-                      if not target:
-                          continue
-                      resolved = os.path.normpath(os.path.join(root, target))
-                      if os.path.exists(resolved):
-                          continue
-                      # GitBook resolves a directory link to its README.md.
-                      if os.path.exists(os.path.join(resolved, 'README.md')):
-                          continue
-                      bad.append(f"{path}: {target}")
+  # The docker/tmux end-to-end suites, once per coding CLI.
+  #
+  # These used to live here, moved to the release gate when they were by far the
+  # slowest check, and are back because the reason they were slow is gone: the
+  # coding CLIs are pulled with a pinned tools base image
+  # (e2e/coordination/Dockerfile.base) instead of being downloaded per build, so
+  # a run now pays for the Rust stage and nothing else. Gating a release on them
+  # meant a harness regression was found at release time, by which point it was
+  # blocking a ship rather than a pull request.
+  e2e-docker:
+    name: E2E (docker + tmux + ${{ matrix.harness }})
+    needs: e2e-relevant
+    if: needs.e2e-relevant.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      # One leg per coding CLI. The image is the same for all three — only
+      # `E2E_HARNESS` differs — so a claude or codex regression cannot hide
+      # behind a green opencode run. `fail-fast: false` so one broken harness
+      # still reports whether the others are healthy.
+      fail-fast: false
+      matrix:
+        harness: [opencode, claude, codex]
+    env:
+      E2E_HARNESS: ${{ matrix.harness }}
+    # Read-only, and `packages` so the harness image can pull its tools base
+    # (ghcr.io/tinyhumansai/medulla_e2e_base) rather than re-downloading every
+    # coding CLI on a cold layer cache.
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: false
 
-          for entry in bad:
-              print(f"::error::broken relative link {entry}")
-          print(f"{len(bad)} broken relative link(s)")
-          sys.exit(1 if bad else 0)
-          EOF
+      - name: Initialize submodules
+        run: bash scripts/init-submodules.sh
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the harness image once with a GHA layer cache. Only the Rust stage
+      # is built here — tmux, node and all three coding CLIs arrive with the
+      # pinned tools base. Then run the suites in fully network-isolated
+      # containers.
+      - name: Build harness image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: e2e/coordination/Dockerfile
+          tags: medulla-e2e:latest
+          load: true
+          provenance: false
+          cache-from: type=gha
+          # A transient GHA cache-service failure must not discard a successfully
+          # built and loaded image or prevent the offline scenarios from running.
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      - name: Coordination round trip (run.sh, --network none)
+        run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh
+
+      - name: Functional scenarios (tests.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests.sh
+
+      - name: Multi-agent scenarios (tests_multi.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_multi.sh
+
+      # The other transport: the daemon spawns an ACP server, which spawns the
+      # harness. Everything the CLI seam does at spawn time has to be redone by
+      # other means there, and twice it silently was not.
+      - name: ACP transport scenarios (tests_acp.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_acp.sh
+
+      # The surfaces an operator looks at: the `medulla <harness>` wrapper and
+      # the `medulla daemon --tui` screen, both full-screen TUIs on a real pty.
+      - name: Terminal scenarios (tests_tui.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_tui.sh

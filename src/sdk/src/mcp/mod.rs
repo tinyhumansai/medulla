@@ -1,0 +1,477 @@
+//! Medulla's Model Context Protocol server, offered to the harnesses it spawns.
+//!
+//! Medulla drives Claude Code and Codex over ACP as a *client*, so it cannot
+//! hand them tools the way a host application does — the tools have to be
+//! offered, and MCP is the way an ACP agent accepts them. Attaching this server
+//! to a session (`session/new`'s `mcpServers`) is what turns "a harness that can
+//! edit files" into one that can build a workflow and delegate to the fleet it
+//! is running in.
+//!
+//! Two tool families are served:
+//!
+//! * `workflow_*` — authoring, validating, and running saved graphs. These are
+//!   the SDK's operations ([`crate::workflows::ops`]), the same ones the
+//!   `medulla workflow` subcommand calls, so a model that learns one has learned
+//!   both and neither can drift from the other.
+//! * `fleet_*` — seeing the fleet and dispatching work into it, proxied to a
+//!   running Medulla over the control socket ([`crate::control_socket`]).
+//!
+//! Which families a session gets is decided by the grant Medulla minted for it,
+//! never by anything the session says about itself.
+//!
+//! # Where the fleet tools exist
+//!
+//! Only on a host that is *running* a fleet — one whose process bound a control
+//! plane ([`crate::control_socket::active`]). In practice that means the
+//! operator's own machine. A harness Medulla dispatched to a remote worker is
+//! executed by that worker's daemon, which has no hub of its own and so mints no
+//! grant; it gets the `workflow_*` family and nothing else.
+//!
+//! So the same prompt reaches a harness with a different tool surface depending
+//! on where the task landed. That is deliberate, and it is why the difference is
+//! expressed by *withholding the verbs* rather than by advertising tools that
+//! fail: a model on a remote worker is never told about a fleet it cannot reach,
+//! so it plans around what it has instead of retrying something structurally
+//! unavailable. `fleet_status` exists for the case where a session does hold the
+//! family and wants to know the fleet's shape before planning around it.
+//!
+//! Routing a remote worker's fleet calls back to the orchestrator over the
+//! remote bridge would remove the asymmetry, and is deliberately not done
+//! here: it needs frames, cross-machine correlation, and abort routing that this
+//! surface does not yet have.
+//!
+//! Only the pieces of MCP a stdio tool server actually needs are implemented —
+//! `initialize`, `tools/list`, `tools/call`, the `notifications/*` a client
+//! sends and expects nothing back from, and `notifications/progress` going the
+//! other way ([`progress`]). That is the whole protocol surface for a server
+//! that exposes tools and no resources or prompts.
+
+pub mod attach;
+pub mod backend;
+mod policy;
+pub(crate) mod progress;
+pub(crate) mod tools;
+mod types;
+
+#[cfg(test)]
+mod tests;
+
+pub use attach::{
+    attach_cli, config_dir_for_socket, forget_session_runs, local_hook_grant, revoke_session,
+    server_command, sweep_stale_config_files, ServerSpec, ATTACHED_ENV, SERVER_COMMAND_ENV,
+};
+pub use backend::{FleetBackend, OfflineFleet};
+pub use tools::{
+    tool_definitions, ToolMode, FLEET_TOOL_NAMES, TOOL_MODE_ENV, TOOL_NAMES, TOOL_SCOPE_ENV,
+};
+pub use types::McpSession;
+pub(crate) use types::RpcError;
+
+use policy::policy_from_loaded;
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+
+use serde_json::{json, Value};
+
+/// The MCP protocol version this server speaks.
+pub const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Versions this server will speak if a client asks for one.
+///
+/// The specification's negotiation is: answer with the client's version if you
+/// support it, otherwise with your own and let the client decide. Answering with
+/// a fixed version regardless — which this did — is the one response that tells
+/// a client nothing, because it looks identical whether or not its request was
+/// understood.
+const SUPPORTED_VERSIONS: [&str; 2] = ["2024-11-05", "2025-03-26"];
+
+/// Maximum MCP requests allowed to execute or wait for stdout concurrently.
+///
+/// A fleet result poll can live for two minutes. Bounding both its task permit
+/// and the response channel prevents a pipelining client from growing either
+/// queue without limit while preserving useful parallelism for short calls.
+const MAX_CONCURRENT_REQUESTS: usize = 32;
+
+/// The version to answer `initialize` with, given what the client asked for.
+fn negotiate(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|asked| SUPPORTED_VERSIONS.iter().find(|known| **known == asked))
+        .copied()
+        .unwrap_or(PROTOCOL_VERSION)
+}
+
+/// The server's advertised name, as it appears to a model.
+///
+/// Plain `medulla` rather than `medulla-workflows`: it serves the fleet family
+/// too now, and a harness reads this in every tool name it sees
+/// (`mcp__medulla__fleet_dispatch`).
+pub const SERVER_NAME: &str = "medulla";
+
+/// Check that a harness session would actually be handed these tools.
+///
+/// The ways they silently do not arrive, all of which leave a session that
+/// starts fine and can do nothing: workflows turned off, a binary whose own path
+/// cannot be resolved, the `workflows` feature compiled out — and a resolved
+/// path that is not a Medulla binary at all, which is the one that used to get
+/// through. [`attach::server_command`] normally names this process, and that is
+/// right for the TUI, the daemon, and the CLI; anything else that links the SDK
+/// resolves to a program for which `mcp` on the argv means nothing.
+///
+/// For a *workflow run* that is survivable — an `agent` node dispatches an
+/// instruction and needs no workflow tools to carry it out. For an *authoring*
+/// turn it is fatal, because the tools are the whole of what the turn is for:
+/// without them the prompt tells a model to call things that are not there, and
+/// the operator gets a confident reply and an unchanged graph. So the copilot
+/// asks first rather than finding out from the silence.
+///
+/// The last check *runs* the server and asks it what it serves, because nothing
+/// cheaper distinguishes "a path exists" from "that path speaks MCP". It is
+/// done once per process and remembered: the binary does not change underneath
+/// a running Medulla, and paying a subprocess spawn per turn to re-learn the
+/// same answer would be a cost on every instruction an operator types.
+///
+/// # Errors
+///
+/// Returns the reason the tools would be missing, phrased for an operator who
+/// has to fix it.
+pub fn preflight(env: &HashMap<String, String>, cwd: &Path) -> Result<(), String> {
+    let enabled =
+        crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd)
+            .map(|loaded| loaded.config.workflows.enabled)
+            .unwrap_or(true);
+    if !enabled {
+        return Err(
+            "workflows are turned off on this host (workflows.enabled = false), so the copilot \
+             has no tools to edit a graph with"
+                .to_string(),
+        );
+    }
+    let Some(command) = attach::server_command() else {
+        return Err(
+            "cannot determine this binary's own path, so the workflow tool server cannot be \
+             started for the harness"
+                .to_string(),
+        );
+    };
+    static SERVES: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    SERVES
+        .get_or_init(|| serves_workflow_tools(&command))
+        .clone()
+}
+
+/// Whether running `command mcp` yields a server that lists the workflow tools.
+///
+/// One `tools/list` over the same stdio transport a harness would use. A
+/// mismatch, a crash, or silence all mean the same thing to the caller — the
+/// tools will not arrive — so all three become one message that names the path,
+/// which is the piece an operator needs to see to recognise a stale or wrapped
+/// binary.
+fn serves_workflow_tools(command: &Path) -> Result<(), String> {
+    use std::io::{BufRead, BufReader, Write};
+
+    let blame = |reason: &str| {
+        format!(
+            "the workflow tool server at {} does not serve Medulla's tools ({reason}), so an \
+             authoring turn would start a harness that cannot edit anything. Set {} to a built \
+             `medulla` binary if this program is not one.",
+            command.display(),
+            attach::SERVER_COMMAND_ENV,
+        )
+    };
+
+    let mut child = std::process::Command::new(command)
+        .arg("mcp")
+        .env(attach::ATTACHED_ENV, "preflight")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|err| blame(&format!("it could not be started: {err}")))?;
+
+    // Killed however this ends, including on an early return: the probe owns
+    // this process and an orphan holding a pipe would outlive the check.
+    let result = (|| {
+        let mut stdin = child.stdin.take().ok_or_else(|| blame("no stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| blame("no stdout"))?;
+        writeln!(
+            stdin,
+            "{}",
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": PROTOCOL_VERSION },
+            })
+        )
+        .and_then(|()| {
+            writeln!(
+                stdin,
+                "{}",
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} })
+            )
+        })
+        .map_err(|err| blame(&format!("it closed its input: {err}")))?;
+
+        let mut reader = BufReader::new(stdout);
+        for _ in 0..2 {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => return Err(blame("it exited without answering")),
+                Ok(_) => {}
+                Err(err) => return Err(blame(&format!("it could not be read: {err}"))),
+            }
+            let Ok(response) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let names = response
+                .pointer("/result/tools")
+                .and_then(Value::as_array)
+                .map(|tools| {
+                    tools
+                        .iter()
+                        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+                        .any(|name| name.starts_with("workflow_"))
+                });
+            if names == Some(true) {
+                return Ok(());
+            }
+            if names == Some(false) {
+                return Err(blame("it lists no workflow tools"));
+            }
+        }
+        Err(blame("it never answered tools/list"))
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+/// Handle one JSON-RPC request, returning the response to write back.
+///
+/// `None` for a notification, which by JSON-RPC definition gets no reply — a
+/// server that answered one would confuse the client's request correlation.
+pub async fn handle_request(session: &McpSession, request: &Value) -> Option<Value> {
+    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+    let id = request.get("id").cloned();
+    let params = request.get("params").cloned().unwrap_or(Value::Null);
+
+    // A notification has no id. `initialized` is the one every client sends,
+    // and answering it would desynchronise the client's request correlation.
+    let id = id?;
+
+    let result = match method {
+        "initialize" => Ok(json!({
+            "protocolVersion": negotiate(
+                params.get("protocolVersion").and_then(Value::as_str)
+            ),
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
+        })),
+        "tools/list" => Ok(json!({ "tools": tool_definitions(session) })),
+        "tools/call" => tools::call(session, &params).await,
+        // Answered rather than errored: some clients probe for these before
+        // deciding what the server offers, and an error reads as a broken
+        // server rather than an empty list.
+        "resources/list" => Ok(json!({ "resources": [] })),
+        "prompts/list" => Ok(json!({ "prompts": [] })),
+        "ping" => Ok(json!({})),
+        other => Err(RpcError::method_not_found(other)),
+    };
+
+    Some(match result {
+        Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        Err(error) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": error.code, "message": error.message },
+        }),
+    })
+}
+
+/// Who a tool server started from `env` should attribute its runs to.
+///
+/// `None` when nothing named a session — an in-process test, or a server a
+/// person started by hand. Runs then carry no origin at all rather than a
+/// guessed one: an origin that names the wrong session is worse than none,
+/// because a rail would draw the run under a harness that never asked for it.
+fn origin_from_env(
+    env: &HashMap<String, String>,
+    cwd: &Path,
+) -> Option<crate::workflows::RunOrigin> {
+    let session = env
+        .get(attach::ORIGIN_SESSION_ENV)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|session| !session.is_empty())?;
+    Some(
+        crate::workflows::RunOrigin::session(session)
+            .in_workspace(cwd.to_string_lossy())
+            .labelled("harness session"),
+    )
+}
+
+/// Serve MCP over stdin/stdout until the client closes the stream.
+///
+/// One JSON object per line, which is the stdio transport MCP defines and the
+/// one every ACP agent supports.
+///
+/// # Errors
+///
+/// Returns an error only when stdin or stdout fails; a malformed request is
+/// answered with a JSON-RPC error and the loop continues, because a client that
+/// sent one bad frame is still a client.
+pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<(), std::io::Error> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    if env
+        .get(attach::ATTACHED_ENV)
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Medulla MCP is available only to harnesses explicitly attached by Medulla",
+        ));
+    }
+
+    let store = crate::workflows::ops::discover_store(env, cwd);
+    // Loaded once, not per call: this process serves one harness session, and
+    // an operator editing config mid-session is not a case worth re-reading a
+    // file on every tool call for. Defaults on failure — a server that refused
+    // to start because config was unreadable would take the copilot's tools
+    // with it, which is worse than answering `workflow_host` conservatively.
+    // Respects the parent's `--config`, if it recorded one before spawning this
+    // subprocess — see `crate::config::CONFIG_PATH_ENV`. Passing `None`
+    // unconditionally here used to make this server re-discover its own
+    // config from `cwd`, silently answering with a different policy
+    // (`allowCode`, `enabled`, …) than the harness session it serves was
+    // actually launched under.
+    // The custom harness presets ride along with the `workflows` section: an
+    // author choosing a harness needs to know which presets this machine has,
+    // and they live in their own config section rather than that one.
+    let loaded =
+        crate::config::load_config(crate::config::explicit_config_from_env(env), env, cwd).ok();
+    let workflows_enabled = loaded
+        .as_ref()
+        .map(|loaded| loaded.config.workflows.enabled)
+        .unwrap_or(true);
+    let policy = loaded.map(policy_from_loaded).unwrap_or_default();
+    // The mode the parent asked for. Read once at startup for the same reason
+    // config is: this process serves exactly one harness session, and which
+    // kind of turn that is was decided before it was spawned.
+    let mode = ToolMode::from_env(env);
+    // Connected before the first request rather than lazily: the answer decides
+    // which tools to advertise, and `tools/list` is often the very first thing
+    // asked. A host with no grant in its environment — a remote worker, or one
+    // with fleet tools turned off — gets the offline stand-in and serves the
+    // workflow tools alone rather than failing to start.
+    // The outbound channel is built before the session because the session
+    // holds a handle to it: a long tool call reports progress on the same
+    // stdout its eventual response goes down, and the writer task below is what
+    // keeps the two from interleaving mid-line.
+    let (responses, mut pending_responses) =
+        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
+    // Resolved once, from the environment the harness's launch put it in. Every
+    // run this server starts is attributed to that session, which is what lets
+    // the Agents rail draw the run under the harness that asked for it instead
+    // of only in the global workflow history.
+    let origin = origin_from_env(env, cwd);
+    let mut session = McpSession::local(store, policy, mode)
+        .with_workflows_enabled(workflows_enabled)
+        .with_fleet(backend::from_env(env).await)
+        .with_origin(origin)
+        .with_notifications(responses.clone());
+    // Defence in depth for a launch whose workflow surface was withheld
+    // ([`crate::harness_tools`]). The launcher already declines to serve this
+    // family — it resolves `workflows_enabled` to false, which mints a
+    // fleet-only grant — so reaching here means the grant came from somewhere
+    // that decision could not reach, such as a parent handoff exchanged on a
+    // worker with no control plane of its own. Applied after the handshake so
+    // it narrows whatever that grant carried.
+    if crate::harness_tools::workflows_withheld(env) {
+        session = session.without_workflow_tools();
+    }
+    let session = Arc::new(session);
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    let mut writer = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(response) = pending_responses.recv().await {
+            stdout.write_all(format!("{response}\n").as_bytes()).await?;
+            stdout.flush().await?;
+        }
+        Ok::<(), std::io::Error>(())
+    });
+    let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_REQUESTS));
+    let mut requests = tokio::task::JoinSet::new();
+
+    loop {
+        // A broken output pipe means no future request can be answered. Watch
+        // it while stdin is open instead of discovering it only at EOF.
+        let line = tokio::select! {
+            result = &mut writer => return result.map_err(std::io::Error::other)?,
+            line = lines.next_line() => line?,
+        };
+        let Some(line) = line else {
+            break;
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Value>(&line) {
+            Ok(request) => {
+                let permit = tokio::select! {
+                    result = &mut writer => return result.map_err(std::io::Error::other)?,
+                    permit = Arc::clone(&permits).acquire_owned() => permit
+                        .map_err(|_| std::io::Error::other("MCP request limiter closed"))?,
+                };
+                let session = Arc::clone(&session);
+                let responses = responses.clone();
+                requests.spawn(async move {
+                    let _permit = permit;
+                    if let Some(response) = handle_request(&session, &request).await {
+                        let _ = responses.send(response).await;
+                    }
+                });
+            }
+            Err(err) => {
+                let response = json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "error": { "code": -32700, "message": format!("parse error: {err}") },
+                });
+                tokio::select! {
+                    result = &mut writer => return result.map_err(std::io::Error::other)?,
+                    sent = responses.send(response) => {
+                        if sent.is_err() {
+                            return writer.await.map_err(std::io::Error::other)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    while !requests.is_empty() {
+        tokio::select! {
+            result = &mut writer => {
+                requests.abort_all();
+                return result.map_err(std::io::Error::other)?;
+            }
+            result = requests.join_next() => {
+                if let Some(result) = result {
+                    result.map_err(std::io::Error::other)?;
+                }
+            }
+        }
+    }
+    // A default `workflow_run` has already answered by this point, but the
+    // server still owns its detached work after stdin closes.
+    session.run_liveness.wait_for_all().await;
+    // Both senders, in order. The session holds one so a tool call can report
+    // progress; leaving it alive here would keep the channel open, the writer
+    // waiting on a message that can never arrive, and this function blocked on
+    // a task that will never return.
+    drop(session);
+    drop(responses);
+    writer.await.map_err(std::io::Error::other)??;
+    Ok(())
+}

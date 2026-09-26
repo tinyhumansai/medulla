@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "model": "openrouter/LIVE_MODEL",
+  "snapshot": false,
+  "provider": {
+    "openrouter": {
+      "name": "OpenRouter",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "LIVE_OPENROUTER_API_KEY",
+        "baseURL": "https://openrouter.ai/api/v1"
+      },
+      "models": {
+        "LIVE_MODEL": {
+          "name": "Live Model"
+        }
+      }
+    }
+  }
+}

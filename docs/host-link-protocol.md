@@ -24,6 +24,9 @@ material:
 
 Both flows use the same packet format, cryptography, and state synchronisation.
 The `direct` module of the `medulla-link` crate documents their shared transport.
+This specification focuses on these production direct links. The crate also
+retains a forwarder route for coordination tests; it is not a deployed
+bootstrap, as described in Appendix A.
 
 This document is normative. Both endpoints live in the `medulla-link` crate and
 code against it. Where this document and the implementation disagree, this
@@ -64,12 +67,12 @@ orchestrator and the machine it pastes the key into is always the host.
 ## 2. Identifiers
 
 `node_id` is 16 random bytes. This is what travels on the wire. On the
-forwarder path it is issued by the backend at enrollment. On the direct
-path (§8.1) there is no backend in the loop: both node ids are minted locally
-by the client when it generates the host key (§7.1.1), and the host simply
-adopts the id it is given. The two are separate namespaces — a direct-path id
-is never registered with the backend and an implementation MUST NOT assume
-every `node_id` it sees resolves there.
+forwarder path it is issued by the backend at enrollment. On the Hosts-tab
+direct path (§7.1.1), both node ids are minted locally by the client when it
+generates the HK1 host key, and the host adopts the id it is given. In the SSH
+bootstrap (§7.2), the host mints its own node id and returns it with the pair
+key over SSH. Direct-path ids are not registered with the backend, and an
+implementation MUST NOT assume every `node_id` it sees resolves there.
 `node_name` is human-readable, shown in the TUI and used as a `Bridge` address.
 It lives in local configuration (`[[remoteHosts]].name`, `[link].nodeName`) and
 never on the wire.
@@ -400,7 +403,9 @@ the pairing and immediately re-execs itself as `medulla daemon --host`, which
 re-derives everything from that pairing rather than from argv — so the key
 does not sit on the *running* daemon's command line, only on the
 initial-invocation process's, for the moment it takes to write the pairing to
-disk and hand off. That is still a real, if brief, exposure: any local
+disk and hand off. The re-exec removes only the host key; other options such as
+`--workspace`, `--workspaces`, `--host-name`, and `--config` are passed through
+to the serving `--host` process. That is still a real, if brief, exposure: any local
 process able to read `ps`/`/proc` during that moment, or the shell history of
 whoever typed the command, can recover the key and forge authenticated
 direct-path datagrams against the host's services until it is rotated. Direct

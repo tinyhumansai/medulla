@@ -130,7 +130,7 @@ The two permission flags point opposite ways on purpose. Headless, the bypass is
 ### Paired daemon
 
 `medulla daemon <host-key>` starts the one-client paired daemon described in the
-[host-link protocol](host-link-protocol.md#72-host-key). The host key is a
+[host-link protocol](host-link-protocol.md#711-host-key-direct-path). The host key is a
 one-shot bootstrap secret: its pair key is exposed in argv for that process
 start, so use it only where local argv and shell-history readers are trusted.
 

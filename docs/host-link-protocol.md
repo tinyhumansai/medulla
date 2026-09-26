@@ -453,10 +453,11 @@ than a mesh.
 The same payload layer (§4) also runs with no forwarder: one socket, one peer,
 the outer header authenticated by a key both ends derive from the pair key
 (`SHA-256("medulla-link/1 direct-path" ‖ pair_key)`) rather than by a
-forwarder key. The host binds a fixed UDP port and adopts the client's address
-from any datagram that authenticates *and* advances the highest sequence seen
-— mosh's rule, client→server only. A host that changes address is not
-followed; the client re-dials. Pairing for this path is either the HK1 host key
+forwarder key. The host binds a fixed UDP port. Each endpoint adopts its peer's
+address from any datagram that authenticates *and* advances the highest
+sequence seen. This address learning is symmetric in the implementation; a
+host address change can therefore be learned from its next accepted datagram
+without a separate re-dial mechanism. Pairing for this path is either the HK1 host key
 (§7.1.1) or the distinct SSH bootstrap (§7.2). The requirement it adds is
 mosh's: the host must be reachable on that port from wherever the client is.
 

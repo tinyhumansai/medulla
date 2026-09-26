@@ -436,8 +436,11 @@ command. SSH is needed for setup only; it is not part of the running link.
 `<home>/link/node.json`, mode `0600`, holding the node id, role, the pair
 key(s) (a single `pair_key` for version 1, or per-peer keys in `peers[]` for
 version 2 — see below), forwarder key, forwarder endpoint and the persisted
-sequence reservation (section 3.1). Created and loaded under the same file
-lock used by the existing identity bootstrap.
+sequence reservation (section 3.1). Created and loaded under the identity file
+lock. An endpoint MUST hold that exclusive lock for the lifetime of its
+`Link`; only one live process may use an identity directory at a time.
+Releasing the lock while the endpoint is running can let another process
+reserve overlapping sequence numbers under the same pair key.
 
 `version` is `1` or `2`. A version-1 file holds one peer in `peer_node_id` /
 `pair_key`. A version-2 file holds every peer in `peers[]`, each with its own

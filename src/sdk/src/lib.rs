@@ -4,6 +4,7 @@
 //! consumes this crate is the sibling `medulla-tui` crate.
 
 pub mod access;
+pub mod analytics;
 pub mod agent;
 pub mod attribution;
 pub mod auth;

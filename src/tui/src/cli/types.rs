@@ -78,7 +78,7 @@ pub enum Command {
     /// (`analytics-test`).
     ///
     /// Hidden from `help`, like [`Command::SentryTest`]: it verifies a
-    /// release's analytics wiring — the baked-in client secret, the endpoint,
+    /// build's analytics wiring — the compiled-in client id, the endpoint,
     /// and the ingestion project — end to end.
     AnalyticsTest,
 }

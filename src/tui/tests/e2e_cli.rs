@@ -555,6 +555,120 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
     assert_eq!(replies[1]["id"], 7);
 }
 
+/// A minimal HTTP server that accepts one request, reads its full declared
+/// body, and answers `200 OK` — enough to stand in for Sentry's envelope
+/// endpoint. Returns the port to point `MEDULLA_SENTRY_DSN` at.
+fn accept_one_and_respond_ok() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let mut request = Vec::new();
+        let mut buf = [0u8; 4096];
+        let headers_end = loop {
+            if let Some(pos) = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+            {
+                break pos + 4;
+            }
+            let Ok(read) = stream.read(&mut buf) else {
+                return;
+            };
+            if read == 0 {
+                return;
+            }
+            request.extend_from_slice(&buf[..read]);
+        };
+        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|v| v.trim().to_owned())
+            })
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        while request.len() < headers_end + content_length {
+            let Ok(read) = stream.read(&mut buf) else {
+                return;
+            };
+            if read == 0 {
+                return;
+            }
+            request.extend_from_slice(&buf[..read]);
+        }
+        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+    });
+    port
+}
+
+#[test]
+fn sentry_test_reaches_a_configured_dsn_end_to_end() {
+    let home = TempDir::new().unwrap();
+    let port = accept_one_and_respond_ok();
+    let dsn = format!("http://publickey@127.0.0.1:{port}/7");
+
+    let output = run_with_env(
+        &["sentry-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_SENTRY_DSN", dsn.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sentry event id:"), "{stdout}");
+    assert!(stdout.contains("HTTP 200"), "{stdout}");
+}
+
+#[test]
+fn sentry_test_reports_why_when_reporting_is_opted_out() {
+    let home = TempDir::new().unwrap();
+
+    let output = run_with_env(
+        &["sentry-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_ANALYTICS_DISABLED", "1")],
+    );
+
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
+#[test]
+fn analytics_test_reports_why_when_analytics_is_opted_out() {
+    // The OpenPanel client id and endpoint are compiled-in constants with no
+    // override (by design — see `medulla::analytics`'s module docs), so this
+    // command cannot be pointed at a local listener the way `sentry-test` can.
+    // The opt-out path is still a real, deterministic, hermetic exercise of
+    // the command's wiring: it proves `analytics-test` is registered, reaches
+    // `medulla::analytics::send_test_event`, and reports a clean inactive
+    // status without any network access.
+    let home = TempDir::new().unwrap();
+
+    let output = run_with_env(
+        &["analytics-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_ANALYTICS_DISABLED", "1")],
+    );
+
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
 #[cfg(unix)]
 unsafe extern "C" {
     fn setsid() -> std::os::raw::c_int;

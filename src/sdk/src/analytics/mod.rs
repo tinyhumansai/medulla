@@ -48,7 +48,11 @@ use config::OpenPanelConfig;
 use payload::Payload;
 
 /// Per-request ceiling: analytics must never hold up a sign-in or an exit.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+/// Per-request ceiling: analytics must never hold up a sign-in or an exit.
+/// Public so a caller awaiting a multi-request call (e.g. [`record_sign_in`])
+/// can bound the whole thing by one deadline rather than stacking each
+/// request's own timeout.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Why analytics is or is not active in this process.
 pub fn status() -> AnalyticsStatus {

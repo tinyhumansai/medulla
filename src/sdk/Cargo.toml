@@ -72,7 +72,6 @@ sentry = { workspace = true }
 tempfile = { workspace = true }
 
 sysinfo = { workspace = true }
-openpanel_rust = "0.4.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

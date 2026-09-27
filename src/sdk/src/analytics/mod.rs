@@ -193,7 +193,7 @@ fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
     TRACKER
         .get_or_init(|| {
             config::resolve(cfg!(test) || crate::observability::opted_out())
-            .and_then(|config| Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig))
+                .and_then(|config| Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig))
         })
         .as_ref()
         .map_err(|status| *status)

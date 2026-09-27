@@ -10,7 +10,7 @@ use super::payload::Payload;
 use super::{AnalyticsError, AnalyticsStatus, Tracker};
 
 fn defaults() -> OpenPanelConfig {
-    OpenPanelConfig::from_build(None, None)
+    OpenPanelConfig::medulla()
 }
 
 #[test]
@@ -57,19 +57,12 @@ fn an_anonymous_track_omits_the_profile_instead_of_sending_null() {
 
 #[test]
 fn the_opt_out_wins_over_everything() {
-    assert_eq!(
-        resolve(
-            true,
-            Some("https://panel.example.test/api"),
-            Some("client-1")
-        ),
-        Err(AnalyticsStatus::Disabled)
-    );
+    assert_eq!(resolve(true), Err(AnalyticsStatus::Disabled));
 }
 
 #[test]
 fn analytics_is_active_by_default_with_no_secret_required() {
-    assert_eq!(resolve(false, None, None), Ok(defaults()));
+    assert_eq!(resolve(false), Ok(defaults()));
 }
 
 #[tokio::test]
@@ -90,24 +83,17 @@ async fn this_crates_tests_never_reach_the_live_project() {
 }
 
 #[test]
-fn an_unconfigured_build_uses_the_medulla_project_defaults() {
-    // CI exports an empty variable when the backing Actions variable is unset.
-    for config in [
-        defaults(),
-        OpenPanelConfig::from_build(Some("  "), Some("")),
-    ] {
-        assert_eq!(config.client_id, DEFAULT_CLIENT_ID);
-        assert_eq!(config.client_id, "781d9ce2-62ec-4059-a093-152c88400576");
-        assert_eq!(config.endpoint(), format!("{DEFAULT_API_URL}/track"));
-        assert_eq!(config.endpoint(), "https://panel.tinyhumans.ai/api/track");
-    }
+fn every_build_reports_to_the_medulla_project() {
+    let config = defaults();
+    assert_eq!(config.client_id, DEFAULT_CLIENT_ID);
+    assert_eq!(config.client_id, "781d9ce2-62ec-4059-a093-152c88400576");
+    assert_eq!(config.endpoint(), format!("{DEFAULT_API_URL}/track"));
+    assert_eq!(config.endpoint(), "https://panel.tinyhumans.ai/api/track");
 }
 
 #[test]
-fn build_time_overrides_replace_the_defaults() {
-    let config =
-        OpenPanelConfig::from_build(Some("https://panel.example.test/api/"), Some("client-1"));
-    assert_eq!(config.client_id, "client-1");
+fn a_trailing_slash_on_the_base_url_is_dropped() {
+    let config = OpenPanelConfig::new("https://panel.example.test/api/", "client-1");
     assert_eq!(config.endpoint(), "https://panel.example.test/api/track");
 }
 
@@ -126,7 +112,7 @@ fn headers_carry_the_client_id_and_never_a_secret() {
 
 #[test]
 fn an_illegal_header_value_disables_the_tracker_instead_of_panicking() {
-    let config = OpenPanelConfig::from_build(None, Some("bad\nclient"));
+    let config = OpenPanelConfig::new(DEFAULT_API_URL, "bad\nclient");
     assert!(config.headers().is_none());
     assert!(Tracker::new(&config).is_none());
 }
@@ -172,7 +158,7 @@ fn serve_once(status: u16) -> (String, std::thread::JoinHandle<String>) {
 #[tokio::test]
 async fn the_tracker_posts_the_payload_with_the_client_id_and_no_secret() {
     let (url, server) = serve_once(202);
-    let config = OpenPanelConfig::from_build(Some(&url), Some("client-1"));
+    let config = OpenPanelConfig::new(&url, "client-1");
     let tracker = Tracker::new(&config).expect("tracker");
     tracker
         .deliver(&Payload::track("signed_in", Some("user-42"), []))
@@ -198,7 +184,7 @@ async fn the_tracker_posts_the_payload_with_the_client_id_and_no_secret() {
 #[tokio::test]
 async fn a_rejected_event_is_an_error_but_its_status_is_reported() {
     let (url, server) = serve_once(401);
-    let config = OpenPanelConfig::from_build(Some(&url), None);
+    let config = OpenPanelConfig::new(&url, DEFAULT_CLIENT_ID);
     let tracker = Tracker::new(&config).expect("tracker");
     assert!(matches!(
         tracker.deliver(&Payload::identify("user-42")).await,
@@ -207,7 +193,7 @@ async fn a_rejected_event_is_an_error_but_its_status_is_reported() {
     server.join().expect("server");
 
     let (url, server) = serve_once(401);
-    let config = OpenPanelConfig::from_build(Some(&url), None);
+    let config = OpenPanelConfig::new(&url, DEFAULT_CLIENT_ID);
     let tracker = Tracker::new(&config).expect("tracker");
     assert_eq!(
         tracker

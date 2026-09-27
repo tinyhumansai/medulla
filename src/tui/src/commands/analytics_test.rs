@@ -3,7 +3,8 @@
 //! Sends one `analytics_test` event to OpenPanel and prints the HTTP status the
 //! ingestion endpoint answered with, so an operator (or a release check) can
 //! confirm a build's analytics wiring — the client id, the endpoint, and the
-//! project's server-side acceptance of a secretless native client — end to end. Deliberately not listed in `help`.
+//! project's server-side acceptance of a secretless native client — end to
+//! end. Deliberately not listed in `help`.
 
 /// Run `medulla analytics-test`.
 ///

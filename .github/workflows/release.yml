@@ -78,30 +78,26 @@ jobs:
           workspaces: .
           key: release-${{ matrix.target }}-${{ hashFiles('.gitmodules', 'rust-toolchain.toml') }}
 
-      # The crash-reporting DSN and the OpenPanel credentials are baked in at
+      # The crash-reporting DSN and the OpenPanel coordinates are baked in at
       # compile time through `option_env!` (see `medulla::observability` and
-      # `medulla::analytics`). Any may be missing — the build still succeeds and
-      # that channel ships inert — so a gap is a warning on the run, not a
-      # failure.
+      # `medulla::analytics`). A missing DSN ships crash reporting inert, so it
+      # is a warning on the run, not a failure; the OpenPanel values fall back
+      # to the Medulla project's defaults.
       - name: Build release binary
         shell: bash
         env:
           # Sentry DSN for crash reports. A DSN is not a secret (it only
           # permits sending events), so it lives in an Actions variable.
           MEDULLA_SENTRY_DSN: ${{ vars.MEDULLA_SENTRY_DSN }}
-          # OpenPanel product analytics. The self-hosted instance rejects a
-          # native client without the client secret, so it is a real secret;
-          # the client id and API URL are variables, and the code falls back to
-          # the Medulla project's defaults when they are empty.
-          MEDULLA_OPENPANEL_CLIENT_SECRET: ${{ secrets.MEDULLA_OPENPANEL_CLIENT_SECRET }}
+          # OpenPanel product analytics. The project's client ignores CORS and
+          # secret checks, so only the public client id is needed; both values
+          # are variables, and the code falls back to the Medulla project's
+          # defaults when they are empty.
           MEDULLA_OPENPANEL_CLIENT_ID: ${{ vars.MEDULLA_OPENPANEL_CLIENT_ID }}
           MEDULLA_OPENPANEL_API_URL: ${{ vars.MEDULLA_OPENPANEL_API_URL }}
         run: |
           if [ -z "${MEDULLA_SENTRY_DSN}" ]; then
             echo "::warning::vars.MEDULLA_SENTRY_DSN is empty — medulla ${{ matrix.target }} will ship without crash reporting."
-          fi
-          if [ -z "${MEDULLA_OPENPANEL_CLIENT_SECRET}" ]; then
-            echo "::warning::secrets.MEDULLA_OPENPANEL_CLIENT_SECRET is empty — medulla ${{ matrix.target }} will ship without product analytics."
           fi
           cargo build --release --locked --target ${{ matrix.target }}
 

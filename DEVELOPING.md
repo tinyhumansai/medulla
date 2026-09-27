@@ -32,23 +32,25 @@ before dispatching a release.
 
 ### Telemetry credentials
 
-Crash reporting (Sentry, `medulla::observability`) and product analytics
-(OpenPanel, `medulla::analytics`) read their credentials at **compile time**
-through `option_env!`, so a plain local `cargo build` produces a binary with
-both inert. `Release`'s build job runs in the `Production` environment (which
-only `main` may use), passes these into the build step, and emits a
-`::warning::` when the DSN or the OpenPanel secret is empty:
+Crash reporting (Sentry, `medulla::observability`) reads its DSN at **compile
+time** through `option_env!`, so a plain local `cargo build` produces a binary
+with crash reporting inert. Product analytics (OpenPanel, `medulla::analytics`)
+needs no credentials: the Medulla OpenPanel client has "ignore CORS and secret"
+enabled server-side, so a native client authenticates with the public client id
+alone, which is compiled in. Analytics is therefore active in every build,
+local ones included, unless `MEDULLA_ANALYTICS_DISABLED=1` is set. `Release`'s
+build job runs in the `Production` environment (which only `main` may use),
+passes these into the build step, and emits a `::warning::` when the DSN is
+empty:
 
 | Build-time variable | Source in `Release` | Effect when unset |
 | --- | --- | --- |
 | `MEDULLA_SENTRY_DSN` | `vars.MEDULLA_SENTRY_DSN` | no crash reporting |
-| `MEDULLA_OPENPANEL_CLIENT_SECRET` | `secrets.MEDULLA_OPENPANEL_CLIENT_SECRET` | no analytics |
-| `MEDULLA_OPENPANEL_CLIENT_ID` | `vars.MEDULLA_OPENPANEL_CLIENT_ID` | Medulla project's id |
+| `MEDULLA_OPENPANEL_CLIENT_ID` | `vars.MEDULLA_OPENPANEL_CLIENT_ID` | Medulla project's id (`781d9ce2-62ec-4059-a093-152c88400576`) |
 | `MEDULLA_OPENPANEL_API_URL` | `vars.MEDULLA_OPENPANEL_API_URL` | `https://panel.tinyhumans.ai/api` |
 
-The OpenPanel secret is required because the self-hosted instance rejects a
-native client that sends only a client id (`401 Invalid cors or secret`). The
-OpenPanel values are never read at run time.
+The OpenPanel values are never read at run time; events are posted to
+`{api_url}/track`.
 
 At run time `MEDULLA_SENTRY_DSN` overrides the baked-in DSN,
 `MEDULLA_SENTRY_ENVIRONMENT` overrides the Sentry environment (default
@@ -69,11 +71,12 @@ To verify a build's wiring end to end, run the hidden diagnostics:
   the ingestion endpoint's HTTP status, and exits non-zero if crash reporting
   is inactive or the event was not accepted.
 - `medulla analytics-test` sends one `analytics_test` event and prints
-  OpenPanel's HTTP status (`401` means the baked-in secret is wrong); it exits
-  non-zero if analytics is inactive or the event was not accepted.
+  OpenPanel's HTTP status (`401 Invalid cors or secret` means the OpenPanel
+  client's "ignore CORS and secret" setting is off); it exits non-zero if
+  analytics is inactive or the event was not accepted.
 
-To try analytics locally, export the secret for the build only, e.g.
-`MEDULLA_OPENPANEL_CLIENT_SECRET=... cargo build`, and never commit it.
+Set `MEDULLA_ANALYTICS_DISABLED=1` while developing if you do not want local
+runs to report to the Medulla project.
 
 Debug symbols are not uploaded to Sentry yet; release binaries symbolicate
 in-process from whatever debug info they carry.

@@ -297,3 +297,55 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
     assert!(request.to_ascii_lowercase().contains("x-sentry-auth"));
     assert_eq!(transport::last_status(), Some(200));
 }
+
+#[test]
+fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
+    // A listener that accepts every connection but never reads or responds:
+    // the sender thread's in-flight request never completes, so every
+    // subsequent task piles up behind it in the bounded channel.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("addr").port();
+    let _server = std::thread::spawn(move || {
+        // Keep accepted connections alive for the life of the test so the
+        // sender thread's request never gets a response.
+        let mut stalled = Vec::new();
+        for _ in 0..40 {
+            match listener.accept() {
+                Ok((stream, _)) => stalled.push(stream),
+                Err(_) => break,
+            }
+        }
+        std::thread::sleep(Duration::from_secs(15));
+        drop(stalled);
+    });
+
+    let options = sentry::ClientOptions {
+        dsn: Some(
+            format!("http://publickey@127.0.0.1:{port}/7")
+                .parse()
+                .expect("dsn"),
+        ),
+        ..Default::default()
+    };
+    let transport = transport::factory(&options);
+    // One to occupy the sender thread indefinitely, then fill the 30-slot
+    // queue behind it.
+    for _ in 0..40 {
+        let mut envelope = sentry::Envelope::new();
+        envelope.add_item(Event {
+            message: Some("queue-filler".into()),
+            ..Default::default()
+        });
+        transport.send_envelope(envelope);
+    }
+
+    let started = std::time::Instant::now();
+    let flushed = transport.flush(Duration::from_millis(200));
+    let elapsed = started.elapsed();
+
+    assert!(!flushed, "a full queue cannot flush within its own timeout");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "flush blocked for {elapsed:?} despite a 200ms timeout"
+    );
+}

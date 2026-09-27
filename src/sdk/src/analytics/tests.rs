@@ -65,7 +65,10 @@ fn the_opt_out_wins_over_a_configured_secret() {
 
 #[test]
 fn a_build_without_a_client_secret_is_inert() {
-    assert_eq!(resolve(false, None, None, None), Err(AnalyticsStatus::NoSecret));
+    assert_eq!(
+        resolve(false, None, None, None),
+        Err(AnalyticsStatus::NoSecret)
+    );
     // CI exports an empty variable when the environment secret is unset.
     assert_eq!(
         resolve(false, None, None, Some("  ")),
@@ -167,7 +170,8 @@ fn serve_once(status: u16) -> (String, std::thread::JoinHandle<String>) {
                 break;
             }
         }
-        let reply = format!("HTTP/1.1 {status} X\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let reply =
+            format!("HTTP/1.1 {status} X\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         stream.write_all(reply.as_bytes()).expect("write");
         String::from_utf8_lossy(&request).into_owned()
     });
@@ -189,8 +193,14 @@ async fn the_tracker_posts_the_payload_with_the_auth_headers() {
     let lower = request.to_ascii_lowercase();
     assert!(request.starts_with("POST /api/track HTTP/1.1"), "{request}");
     assert!(lower.contains("openpanel-client-id: client-1"), "{request}");
-    assert!(lower.contains("openpanel-client-secret: sec_abc"), "{request}");
-    assert!(lower.contains("content-type: application/json"), "{request}");
+    assert!(
+        lower.contains("openpanel-client-secret: sec_abc"),
+        "{request}"
+    );
+    assert!(
+        lower.contains("content-type: application/json"),
+        "{request}"
+    );
     let body = &request[request.find("\r\n\r\n").unwrap() + 4..];
     let body: serde_json::Value = serde_json::from_str(body).expect("json body");
     assert_eq!(body["type"], "track");

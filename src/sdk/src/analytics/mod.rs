@@ -215,7 +215,10 @@ fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
 
 /// Spawn a best-effort `name` event for the signed-in account, if there is one
 /// and a runtime to run it on.
-fn spawn_for_current_user<const N: usize>(name: &'static str, properties: [(&'static str, String); N]) {
+fn spawn_for_current_user<const N: usize>(
+    name: &'static str,
+    properties: [(&'static str, String); N],
+) {
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         return;
     };

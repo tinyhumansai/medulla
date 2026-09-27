@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
+use super::mapper::token_delta;
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,
 };

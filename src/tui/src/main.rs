@@ -48,6 +48,11 @@ fn main() -> anyhow::Result<()> {
     install_crypto_provider();
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let is_hook = matches!(parse_command(&raw), Command::Hook);
+    // `--mock` is the offline demo runtime: no backend, no login, and per
+    // README no network — starting crash reporting here would let a
+    // configured (or `.env`-overridden) DSN reach out during what is supposed
+    // to be an entirely local demo.
+    let is_mock = raw.iter().any(|arg| arg == "--mock");
 
     // Load a cwd `.env` into the process env before anything reads it (this is
     // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.

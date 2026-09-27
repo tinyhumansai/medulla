@@ -67,6 +67,13 @@ pub enum Command {
     /// to it, and it files a one-line report on the control socket the same
     /// spawn was handed.
     Hook,
+    /// Send one diagnostic crash report and print its event id
+    /// (`sentry-test`).
+    ///
+    /// Hidden from `help`: it exists so a release's crash-reporting wiring —
+    /// the baked-in DSN, the transport, and the ingestion project — can be
+    /// verified end to end without having to crash anything.
+    SentryTest,
 }
 
 /// The `medulla skills` action.

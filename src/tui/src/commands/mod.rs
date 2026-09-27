@@ -14,6 +14,7 @@ pub(crate) mod hook;
 pub(crate) mod login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) mod mcp;
+pub(crate) mod sentry_test;
 #[cfg(feature = "workflows")]
 pub(crate) mod skills;
 #[cfg(feature = "workflows")]
@@ -24,6 +25,7 @@ pub(crate) use hook::run_hook_cmd;
 pub(crate) use login_screen::run_login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) use mcp::run_mcp_cmd;
+pub(crate) use sentry_test::run_sentry_test;
 #[cfg(feature = "workflows")]
 pub(crate) use skills::run_skills_cmd;
 #[cfg(feature = "workflows")]
@@ -138,6 +140,9 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
                 medulla::home::user::MEDULLA_USER_ENV,
             );
         }
+        // Verified by `/auth/me` and durably stored: later crash reports from
+        // this process carry the account id (and nothing else about it).
+        medulla::observability::set_user(Some(&account));
     }
 
     adopt_legacy_credentials(&env, &loaded.config.backend).await;
@@ -325,6 +330,8 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let home = medulla::home::medulla_home(&env);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
+    // Before the session goes, so no later report is attributed to it.
+    medulla::observability::set_user(None);
     medulla::auth::clear(&env)
         .map_err(|e| anyhow::anyhow!("the stored session could not be removed: {e}"))?;
 

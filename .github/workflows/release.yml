@@ -75,8 +75,21 @@ jobs:
           workspaces: .
           key: release-${{ matrix.target }}-${{ hashFiles('.gitmodules', 'rust-toolchain.toml') }}
 
+      # The crash-reporting DSN is baked in at compile time through `option_env!`
+      # (see `medulla::observability`). It may be missing — the build still
+      # succeeds and crash reporting ships inert — so a gap is a warning on the
+      # run, not a failure.
       - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        shell: bash
+        env:
+          # Sentry DSN for crash reports. A DSN is not a secret (it only
+          # permits sending events), so it lives in an Actions variable.
+          MEDULLA_SENTRY_DSN: ${{ vars.MEDULLA_SENTRY_DSN }}
+        run: |
+          if [ -z "${MEDULLA_SENTRY_DSN}" ]; then
+            echo "::warning::vars.MEDULLA_SENTRY_DSN is empty — medulla ${{ matrix.target }} will ship without crash reporting."
+          fi
+          cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package (unix)
         if: runner.os != 'Windows'

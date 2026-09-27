@@ -10,7 +10,7 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
 use crate::commands::run_hook_cmd;
-use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
+use crate::commands::{run_hub, run_init, run_login, run_logout, run_sentry_test, run_workspace};
 #[cfg(feature = "workflows")]
 use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
 use crate::run::run_core;
@@ -45,12 +45,37 @@ mod worker_loop;
 fn main() -> anyhow::Result<()> {
     install_crypto_provider();
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    let is_hook = matches!(parse_command(&raw), Command::Hook);
+
+    // Load a cwd `.env` into the process env before anything reads it (this is
+    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
+    // Done ahead of crash reporting so a `.env` can carry its DSN or opt-out.
+    //
+    // The hook shim is the exception: it runs inside the operator's live turn,
+    // with the harness waiting on this process under a hard deadline, and the
+    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
+    // read there would burn the shim's whole budget before `run_hook_cmd`'s
+    // own deadline even starts, so the harness would kill it as a hung hook.
+    // For the same reason it never starts crash reporting — no transport
+    // thread, and no flush on exit.
+    //
+    // The guard is bound here, outside the runtime, so it outlives every task
+    // and its drop flushes queued reports on the way out. Initialized after the
+    // TLS provider (the transport opens connections) and before the runtime, so
+    // Sentry's panic hook is installed first; the TUI's terminal-restoring hook
+    // is chained on top of it later, which means a panic restores the screen
+    // before the report is captured and flushed.
+    let _crash_reporting = (!is_hook).then(|| {
+        medulla::home::load_dotenv_from_cwd();
+        medulla::observability::init()
+    });
+
     // The hook shim runs inside an operator's live turn under a 3-5 second
     // harness deadline (see `commands::hook`'s module docs), so it gets a
     // single-thread runtime rather than paying to spin up the multi-thread,
     // 16 MiB-per-worker-stack runtime every other command needs to host an
     // agent turn.
-    if matches!(parse_command(&raw), Command::Hook) {
+    if is_hook {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -76,21 +101,8 @@ fn install_crypto_provider() {
 }
 
 async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
-    let command = parse_command(&raw);
-
-    // Load a cwd `.env` into the process env before anything reads it (this is
-    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    //
-    // The hook shim is the exception: it runs inside the operator's live turn,
-    // with the harness waiting on this process under a hard deadline, and the
-    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
-    // read there would burn the shim's whole budget before `run_hook_cmd`'s
-    // own deadline even starts, so the harness would kill it as a hung hook.
-    if !matches!(&command, Command::Hook) {
-        medulla::home::load_dotenv_from_cwd();
-    }
-
-    match command {
+    // `.env` was already loaded by `main`, ahead of crash reporting.
+    match parse_command(&raw) {
         Command::Run => run_core(&raw[1..]).await,
         Command::Daemon if daemon_uses_tui(io::stdout().is_terminal(), &raw) => {
             run_worker_tui_command(&raw[1..]).await
@@ -140,6 +152,7 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             run_hook_cmd(&raw[1..], &env).await;
             Ok(())
         }
+        Command::SentryTest => run_sentry_test().await,
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout().await,
         Command::Init => run_init(&raw[1..]).await,

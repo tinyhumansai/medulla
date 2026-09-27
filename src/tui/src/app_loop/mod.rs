@@ -334,6 +334,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         }
     }
 
+    // Tie crash reports to the signed-in account — its opaque id only — now
+    // that both boot paths (stored session, fresh sign-in) have settled on one.
+    medulla::observability::set_user(account.as_ref().and_then(|state| state.user_id.as_deref()));
+
     // `mut` because a relogin rebuilds it around a fresh client.
     let mut runtime = runtime.expect("a runtime is always selected");
 

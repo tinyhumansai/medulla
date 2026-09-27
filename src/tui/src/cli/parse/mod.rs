@@ -44,6 +44,7 @@ pub fn parse_command(args: &[String]) -> Command {
         Some("skills") | Some("skill") => Command::Skills,
         Some("mcp") => Command::Mcp,
         Some("hook") => Command::Hook,
+        Some("sentry-test") => Command::SentryTest,
         Some("codex") => Command::Wrapper(HarnessProvider::Codex),
         Some("claude") => Command::Wrapper(HarnessProvider::Claude),
         Some("opencode") => Command::Wrapper(HarnessProvider::Opencode),

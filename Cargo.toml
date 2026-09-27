@@ -73,6 +73,13 @@ bytes = "1"
 # dependency). Neither wins by default, so every TLS handshake panicked on
 # whichever tokio worker reached it first.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# Crash reporting. Default features are off on purpose: they bring Sentry's own
+# reqwest 0.13 transport with native-tls, a second HTTP stack and a TLS backend
+# this workspace does not otherwise link. `medulla::observability` sends
+# envelopes over the reqwest 0.12 + rustls/ring stack above instead, so this
+# adds no crypto provider (see the `rustls` note). `httpdate` is only for the
+# rate limiter's `Retry-After` parsing.
+sentry = { version = "0.47", default-features = false, features = ["backtrace", "contexts", "panic", "httpdate"] }
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 portable-pty = "0.9"

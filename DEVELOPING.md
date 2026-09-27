@@ -29,3 +29,27 @@ artifacts and `latest.json` as a GitHub Release in this repository. The workflow
 uses the repository's standard `GITHUB_TOKEN`; it requires no organization app
 secrets. Bump the workspace version and lockfile in a reviewed pull request
 before dispatching a release.
+
+### Crash-reporting credentials
+
+Crash reporting (Sentry) reads its DSN at **compile time** through
+`option_env!`, so a plain local `cargo build` produces a binary with crash
+reporting inert. `Release` passes it into the build step and emits a
+`::warning::` when it is empty:
+
+| Build-time variable | Source in `Release` | Effect when unset |
+| --- | --- | --- |
+| `MEDULLA_SENTRY_DSN` | `vars.MEDULLA_SENTRY_DSN` | no crash reporting |
+
+At run time `MEDULLA_SENTRY_DSN` overrides the baked-in DSN,
+`MEDULLA_SENTRY_ENVIRONMENT` overrides the Sentry environment (default
+`production` for release builds, `development` for debug), and
+`MEDULLA_ANALYTICS_DISABLED=1` turns crash reporting off.
+
+To verify a build's crash-report wiring end to end, run the hidden
+`medulla sentry-test` command: it sends one informational event, prints its
+event id and the ingestion endpoint's HTTP status, and exits non-zero if
+crash reporting is inactive or the event was not accepted.
+
+Debug symbols are not uploaded to Sentry yet; release binaries symbolicate
+in-process from whatever debug info they carry.

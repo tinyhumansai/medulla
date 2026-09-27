@@ -339,6 +339,19 @@ tokenEnv = "MEDULLA_TOKEN"
 # check = true
 
 # ---------------------------------------------------------------------------
+# Telemetry — environment only, no config keys
+# ---------------------------------------------------------------------------
+# Official builds send crash reports (Sentry). They carry no prompts, file
+# contents, paths, or arguments, and are tied only to your opaque account id;
+# home-directory paths, hostnames, and credentials are scrubbed before they
+# leave the machine.
+#   MEDULLA_ANALYTICS_DISABLED=1    turns off crash reporting (and anything
+#                                   else Medulla reports home)
+#   MEDULLA_SENTRY_DSN=<dsn>        send crash reports to a different project
+#   MEDULLA_SENTRY_ENVIRONMENT=<n>  override the reported environment name
+# `medulla sentry-test` sends one test event and prints its id.
+
+# ---------------------------------------------------------------------------
 # stateDir — TUI state (chats, resolved serve socket). Default: <home>/state
 # Env override: MEDULLA_STATE_DIR.
 # ---------------------------------------------------------------------------

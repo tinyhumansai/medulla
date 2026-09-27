@@ -3,18 +3,21 @@
 //! Pure functions over their inputs, so the precedence rules are testable
 //! without mutating the process environment.
 
-/// Pick the DSN: a non-blank runtime value wins over the compiled-in one.
+/// The Medulla project's Sentry DSN, compiled into every build. A DSN is not a
+/// secret: it only permits sending events to the project.
+pub(super) const DEFAULT_DSN: &str =
+    "https://40b6883c6f8013c8382f8b0bc5986108@sentry.tinyhumans.ai/12";
+
+/// Pick the DSN: a non-blank runtime value wins over [`DEFAULT_DSN`].
 ///
-/// Blank counts as absent on both sides — CI exports an empty variable when
-/// the repository variable is unset, and an operator clearing the variable
-/// should fall back to the build's DSN rather than break it.
-pub(super) fn resolve_dsn(runtime: Option<&str>, compiled: Option<&str>) -> Option<String> {
-    [runtime, compiled]
-        .into_iter()
-        .flatten()
+/// Blank counts as absent, so an operator clearing the variable falls back to
+/// the built-in DSN rather than breaking reporting.
+pub(super) fn resolve_dsn(runtime: Option<&str>) -> String {
+    runtime
         .map(str::trim)
-        .find(|value| !value.is_empty())
-        .map(str::to_owned)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_DSN)
+        .to_owned()
 }
 
 /// The Sentry release every report is filed under: `medulla@<version>`.

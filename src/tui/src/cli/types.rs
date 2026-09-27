@@ -71,7 +71,7 @@ pub enum Command {
     /// (`sentry-test`).
     ///
     /// Hidden from `help`: it exists so a release's crash-reporting wiring —
-    /// the baked-in DSN, the transport, and the ingestion project — can be
+    /// the compiled-in DSN, the transport, and the ingestion project — can be
     /// verified end to end without having to crash anything.
     SentryTest,
     /// Send one diagnostic analytics event and print OpenPanel's HTTP status

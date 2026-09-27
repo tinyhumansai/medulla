@@ -9,14 +9,18 @@
 //!
 //! # Configuration
 //!
-//! - DSN: `MEDULLA_SENTRY_DSN` at **build** time is baked in via `option_env!`;
-//!   the same variable at **run** time overrides it. With neither, the module
-//!   is fully inert — no client, no thread, no network.
+//! - DSN: the Medulla project's DSN is compiled in as a constant, so every
+//!   build reports; `MEDULLA_SENTRY_DSN` at **run** time overrides it.
 //! - `MEDULLA_SENTRY_ENVIRONMENT` (runtime) overrides the environment, which
 //!   otherwise is `production` for release builds and `development` for debug.
 //! - Opt-out: [`DISABLED_ENV`] (`MEDULLA_ANALYTICS_DISABLED`) is the single
 //!   switch for everything Medulla reports home, crash reports and product
-//!   analytics ([`crate::analytics`]) included; see [`opted_out`].
+//!   analytics ([`crate::analytics`]) included; see [`opted_out`]. When it is
+//!   set the module is fully inert — no client, no thread, no network.
+//!
+//! This crate's own unit tests always resolve as opted out, so a test run can
+//! never send a real report; the transport is exercised against a local
+//! listener instead.
 
 mod config;
 mod scrub;
@@ -32,8 +36,7 @@ use std::time::Duration;
 
 pub use types::{CrashReportingGuard, CrashReportingStatus, TestEventReport};
 
-/// Runtime override for the compiled-in Sentry DSN (and the build-time
-/// variable that bakes one in).
+/// Runtime override for the compiled-in Sentry DSN.
 pub const DSN_ENV: &str = "MEDULLA_SENTRY_DSN";
 /// Runtime override for the Sentry environment name.
 pub const ENVIRONMENT_ENV: &str = "MEDULLA_SENTRY_ENVIRONMENT";
@@ -49,8 +52,8 @@ const IN_APP_CRATES: &[&str] = &["medulla", "medulla_tui", "medulla_link"];
 ///
 /// Call once, from `main`, after the TLS provider is installed and before any
 /// async runtime starts, and keep the guard alive until exit. Never fails:
-/// without a DSN, or with the opt-out set, it returns an inert guard and
-/// records why in [`status`].
+/// with the opt-out set, or an unparseable DSN override, it returns an inert
+/// guard and records why in [`status`].
 pub fn init() -> CrashReportingGuard {
     let (status, dsn) = resolve_status();
     let _ = STATUS.set(status);
@@ -147,19 +150,16 @@ pub fn opted_out() -> bool {
 static STATUS: OnceLock<CrashReportingStatus> = OnceLock::new();
 
 /// Work out whether to start, and with which DSN, from the process
-/// environment and the build.
+/// environment. Under this crate's unit tests it always resolves as opted
+/// out, so no test can reach the live Sentry project.
 fn resolve_status() -> (CrashReportingStatus, Option<sentry::types::Dsn>) {
-    if opted_out() {
+    if cfg!(test) || opted_out() {
         return (CrashReportingStatus::Disabled, None);
     }
-    let raw = config::resolve_dsn(
-        std::env::var(DSN_ENV).ok().as_deref(),
-        option_env!("MEDULLA_SENTRY_DSN"),
-    );
-    match raw.map(|raw| raw.parse::<sentry::types::Dsn>()) {
-        None => (CrashReportingStatus::NoDsn, None),
-        Some(Err(_)) => (CrashReportingStatus::InvalidDsn, None),
-        Some(Ok(dsn)) => (CrashReportingStatus::Active, Some(dsn)),
+    let raw = config::resolve_dsn(std::env::var(DSN_ENV).ok().as_deref());
+    match raw.parse::<sentry::types::Dsn>() {
+        Err(_) => (CrashReportingStatus::InvalidDsn, None),
+        Ok(dsn) => (CrashReportingStatus::Active, Some(dsn)),
     }
 }
 

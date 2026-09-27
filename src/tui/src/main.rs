@@ -51,7 +51,8 @@ fn main() -> anyhow::Result<()> {
 
     // Load a cwd `.env` into the process env before anything reads it (this is
     // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    // Done ahead of crash reporting so a `.env` can carry its DSN or opt-out.
+    // Done ahead of crash reporting so a `.env` can carry a DSN override or the
+    // opt-out.
     //
     // The hook shim is the exception: it runs inside the operator's live turn,
     // with the harness waiting on this process under a hard deadline, and the

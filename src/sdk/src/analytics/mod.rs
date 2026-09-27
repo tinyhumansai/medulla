@@ -17,17 +17,15 @@
 //! (`dotenvy::dotenv()?` fails without one) and reads its configuration from
 //! the process environment, so it cannot run on a user's machine.
 //!
-//! # Build-time configuration
+//! # Configuration
 //!
-//! A native client has no browser `Origin`, so the Medulla OpenPanel client is
-//! configured server-side to ignore CORS and secret checks
-//! (`ignoreCorsAndSecret`): ingestion needs only the public client id, and no
-//! secret is ever compiled in or sent. Analytics is therefore active in every
-//! build unless [`DISABLED_ENV`] opts the process out. Two optional
-//! compile-time overrides, never read at run time:
-//!
-//! - `MEDULLA_OPENPANEL_CLIENT_ID` — overrides the Medulla project's client id.
-//! - `MEDULLA_OPENPANEL_API_URL` — overrides the ingestion API base URL.
+//! The Medulla project's client id and ingestion URL are compiled-in constants
+//! with no build-time or run-time overrides. A native client has no browser
+//! `Origin`, so the Medulla OpenPanel client is configured server-side to
+//! ignore CORS and secret checks (`ignoreCorsAndSecret`): ingestion needs only
+//! the public client id, and no secret is ever compiled in or sent. Analytics
+//! is therefore active in every build unless [`DISABLED_ENV`] opts the process
+//! out.
 //!
 //! This crate's own unit tests never resolve the process-wide tracker to an
 //! active one, so a test run cannot post events to the live project; the
@@ -194,11 +192,7 @@ fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
     static TRACKER: OnceLock<Result<Tracker, AnalyticsStatus>> = OnceLock::new();
     TRACKER
         .get_or_init(|| {
-            config::resolve(
-                cfg!(test) || crate::observability::opted_out(),
-                option_env!("MEDULLA_OPENPANEL_API_URL"),
-                option_env!("MEDULLA_OPENPANEL_CLIENT_ID"),
-            )
+            config::resolve(cfg!(test) || crate::observability::opted_out())
             .and_then(|config| Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig))
         })
         .as_ref()

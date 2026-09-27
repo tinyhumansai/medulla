@@ -6,33 +6,35 @@ use std::time::Duration;
 
 use sentry::protocol::{Breadcrumb, Event, Exception, Frame, LogEntry, Stacktrace, User};
 
-use super::config::{is_opted_out, release, resolve_dsn, resolve_environment};
+use super::config::{is_opted_out, release, resolve_dsn, resolve_environment, DEFAULT_DSN};
 use super::scrub::{scrub_event, scrub_paths, scrub_text};
 use super::{current_user, set_user, transport, CrashReportingStatus};
 
 #[test]
-fn the_runtime_dsn_overrides_the_compiled_one() {
+fn the_runtime_dsn_overrides_the_compiled_in_default() {
     assert_eq!(
-        resolve_dsn(
-            Some("https://k@rt.example/1"),
-            Some("https://k@ct.example/2")
-        )
-        .as_deref(),
-        Some("https://k@rt.example/1")
-    );
-    assert_eq!(
-        resolve_dsn(None, Some("https://k@ct.example/2")).as_deref(),
-        Some("https://k@ct.example/2")
+        resolve_dsn(Some(" https://k@rt.example/1 ")),
+        "https://k@rt.example/1"
     );
 }
 
 #[test]
-fn blank_dsns_count_as_absent() {
-    assert_eq!(resolve_dsn(Some("  "), Some("")), None);
-    assert_eq!(resolve_dsn(None, None), None);
+fn every_build_carries_the_medulla_project_dsn() {
+    assert_eq!(resolve_dsn(None), DEFAULT_DSN);
     assert_eq!(
-        resolve_dsn(Some(""), Some("https://k@ct.example/2")).as_deref(),
-        Some("https://k@ct.example/2")
+        DEFAULT_DSN,
+        "https://40b6883c6f8013c8382f8b0bc5986108@sentry.tinyhumans.ai/12"
+    );
+    assert!(DEFAULT_DSN.parse::<sentry::types::Dsn>().is_ok());
+    // A blank override falls back to the default rather than breaking it.
+    assert_eq!(resolve_dsn(Some("  ")), DEFAULT_DSN);
+}
+
+#[test]
+fn this_crates_tests_never_start_real_crash_reporting() {
+    assert_eq!(
+        super::resolve_status(),
+        (CrashReportingStatus::Disabled, None)
     );
 }
 

@@ -15,8 +15,6 @@ pub enum CrashReportingStatus {
     /// The operator opted out through
     /// [`DISABLED_ENV`](super::DISABLED_ENV).
     Disabled,
-    /// Neither the build nor the environment supplied a DSN.
-    NoDsn,
     /// A DSN was supplied but did not parse.
     InvalidDsn,
 }
@@ -27,10 +25,6 @@ impl fmt::Display for CrashReportingStatus {
             Self::Uninitialized => "crash reporting was not initialized in this process",
             Self::Active => "crash reporting is active",
             Self::Disabled => "crash reporting is disabled by MEDULLA_ANALYTICS_DISABLED",
-            Self::NoDsn => {
-                "crash reporting is inactive: this build has no Sentry DSN and \
-                 MEDULLA_SENTRY_DSN is not set"
-            }
             Self::InvalidDsn => "crash reporting is inactive: the Sentry DSN does not parse",
         })
     }

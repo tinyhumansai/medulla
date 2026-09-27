@@ -14,7 +14,7 @@ const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Run `medulla sentry-test`.
 ///
-/// Errors when crash reporting is inactive (no DSN, opted out, bad DSN) or when
+/// Errors when crash reporting is inactive (opted out, bad DSN override) or when
 /// the event could not be confirmed as accepted, so the exit status is usable
 /// from a script.
 pub(crate) async fn run_sentry_test() -> anyhow::Result<()> {

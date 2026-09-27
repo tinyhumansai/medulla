@@ -124,6 +124,16 @@ fn credentials_in_messages_are_redacted() {
 }
 
 #[test]
+fn short_bearer_credentials_are_still_redacted() {
+    // A short Basic credential must not slip through an undocumented minimum
+    // length: this is the last line of defence before a panic message leaves
+    // the machine.
+    let scrubbed = scrub_text("Authorization: Basic dTph", None);
+    assert!(!scrubbed.contains("dTph"), "{scrubbed}");
+    assert!(scrubbed.contains("Basic <redacted>"), "{scrubbed}");
+}
+
+#[test]
 fn long_messages_are_truncated_on_a_char_boundary() {
     let scrubbed = scrub_text(&"é".repeat(2000), None);
     assert!(scrubbed.len() <= 1024 + '…'.len_utf8());

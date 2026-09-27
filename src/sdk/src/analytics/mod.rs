@@ -14,22 +14,24 @@
 //! docs), but this module posts them itself over the workspace's reqwest 0.12
 //! with rustls and `ring`. The SDK cannot be used as a dependency here: its
 //! only constructor, `Tracker::try_new_from_env`, requires a `.env` file
-//! (`dotenvy::dotenv()?` fails without one) and reads the credentials from the
-//! process environment, so it can neither take a compiled-in secret nor run on
-//! a user's machine; and its derived `Debug` prints the client secret.
+//! (`dotenvy::dotenv()?` fails without one) and reads its configuration from
+//! the process environment, so it cannot run on a user's machine.
 //!
 //! # Build-time configuration
 //!
-//! A native client has no browser `Origin`, so the self-hosted OpenPanel
-//! rejects a request carrying only a client id (`401 Invalid cors or secret`).
-//! Ingestion therefore needs the project's client secret, baked in at compile
-//! time and never read at run time:
+//! A native client has no browser `Origin`, so the Medulla OpenPanel client is
+//! configured server-side to ignore CORS and secret checks
+//! (`ignoreCorsAndSecret`): ingestion needs only the public client id, and no
+//! secret is ever compiled in or sent. Analytics is therefore active in every
+//! build unless [`DISABLED_ENV`] opts the process out. Two optional
+//! compile-time overrides, never read at run time:
 //!
-//! - `MEDULLA_OPENPANEL_CLIENT_SECRET` — required for any event to be sent. A
-//!   build without it (every local `cargo build`, unless exported) keeps
-//!   analytics inert rather than sending requests certain to fail.
 //! - `MEDULLA_OPENPANEL_CLIENT_ID` — overrides the Medulla project's client id.
 //! - `MEDULLA_OPENPANEL_API_URL` — overrides the ingestion API base URL.
+//!
+//! This crate's own unit tests never resolve the process-wide tracker to an
+//! active one, so a test run cannot post events to the live project; the
+//! transport is exercised against a local listener instead.
 
 mod config;
 mod payload;
@@ -186,28 +188,18 @@ impl Tracker {
 /// The process-wide tracker, resolved on first use.
 ///
 /// Resolution reads the opt-out once; analytics has no runtime configuration
-/// beyond it.
+/// beyond it. Under this crate's unit tests it always resolves as opted out,
+/// so no test can reach the live OpenPanel project.
 fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
     static TRACKER: OnceLock<Result<Tracker, AnalyticsStatus>> = OnceLock::new();
     TRACKER
         .get_or_init(|| {
-            let config = config::resolve(
-                crate::observability::opted_out(),
+            config::resolve(
+                cfg!(test) || crate::observability::opted_out(),
                 option_env!("MEDULLA_OPENPANEL_API_URL"),
                 option_env!("MEDULLA_OPENPANEL_CLIENT_ID"),
-                option_env!("MEDULLA_OPENPANEL_CLIENT_SECRET"),
-            );
-            match config {
-                Ok(config) => Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig),
-                Err(status) => {
-                    // Once per process (this closure runs once), at debug level
-                    // because every local build is expected to lack a secret.
-                    if status == AnalyticsStatus::NoSecret {
-                        tracing::debug!("{status}");
-                    }
-                    Err(status)
-                }
-            }
+            )
+            .and_then(|config| Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig))
         })
         .as_ref()
         .map_err(|status| *status)

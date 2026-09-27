@@ -10,9 +10,6 @@ pub enum AnalyticsStatus {
     /// The operator opted out through
     /// [`DISABLED_ENV`](crate::observability::DISABLED_ENV).
     Disabled,
-    /// This build carries no `MEDULLA_OPENPANEL_CLIENT_SECRET`, which OpenPanel
-    /// requires from a native client.
-    NoSecret,
     /// A configured value is not a legal HTTP header value, or the HTTP client
     /// could not be built.
     InvalidConfig,
@@ -23,10 +20,6 @@ impl fmt::Display for AnalyticsStatus {
         f.write_str(match self {
             Self::Active => "analytics is active",
             Self::Disabled => "analytics is disabled by MEDULLA_ANALYTICS_DISABLED",
-            Self::NoSecret => {
-                "analytics is inactive: this build has no MEDULLA_OPENPANEL_CLIENT_SECRET, \
-                 which OpenPanel requires from a native client"
-            }
             Self::InvalidConfig => {
                 "analytics is inactive: the build's OpenPanel configuration is not usable"
             }

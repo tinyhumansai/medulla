@@ -73,9 +73,9 @@ fn main() -> anyhow::Result<()> {
     // Sentry's panic hook is installed first; the TUI's terminal-restoring hook
     // is chained on top of it later, which means a panic restores the screen
     // before the report is captured and flushed.
-    let _crash_reporting = (!is_hook && !is_mock).then(|| {
+    let _crash_reporting = (!is_hook).then(|| {
         medulla::home::load_dotenv_from_cwd();
-        medulla::observability::init()
+        (!is_mock).then(medulla::observability::init)
     });
 
     // The hook shim runs inside an operator's live turn under a 3-5 second

@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod agent;
+pub mod analytics;
 pub mod attribution;
 pub mod auth;
 pub mod bridge;
@@ -36,6 +37,7 @@ pub mod logging;
 /// [`control_socket`].
 #[cfg(feature = "workflows")]
 pub mod mcp;
+pub mod observability;
 pub mod onboarding;
 pub(crate) mod persistence;
 pub mod protocol;

@@ -67,6 +67,20 @@ pub enum Command {
     /// to it, and it files a one-line report on the control socket the same
     /// spawn was handed.
     Hook,
+    /// Send one diagnostic crash report and print its event id
+    /// (`sentry-test`).
+    ///
+    /// Hidden from `help`: it exists so a release's crash-reporting wiring —
+    /// the compiled-in DSN, the transport, and the ingestion project — can be
+    /// verified end to end without having to crash anything.
+    SentryTest,
+    /// Send one diagnostic analytics event and print OpenPanel's HTTP status
+    /// (`analytics-test`).
+    ///
+    /// Hidden from `help`, like [`Command::SentryTest`]: it verifies a
+    /// build's analytics wiring — the compiled-in client id, the endpoint,
+    /// and the ingestion project — end to end.
+    AnalyticsTest,
 }
 
 /// The `medulla skills` action.

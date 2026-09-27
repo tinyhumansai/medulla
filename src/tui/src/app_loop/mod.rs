@@ -334,6 +334,17 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
         }
     }
 
+    // Tie crash reports to the signed-in account — its opaque id only — now
+    // that both boot paths (stored session, fresh sign-in) have settled on one.
+    medulla::observability::set_user(account.as_ref().and_then(|state| state.user_id.as_deref()));
+    // Product analytics reads the same account slot. Spawned so a slow or
+    // unreachable OpenPanel never delays the first frame.
+    if let Some(user_id) = account.as_ref().and_then(|state| state.user_id.clone()) {
+        tokio::spawn(async move {
+            let _ = medulla::analytics::record_application_started(&user_id).await;
+        });
+    }
+
     // `mut` because a relogin rebuilds it around a fresh client.
     let mut runtime = runtime.expect("a runtime is always selected");
 
@@ -698,6 +709,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // every other one reports that it holds none, so its logout
                 // never succeeds and this arm is unreachable for it.
                 if client_arc.is_some() {
+                    // The runtime's own logout already cleared authentication,
+                    // but not the global reporting identity: left set, a crash
+                    // on the relogin screen itself would still be attributed
+                    // to the account that just signed out.
+                    medulla::observability::set_user(None);
                     match relogin(&mut terminal, &env, &loaded.config.backend.base_url).await {
                         // Signing in as a different account re-homes the
                         // install, and this process cannot follow: its config,
@@ -710,6 +726,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         }
                         Ok(SignIn::SameAccount) => {
                             (_, account) = session_of(&env, &loaded.config.backend);
+                            // Restore the reporting identity now that the
+                            // same account is signed back in.
+                            medulla::observability::set_user(
+                                account.as_ref().and_then(|state| state.user_id.as_deref()),
+                            );
                             // Rebuilt rather than reused: the relogin replaced
                             // the stored token, and the client captured its
                             // bearer at construction — carrying the old one

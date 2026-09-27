@@ -15,6 +15,21 @@ use super::usage::scan_usage;
 /// Codex records each assistant message twice within this window; drop the repeat.
 const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 
+/// How much of `current` is new since `previous`, given cumulative provider
+/// counters.
+///
+/// A decrease means the provider reset its counter — a new sub-session
+/// started counting from zero, not that usage went backwards — so the whole
+/// new snapshot is the delta; `current.saturating_sub(previous)` alone would
+/// floor that case to zero and silently drop it.
+pub(super) fn token_delta(current: i64, previous: i64) -> i64 {
+    if current < previous {
+        current
+    } else {
+        current - previous
+    }
+}
+
 impl HarnessLineMapper {
     /// Seed repository context retained by a reused interactive session.
     pub fn set_workspace_context(
@@ -81,7 +96,18 @@ impl HarnessLineMapper {
         if raw.contains("okens") {
             if let Ok(value) = serde_json::from_str::<Value>(raw) {
                 if let Some(usage) = scan_usage(&value, 0) {
+                    let previous = self.usage.unwrap_or(TokenUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    });
                     self.usage = Some(usage);
+                    // Provider snapshots are cumulative, so report only the new
+                    // portion.
+                    let input = token_delta(usage.input_tokens, previous.input_tokens);
+                    let output = token_delta(usage.output_tokens, previous.output_tokens);
+                    if input > 0 || output > 0 {
+                        crate::analytics::record_token_usage(input, output);
+                    }
                 }
             }
         }

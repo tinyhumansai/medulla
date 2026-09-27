@@ -96,6 +96,10 @@ pub(crate) async fn run(
     // `MEDULLA_NO_UPDATE_CHECK`.
     spawn_update_checker(&app.loaded, &msg_tx);
 
+    // Product analytics: the top-level screen on entry and on every change.
+    let mut analytics_screen = app.tab();
+    medulla::analytics::record_screen_view(analytics_screen);
+
     loop {
         terminal.draw(|f| app.draw(f))?;
         if app.should_quit {
@@ -110,6 +114,10 @@ pub(crate) async fn run(
             maybe_event = reader.next() => {
                 if let Some(Ok(ev)) = maybe_event {
                     if let Some(cmd) = app.on_event(ev) {
+                        // The shared endpoint for mouse clicks and keyboard
+                        // shortcuts. Only the fact of a dispatch is recorded —
+                        // command payloads can carry text, paths, or ids.
+                        medulla::analytics::record_ui_action("command_dispatched");
                         run_cmd(
                             cmd,
                             &runtime,
@@ -117,6 +125,11 @@ pub(crate) async fn run(
                             &msg_tx,
                             local_hosts.as_ref(),
                         );
+                    }
+                    let screen = app.tab();
+                    if screen != analytics_screen {
+                        analytics_screen = screen;
+                        medulla::analytics::record_screen_view(screen);
                     }
                 }
             }
@@ -214,6 +227,17 @@ pub(crate) async fn run(
                     }
                     AppMsg::OpenResume(chats) => app.open_resume(chats),
                     AppMsg::LoggedOut => {
+                        // The runtime's own clear already landed (that is
+                        // what produced this message), so the sign-out is
+                        // real: report it and clear the crash-report user
+                        // before the account leaves `app` state, matching the
+                        // CLI `medulla logout` path.
+                        if let Some(user_id) = app.account_user_id() {
+                            medulla::observability::set_user(None);
+                            tokio::spawn(async move {
+                                let _ = medulla::analytics::record_sign_out(&user_id).await;
+                            });
+                        }
                         app.set_status("Account · logged out. Returning to the login screen…");
                         app.logged_out();
                     }

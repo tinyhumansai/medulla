@@ -66,6 +66,8 @@ fs2 = { workspace = true }
 regex = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
+# Crash reporting (`observability`); see the workspace note on its features.
+sentry = { workspace = true }
 
 tempfile = { workspace = true }
 

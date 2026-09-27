@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
+use super::mapper::token_delta;
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,
 };
@@ -86,6 +87,20 @@ fn mapper_accumulates_latest_usage() {
             output_tokens: 11
         })
     );
+}
+
+#[test]
+fn token_delta_reports_the_new_portion_of_a_cumulative_counter() {
+    assert_eq!(token_delta(50, 10), 40);
+    assert_eq!(token_delta(10, 10), 0);
+}
+
+#[test]
+fn token_delta_treats_a_counter_reset_as_a_new_baseline() {
+    // A provider that resets its cumulative counter (e.g. a fresh sub-session)
+    // reports a value below the previous snapshot; the whole new snapshot is
+    // the delta, not zero.
+    assert_eq!(token_delta(50, 1000), 50);
 }
 
 fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {

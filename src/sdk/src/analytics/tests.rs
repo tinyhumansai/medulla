@@ -9,8 +9,8 @@ use super::config::{resolve, OpenPanelConfig, DEFAULT_API_URL, DEFAULT_CLIENT_ID
 use super::payload::Payload;
 use super::{AnalyticsError, AnalyticsStatus, Tracker};
 
-fn configured(secret: &str) -> OpenPanelConfig {
-    OpenPanelConfig::from_build(None, None, Some(secret)).expect("configured")
+fn defaults() -> OpenPanelConfig {
+    OpenPanelConfig::from_build(None, None)
 }
 
 #[test]
@@ -56,39 +56,28 @@ fn an_anonymous_track_omits_the_profile_instead_of_sending_null() {
 }
 
 #[test]
-fn the_opt_out_wins_over_a_configured_secret() {
+fn the_opt_out_wins_over_everything() {
     assert_eq!(
-        resolve(true, None, None, Some("sec_abc")),
+        resolve(true, Some("https://panel.example.test/api"), Some("client-1")),
         Err(AnalyticsStatus::Disabled)
     );
 }
 
 #[test]
-fn a_build_without_a_client_secret_is_inert() {
-    assert_eq!(
-        resolve(false, None, None, None),
-        Err(AnalyticsStatus::NoSecret)
-    );
-    // CI exports an empty variable when the environment secret is unset.
-    assert_eq!(
-        resolve(false, None, None, Some("  ")),
-        Err(AnalyticsStatus::NoSecret)
-    );
+fn analytics_is_active_by_default_with_no_secret_required() {
+    assert_eq!(resolve(false, None, None), Ok(defaults()));
 }
 
 #[tokio::test]
-async fn this_test_build_without_a_secret_sends_nothing() {
-    if option_env!("MEDULLA_OPENPANEL_CLIENT_SECRET").is_some_and(|s| !s.trim().is_empty()) {
-        return; // Built with a real secret: the inert path is not reachable.
-    }
-    assert_ne!(super::status(), AnalyticsStatus::Active);
+async fn this_crates_tests_never_reach_the_live_project() {
+    assert_eq!(super::status(), AnalyticsStatus::Disabled);
     assert!(matches!(
         super::record_sign_in("user-42").await,
-        Err(AnalyticsError::Inactive(_))
+        Err(AnalyticsError::Inactive(AnalyticsStatus::Disabled))
     ));
     assert!(matches!(
         super::send_test_event().await,
-        Err(AnalyticsError::Inactive(_))
+        Err(AnalyticsError::Inactive(AnalyticsStatus::Disabled))
     ));
     // The fire-and-forget helpers are no-ops rather than panics.
     super::record_screen_view("Chat");
@@ -97,47 +86,44 @@ async fn this_test_build_without_a_secret_sends_nothing() {
 }
 
 #[test]
-fn a_secret_alone_uses_the_medulla_project_defaults() {
-    let config = OpenPanelConfig::from_build(None, Some(""), Some("sec_abc")).expect("configured");
-    assert_eq!(config.client_id, DEFAULT_CLIENT_ID);
-    assert_eq!(config.endpoint(), format!("{DEFAULT_API_URL}/track"));
-    assert_eq!(config.endpoint(), "https://panel.tinyhumans.ai/api/track");
+fn an_unconfigured_build_uses_the_medulla_project_defaults() {
+    // CI exports an empty variable when the backing Actions variable is unset.
+    for config in [defaults(), OpenPanelConfig::from_build(Some("  "), Some(""))] {
+        assert_eq!(config.client_id, DEFAULT_CLIENT_ID);
+        assert_eq!(config.client_id, "781d9ce2-62ec-4059-a093-152c88400576");
+        assert_eq!(config.endpoint(), format!("{DEFAULT_API_URL}/track"));
+        assert_eq!(config.endpoint(), "https://panel.tinyhumans.ai/api/track");
+    }
 }
 
 #[test]
 fn build_time_overrides_replace_the_defaults() {
-    let config = OpenPanelConfig::from_build(
-        Some("https://panel.example.test/api/"),
-        Some("client-1"),
-        Some("sec_abc"),
-    )
-    .expect("configured");
+    let config =
+        OpenPanelConfig::from_build(Some("https://panel.example.test/api/"), Some("client-1"));
     assert_eq!(config.client_id, "client-1");
     assert_eq!(config.endpoint(), "https://panel.example.test/api/track");
 }
 
 #[test]
-fn headers_carry_the_client_id_and_a_sensitive_secret() {
-    let headers = configured("sec_abc").headers().expect("valid headers");
+fn headers_carry_the_client_id_and_never_a_secret() {
+    let headers = defaults().headers().expect("valid headers");
     assert_eq!(headers["content-type"], "application/json");
     assert_eq!(headers["openpanel-client-id"], DEFAULT_CLIENT_ID);
-    let secret = &headers["openpanel-client-secret"];
-    assert_eq!(secret, "sec_abc");
-    assert!(secret.is_sensitive(), "secret must be redacted from Debug");
     assert_eq!(headers["openpanel-sdk-name"], "medulla");
-    assert!(!format!("{headers:?}").contains("sec_abc"));
+    assert_eq!(headers["openpanel-sdk-version"], env!("CARGO_PKG_VERSION"));
+    assert!(
+        headers
+            .keys()
+            .all(|name| !name.as_str().contains("secret")),
+        "{headers:?}"
+    );
 }
 
 #[test]
 fn an_illegal_header_value_disables_the_tracker_instead_of_panicking() {
-    assert!(configured("bad\nsecret").headers().is_none());
-}
-
-#[test]
-fn debug_output_never_contains_the_secret() {
-    let rendered = format!("{:?}", configured("sec_abc"));
-    assert!(!rendered.contains("sec_abc"), "{rendered}");
-    assert!(rendered.contains("<redacted>"));
+    let config = OpenPanelConfig::from_build(None, Some("bad\nclient"));
+    assert!(config.headers().is_none());
+    assert!(Tracker::new(&config).is_none());
 }
 
 /// Accept one HTTP request on a local listener, answer it with `status`, and
@@ -179,10 +165,9 @@ fn serve_once(status: u16) -> (String, std::thread::JoinHandle<String>) {
 }
 
 #[tokio::test]
-async fn the_tracker_posts_the_payload_with_the_auth_headers() {
+async fn the_tracker_posts_the_payload_with_the_client_id_and_no_secret() {
     let (url, server) = serve_once(202);
-    let config = OpenPanelConfig::from_build(Some(&url), Some("client-1"), Some("sec_abc"))
-        .expect("configured");
+    let config = OpenPanelConfig::from_build(Some(&url), Some("client-1"));
     let tracker = Tracker::new(&config).expect("tracker");
     tracker
         .deliver(&Payload::track("signed_in", Some("user-42"), []))
@@ -193,10 +178,7 @@ async fn the_tracker_posts_the_payload_with_the_auth_headers() {
     let lower = request.to_ascii_lowercase();
     assert!(request.starts_with("POST /api/track HTTP/1.1"), "{request}");
     assert!(lower.contains("openpanel-client-id: client-1"), "{request}");
-    assert!(
-        lower.contains("openpanel-client-secret: sec_abc"),
-        "{request}"
-    );
+    assert!(!lower.contains("secret"), "{request}");
     assert!(
         lower.contains("content-type: application/json"),
         "{request}"
@@ -211,8 +193,7 @@ async fn the_tracker_posts_the_payload_with_the_auth_headers() {
 #[tokio::test]
 async fn a_rejected_event_is_an_error_but_its_status_is_reported() {
     let (url, server) = serve_once(401);
-    let config =
-        OpenPanelConfig::from_build(Some(&url), None, Some("sec_abc")).expect("configured");
+    let config = OpenPanelConfig::from_build(Some(&url), None);
     let tracker = Tracker::new(&config).expect("tracker");
     assert!(matches!(
         tracker.deliver(&Payload::identify("user-42")).await,
@@ -221,8 +202,7 @@ async fn a_rejected_event_is_an_error_but_its_status_is_reported() {
     server.join().expect("server");
 
     let (url, server) = serve_once(401);
-    let config =
-        OpenPanelConfig::from_build(Some(&url), None, Some("sec_abc")).expect("configured");
+    let config = OpenPanelConfig::from_build(Some(&url), None);
     let tracker = Tracker::new(&config).expect("tracker");
     assert_eq!(
         tracker

@@ -169,8 +169,14 @@ fn events_lose_everything_that_identifies_the_person() {
         extra: [("argv".to_owned(), "--config secret.toml".into())]
             .into_iter()
             .collect(),
+        tags: [("user_email".to_owned(), "alice@example.com".to_owned())]
+            .into_iter()
+            .collect(),
         ..Default::default()
     };
+    event
+        .contexts
+        .insert("os".to_owned(), sentry::protocol::Context::Os(Box::default()));
     event.breadcrumbs.values.push(Breadcrumb::default());
     event.exception.values.push(Exception {
         ty: "panic".into(),

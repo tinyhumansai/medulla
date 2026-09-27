@@ -571,10 +571,7 @@ fn accept_one_and_respond_ok() -> u16 {
         let mut request = Vec::new();
         let mut buf = [0u8; 4096];
         let headers_end = loop {
-            if let Some(pos) = request
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-            {
+            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
                 break pos + 4;
             }
             let Ok(read) = stream.read(&mut buf) else {
@@ -603,7 +600,8 @@ fn accept_one_and_respond_ok() -> u16 {
             }
             request.extend_from_slice(&buf[..read]);
         }
-        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let _ =
+            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
     });
     port
 }

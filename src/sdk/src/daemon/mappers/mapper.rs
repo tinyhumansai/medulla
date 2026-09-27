@@ -22,7 +22,7 @@ const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 /// started counting from zero, not that usage went backwards — so the whole
 /// new snapshot is the delta; `current.saturating_sub(previous)` alone would
 /// floor that case to zero and silently drop it.
-fn token_delta(current: i64, previous: i64) -> i64 {
+pub(super) fn token_delta(current: i64, previous: i64) -> i64 {
     if current < previous {
         current
     } else {

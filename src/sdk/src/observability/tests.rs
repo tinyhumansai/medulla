@@ -103,10 +103,7 @@ fn a_longer_account_directory_is_not_mistaken_for_the_configured_home() {
     // account's directory; only the generic mask should touch it, not the
     // operator's own `~` substitution.
     assert_eq!(
-        scrub_paths(
-            "/home/alice2/Documents/report.txt",
-            Some("/home/alice")
-        ),
+        scrub_paths("/home/alice2/Documents/report.txt", Some("/home/alice")),
         "/home/<user>/Documents/report.txt"
     );
 }
@@ -174,9 +171,10 @@ fn events_lose_everything_that_identifies_the_person() {
             .collect(),
         ..Default::default()
     };
-    event
-        .contexts
-        .insert("os".to_owned(), sentry::protocol::Context::Os(Box::default()));
+    event.contexts.insert(
+        "os".to_owned(),
+        sentry::protocol::Context::Os(Box::default()),
+    );
     event.breadcrumbs.values.push(Breadcrumb::default());
     event.exception.values.push(Exception {
         ty: "panic".into(),
@@ -260,13 +258,20 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
         };
         let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
             .lines()
-            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_owned()))
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|v| v.trim().to_owned())
+            })
             .expect("content-length header")
             .parse()
             .expect("numeric content-length");
         while request.len() < headers_end + content_length {
             let read = stream.read(&mut buf).expect("read body");
-            assert_ne!(read, 0, "connection closed before the declared body arrived");
+            assert_ne!(
+                read, 0,
+                "connection closed before the declared body arrived"
+            );
             request.extend_from_slice(&buf[..read]);
         }
         stream

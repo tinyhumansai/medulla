@@ -228,6 +228,13 @@ fn a_test_event_without_a_client_reports_why() {
     assert!(!error.to_string().is_empty());
 }
 
+/// The byte offset of the first occurrence of `needle` in `haystack`, if any.
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
 #[test]
 fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");

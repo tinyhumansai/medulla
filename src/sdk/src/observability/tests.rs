@@ -131,7 +131,11 @@ fn frame_paths_outside_any_users_home_are_still_dropped() {
 
     let event = scrub_event(event, None);
 
-    let frame = &event.exception.values[0].stacktrace.as_ref().expect("stack").frames[0];
+    let frame = &event.exception.values[0]
+        .stacktrace
+        .as_ref()
+        .expect("stack")
+        .frames[0];
     assert_eq!(frame.abs_path, None);
     assert_eq!(frame.filename, None);
     assert_eq!(frame.package, None);

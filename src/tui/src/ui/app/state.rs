@@ -174,6 +174,12 @@ impl App {
         self.account = account;
     }
 
+    /// The signed-in account's opaque id, if any — read by the event loop to
+    /// attribute a logout's analytics event before the account is cleared.
+    pub fn account_user_id(&self) -> Option<String> {
+        self.account.as_ref().and_then(|state| state.user_id.clone())
+    }
+
     /// Pin the sidebar's device readings to a fixed sample.
     ///
     /// Render tests need the footer to say the same thing on every machine, so

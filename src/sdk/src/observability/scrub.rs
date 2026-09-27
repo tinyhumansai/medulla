@@ -107,16 +107,21 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
         .map(|home| home.trim_end_matches(['/', '\\']))
         .filter(|home| home.len() > 1)
         .and_then(|home| {
+            // Either a path separator (consumed and kept in the replacement)
+            // or a zero-width lookahead for whitespace, a quote, or the end of
+            // the string — so the boundary check never eats a character that
+            // belongs to whatever follows.
             Regex::new(&format!(
-                r#"{}(?:[/\\]|$|(?=[\s"':]))"#,
+                r#"{}(?:(?P<sep>[/\\])|(?=[\s"':]|$))"#,
                 regex::escape(home)
             ))
             .ok()
         });
     let value = match home {
         Some(home) => home
-            .replace_all(value, |caps: &regex::Captures<'_>| {
-                format!("~{}", &caps[0][home.as_str().len()..])
+            .replace_all(value, |caps: &regex::Captures<'_>| match caps.name("sep") {
+                Some(sep) => format!("~{}", sep.as_str()),
+                None => "~".to_owned(),
             })
             .into_owned(),
         None => value.to_owned(),

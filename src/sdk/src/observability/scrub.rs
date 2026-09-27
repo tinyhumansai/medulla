@@ -152,21 +152,25 @@ fn truncate(mut value: String) -> String {
     value
 }
 
-/// `/Users/<name>`, `/home/<name>`, and `C:\Users\<name>` — the per-user
-/// directory of any account, not just the one running Medulla.
+/// `/Users/<name>`, `/home/<name>`, `C:\Users\<name>`, and `C:/Users/<name>` —
+/// the per-user directory of any account, not just the one running Medulla.
+/// Windows paths appear with either slash direction (APIs, panic messages, and
+/// normalization all vary), so both are matched.
 fn user_dir_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r#"(?P<prefix>/Users/|/home/|(?i:[a-z]:\\Users\\))[^/\\\s"':]+"#)
+        Regex::new(r#"(?P<prefix>/Users/|/home/|(?i:[a-z]:[\\/]Users[\\/]))[^/\\\s"':]+"#)
             .expect("valid user-dir pattern")
     })
 }
 
-/// An HTTP `Authorization`-style credential.
+/// An HTTP `Authorization`-style credential. No minimum length: this is the
+/// last line of defence before a panic message leaves the machine, so even a
+/// short bearer token or Basic credential must be redacted.
 fn bearer_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"(?i)(?P<scheme>bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
+        Regex::new(r"(?i)(?P<scheme>bearer|token|basic)\s+[A-Za-z0-9._~+/=-]+")
             .expect("valid bearer pattern")
     })
 }

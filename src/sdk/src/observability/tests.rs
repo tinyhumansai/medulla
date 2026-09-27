@@ -109,6 +109,35 @@ fn a_longer_account_directory_is_not_mistaken_for_the_configured_home() {
 }
 
 #[test]
+fn frame_paths_outside_any_users_home_are_still_dropped() {
+    // A build/CI checkout path (`/opt/checkout/...`) carries no user
+    // directory to mask, but still describes the machine's layout — the
+    // frame path fields must be dropped outright, not passed through
+    // unmasked because they didn't match a home/user-dir pattern.
+    let mut event = Event::default();
+    event.exception.values.push(Exception {
+        ty: "panic".into(),
+        stacktrace: Some(Stacktrace {
+            frames: vec![Frame {
+                abs_path: Some("/opt/checkout/src/main.rs".into()),
+                filename: Some("/opt/checkout/src/main.rs".into()),
+                package: Some("/opt/checkout/target/debug/medulla".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let event = scrub_event(event, None);
+
+    let frame = &event.exception.values[0].stacktrace.as_ref().expect("stack").frames[0];
+    assert_eq!(frame.abs_path, None);
+    assert_eq!(frame.filename, None);
+    assert_eq!(frame.package, None);
+}
+
+#[test]
 fn credentials_in_messages_are_redacted() {
     let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl";
     let scrubbed = scrub_text(

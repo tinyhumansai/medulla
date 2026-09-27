@@ -58,7 +58,11 @@ fn an_anonymous_track_omits_the_profile_instead_of_sending_null() {
 #[test]
 fn the_opt_out_wins_over_everything() {
     assert_eq!(
-        resolve(true, Some("https://panel.example.test/api"), Some("client-1")),
+        resolve(
+            true,
+            Some("https://panel.example.test/api"),
+            Some("client-1")
+        ),
         Err(AnalyticsStatus::Disabled)
     );
 }
@@ -88,7 +92,10 @@ async fn this_crates_tests_never_reach_the_live_project() {
 #[test]
 fn an_unconfigured_build_uses_the_medulla_project_defaults() {
     // CI exports an empty variable when the backing Actions variable is unset.
-    for config in [defaults(), OpenPanelConfig::from_build(Some("  "), Some(""))] {
+    for config in [
+        defaults(),
+        OpenPanelConfig::from_build(Some("  "), Some("")),
+    ] {
         assert_eq!(config.client_id, DEFAULT_CLIENT_ID);
         assert_eq!(config.client_id, "781d9ce2-62ec-4059-a093-152c88400576");
         assert_eq!(config.endpoint(), format!("{DEFAULT_API_URL}/track"));
@@ -112,9 +119,7 @@ fn headers_carry_the_client_id_and_never_a_secret() {
     assert_eq!(headers["openpanel-sdk-name"], "medulla");
     assert_eq!(headers["openpanel-sdk-version"], env!("CARGO_PKG_VERSION"));
     assert!(
-        headers
-            .keys()
-            .all(|name| !name.as_str().contains("secret")),
+        headers.keys().all(|name| !name.as_str().contains("secret")),
         "{headers:?}"
     );
 }

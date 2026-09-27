@@ -239,15 +239,28 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
             .expect("timeout");
         let mut request = Vec::new();
         let mut buf = [0u8; 4096];
-        // Read until the envelope body (which follows the headers) arrives.
-        while let Ok(read) = stream.read(&mut buf) {
-            if read == 0 {
-                break;
+        // Read the headers first, then read exactly the declared body length —
+        // stopping as soon as a marker appears anywhere in the buffered bytes
+        // would let this respond while the client is still mid-upload if the
+        // envelope arrives split across TCP writes.
+        let headers_end = loop {
+            if let Some(pos) = find_subslice(&request, b"\r\n\r\n") {
+                break pos + 4;
             }
+            let read = stream.read(&mut buf).expect("read headers");
+            assert_ne!(read, 0, "connection closed before headers completed");
             request.extend_from_slice(&buf[..read]);
-            if String::from_utf8_lossy(&request).contains("sentry-test-transport") {
-                break;
-            }
+        };
+        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+            .lines()
+            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_owned()))
+            .expect("content-length header")
+            .parse()
+            .expect("numeric content-length");
+        while request.len() < headers_end + content_length {
+            let read = stream.read(&mut buf).expect("read body");
+            assert_ne!(read, 0, "connection closed before the declared body arrived");
+            request.extend_from_slice(&buf[..read]);
         }
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")

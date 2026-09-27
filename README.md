@@ -31,7 +31,7 @@ medulla         # open the terminal
 
 Not ready to sign in? `medulla --mock` runs an offline demo with no account and no network.
 
-Medulla sends usage analytics (and, in official builds, crash reports) tied only to your account id (no prompts, paths, or arguments); set `MEDULLA_ANALYTICS_DISABLED=1` to turn both off.
+Medulla sends crash reports and usage analytics tied only to your account id (no prompts, paths, or arguments); set `MEDULLA_ANALYTICS_DISABLED=1` to turn both off.
 
 Prebuilt binaries ship for Linux (x86_64, aarch64), macOS (Apple Silicon), and Windows (x86_64). Building from source and pinning a version are covered in [Getting Started](https://tinyhumans.gitbook.io/medulla/developers/getting-started).
 

@@ -30,32 +30,24 @@ uses the repository's standard `GITHUB_TOKEN`; it requires no organization app
 secrets. Bump the workspace version and lockfile in a reviewed pull request
 before dispatching a release.
 
-### Telemetry credentials
+### Telemetry
 
-Crash reporting (Sentry, `medulla::observability`) reads its DSN at **compile
-time** through `option_env!`, so a plain local `cargo build` produces a binary
-with crash reporting inert. Product analytics (OpenPanel, `medulla::analytics`)
-needs no credentials: the Medulla OpenPanel client has "ignore CORS and secret"
-enabled server-side, so a native client authenticates with the public client id
-alone, which is compiled in. Analytics is therefore active in every build,
-local ones included, unless `MEDULLA_ANALYTICS_DISABLED=1` is set. `Release`'s
-build job runs in the `Production` environment (which only `main` may use),
-passes these into the build step, and emits a `::warning::` when the DSN is
-empty:
+Crash reporting (Sentry, `medulla::observability`) and product analytics
+(OpenPanel, `medulla::analytics`) are configured in code, with no build-time
+inputs: the Sentry DSN, the OpenPanel client id
+(`781d9ce2-62ec-4059-a093-152c88400576`), and the OpenPanel API URL
+(`https://panel.tinyhumans.ai/api`, events posted to `/track`) are compiled-in
+constants. Every build, local ones included, therefore reports unless
+`MEDULLA_ANALYTICS_DISABLED=1` is set, and the `Release` workflow passes no
+telemetry configuration. OpenPanel needs no secret: the Medulla client has
+"ignore CORS and secret" enabled server-side, so a native client authenticates
+with the public client id alone.
 
-| Build-time variable | Source in `Release` | Effect when unset |
-| --- | --- | --- |
-| `MEDULLA_SENTRY_DSN` | `vars.MEDULLA_SENTRY_DSN` | no crash reporting |
-| `MEDULLA_OPENPANEL_CLIENT_ID` | `vars.MEDULLA_OPENPANEL_CLIENT_ID` | Medulla project's id (`781d9ce2-62ec-4059-a093-152c88400576`) |
-| `MEDULLA_OPENPANEL_API_URL` | `vars.MEDULLA_OPENPANEL_API_URL` | `https://panel.tinyhumans.ai/api` |
-
-The OpenPanel values are never read at run time; events are posted to
-`{api_url}/track`.
-
-At run time `MEDULLA_SENTRY_DSN` overrides the baked-in DSN,
+At run time `MEDULLA_SENTRY_DSN` overrides the compiled-in DSN,
 `MEDULLA_SENTRY_ENVIRONMENT` overrides the Sentry environment (default
 `production` for release builds, `development` for debug), and
 `MEDULLA_ANALYTICS_DISABLED=1` turns off both crash reporting and analytics.
+The OpenPanel coordinates have no override.
 
 Analytics records `application_started` (OS and architecture), `signed_in`,
 `signed_out`, `screen_viewed` (top-level tab name), `ui_action` (only that a
@@ -76,7 +68,8 @@ To verify a build's wiring end to end, run the hidden diagnostics:
   analytics is inactive or the event was not accepted.
 
 Set `MEDULLA_ANALYTICS_DISABLED=1` while developing if you do not want local
-runs to report to the Medulla project.
+runs to report to the Medulla projects. The `medulla` crate's own unit tests
+never send real events: both modules resolve as opted out under `cfg(test)`.
 
 Debug symbols are not uploaded to Sentry yet; release binaries symbolicate
 in-process from whatever debug info they carry.

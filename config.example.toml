@@ -341,8 +341,8 @@ tokenEnv = "MEDULLA_TOKEN"
 # ---------------------------------------------------------------------------
 # Telemetry — environment only, no config keys
 # ---------------------------------------------------------------------------
-# Medulla sends product analytics (OpenPanel) and, in official builds, crash
-# reports (Sentry). Neither carries prompts, file contents, paths, or
+# Medulla sends crash reports (Sentry) and product analytics (OpenPanel).
+# Neither carries prompts, file contents, paths, or
 # arguments; both are tied only to your opaque account id. Crash reports have home-directory
 # paths, hostnames, and credentials scrubbed before they leave the machine;
 # analytics records only app start (OS and architecture), sign-in/out, the

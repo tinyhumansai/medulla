@@ -87,19 +87,9 @@ impl HarnessLineMapper {
                     });
                     self.usage = Some(usage);
                     // Provider snapshots are cumulative, so report only the new
-                    // portion. A decrease means the provider reset its counter
-                    // (a new sub-session started its own count from zero), so
-                    // the whole new snapshot is the delta rather than nothing —
-                    // `saturating_sub` alone would silently drop it.
-                    let delta = |current: i64, previous: i64| {
-                        if current < previous {
-                            current
-                        } else {
-                            current - previous
-                        }
-                    };
-                    let input = delta(usage.input_tokens, previous.input_tokens);
-                    let output = delta(usage.output_tokens, previous.output_tokens);
+                    // portion.
+                    let input = token_delta(usage.input_tokens, previous.input_tokens);
+                    let output = token_delta(usage.output_tokens, previous.output_tokens);
                     if input > 0 || output > 0 {
                         crate::analytics::record_token_usage(input, output);
                     }

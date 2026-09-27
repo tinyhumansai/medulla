@@ -337,6 +337,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Tie crash reports to the signed-in account — its opaque id only — now
     // that both boot paths (stored session, fresh sign-in) have settled on one.
     medulla::observability::set_user(account.as_ref().and_then(|state| state.user_id.as_deref()));
+    // Product analytics reads the same account slot. Spawned so a slow or
+    // unreachable OpenPanel never delays the first frame.
+    if let Some(user_id) = account.as_ref().and_then(|state| state.user_id.clone()) {
+        tokio::spawn(async move {
+            let _ = medulla::analytics::record_application_started(&user_id).await;
+        });
+    }
 
     // `mut` because a relogin rebuilds it around a fresh client.
     let mut runtime = runtime.expect("a runtime is always selected");

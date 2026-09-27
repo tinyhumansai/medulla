@@ -143,6 +143,9 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
         // Verified by `/auth/me` and durably stored: later crash reports from
         // this process carry the account id (and nothing else about it).
         medulla::observability::set_user(Some(&account));
+        // Best-effort (bounded by the tracker's request timeout): an analytics
+        // failure never turns a successful login into an error.
+        let _ = medulla::analytics::record_sign_in(&account).await;
     }
 
     adopt_legacy_credentials(&env, &loaded.config.backend).await;
@@ -330,6 +333,12 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let home = medulla::home::medulla_home(&env);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
+    // Read the account before deleting the session that names it, and await
+    // the event (bounded by the tracker's timeout) since this process exits
+    // right after. An analytics failure never blocks the sign-out itself.
+    if let Some(user_id) = medulla::auth::state(&env).user_id {
+        let _ = medulla::analytics::record_sign_out(&user_id).await;
+    }
     // Before the session goes, so no later report is attributed to it.
     medulla::observability::set_user(None);
     medulla::auth::clear(&env)

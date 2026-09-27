@@ -81,7 +81,18 @@ impl HarnessLineMapper {
         if raw.contains("okens") {
             if let Ok(value) = serde_json::from_str::<Value>(raw) {
                 if let Some(usage) = scan_usage(&value, 0) {
+                    let previous = self.usage.unwrap_or(TokenUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    });
                     self.usage = Some(usage);
+                    // Provider snapshots are cumulative, so report only the new
+                    // portion; a provider reset counts as a new baseline.
+                    let input = usage.input_tokens.saturating_sub(previous.input_tokens);
+                    let output = usage.output_tokens.saturating_sub(previous.output_tokens);
+                    if input > 0 || output > 0 {
+                        crate::analytics::record_token_usage(input, output);
+                    }
                 }
             }
         }

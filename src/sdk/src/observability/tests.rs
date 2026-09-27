@@ -193,6 +193,8 @@ fn events_lose_everything_that_identifies_the_person() {
     assert_eq!(event.server_name, None);
     assert!(event.breadcrumbs.values.is_empty());
     assert!(event.extra.is_empty());
+    assert!(event.tags.is_empty(), "{:?}", event.tags);
+    assert!(event.contexts.is_empty(), "{:?}", event.contexts);
     assert_eq!(event.message.as_deref(), Some("panicked at ~/src/x.rs"));
     let entry = event.logentry.as_ref().expect("logentry kept");
     assert!(entry.params.is_empty());

@@ -15,7 +15,8 @@
 //! - `MEDULLA_SENTRY_ENVIRONMENT` (runtime) overrides the environment, which
 //!   otherwise is `production` for release builds and `development` for debug.
 //! - Opt-out: [`DISABLED_ENV`] (`MEDULLA_ANALYTICS_DISABLED`) is the single
-//!   switch for everything Medulla reports home, crash reports included.
+//!   switch for everything Medulla reports home, crash reports and product
+//!   analytics ([`crate::analytics`]) included; see [`opted_out`].
 
 mod config;
 mod scrub;
@@ -133,13 +134,22 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
     })
 }
 
+/// Whether the operator opted this process out of everything Medulla reports
+/// home, through [`DISABLED_ENV`].
+///
+/// The one opt-out check, shared with product analytics
+/// ([`crate::analytics`]) so the two can never disagree about it.
+pub fn opted_out() -> bool {
+    config::is_opted_out(std::env::var(DISABLED_ENV).ok().as_deref())
+}
+
 /// The status [`init`] resolved, set once per process.
 static STATUS: OnceLock<CrashReportingStatus> = OnceLock::new();
 
 /// Work out whether to start, and with which DSN, from the process
 /// environment and the build.
 fn resolve_status() -> (CrashReportingStatus, Option<sentry::types::Dsn>) {
-    if config::is_opted_out(std::env::var(DISABLED_ENV).ok().as_deref()) {
+    if opted_out() {
         return (CrashReportingStatus::Disabled, None);
     }
     let raw = config::resolve_dsn(
@@ -160,7 +170,10 @@ fn user_slot() -> &'static Mutex<Option<String>> {
 }
 
 /// Read the account id to attach, if a signed-in run recorded one.
-fn current_user() -> Option<String> {
+///
+/// Also the identity product analytics attributes its events to, so crash
+/// reports and analytics share one account slot set through [`set_user`].
+pub(crate) fn current_user() -> Option<String> {
     user_slot()
         .lock()
         .unwrap_or_else(|e| e.into_inner())

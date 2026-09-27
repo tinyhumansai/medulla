@@ -169,9 +169,32 @@ impl Transport for ReqwestTransport {
     ///
     /// Tasks are processed in order, so the flush marker is answered only after
     /// the sends ahead of it completed (or failed).
+    ///
+    /// Enqueueing the marker itself is bounded by `timeout`: a plain blocking
+    /// `send` on the bounded channel would wait for a free slot regardless of
+    /// the caller's deadline, so a full queue behind a slow request could make
+    /// this block for roughly the request timeout even when `timeout` asked
+    /// for far less. This matters because `flush` runs during Sentry shutdown
+    /// and after a panic, where exceeding the caller's deadline can make
+    /// Medulla appear hung.
     fn flush(&self, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
         let (done_tx, done_rx) = mpsc::sync_channel(1);
-        self.sender.send(Task::Flush(done_tx)).is_ok() && done_rx.recv_timeout(timeout).is_ok()
+        loop {
+            match self.sender.try_send(Task::Flush(done_tx.clone())) {
+                Ok(()) => break,
+                Err(mpsc::TrySendError::Disconnected(_)) => return false,
+                Err(mpsc::TrySendError::Full(_)) => {
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        return false;
+                    }
+                    std::thread::sleep(remaining.min(Duration::from_millis(5)));
+                }
+            }
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        done_rx.recv_timeout(remaining).is_ok()
     }
 
     fn shutdown(&self, timeout: Duration) -> bool {

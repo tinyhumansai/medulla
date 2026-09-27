@@ -203,8 +203,12 @@ fn events_lose_everything_that_identifies_the_person() {
     let exception = &event.exception.values[0];
     assert_eq!(exception.value.as_deref(), Some("open ~/secret.txt"));
     let frame = &exception.stacktrace.as_ref().expect("stack").frames[0];
-    assert_eq!(frame.abs_path.as_deref(), Some("~/src/medulla/src/main.rs"));
-    assert_eq!(frame.package.as_deref(), Some("~/.cargo/bin/medulla"));
+    // Frame paths are dropped outright, not masked: a build/CI checkout path
+    // carries no user directory to mask but still describes the machine's
+    // layout.
+    assert_eq!(frame.filename, None);
+    assert_eq!(frame.abs_path, None);
+    assert_eq!(frame.package, None);
     assert!(frame.vars.is_empty());
     assert!(frame.pre_context.is_empty());
     assert_eq!(frame.context_line, None);

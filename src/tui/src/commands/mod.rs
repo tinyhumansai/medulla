@@ -145,18 +145,20 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
         // Verified by `/auth/me` and durably stored: later crash reports from
         // this process carry the account id (and nothing else about it).
         medulla::observability::set_user(Some(&account));
-        // Best-effort and off the critical path: analytics is documented as
-        // never holding up a sign-in, but awaiting it here still would — the
-        // command would print nothing until OpenPanel answered or the
-        // tracker's own timeout elapsed, up to three seconds after the
-        // credential was already stored. `medulla login` exits right after,
-        // so nothing else in this process needs the event to have landed.
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let account = account.clone();
-            handle.spawn(async move {
-                let _ = medulla::analytics::record_sign_in(&account).await;
-            });
-        }
+        // Best-effort, bounded by one shared deadline rather than the
+        // tracker's own per-request timeout: `record_sign_in` makes two
+        // sequential requests (identify, then the event), so awaiting each of
+        // their individual three-second ceilings could delay this
+        // already-completed login by nearly six seconds. `medulla login`
+        // exits right after this, so the event has to be awaited somewhat —
+        // a detached task would almost always be cancelled by the runtime
+        // shutting down before it lands — but one request timeout is the
+        // most a finished login should ever wait on it.
+        let _ = tokio::time::timeout(
+            medulla::analytics::REQUEST_TIMEOUT,
+            medulla::analytics::record_sign_in(&account),
+        )
+        .await;
     }
 
     adopt_legacy_credentials(&env, &loaded.config.backend).await;

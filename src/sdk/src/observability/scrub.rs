@@ -76,13 +76,20 @@ fn scrub_stacktrace(stacktrace: Option<&mut Stacktrace>, home: Option<&str>) {
     }
 }
 
-/// Mask paths in a frame and drop anything that could carry runtime data.
-fn scrub_frame(frame: &mut Frame, home: Option<&str>) {
-    for path in [&mut frame.filename, &mut frame.abs_path, &mut frame.package] {
-        if let Some(value) = path.as_mut() {
-            *value = scrub_paths(value, home);
-        }
-    }
+/// Drop every path field of a frame and anything else that could carry
+/// runtime data.
+///
+/// Masking home/user directories (as [`scrub_paths`] does for free-text
+/// values) is not enough here: a build or CI checkout path
+/// (`/opt/checkout/...`, `/work/project/...`) carries no user directory to
+/// mask but still describes the machine's layout, and it is exactly what
+/// `abs_path`/`filename`/`package` hold on every frame. The function name and
+/// line number — the fields that actually diagnose a crash — survive; only
+/// the path is dropped.
+fn scrub_frame(frame: &mut Frame, _home: Option<&str>) {
+    frame.filename = None;
+    frame.abs_path = None;
+    frame.package = None;
     frame.vars.clear();
     frame.pre_context.clear();
     frame.context_line = None;

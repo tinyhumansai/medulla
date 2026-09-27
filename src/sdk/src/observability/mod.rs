@@ -3,9 +3,14 @@
 //! The binary calls [`init`] once, before any runtime starts, and holds the
 //! returned [`CrashReportingGuard`] for the life of the process. From then on a
 //! panic on any thread is reported, after passing through [`scrub`]'s privacy
-//! filter: reports identify the failure and the release, never the person —
-//! no hostname, prompts, arguments, local variables, or home-directory paths,
-//! and no account data beyond the opaque account id (see [`set_user`]).
+//! filter: reports drop the hostname, request data, breadcrumbs, free-form
+//! extras, local variables, and source context outright, mask the operator's
+//! home directory and any other user's directory in every path, redact
+//! bearer/JWT-shaped credentials, and carry no account data beyond the opaque
+//! account id (see [`set_user`]). The message and exception text a panic
+//! supplies are otherwise kept (capped in length) for diagnostic value, so a
+//! panic that itself embeds a prompt or argument can still surface it —
+//! privacy-filtered, not a guarantee those values never appear.
 //!
 //! # Configuration
 //!

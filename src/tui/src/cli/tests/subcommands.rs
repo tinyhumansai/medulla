@@ -22,6 +22,10 @@ fn dispatches_subcommands() {
     assert_eq!(parse_command(&argv(&["logout"])), Command::Logout);
     assert_eq!(parse_command(&argv(&["sentry-test"])), Command::SentryTest);
     assert_eq!(
+        parse_command(&argv(&["analytics-test"])),
+        Command::AnalyticsTest
+    );
+    assert_eq!(
         parse_command(&argv(&["codex", "resume"])),
         Command::Wrapper(HarnessProvider::Codex)
     );

@@ -74,6 +74,13 @@ pub enum Command {
     /// the baked-in DSN, the transport, and the ingestion project — can be
     /// verified end to end without having to crash anything.
     SentryTest,
+    /// Send one diagnostic analytics event and print OpenPanel's HTTP status
+    /// (`analytics-test`).
+    ///
+    /// Hidden from `help`, like [`Command::SentryTest`]: it verifies a
+    /// release's analytics wiring — the baked-in client secret, the endpoint,
+    /// and the ingestion project — end to end.
+    AnalyticsTest,
 }
 
 /// The `medulla skills` action.

@@ -10,7 +10,9 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
 use crate::commands::run_hook_cmd;
-use crate::commands::{run_hub, run_init, run_login, run_logout, run_sentry_test, run_workspace};
+use crate::commands::{
+    run_analytics_test, run_hub, run_init, run_login, run_logout, run_sentry_test, run_workspace,
+};
 #[cfg(feature = "workflows")]
 use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
 use crate::run::run_core;
@@ -153,6 +155,7 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             Ok(())
         }
         Command::SentryTest => run_sentry_test().await,
+        Command::AnalyticsTest => run_analytics_test().await,
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout().await,
         Command::Init => run_init(&raw[1..]).await,

@@ -709,6 +709,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // every other one reports that it holds none, so its logout
                 // never succeeds and this arm is unreachable for it.
                 if client_arc.is_some() {
+                    // The runtime's own logout already cleared authentication,
+                    // but not the global reporting identity: left set, a crash
+                    // on the relogin screen itself would still be attributed
+                    // to the account that just signed out.
+                    medulla::observability::set_user(None);
                     match relogin(&mut terminal, &env, &loaded.config.backend.base_url).await {
                         // Signing in as a different account re-homes the
                         // install, and this process cannot follow: its config,
@@ -721,6 +726,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         }
                         Ok(SignIn::SameAccount) => {
                             (_, account) = session_of(&env, &loaded.config.backend);
+                            // Restore the reporting identity now that the
+                            // same account is signed back in.
+                            medulla::observability::set_user(
+                                account.as_ref().and_then(|state| state.user_id.as_deref()),
+                            );
                             // Rebuilt rather than reused: the relogin replaced
                             // the stored token, and the client captured its
                             // bearer at construction — carrying the old one

@@ -145,9 +145,18 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
         // Verified by `/auth/me` and durably stored: later crash reports from
         // this process carry the account id (and nothing else about it).
         medulla::observability::set_user(Some(&account));
-        // Best-effort (bounded by the tracker's request timeout): an analytics
-        // failure never turns a successful login into an error.
-        let _ = medulla::analytics::record_sign_in(&account).await;
+        // Best-effort and off the critical path: analytics is documented as
+        // never holding up a sign-in, but awaiting it here still would — the
+        // command would print nothing until OpenPanel answered or the
+        // tracker's own timeout elapsed, up to three seconds after the
+        // credential was already stored. `medulla login` exits right after,
+        // so nothing else in this process needs the event to have landed.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let account = account.clone();
+            handle.spawn(async move {
+                let _ = medulla::analytics::record_sign_in(&account).await;
+            });
+        }
     }
 
     adopt_legacy_credentials(&env, &loaded.config.backend).await;

@@ -97,15 +97,28 @@ pub(super) fn scrub_text(value: &str, home: Option<&str>) -> String {
 
 /// Replace the home directory with `~`, then mask any other user directory.
 pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
-    // Matched on a word boundary so `/home/al` does not eat half of
-    // `/home/alice`. Compiled per call: crash events are rare enough that
+    // A path-component boundary, not a word boundary: `\b` would also match
+    // inside `/home/alice2`, eating the unrelated account's directory as if it
+    // were the operator's own. Requiring a separator, quote, whitespace, or
+    // end of string after the directory keeps the match to whole path
+    // components. Compiled per call: crash events are rare enough that
     // caching buys nothing worth the extra state.
     let home = home
         .map(|home| home.trim_end_matches(['/', '\\']))
         .filter(|home| home.len() > 1)
-        .and_then(|home| Regex::new(&format!(r"{}\b", regex::escape(home))).ok());
+        .and_then(|home| {
+            Regex::new(&format!(
+                r#"{}(?:[/\\]|$|(?=[\s"':]))"#,
+                regex::escape(home)
+            ))
+            .ok()
+        });
     let value = match home {
-        Some(home) => home.replace_all(value, "~").into_owned(),
+        Some(home) => home
+            .replace_all(value, |caps: &regex::Captures<'_>| {
+                format!("~{}", &caps[0][home.as_str().len()..])
+            })
+            .into_owned(),
         None => value.to_owned(),
     };
     user_dir_pattern()

@@ -107,22 +107,17 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
         .map(|home| home.trim_end_matches(['/', '\\']))
         .filter(|home| home.len() > 1)
         .and_then(|home| {
-            // Either a path separator (consumed and kept in the replacement)
-            // or a zero-width lookahead for whitespace, a quote, or the end of
-            // the string — so the boundary check never eats a character that
-            // belongs to whatever follows.
-            Regex::new(&format!(
-                r#"{}(?:(?P<sep>[/\\])|(?=[\s"':]|$))"#,
-                regex::escape(home)
-            ))
-            .ok()
+            // A path separator, whitespace, a quote, or the end of the string
+            // — anything else after the configured directory means this is a
+            // different, longer path component (`/home/alice2`, not
+            // `/home/alice`) and must not match. The boundary character itself
+            // is captured and put back unchanged (the `regex` crate has no
+            // lookahead, so it has to be consumed rather than just asserted).
+            Regex::new(&format!(r#"{}([/\\]|[\s"':]|$)"#, regex::escape(home))).ok()
         });
     let value = match home {
         Some(home) => home
-            .replace_all(value, |caps: &regex::Captures<'_>| match caps.name("sep") {
-                Some(sep) => format!("~{}", sep.as_str()),
-                None => "~".to_owned(),
-            })
+            .replace_all(value, |caps: &regex::Captures<'_>| format!("~{}", &caps[1]))
             .into_owned(),
         None => value.to_owned(),
     };

@@ -90,6 +90,25 @@ fn other_user_directories_are_masked_on_every_platform() {
         scrub_paths(r"C:\Users\carol\AppData\medulla.exe", None),
         r"C:\Users\<user>\AppData\medulla.exe"
     );
+    // Windows paths normalized to forward slashes must be masked too.
+    assert_eq!(
+        scrub_paths("C:/Users/carol/AppData/medulla.exe", None),
+        "C:/Users/<user>/AppData/medulla.exe"
+    );
+}
+
+#[test]
+fn a_longer_account_directory_is_not_mistaken_for_the_configured_home() {
+    // `/home/alice2` shares the `/home/alice` prefix but is a different
+    // account's directory; only the generic mask should touch it, not the
+    // operator's own `~` substitution.
+    assert_eq!(
+        scrub_paths(
+            "/home/alice2/Documents/report.txt",
+            Some("/home/alice")
+        ),
+        "/home/<user>/Documents/report.txt"
+    );
 }
 
 #[test]

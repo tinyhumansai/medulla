@@ -346,16 +346,27 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let home = medulla::home::medulla_home(&env);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    // Read the account before deleting the session that names it, and await
-    // the event (bounded by the tracker's timeout) since this process exits
-    // right after. An analytics failure never blocks the sign-out itself.
-    if let Some(user_id) = medulla::auth::state(&env).user_id {
-        let _ = medulla::analytics::record_sign_out(&user_id).await;
-    }
-    // Before the session goes, so no later report is attributed to it.
-    medulla::observability::set_user(None);
+    // Read the account before deleting the session that names it, but do not
+    // report or clear anything yet: a `signed_out` event and a cleared crash
+    // report user for a logout that then fails to clear (a read-only mount, a
+    // permissions change, a file another process still holds open) would lie
+    // about the session's real state — the bearer stays active while every
+    // signal says otherwise.
+    let user_id = medulla::auth::state(&env).user_id;
     medulla::auth::clear(&env)
         .map_err(|e| anyhow::anyhow!("the stored session could not be removed: {e}"))?;
+    // Only now is the sign-out real: report it (bounded by the tracker's
+    // timeout, since this process exits right after) and clear the crash
+    // report user, so no later report is attributed to the retired session.
+    // An analytics failure never blocks the sign-out itself.
+    if let Some(user_id) = user_id {
+        let _ = tokio::time::timeout(
+            medulla::analytics::REQUEST_TIMEOUT,
+            medulla::analytics::record_sign_out(&user_id),
+        )
+        .await;
+    }
+    medulla::observability::set_user(None);
 
     // Retired credential files go too. Adoption is a *startup* behaviour — an
     // install that predates the store is signed in and should stay signed in —

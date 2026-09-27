@@ -12,7 +12,7 @@
 //!
 //! Payloads and headers match the `openpanel_rust` SDK (see [`payload`]'s
 //! docs), but this module posts them itself over the workspace's reqwest 0.12
-//! + rustls/`ring` stack. The SDK cannot be used as a dependency here: its
+//! with rustls and `ring`. The SDK cannot be used as a dependency here: its
 //! only constructor, `Tracker::try_new_from_env`, requires a `.env` file
 //! (`dotenvy::dotenv()?` fails without one) and reads the credentials from the
 //! process environment, so it can neither take a compiled-in secret nor run on

@@ -28,6 +28,12 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     event.breadcrumbs = Default::default();
     event.extra.clear();
     event.modules.clear();
+    // `tags` and `contexts` are extensible metadata containers a caller or
+    // integration can populate with arbitrary data (a hostname, an email, a
+    // request id); they carry nothing this filter allowlists, so they are
+    // dropped rather than passed through.
+    event.tags.clear();
+    event.contexts.clear();
     event.user = event.user.and_then(|user| user.id).map(|id| User {
         id: Some(id),
         ..Default::default()

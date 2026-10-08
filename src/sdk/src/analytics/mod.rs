@@ -209,7 +209,8 @@ fn endpoint_is_allowed(endpoint: &str) -> bool {
     if host == "localhost" {
         return true;
     }
-    host.parse::<std::net::IpAddr>()
+    host.trim_matches(['[', ']'])
+        .parse::<std::net::IpAddr>()
         .is_ok_and(|address| address.is_loopback())
 }
 

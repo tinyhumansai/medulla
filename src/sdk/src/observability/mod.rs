@@ -164,6 +164,15 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
     })
 }
 
+/// Flush queued crash reports while the process is still able to run
+/// destructors (for example, immediately before a wrapper exits).
+pub fn flush(timeout: Duration) -> bool {
+    CLIENT
+        .get()
+        .filter(|state| state.client.is_enabled())
+        .is_none_or(|state| state.client.flush(Some(timeout)))
+}
+
 /// Whether the operator opted this process out of everything Medulla reports
 /// home, through [`DISABLED_ENV`].
 ///

@@ -52,7 +52,8 @@ fn main() -> anyhow::Result<()> {
     // README no network — starting crash reporting here would let a
     // configured (or `.env`-overridden) DSN reach out during what is supposed
     // to be an entirely local demo.
-    let is_mock = raw.iter().any(|arg| arg == "--mock");
+    let is_mock = matches!(parse_command(&raw), Command::Tui)
+        && medulla_tui::cli::parse_tui_args(&raw).mock;
 
     // Load a cwd `.env` into the process env before anything reads it (this is
     // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
@@ -115,6 +116,10 @@ fn set_stored_telemetry_user(raw: &[String]) {
     // Harness wrapper flags belong to the child CLI. In particular, Codex's
     // `--config key=value` is a model override, not a Medulla config path.
     if matches!(parse_command(raw), Command::Wrapper(_)) {
+        let env: std::collections::HashMap<String, String> = std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect();
+        medulla::observability::set_user(medulla::auth::state(&env).user_id.as_deref());
         return;
     }
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
@@ -261,6 +266,7 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             )
             .await?;
             medulla::analytics::flush_pending().await;
+            medulla::observability::flush(std::time::Duration::from_secs(2));
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.

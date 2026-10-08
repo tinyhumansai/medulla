@@ -137,7 +137,16 @@ fn run_sender(
             )
             .body(body)
             .send();
-        match runtime.block_on(request) {
+        let response = runtime.block_on(async {
+            tokio::select! {
+                response = request => Some(response),
+                () = wait_until_stopping(&stopping) => None,
+            }
+        });
+        let Some(response) = response else {
+            return;
+        };
+        match response {
             Ok(response) => {
                 last_status.store(response.status().as_u16(), Ordering::SeqCst);
                 update_rate_limits(&mut rate_limiter, &response);
@@ -147,6 +156,12 @@ fn run_sender(
                 sentry_debug!("failed to send Sentry envelope: {error}");
             }
         }
+    }
+}
+
+async fn wait_until_stopping(stopping: &AtomicBool) {
+    while !stopping.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -221,6 +236,9 @@ impl Transport for ReqwestTransport {
 
 impl Drop for ReqwestTransport {
     fn drop(&mut self) {
+        // Drain accepted work before asking the sender to stop. This is also
+        // the fallback for clients dropped without an explicit shutdown.
+        let _ = self.flush(REQUEST_TIMEOUT);
         self.stopping.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
         // Give the sender a short grace period to finish, but never let a

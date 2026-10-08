@@ -38,6 +38,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -53,6 +54,26 @@ use payload::Payload;
 /// can bound the whole thing by one deadline rather than stacking each
 /// request's own timeout.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+
+static PENDING_EVENTS: AtomicUsize = AtomicUsize::new(0);
+static PENDING_EVENTS_CHANGED: OnceLock<tokio::sync::Notify> = OnceLock::new();
+
+/// Wait briefly for previously queued fire-and-forget analytics events.
+/// Wrapper commands call this after their final transcript drain and before
+/// `process::exit`, which would otherwise abort Tokio tasks immediately.
+pub async fn flush_pending() {
+    let notify = PENDING_EVENTS_CHANGED.get_or_init(tokio::sync::Notify::new);
+    let _ = tokio::time::timeout(REQUEST_TIMEOUT, async {
+        loop {
+            let changed = notify.notified();
+            if PENDING_EVENTS.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            changed.await;
+        }
+    })
+    .await;
+}
 
 /// Why analytics is or is not active in this process.
 pub fn status() -> AnalyticsStatus {
@@ -103,12 +124,21 @@ pub async fn record_sign_out(user_id: &str) -> Result<(), AnalyticsError> {
 /// Fire-and-forget: spawns onto the current tokio runtime, and does nothing
 /// outside one, without a signed-in account, or while analytics is inactive.
 pub fn record_screen_view(screen: &str) {
+    if !matches!(
+        screen,
+        "Sessions" | "Workflows" | "Subconscious" | "Feedback" | "Settings"
+    ) {
+        return;
+    }
     spawn_for_current_user("screen_viewed", [("screen", screen.to_owned())]);
 }
 
 /// Record a normalized TUI interaction name (never its payload) for the
 /// signed-in account. Fire-and-forget, as [`record_screen_view`].
 pub fn record_ui_action(action: &str) {
+    if action != "command_dispatched" {
+        return;
+    }
     spawn_for_current_user("ui_action", [("action", action.to_owned())]);
 }
 
@@ -254,9 +284,13 @@ fn spawn_for_current_user<const N: usize>(
     let Ok(tracker) = tracker() else {
         return;
     };
+    PENDING_EVENTS.fetch_add(1, Ordering::AcqRel);
+    let notify = PENDING_EVENTS_CHANGED.get_or_init(tokio::sync::Notify::new);
     runtime.spawn(async move {
         let _ = tracker
             .deliver(&Payload::track(name, Some(&user_id), properties))
             .await;
+        PENDING_EVENTS.fetch_sub(1, Ordering::AcqRel);
+        notify.notify_waiters();
     });
 }

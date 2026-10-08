@@ -255,6 +255,7 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
                 Some(medulla_tui::harness_pty::spawner()),
             )
             .await?;
+            medulla::analytics::flush_pending().await;
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.

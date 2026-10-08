@@ -34,6 +34,7 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     // dropped rather than passed through.
     event.tags.clear();
     event.contexts.clear();
+    event.fingerprint = Default::default();
     event.user = event.user.and_then(|user| user.id).map(|id| User {
         id: Some(id),
         ..Default::default()
@@ -75,6 +76,7 @@ fn scrub_stacktrace(stacktrace: Option<&mut Stacktrace>, home: Option<&str>) {
     let Some(stacktrace) = stacktrace else {
         return;
     };
+    stacktrace.registers.clear();
     for frame in &mut stacktrace.frames {
         scrub_frame(frame, home);
     }

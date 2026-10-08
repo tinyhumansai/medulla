@@ -126,11 +126,6 @@ pub(crate) async fn run(
                             local_hosts.as_ref(),
                         );
                     }
-                    let screen = app.tab();
-                    if screen != analytics_screen {
-                        analytics_screen = screen;
-                        medulla::analytics::record_screen_view(screen);
-                    }
                 }
             }
             recv = sub.recv(), if !runtime_sub_closed => {
@@ -416,6 +411,11 @@ pub(crate) async fn run(
                     );
                 }
             }
+        }
+        let screen = app.tab();
+        if screen != analytics_screen {
+            analytics_screen = screen;
+            medulla::analytics::record_screen_view(screen);
         }
     }
     Ok(if app.relogin_requested() {

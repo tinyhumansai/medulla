@@ -2,6 +2,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use sentry::protocol::{Breadcrumb, Event, Exception, Frame, LogEntry, Stacktrace, User};
@@ -9,6 +10,8 @@ use sentry::protocol::{Breadcrumb, Event, Exception, Frame, LogEntry, Stacktrace
 use super::config::{is_opted_out, release, resolve_dsn, resolve_environment, DEFAULT_DSN};
 use super::scrub::{scrub_event, scrub_paths, scrub_text};
 use super::{current_user, set_user, transport, CrashReportingStatus};
+
+static TRANSPORT_STATUS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn the_runtime_dsn_overrides_the_compiled_in_default() {
@@ -285,6 +288,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[test]
 fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let port = listener.local_addr().expect("addr").port();
     let server = std::thread::spawn(move || {
@@ -355,6 +359,7 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
 
 #[test]
 fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
     // A listener that accepts every connection but never reads or responds:
     // the sender thread's in-flight request never completes, so every
     // subsequent task piles up behind it in the bounded channel.

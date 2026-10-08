@@ -91,7 +91,7 @@ pub fn init() -> CrashReportingGuard {
             });
             Some(event)
         })),
-        transport: Some(Arc::new(move |options| {
+        transport: Some(Arc::new(move |options: &sentry::ClientOptions| {
             transport::factory(options, Arc::clone(&last_status))
         })),
         ..Default::default()

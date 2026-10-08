@@ -2,7 +2,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sentry::protocol::{Breadcrumb, Event, Exception, Frame, LogEntry, Stacktrace, User};

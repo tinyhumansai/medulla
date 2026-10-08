@@ -82,9 +82,8 @@ impl HarnessLineMapper {
         }
     }
 
-    /// The most recent token usage seen on the stream, if any. Providers report
-    /// cumulative counts (claude on the result record, codex via token_count
-    /// events), so latest-wins is the correct fold.
+    /// The most recent total token usage seen on the stream, if any. Claude and
+    /// Codex report cumulative counters; OpenCode reports per-step counts.
     pub fn usage(&self) -> Option<TokenUsage> {
         self.usage
     }
@@ -100,11 +99,25 @@ impl HarnessLineMapper {
                         input_tokens: 0,
                         output_tokens: 0,
                     });
-                    self.usage = Some(usage);
-                    // Provider snapshots are cumulative, so report only the new
-                    // portion.
-                    let input = token_delta(usage.input_tokens, previous.input_tokens);
-                    let output = token_delta(usage.output_tokens, previous.output_tokens);
+                    // OpenCode's step-finish usage is per-step; Claude and
+                    // Codex emit cumulative snapshots. Preserve total usage
+                    // for callers while reporting the appropriate amount.
+                    let (input, output, total) = match self.provider {
+                        Provider::Opencode => (
+                            usage.input_tokens,
+                            usage.output_tokens,
+                            TokenUsage {
+                                input_tokens: previous.input_tokens.saturating_add(usage.input_tokens),
+                                output_tokens: previous.output_tokens.saturating_add(usage.output_tokens),
+                            },
+                        ),
+                        Provider::Claude | Provider::Codex => (
+                            token_delta(usage.input_tokens, previous.input_tokens),
+                            token_delta(usage.output_tokens, previous.output_tokens),
+                            usage,
+                        ),
+                    };
+                    self.usage = Some(total);
                     if input > 0 || output > 0 {
                         crate::analytics::record_token_usage(input, output);
                     }

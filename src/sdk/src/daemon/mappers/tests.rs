@@ -90,6 +90,22 @@ fn mapper_accumulates_latest_usage() {
 }
 
 #[test]
+fn opencode_step_usage_is_summed_instead_of_delta_folded() {
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("opencode", false);
+    for (input, output) in [(100, 10), (120, 12)] {
+        let line = format!(r#"{{"type":"step-finish","tokens":{{"input_tokens":{input},"output_tokens":{output}}}}}"#);
+        let _ = mapper.map_line(&line, 0);
+    }
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 220,
+            output_tokens: 22,
+        })
+    );
+}
+
+#[test]
 fn token_delta_reports_the_new_portion_of_a_cumulative_counter() {
     assert_eq!(token_delta(50, 10), 40);
     assert_eq!(token_delta(10, 10), 0);

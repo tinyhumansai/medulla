@@ -115,26 +115,24 @@ fn main() -> anyhow::Result<()> {
 fn set_stored_telemetry_user(raw: &[String]) {
     // Harness wrapper flags belong to the child CLI. In particular, Codex's
     // `--config key=value` is a model override, not a Medulla config path.
-    if matches!(parse_command(raw), Command::Wrapper(_)) {
-        let env: std::collections::HashMap<String, String> = std::env::vars_os()
-            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
-            .collect();
-        medulla::observability::set_user(medulla::auth::state(&env).user_id.as_deref());
-        return;
-    }
+    let is_wrapper = matches!(parse_command(raw), Command::Wrapper(_));
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
         .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let explicit_config = raw.iter().enumerate().find_map(|(index, arg)| {
-        arg.strip_prefix("--config=")
-            .map(str::to_owned)
-            .or_else(|| {
-                (arg == "--config")
-                    .then(|| raw.get(index + 1).cloned())
-                    .flatten()
-            })
-    });
+    let explicit_config = if is_wrapper {
+        None
+    } else {
+        raw.iter().enumerate().find_map(|(index, arg)| {
+            arg.strip_prefix("--config=")
+                .map(str::to_owned)
+                .or_else(|| {
+                    (arg == "--config")
+                        .then(|| raw.get(index + 1).cloned())
+                        .flatten()
+                })
+        })
+    };
     let user_id = medulla::config::load_config(explicit_config.as_deref(), &env, &cwd)
         .ok()
         .and_then(|loaded| {

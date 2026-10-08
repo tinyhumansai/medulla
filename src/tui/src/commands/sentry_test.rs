@@ -23,8 +23,8 @@ pub(crate) async fn run_sentry_test() -> anyhow::Result<()> {
         .await?
         .map_err(|status| anyhow::anyhow!("{status}"))?;
     println!("{}", describe(&report));
-    match report.http_status {
-        Some(status) if (200..300).contains(&status) => Ok(()),
+    match (report.flushed, report.http_status) {
+        (true, Some(status)) if (200..300).contains(&status) => Ok(()),
         _ => anyhow::bail!("the test event was not confirmed as accepted by Sentry"),
     }
 }

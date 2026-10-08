@@ -36,7 +36,7 @@ mod types;
 mod tests;
 
 use std::borrow::Cow;
-use std::sync::atomic::AtomicU16;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -144,6 +144,9 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
             other => other,
         });
     };
+    // A diagnostic result must describe this attempt, not a successful event
+    // sent earlier in the process.
+    state.last_status.store(0, Ordering::SeqCst);
     let hub = sentry::Hub::new(
         Some(Arc::clone(&state.client)),
         Arc::new(sentry::Scope::default()),

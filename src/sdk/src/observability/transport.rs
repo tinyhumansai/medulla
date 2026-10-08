@@ -13,7 +13,7 @@
 //! own runtime — including from a panic hook on a runtime worker.
 
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -47,6 +47,8 @@ pub(super) struct ReqwestTransport {
     sender: mpsc::SyncSender<Task>,
     handle: Option<JoinHandle<()>>,
     stopping: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+    send_gate: Mutex<()>,
 }
 
 impl ReqwestTransport {
@@ -59,6 +61,8 @@ impl ReqwestTransport {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_DEPTH);
         let stopping = Arc::new(AtomicBool::new(false));
         let sender_stopping = Arc::clone(&stopping);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let sender_cancelled = Arc::clone(&cancelled);
         let target = options.dsn.as_ref().map(|dsn| {
             (
                 dsn.envelope_api_url().to_string(),
@@ -69,7 +73,7 @@ impl ReqwestTransport {
             .name("medulla-sentry".into())
             .spawn(move || {
                 if let Some((url, auth)) = target {
-                    run_sender(receiver, &url, &auth, last_status.clone(), sender_stopping);
+                    run_sender(receiver, &url, &auth, last_status.clone(), sender_cancelled);
                 }
             })
             .ok();
@@ -77,6 +81,8 @@ impl ReqwestTransport {
             sender,
             handle,
             stopping,
+            cancelled,
+            send_gate: Mutex::new(()),
         }
     }
 }
@@ -87,7 +93,7 @@ fn run_sender(
     url: &str,
     auth: &str,
     last_status: Arc<AtomicU16>,
-    stopping: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
 ) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -104,9 +110,6 @@ fn run_sender(
     };
     let mut rate_limiter = RateLimiter::new();
     for task in receiver {
-        if stopping.load(Ordering::Acquire) {
-            return;
-        }
         let envelope = match task {
             Task::Send(envelope) => *envelope,
             Task::Flush(done) => {
@@ -140,7 +143,7 @@ fn run_sender(
         let response = runtime.block_on(async {
             tokio::select! {
                 response = request => Some(response),
-                () = wait_until_stopping(&stopping) => None,
+                () = wait_until_stopping(&cancelled) => None,
             }
         });
         let Some(response) = response else {
@@ -185,6 +188,10 @@ fn update_rate_limits(rate_limiter: &mut RateLimiter, response: &reqwest::Respon
 
 impl Transport for ReqwestTransport {
     fn send_envelope(&self, envelope: Envelope) {
+        let _gate = self.send_gate.lock().unwrap_or_else(|e| e.into_inner());
+        if self.stopping.load(Ordering::Acquire) {
+            return;
+        }
         if self
             .sender
             .try_send(Task::Send(Box::new(envelope)))
@@ -227,8 +234,12 @@ impl Transport for ReqwestTransport {
     }
 
     fn shutdown(&self, timeout: Duration) -> bool {
+        {
+            let _gate = self.send_gate.lock().unwrap_or_else(|e| e.into_inner());
+            self.stopping.store(true, Ordering::Release);
+        }
         let flushed = self.flush(timeout);
-        self.stopping.store(true, Ordering::Release);
+        self.cancelled.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
         flushed
     }
@@ -236,21 +247,17 @@ impl Transport for ReqwestTransport {
 
 impl Drop for ReqwestTransport {
     fn drop(&mut self) {
-        // Drain accepted work before asking the sender to stop. This is also
-        // the fallback for clients dropped without an explicit shutdown.
+        // Stop accepting new work, then drain the tasks accepted before this
+        // point. If the drain deadline expires, cancel the in-flight request.
+        {
+            let _gate = self.send_gate.lock().unwrap_or_else(|e| e.into_inner());
+            self.stopping.store(true, Ordering::Release);
+        }
         let _ = self.flush(REQUEST_TIMEOUT);
-        self.stopping.store(true, Ordering::Release);
+        self.cancelled.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
-        // Give the sender a short grace period to finish, but never let a
-        // stalled request extend process shutdown beyond its caller's budget.
         if let Some(handle) = self.handle.take() {
-            let deadline = std::time::Instant::now() + Duration::from_secs(1);
-            while !handle.is_finished() && std::time::Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            if handle.is_finished() {
-                let _ = handle.join();
-            }
+            let _ = handle.join();
         }
     }
 }

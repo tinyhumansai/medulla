@@ -96,7 +96,8 @@ fn scrub_stacktrace(stacktrace: Option<&mut Stacktrace>, home: Option<&str>) {
 /// allowlisted because integrations can populate them dynamically; numeric
 /// location metadata remains available for the stack shape.
 fn scrub_frame(frame: &mut Frame, _home: Option<&str>) {
-    frame.function = None;
+    // Function names come from the compiled program and are useful for
+    // diagnosis; drop symbol/module strings, which may be integration data.
     frame.symbol = None;
     frame.module = None;
     frame.filename = None;

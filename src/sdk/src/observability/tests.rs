@@ -189,6 +189,7 @@ fn configured_home_paths_end_at_punctuation() {
 #[test]
 fn events_lose_everything_that_identifies_the_person() {
     let frame = Frame {
+        function: Some("run_wrapper".into()),
         abs_path: Some("/home/alice/src/medulla/src/main.rs".into()),
         filename: Some("/home/alice/src/medulla/src/main.rs".into()),
         package: Some("/home/alice/.cargo/bin/medulla".into()),
@@ -225,6 +226,7 @@ fn events_lose_everything_that_identifies_the_person() {
         sentry::protocol::Context::Os(Box::default()),
     );
     event.breadcrumbs.values.push(Breadcrumb::default());
+    event.spans.push(Default::default());
     event.exception.values.push(Exception {
         ty: "panic".into(),
         value: Some("open /home/alice/secret.txt".into()),
@@ -242,6 +244,7 @@ fn events_lose_everything_that_identifies_the_person() {
     assert!(event.extra.is_empty());
     assert!(event.tags.is_empty(), "{:?}", event.tags);
     assert!(event.contexts.is_empty(), "{:?}", event.contexts);
+    assert!(event.spans.is_empty());
     assert_eq!(event.message.as_deref(), Some("panicked at ~/src/x.rs"));
     let entry = event.logentry.as_ref().expect("logentry kept");
     assert!(entry.params.is_empty());
@@ -258,7 +261,7 @@ fn events_lose_everything_that_identifies_the_person() {
     assert_eq!(frame.filename, None);
     assert_eq!(frame.abs_path, None);
     assert_eq!(frame.package, None);
-    assert_eq!(frame.function, None);
+    assert_eq!(frame.function.as_deref(), Some("run_wrapper"));
     assert_eq!(frame.symbol, None);
     assert_eq!(frame.module, None);
     assert!(frame.vars.is_empty());

@@ -117,6 +117,9 @@ pub fn record_ui_action(action: &str) {
 /// Counts only, parsed by the harness from its own protocol; no prompt or
 /// completion text crosses this boundary. Fire-and-forget.
 pub fn record_token_usage(input_tokens: i64, output_tokens: i64) {
+    if input_tokens < 0 || output_tokens < 0 {
+        return;
+    }
     spawn_for_current_user(
         "token_usage_reported",
         [
@@ -198,7 +201,7 @@ fn endpoint_is_allowed(endpoint: &str) -> bool {
         return false;
     };
     if url.scheme() == "https" {
-        return true;
+        return url.host_str().is_some();
     }
     if url.scheme() != "http" {
         return false;

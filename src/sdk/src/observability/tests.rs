@@ -166,8 +166,15 @@ fn short_bearer_credentials_are_still_redacted() {
 #[test]
 fn long_messages_are_truncated_on_a_char_boundary() {
     let scrubbed = scrub_text(&"é".repeat(2000), None);
-    assert!(scrubbed.len() <= 1024 + '…'.len_utf8());
+    assert!(scrubbed.len() <= 1024);
     assert!(scrubbed.ends_with('…'));
+    assert_eq!(scrub_text(&"a".repeat(2000), None).len(), 1024);
+}
+
+#[test]
+fn configured_home_paths_end_at_punctuation() {
+    assert_eq!(scrub_paths("panic at /srv/alice),", Some("/srv/alice")), "panic at ~/),");
+    assert_eq!(scrub_paths("/srv/alice2/file", Some("/srv/alice")), "/srv/alice2/file");
 }
 
 #[test]

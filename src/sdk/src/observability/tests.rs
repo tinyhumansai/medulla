@@ -258,9 +258,13 @@ fn events_lose_everything_that_identifies_the_person() {
     assert_eq!(frame.filename, None);
     assert_eq!(frame.abs_path, None);
     assert_eq!(frame.package, None);
+    assert_eq!(frame.function, None);
+    assert_eq!(frame.symbol, None);
+    assert_eq!(frame.module, None);
     assert!(frame.vars.is_empty());
     assert!(frame.pre_context.is_empty());
     assert_eq!(frame.context_line, None);
+    assert!(event.debug_meta.is_empty());
 }
 
 #[test]

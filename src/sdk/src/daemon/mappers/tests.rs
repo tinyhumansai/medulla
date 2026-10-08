@@ -69,6 +69,19 @@ fn scan_usage_finds_nested_counts_in_all_shapes() {
 }
 
 #[test]
+fn scan_usage_skips_negative_match_and_continues_nested_scan() {
+    let value = json!({
+        "input_tokens": -1,
+        "output_tokens": 2,
+        "nested": { "input_tokens": 3, "output_tokens": 4 }
+    });
+    assert_eq!(
+        scan_usage(&value, 0),
+        Some(TokenUsage { input_tokens: 3, output_tokens: 4 })
+    );
+}
+
+#[test]
 fn mapper_accumulates_latest_usage() {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override("codex", false);
     assert_eq!(mapper.usage(), None);

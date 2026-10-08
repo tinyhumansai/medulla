@@ -34,6 +34,9 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     // dropped rather than passed through.
     event.tags.clear();
     event.contexts.clear();
+    // Debug images can carry local source/build paths (`code_file`,
+    // `debug_file`, and image names). None are needed for the stack shape.
+    event.debug_meta = Default::default();
     event.fingerprint = Default::default();
     event.user = event.user.and_then(|user| user.id).map(|id| User {
         id: Some(id),
@@ -93,6 +96,9 @@ fn scrub_stacktrace(stacktrace: Option<&mut Stacktrace>, home: Option<&str>) {
 /// line number — the fields that actually diagnose a crash — survive; only
 /// the path is dropped.
 fn scrub_frame(frame: &mut Frame, _home: Option<&str>) {
+    frame.function = None;
+    frame.symbol = None;
+    frame.module = None;
     frame.filename = None;
     frame.abs_path = None;
     frame.package = None;

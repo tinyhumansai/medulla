@@ -24,13 +24,12 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
             num(["input_tokens", "inputTokens"]),
             num(["output_tokens", "outputTokens"]),
         ) {
-            if input < 0 || output < 0 {
-                return None;
+            if input >= 0 && output >= 0 {
+                return Some(TokenUsage {
+                    input_tokens: input,
+                    output_tokens: output,
+                });
             }
-            return Some(TokenUsage {
-                input_tokens: input,
-                output_tokens: output,
-            });
         }
         // opencode reports a nested `tokens: { input, output, reasoning, cache }`
         // object rather than the *_tokens naming the other harnesses use.
@@ -41,13 +40,12 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
                     .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
             };
             if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
-                if input < 0 || output < 0 {
-                    return None;
+                if input >= 0 && output >= 0 {
+                    return Some(TokenUsage {
+                        input_tokens: input,
+                        output_tokens: output,
+                    });
                 }
-                return Some(TokenUsage {
-                    input_tokens: input,
-                    output_tokens: output,
-                });
             }
         }
         return obj.values().find_map(|v| scan_usage(v, depth + 1));

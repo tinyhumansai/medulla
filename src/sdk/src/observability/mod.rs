@@ -77,6 +77,7 @@ pub fn init() -> CrashReportingGuard {
 
     let home = dirs::home_dir().map(|path| path.to_string_lossy().into_owned());
     let last_status = Arc::new(AtomicU16::new(0));
+    let transport_status = Arc::clone(&last_status);
     let client = sentry::init(sentry::ClientOptions {
         dsn: Some(dsn),
         release: Some(Cow::Owned(config::release())),
@@ -99,7 +100,7 @@ pub fn init() -> CrashReportingGuard {
             Some(event)
         })),
         transport: Some(Arc::new(move |options: &sentry::ClientOptions| {
-            transport::factory(options, Arc::clone(&last_status))
+            transport::factory(options, Arc::clone(&transport_status))
         })),
         ..Default::default()
     });

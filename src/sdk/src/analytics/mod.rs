@@ -66,6 +66,8 @@ pub async fn flush_pending() {
     let _ = tokio::time::timeout(REQUEST_TIMEOUT, async {
         loop {
             let changed = notify.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
             if PENDING_EVENTS.load(Ordering::Acquire) == 0 {
                 return;
             }

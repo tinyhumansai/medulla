@@ -336,10 +336,20 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
 
     // Tie crash reports to the signed-in account — its opaque id only — now
     // that both boot paths (stored session, fresh sign-in) have settled on one.
-    medulla::observability::set_user(account.as_ref().and_then(|state| state.user_id.as_deref()));
+    // A config/env bearer can authenticate as an account different from the
+    // stored login. Its identity is unknown locally, so never attribute this
+    // run's reports to the stale stored account.
+    let external_token = loaded.config.backend.token.as_ref().is_some_and(|token| !token.is_empty())
+        || env
+            .get(&loaded.config.backend.token_env)
+            .is_some_and(|token| !token.is_empty());
+    let telemetry_user_id = (!external_token)
+        .then(|| account.as_ref().and_then(|state| state.user_id.clone()))
+        .flatten();
+    medulla::observability::set_user(telemetry_user_id.as_deref());
     // Product analytics reads the same account slot. Spawned so a slow or
     // unreachable OpenPanel never delays the first frame.
-    if let Some(user_id) = account.as_ref().and_then(|state| state.user_id.clone()) {
+    if let Some(user_id) = telemetry_user_id {
         tokio::spawn(async move {
             let _ = medulla::analytics::record_application_started(&user_id).await;
         });

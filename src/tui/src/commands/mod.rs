@@ -355,16 +355,21 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let user_id = medulla::auth::state(&env).user_id;
     medulla::auth::clear(&env)
         .map_err(|e| anyhow::anyhow!("the stored session could not be removed: {e}"))?;
+    let external_credential_remains = load_config(None, &env, &cwd).ok().is_some_and(|loaded| {
+        medulla::auth::resolve_backend_token(&env, &loaded.config.backend, None).is_some()
+    });
     // Only now is the sign-out real: report it (bounded by the tracker's
     // timeout, since this process exits right after) and clear the crash
     // report user, so no later report is attributed to the retired session.
     // An analytics failure never blocks the sign-out itself.
-    if let Some(user_id) = user_id {
+    if !external_credential_remains {
+        if let Some(user_id) = user_id {
         let _ = tokio::time::timeout(
             medulla::analytics::REQUEST_TIMEOUT,
             medulla::analytics::record_sign_out(&user_id),
         )
         .await;
+        }
     }
     medulla::observability::set_user(None);
 

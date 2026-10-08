@@ -122,7 +122,11 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
             // configured directory. Capture and restore it because regex has
             // no lookahead. Alphanumerics and path punctuation remain part of
             // the component, so `/home/alice2` is not mistaken for `/home/alice`.
-            Regex::new(&format!(r#"{}([/\\]|[^/\\A-Za-z0-9._-]|$)"#, regex::escape(home))).ok()
+            Regex::new(&format!(
+                r#"{}([/\\]|[^/\\A-Za-z0-9._-]|$)"#,
+                regex::escape(home)
+            ))
+            .ok()
         });
     let value = match home {
         Some(home) => home

@@ -109,6 +109,9 @@ fn run_sender(
     };
     let mut rate_limiter = RateLimiter::new();
     for task in receiver {
+        if cancelled.load(Ordering::Acquire) {
+            return;
+        }
         let envelope = match task {
             Task::Send(envelope) => *envelope,
             Task::Flush(done) => {

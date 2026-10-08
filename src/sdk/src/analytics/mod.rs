@@ -196,12 +196,14 @@ fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
     static TRACKER: OnceLock<Result<Tracker, AnalyticsStatus>> = OnceLock::new();
     TRACKER
         .get_or_init(|| {
-            config::resolve(cfg!(test) || crate::observability::opted_out()).and_then(|mut config| {
-                if let Ok(api_url) = std::env::var(API_URL_ENV) {
-                    config.api_url = api_url.trim_end_matches('/').to_owned();
-                }
-                Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig)
-            })
+            config::resolve(cfg!(test) || crate::observability::opted_out()).and_then(
+                |mut config| {
+                    if let Ok(api_url) = std::env::var(API_URL_ENV) {
+                        config.api_url = api_url.trim_end_matches('/').to_owned();
+                    }
+                    Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig)
+                },
+            )
         })
         .as_ref()
         .map_err(|status| *status)

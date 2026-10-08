@@ -128,10 +128,7 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
             other => other,
         });
     };
-    let hub = sentry::Hub::new(
-        Some(Arc::clone(client)),
-        Arc::new(sentry::Scope::default()),
-    );
+    let hub = sentry::Hub::new(Some(Arc::clone(client)), Arc::new(sentry::Scope::default()));
     let event_id = hub.capture_event(sentry::protocol::Event {
         message: Some("medulla sentry-test: verifying crash-report ingestion".into()),
         level: sentry::Level::Info,

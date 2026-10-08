@@ -85,6 +85,7 @@ fn main() -> anyhow::Result<()> {
             Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
             None => std::env::remove_var(medulla::observability::DSN_ENV),
         }
+        set_stored_telemetry_user();
         (!is_mock).then(medulla::observability::init)
     };
 
@@ -101,6 +102,29 @@ fn main() -> anyhow::Result<()> {
     } else {
         medulla::tokio_tuning::build_runtime()?.block_on(async_main(raw))
     }
+}
+
+/// Attribute non-TUI harness and daemon analytics to a stored account only
+/// when config/environment credentials do not override that session.
+fn set_stored_telemetry_user() {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let user_id = medulla::config::load_config(None, &env, &cwd)
+        .ok()
+        .and_then(|loaded| {
+            let backend = loaded.config.backend;
+            let external_token = backend
+                .token
+                .as_ref()
+                .is_some_and(|token| !token.is_empty())
+                || env
+                    .get(&backend.token_env)
+                    .is_some_and(|token| !token.is_empty());
+            (!external_token)
+                .then(|| medulla::auth::state(&env).user_id)
+                .flatten()
+        });
+    medulla::observability::set_user(user_id.as_deref());
 }
 
 /// Pick the TLS backend before anything opens a connection.

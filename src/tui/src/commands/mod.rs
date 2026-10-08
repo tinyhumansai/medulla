@@ -364,11 +364,11 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     // An analytics failure never blocks the sign-out itself.
     if !external_credential_remains {
         if let Some(user_id) = user_id {
-        let _ = tokio::time::timeout(
-            medulla::analytics::REQUEST_TIMEOUT,
-            medulla::analytics::record_sign_out(&user_id),
-        )
-        .await;
+            let _ = tokio::time::timeout(
+                medulla::analytics::REQUEST_TIMEOUT,
+                medulla::analytics::record_sign_out(&user_id),
+            )
+            .await;
         }
     }
     medulla::observability::set_user(None);

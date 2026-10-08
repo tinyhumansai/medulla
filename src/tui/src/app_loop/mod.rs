@@ -339,7 +339,12 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // A config/env bearer can authenticate as an account different from the
     // stored login. Its identity is unknown locally, so never attribute this
     // run's reports to the stale stored account.
-    let external_token = loaded.config.backend.token.as_ref().is_some_and(|token| !token.is_empty())
+    let external_token = loaded
+        .config
+        .backend
+        .token
+        .as_ref()
+        .is_some_and(|token| !token.is_empty())
         || env
             .get(&loaded.config.backend.token_env)
             .is_some_and(|token| !token.is_empty());

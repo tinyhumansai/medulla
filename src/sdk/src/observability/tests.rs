@@ -269,6 +269,7 @@ fn events_lose_everything_that_identifies_the_person() {
 
 #[test]
 fn the_account_id_can_be_set_and_cleared() {
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
     set_user(Some("user-42"));
     assert_eq!(current_user().as_deref(), Some("user-42"));
     set_user(None);

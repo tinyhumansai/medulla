@@ -115,9 +115,8 @@ fn mapper_accumulates_latest_usage() {
 fn opencode_step_usage_is_summed_instead_of_delta_folded() {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override("opencode", false);
     for (input, output) in [(100, 10), (120, 12)] {
-        let line = format!(
-            r#"{{"type":"step-finish","tokens":{{"input":{input},"output":{output}}}}}"#
-        );
+        let line =
+            format!(r#"{{"type":"step-finish","tokens":{{"input":{input},"output":{output}}}}}"#);
         let _ = mapper.map_line(&line, 0);
     }
     assert_eq!(

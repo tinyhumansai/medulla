@@ -92,9 +92,9 @@ fn scrub_stacktrace(stacktrace: Option<&mut Stacktrace>, home: Option<&str>) {
 /// values) is not enough here: a build or CI checkout path
 /// (`/opt/checkout/...`, `/work/project/...`) carries no user directory to
 /// mask but still describes the machine's layout, and it is exactly what
-/// `abs_path`/`filename`/`package` hold on every frame. The function name and
-/// line number — the fields that actually diagnose a crash — survive; only
-/// the path is dropped.
+/// `abs_path`/`filename`/`package` hold on every frame. Frame strings are not
+/// allowlisted because integrations can populate them dynamically; numeric
+/// location metadata remains available for the stack shape.
 fn scrub_frame(frame: &mut Frame, _home: Option<&str>) {
     frame.function = None;
     frame.symbol = None;

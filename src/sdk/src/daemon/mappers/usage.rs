@@ -34,9 +34,7 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
         // opencode reports a nested `tokens: { input, output, reasoning, cache }`
         // object rather than the *_tokens naming the other harnesses use.
         if let Some(tokens) = obj.get("tokens").and_then(|v| v.as_object()) {
-            let tnum = |key: &str| {
-                tokens.get(key).and_then(Value::as_i64)
-            };
+            let tnum = |key: &str| tokens.get(key).and_then(Value::as_i64);
             if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
                 if input >= 0 && output >= 0 {
                     return Some(TokenUsage {

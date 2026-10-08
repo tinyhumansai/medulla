@@ -112,6 +112,11 @@ fn main() -> anyhow::Result<()> {
 /// Attribute non-TUI harness and daemon analytics to a stored account only
 /// when config/environment credentials do not override that session.
 fn set_stored_telemetry_user(raw: &[String]) {
+    // Harness wrapper flags belong to the child CLI. In particular, Codex's
+    // `--config key=value` is a model override, not a Medulla config path.
+    if matches!(parse_command(raw), Command::Wrapper(_)) {
+        return;
+    }
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
         .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
         .collect();

@@ -19,8 +19,8 @@
 //!
 //! # Configuration
 //!
-//! The Medulla project's client id and ingestion URL are compiled-in constants
-//! with no build-time or run-time overrides. A native client has no browser
+//! The Medulla project's client id is compiled in. The API URL can be
+//! overridden with [`API_URL_ENV`] for local diagnostics. A native client has no browser
 //! `Origin`, so the Medulla OpenPanel client is configured server-side to
 //! ignore CORS and secret checks (`ignoreCorsAndSecret`): ingestion needs only
 //! the public client id, and no secret is ever compiled in or sent. Analytics
@@ -42,6 +42,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub use crate::observability::DISABLED_ENV;
+pub use config::API_URL_ENV;
 pub use types::{AnalyticsError, AnalyticsStatus};
 
 use config::OpenPanelConfig;
@@ -195,8 +196,12 @@ fn tracker() -> Result<&'static Tracker, AnalyticsStatus> {
     static TRACKER: OnceLock<Result<Tracker, AnalyticsStatus>> = OnceLock::new();
     TRACKER
         .get_or_init(|| {
-            config::resolve(cfg!(test) || crate::observability::opted_out())
-                .and_then(|config| Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig))
+            config::resolve(cfg!(test) || crate::observability::opted_out()).and_then(|mut config| {
+                if let Ok(api_url) = std::env::var(API_URL_ENV) {
+                    config.api_url = api_url.trim_end_matches('/').to_owned();
+                }
+                Tracker::new(&config).ok_or(AnalyticsStatus::InvalidConfig)
+            })
         })
         .as_ref()
         .map_err(|status| *status)

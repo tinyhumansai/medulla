@@ -352,6 +352,7 @@ tokenEnv = "MEDULLA_TOKEN"
 #                                   (everything Medulla reports home)
 #   MEDULLA_SENTRY_DSN=<dsn>        send crash reports to a different project
 #   MEDULLA_SENTRY_ENVIRONMENT=<n>  override the reported environment name
+#   MEDULLA_ANALYTICS_API_URL=<url> override the analytics endpoint
 # `medulla sentry-test` sends one test crash report and prints its id;
 # `medulla analytics-test` sends one test analytics event and prints the HTTP
 # status. Analytics has no run-time settings beyond the opt-out.

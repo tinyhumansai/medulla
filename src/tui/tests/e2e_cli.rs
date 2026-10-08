@@ -647,13 +647,8 @@ fn sentry_test_reports_why_when_reporting_is_opted_out() {
 
 #[test]
 fn analytics_test_reports_why_when_analytics_is_opted_out() {
-    // The OpenPanel client id and endpoint are compiled-in constants with no
-    // override (by design — see `medulla::analytics`'s module docs), so this
-    // command cannot be pointed at a local listener the way `sentry-test` can.
-    // The opt-out path is still a real, deterministic, hermetic exercise of
-    // the command's wiring: it proves `analytics-test` is registered, reaches
-    // `medulla::analytics::send_test_event`, and reports a clean inactive
-    // status without any network access.
+    // The opt-out path verifies the command's inactive status without network
+    // access; the successful path is exercised against a local listener below.
     let home = TempDir::new().unwrap();
 
     let output = run_with_env(
@@ -665,6 +660,26 @@ fn analytics_test_reports_why_when_analytics_is_opted_out() {
 
     assert!(!output.status.success());
     assert!(!String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
+#[test]
+fn analytics_test_reaches_a_configured_endpoint_end_to_end() {
+    let home = TempDir::new().unwrap();
+    let port = accept_one_and_respond_ok();
+    let api_url = format!("http://127.0.0.1:{port}");
+    let output = run_with_env(
+        &["analytics-test"],
+        home.path(),
+        home.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("HTTP 200"));
 }
 
 #[cfg(unix)]

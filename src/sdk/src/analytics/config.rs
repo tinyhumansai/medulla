@@ -9,6 +9,8 @@ use super::types::AnalyticsStatus;
 
 /// OpenPanel's ingestion API for the Medulla project.
 pub(super) const DEFAULT_API_URL: &str = "https://panel.tinyhumans.ai/api";
+/// Runtime endpoint override used by the diagnostic and local integration tests.
+pub const API_URL_ENV: &str = "MEDULLA_ANALYTICS_API_URL";
 /// The public OpenPanel client id for the Medulla project.
 pub(super) const DEFAULT_CLIENT_ID: &str = "781d9ce2-62ec-4059-a093-152c88400576";
 

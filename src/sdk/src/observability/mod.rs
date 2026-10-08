@@ -91,6 +91,9 @@ pub fn init() -> CrashReportingGuard {
         transport: Some(Arc::new(transport::factory)),
         ..Default::default()
     });
+    if let Some(client) = sentry::Hub::main().client() {
+        let _ = CLIENT.set(client);
+    }
     CrashReportingGuard {
         client: Some(client),
     }
@@ -119,13 +122,16 @@ pub fn set_user(user_id: Option<&str>) {
 /// client to send through.
 pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReportingStatus> {
     let status = status();
-    let hub = sentry::Hub::main();
-    let Some(client) = hub.client().filter(|client| client.is_enabled()) else {
+    let Some(client) = CLIENT.get().filter(|client| client.is_enabled()) else {
         return Err(match status {
             CrashReportingStatus::Active => CrashReportingStatus::Uninitialized,
             other => other,
         });
     };
+    let hub = sentry::Hub::new(
+        Some(Arc::clone(client)),
+        Arc::new(sentry::Scope::default()),
+    );
     let event_id = hub.capture_event(sentry::protocol::Event {
         message: Some("medulla sentry-test: verifying crash-report ingestion".into()),
         level: sentry::Level::Info,
@@ -153,6 +159,10 @@ pub fn opted_out() -> bool {
 
 /// The status [`init`] resolved, set once per process.
 static STATUS: OnceLock<CrashReportingStatus> = OnceLock::new();
+
+/// The client initialized by this module, used by diagnostics without relying
+/// on later mutations to Sentry's process-global main hub.
+static CLIENT: OnceLock<Arc<sentry::Client>> = OnceLock::new();
 
 /// Work out whether to start, and with which DSN, from the process
 /// environment. Under this crate's unit tests it always resolves as opted

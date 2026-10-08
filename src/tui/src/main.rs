@@ -76,7 +76,15 @@ fn main() -> anyhow::Result<()> {
     let _crash_reporting = if is_hook {
         None
     } else {
+        // A cwd `.env` is controlled by the repository being opened. Preserve
+        // only a DSN supplied by the invoking environment so an untrusted
+        // checkout cannot redirect crash reports to its own collector.
+        let trusted_sentry_dsn = std::env::var_os(medulla::observability::DSN_ENV);
         medulla::home::load_dotenv_from_cwd();
+        match trusted_sentry_dsn {
+            Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
+            None => std::env::remove_var(medulla::observability::DSN_ENV),
+        }
         (!is_mock).then(medulla::observability::init)
     };
 

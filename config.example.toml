@@ -355,7 +355,9 @@ tokenEnv = "MEDULLA_TOKEN"
 #   MEDULLA_ANALYTICS_API_URL=<url> override the analytics endpoint
 # `medulla sentry-test` sends one test crash report and prints its id;
 # `medulla analytics-test` sends one test analytics event and prints the HTTP
-# status. Analytics has no run-time settings beyond the opt-out.
+# status. The analytics endpoint override applies only when set in the
+# invoking environment; remote overrides must use HTTPS (loopback HTTP is
+# allowed for local diagnostics).
 
 # ---------------------------------------------------------------------------
 # stateDir — TUI state (chats, resolved serve socket). Default: <home>/state

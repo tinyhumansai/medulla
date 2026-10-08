@@ -111,6 +111,26 @@ fn headers_carry_the_client_id_and_never_a_secret() {
 }
 
 #[test]
+fn analytics_endpoint_requires_tls_except_for_loopback_diagnostics() {
+    assert!(super::endpoint_is_allowed(
+        "https://panel.example/api/track"
+    ));
+    assert!(super::endpoint_is_allowed(
+        "http://127.0.0.1:3000/api/track"
+    ));
+    assert!(super::endpoint_is_allowed("http://[::1]:3000/api/track"));
+    assert!(super::endpoint_is_allowed(
+        "http://localhost:3000/api/track"
+    ));
+    assert!(!super::endpoint_is_allowed(
+        "http://panel.example/api/track"
+    ));
+    assert!(!super::endpoint_is_allowed(
+        "http://localhost.evil.example/api/track"
+    ));
+}
+
+#[test]
 fn an_illegal_header_value_disables_the_tracker_instead_of_panicking() {
     let config = OpenPanelConfig::new(DEFAULT_API_URL, "bad\nclient");
     assert!(config.headers().is_none());

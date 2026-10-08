@@ -151,9 +151,14 @@ impl Tracker {
     /// Build the client for `config`. `None` when a configured value is not a
     /// legal header value or the client cannot be built.
     fn new(config: &OpenPanelConfig) -> Option<Self> {
+        if !endpoint_is_allowed(&config.endpoint()) {
+            return None;
+        }
         let client = reqwest::Client::builder()
             .default_headers(config.headers()?)
             .timeout(REQUEST_TIMEOUT)
+            // Do not follow an HTTPS endpoint's redirect to plaintext HTTP.
+            .redirect(reqwest::redirect::Policy::none())
             // One shared client outlives any single runtime (tests start one
             // per case); a pooled connection bound to a finished runtime
             // would fail its next request. Events are rare, so skip pooling.
@@ -185,6 +190,27 @@ impl Tracker {
             status => Err(AnalyticsError::Rejected(status)),
         }
     }
+}
+
+/// Permit HTTPS destinations and loopback-only HTTP for local diagnostics.
+fn endpoint_is_allowed(endpoint: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    if url.scheme() == "https" {
+        return true;
+    }
+    if url.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 /// The process-wide tracker, resolved on first use.

@@ -53,6 +53,8 @@ pub const DISABLED_ENV: &str = "MEDULLA_ANALYTICS_DISABLED";
 
 /// The crate modules whose frames Sentry marks as the application's own.
 const IN_APP_CRATES: &[&str] = &["medulla", "medulla_tui", "medulla_link"];
+/// The initialized Sentry client and the delivery status owned by its
+/// transport, kept together for diagnostics.
 struct ClientState {
     client: Arc<sentry::Client>,
     last_status: Arc<AtomicU16>,
@@ -172,9 +174,6 @@ pub fn opted_out() -> bool {
 
 /// The status [`init`] resolved, set once per process.
 static STATUS: OnceLock<CrashReportingStatus> = OnceLock::new();
-
-/// The client initialized by this module, used by diagnostics without relying
-/// on later mutations to Sentry's process-global main hub.
 
 /// Work out whether to start, and with which DSN, from the process
 /// environment. Under this crate's unit tests it always resolves as opted

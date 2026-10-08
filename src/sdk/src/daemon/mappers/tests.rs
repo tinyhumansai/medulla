@@ -77,7 +77,10 @@ fn scan_usage_skips_negative_match_and_continues_nested_scan() {
     });
     assert_eq!(
         scan_usage(&value, 0),
-        Some(TokenUsage { input_tokens: 3, output_tokens: 4 })
+        Some(TokenUsage {
+            input_tokens: 3,
+            output_tokens: 4
+        })
     );
 }
 

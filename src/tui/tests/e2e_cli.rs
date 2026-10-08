@@ -606,6 +606,80 @@ fn accept_one_and_respond_ok() -> u16 {
     port
 }
 
+/// Accept one OpenPanel event and return its body after responding successfully.
+fn accept_one_analytics_event() -> (u16, std::thread::JoinHandle<String>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("listener address").port();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("analytics request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let mut request = Vec::new();
+        let mut buf = [0u8; 4096];
+        let headers_end = loop {
+            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break pos + 4;
+            }
+            let read = stream.read(&mut buf).expect("read headers");
+            assert_ne!(read, 0, "connection closed before headers completed");
+            request.extend_from_slice(&buf[..read]);
+        };
+        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(str::to_owned)
+            })
+            .and_then(|value| value.trim().parse().ok())
+            .expect("content length");
+        while request.len() < headers_end + content_length {
+            let read = stream.read(&mut buf).expect("read body");
+            assert_ne!(read, 0, "connection closed before body completed");
+            request.extend_from_slice(&buf[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            .expect("respond");
+        String::from_utf8_lossy(&request[headers_end..headers_end + content_length]).into_owned()
+    });
+    (port, server)
+}
+
+#[test]
+fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() {
+    let dir = TempDir::new().unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    let (port, server) = accept_one_analytics_event();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(&server.join().expect("server thread")).expect("analytics JSON");
+    assert_eq!(body["type"], "track");
+    assert_eq!(body["payload"]["name"], "signed_out");
+    assert_eq!(body["payload"]["profileId"], "user-42");
+}
+
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();

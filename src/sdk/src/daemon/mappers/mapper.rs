@@ -107,8 +107,12 @@ impl HarnessLineMapper {
                             usage.input_tokens,
                             usage.output_tokens,
                             TokenUsage {
-                                input_tokens: previous.input_tokens.saturating_add(usage.input_tokens),
-                                output_tokens: previous.output_tokens.saturating_add(usage.output_tokens),
+                                input_tokens: previous
+                                    .input_tokens
+                                    .saturating_add(usage.input_tokens),
+                                output_tokens: previous
+                                    .output_tokens
+                                    .saturating_add(usage.output_tokens),
                             },
                         ),
                         Provider::Claude | Provider::Codex => (

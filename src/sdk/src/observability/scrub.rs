@@ -118,13 +118,11 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
         .map(|home| home.trim_end_matches(['/', '\\']))
         .filter(|home| home.len() > 1)
         .and_then(|home| {
-            // A path separator, whitespace, a quote, or the end of the string
-            // — anything else after the configured directory means this is a
-            // different, longer path component (`/home/alice2`, not
-            // `/home/alice`) and must not match. The boundary character itself
-            // is captured and put back unchanged (the `regex` crate has no
-            // lookahead, so it has to be consumed rather than just asserted).
-            Regex::new(&format!(r#"{}([/\\]|[\s"':]|$)"#, regex::escape(home))).ok()
+            // A path separator or any non-path punctuation terminates the
+            // configured directory. Capture and restore it because regex has
+            // no lookahead. Alphanumerics and path punctuation remain part of
+            // the component, so `/home/alice2` is not mistaken for `/home/alice`.
+            Regex::new(&format!(r#"{}([/\\]|[^/\\A-Za-z0-9._-]|$)"#, regex::escape(home))).ok()
         });
     let value = match home {
         Some(home) => home

@@ -12,7 +12,7 @@
 //! blocks the caller and works identically before, inside, or after the app's
 //! own runtime — including from a panic hook on a runtime worker.
 
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -46,6 +46,7 @@ enum Task {
 pub(super) struct ReqwestTransport {
     sender: mpsc::SyncSender<Task>,
     handle: Option<JoinHandle<()>>,
+    stopping: Arc<AtomicBool>,
 }
 
 impl ReqwestTransport {
@@ -56,6 +57,8 @@ impl ReqwestTransport {
     /// may run on one.
     fn new(options: &ClientOptions, last_status: Arc<AtomicU16>) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_DEPTH);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let sender_stopping = Arc::clone(&stopping);
         let target = options.dsn.as_ref().map(|dsn| {
             (
                 dsn.envelope_api_url().to_string(),
@@ -66,16 +69,26 @@ impl ReqwestTransport {
             .name("medulla-sentry".into())
             .spawn(move || {
                 if let Some((url, auth)) = target {
-                    run_sender(receiver, &url, &auth, last_status.clone());
+                    run_sender(receiver, &url, &auth, last_status.clone(), sender_stopping);
                 }
             })
             .ok();
-        Self { sender, handle }
+        Self {
+            sender,
+            handle,
+            stopping,
+        }
     }
 }
 
 /// The sender thread's loop: drain tasks until shutdown or disconnect.
-fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str, last_status: Arc<AtomicU16>) {
+fn run_sender(
+    receiver: mpsc::Receiver<Task>,
+    url: &str,
+    auth: &str,
+    last_status: Arc<AtomicU16>,
+    stopping: Arc<AtomicBool>,
+) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -91,6 +104,9 @@ fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str, last_status
     };
     let mut rate_limiter = RateLimiter::new();
     for task in receiver {
+        if stopping.load(Ordering::Acquire) {
+            return;
+        }
         let envelope = match task {
             Task::Send(envelope) => *envelope,
             Task::Flush(done) => {
@@ -197,6 +213,7 @@ impl Transport for ReqwestTransport {
 
     fn shutdown(&self, timeout: Duration) -> bool {
         let flushed = self.flush(timeout);
+        self.stopping.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
         flushed
     }
@@ -204,6 +221,7 @@ impl Transport for ReqwestTransport {
 
 impl Drop for ReqwestTransport {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
         // Shutdown is queued after outstanding work. Joining ensures the
         // thread and its reqwest client cannot outlive this transport.

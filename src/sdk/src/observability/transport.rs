@@ -46,7 +46,6 @@ enum Task {
 pub(super) struct ReqwestTransport {
     sender: mpsc::SyncSender<Task>,
     handle: Option<JoinHandle<()>>,
-    last_status: Arc<AtomicU16>,
 }
 
 impl ReqwestTransport {
@@ -71,7 +70,7 @@ impl ReqwestTransport {
                 }
             })
             .ok();
-        Self { sender, handle, last_status }
+        Self { sender, handle }
     }
 }
 

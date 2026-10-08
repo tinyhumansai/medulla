@@ -346,7 +346,8 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
         ),
         ..Default::default()
     };
-    let transport = transport::factory(&options);
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, Arc::clone(&status));
     let mut envelope = sentry::Envelope::new();
     envelope.add_item(Event {
         message: Some("sentry-test-transport".into()),
@@ -358,7 +359,7 @@ fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
     let request = server.join().expect("server thread");
     assert!(request.starts_with("POST /api/7/envelope/"), "{request}");
     assert!(request.to_ascii_lowercase().contains("x-sentry-auth"));
-    assert_eq!(transport::last_status(), Some(200));
+    assert_eq!(transport::last_status(&status), Some(200));
 }
 
 #[test]
@@ -391,7 +392,8 @@ fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
         ),
         ..Default::default()
     };
-    let transport = transport::factory(&options);
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, status);
     // One to occupy the sender thread indefinitely, then fill the 30-slot
     // queue behind it.
     for _ in 0..40 {

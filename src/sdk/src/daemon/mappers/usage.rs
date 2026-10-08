@@ -24,6 +24,9 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
             num(["input_tokens", "inputTokens"]),
             num(["output_tokens", "outputTokens"]),
         ) {
+            if input < 0 || output < 0 {
+                return None;
+            }
             return Some(TokenUsage {
                 input_tokens: input,
                 output_tokens: output,
@@ -38,6 +41,9 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
                     .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
             };
             if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
+                if input < 0 || output < 0 {
+                    return None;
+                }
                 return Some(TokenUsage {
                     input_tokens: input,
                     output_tokens: output,

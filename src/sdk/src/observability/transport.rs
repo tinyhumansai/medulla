@@ -121,7 +121,10 @@ fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str) {
         let request = client
             .post(url)
             .header("X-Sentry-Auth", auth)
-            .header(reqwest::header::CONTENT_TYPE, "application/x-sentry-envelope")
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-sentry-envelope",
+            )
             .body(body)
             .send();
         match runtime.block_on(request) {

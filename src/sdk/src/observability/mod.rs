@@ -36,6 +36,7 @@ mod types;
 mod tests;
 
 use std::borrow::Cow;
+use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -52,6 +53,7 @@ pub const DISABLED_ENV: &str = "MEDULLA_ANALYTICS_DISABLED";
 
 /// The crate modules whose frames Sentry marks as the application's own.
 const IN_APP_CRATES: &[&str] = &["medulla", "medulla_tui", "medulla_link"];
+static LAST_STATUS: OnceLock<Arc<AtomicU16>> = OnceLock::new();
 
 /// Start crash reporting for this process.
 ///
@@ -67,6 +69,7 @@ pub fn init() -> CrashReportingGuard {
     };
 
     let home = dirs::home_dir().map(|path| path.to_string_lossy().into_owned());
+    let last_status = Arc::clone(LAST_STATUS.get_or_init(|| Arc::new(AtomicU16::new(0))));
     let client = sentry::init(sentry::ClientOptions {
         dsn: Some(dsn),
         release: Some(Cow::Owned(config::release())),
@@ -88,7 +91,9 @@ pub fn init() -> CrashReportingGuard {
             });
             Some(event)
         })),
-        transport: Some(Arc::new(transport::factory)),
+        transport: Some(Arc::new(move |options| {
+            transport::factory(options, Arc::clone(&last_status))
+        })),
         ..Default::default()
     });
     if let Some(client) = sentry::Hub::main().client() {
@@ -141,7 +146,7 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
     Ok(TestEventReport {
         event_id,
         flushed,
-        http_status: transport::last_status(),
+        http_status: LAST_STATUS.get().and_then(|status| transport::last_status(status)),
     })
 }
 

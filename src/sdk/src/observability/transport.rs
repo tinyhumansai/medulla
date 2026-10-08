@@ -25,16 +25,10 @@ const QUEUE_DEPTH: usize = 30;
 /// Per-request ceiling, so a dead network cannot wedge the sender thread.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The HTTP status of the most recent envelope delivery attempt, `0` when none
-/// has completed or the last one failed before a response arrived.
-///
-/// Read by the `sentry-test` diagnostic so an operator can tell "Sentry
-/// accepted it" from "the request went nowhere" without opening Sentry.
-static LAST_STATUS: AtomicU16 = AtomicU16::new(0);
-
-/// The status recorded by the last delivery attempt, if it got a response.
-pub(super) fn last_status() -> Option<u16> {
-    match LAST_STATUS.load(Ordering::SeqCst) {
+/// Read the status recorded for this Sentry client, if its latest attempt got
+/// a response.
+pub(super) fn last_status(status: &AtomicU16) -> Option<u16> {
+    match status.load(Ordering::SeqCst) {
         0 => None,
         status => Some(status),
     }
@@ -52,6 +46,7 @@ enum Task {
 pub(super) struct ReqwestTransport {
     sender: mpsc::SyncSender<Task>,
     handle: Option<JoinHandle<()>>,
+    last_status: Arc<AtomicU16>,
 }
 
 impl ReqwestTransport {
@@ -60,7 +55,7 @@ impl ReqwestTransport {
     /// The HTTP client is built on the sender thread itself: a reqwest client
     /// must not be created or dropped on a tokio worker, and this constructor
     /// may run on one.
-    fn new(options: &ClientOptions) -> Self {
+    fn new(options: &ClientOptions, last_status: Arc<AtomicU16>) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_DEPTH);
         let target = options.dsn.as_ref().map(|dsn| {
             (
@@ -72,16 +67,16 @@ impl ReqwestTransport {
             .name("medulla-sentry".into())
             .spawn(move || {
                 if let Some((url, auth)) = target {
-                    run_sender(receiver, &url, &auth);
+                    run_sender(receiver, &url, &auth, last_status.clone());
                 }
             })
             .ok();
-        Self { sender, handle }
+        Self { sender, handle, last_status }
     }
 }
 
 /// The sender thread's loop: drain tasks until shutdown or disconnect.
-fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str) {
+fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str, last_status: Arc<AtomicU16>) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -129,11 +124,11 @@ fn run_sender(receiver: mpsc::Receiver<Task>, url: &str, auth: &str) {
             .send();
         match runtime.block_on(request) {
             Ok(response) => {
-                LAST_STATUS.store(response.status().as_u16(), Ordering::SeqCst);
+                last_status.store(response.status().as_u16(), Ordering::SeqCst);
                 update_rate_limits(&mut rate_limiter, &response);
             }
             Err(error) => {
-                LAST_STATUS.store(0, Ordering::SeqCst);
+                last_status.store(0, Ordering::SeqCst);
                 sentry_debug!("failed to send Sentry envelope: {error}");
             }
         }
@@ -211,18 +206,15 @@ impl Transport for ReqwestTransport {
 impl Drop for ReqwestTransport {
     fn drop(&mut self) {
         let _ = self.sender.try_send(Task::Shutdown);
-        // Joining could hang process exit on a stalled request; the sender
-        // thread is daemon-like and dies with the process, so detach instead
-        // unless it has already finished.
+        // Shutdown is queued after outstanding work. Joining ensures the
+        // thread and its reqwest client cannot outlive this transport.
         if let Some(handle) = self.handle.take() {
-            if handle.is_finished() {
-                let _ = handle.join();
-            }
+            let _ = handle.join();
         }
     }
 }
 
 /// Factory for [`ClientOptions::transport`].
-pub(super) fn factory(options: &ClientOptions) -> Arc<dyn Transport> {
-    Arc::new(ReqwestTransport::new(options))
+pub(super) fn factory(options: &ClientOptions, last_status: Arc<AtomicU16>) -> Arc<dyn Transport> {
+    Arc::new(ReqwestTransport::new(options, last_status))
 }

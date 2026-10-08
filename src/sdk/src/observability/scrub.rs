@@ -55,11 +55,15 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     }
     for exception in &mut event.exception.values {
         text(&mut exception.value);
+        // Mechanism data is extensible and can contain arbitrary runtime or
+        // user supplied metadata; it is not needed to diagnose the exception.
+        exception.mechanism = None;
         scrub_stacktrace(exception.stacktrace.as_mut(), home);
         scrub_stacktrace(exception.raw_stacktrace.as_mut(), home);
     }
     scrub_stacktrace(event.stacktrace.as_mut(), home);
     for thread in &mut event.threads.values {
+        thread.name = None;
         scrub_stacktrace(thread.stacktrace.as_mut(), home);
         scrub_stacktrace(thread.raw_stacktrace.as_mut(), home);
     }
@@ -144,7 +148,7 @@ fn scrub_secrets(value: &str) -> String {
 /// Cap a value at [`MAX_TEXT_LEN`] bytes on a character boundary.
 fn truncate(mut value: String) -> String {
     if value.len() > MAX_TEXT_LEN {
-        let mut end = MAX_TEXT_LEN;
+        let mut end = MAX_TEXT_LEN - '…'.len_utf8();
         while !value.is_char_boundary(end) {
             end -= 1;
         }

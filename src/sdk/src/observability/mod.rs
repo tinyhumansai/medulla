@@ -146,7 +146,9 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
     Ok(TestEventReport {
         event_id,
         flushed,
-        http_status: LAST_STATUS.get().and_then(|status| transport::last_status(status)),
+        http_status: LAST_STATUS
+            .get()
+            .and_then(|status| transport::last_status(status)),
     })
 }
 

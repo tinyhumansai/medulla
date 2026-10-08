@@ -74,6 +74,7 @@ impl HarnessLineMapper {
             last_text: None,
             last_at_ms: i64::MIN,
             usage: None,
+            saw_claude_call_usage: false,
             pull_request_calls: Default::default(),
             workspace_cwd: None,
             workspace_branch: None,
@@ -95,35 +96,56 @@ impl HarnessLineMapper {
         if raw.contains("okens") {
             if let Ok(value) = serde_json::from_str::<Value>(raw) {
                 if let Some(usage) = scan_usage(&value, 0) {
-                    let previous = self.usage.unwrap_or(TokenUsage {
-                        input_tokens: 0,
-                        output_tokens: 0,
-                    });
-                    // OpenCode's step-finish usage is per-step; Claude and
-                    // Codex emit cumulative snapshots. Preserve total usage
-                    // for callers while reporting the appropriate amount.
-                    let (input, output, total) = match self.provider {
-                        Provider::Opencode => (
-                            usage.input_tokens,
-                            usage.output_tokens,
-                            TokenUsage {
-                                input_tokens: previous
-                                    .input_tokens
-                                    .saturating_add(usage.input_tokens),
-                                output_tokens: previous
-                                    .output_tokens
-                                    .saturating_add(usage.output_tokens),
-                            },
-                        ),
-                        Provider::Claude | Provider::Codex => (
-                            token_delta(usage.input_tokens, previous.input_tokens),
-                            token_delta(usage.output_tokens, previous.output_tokens),
-                            usage,
-                        ),
-                    };
-                    self.usage = Some(total);
-                    if input > 0 || output > 0 {
-                        crate::analytics::record_token_usage(input, output);
+                    let record_type = value.get("type").and_then(Value::as_str);
+                    let duplicate_claude_result = self.provider == Provider::Claude
+                        && record_type == Some("result")
+                        && self.saw_claude_call_usage;
+                    if !duplicate_claude_result {
+                        let previous = self.usage.unwrap_or(TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                        });
+                        // OpenCode's step-finish usage is per-step; Claude and
+                        // Codex emit cumulative snapshots. Preserve total usage
+                        // for callers while reporting the appropriate amount.
+                        let (input, output, total) = match self.provider {
+                            Provider::Claude if record_type == Some("assistant") => {
+                                self.saw_claude_call_usage = true;
+                                (
+                                    usage.input_tokens,
+                                    usage.output_tokens,
+                                    TokenUsage {
+                                        input_tokens: previous
+                                            .input_tokens
+                                            .saturating_add(usage.input_tokens),
+                                        output_tokens: previous
+                                            .output_tokens
+                                            .saturating_add(usage.output_tokens),
+                                    },
+                                )
+                            }
+                            Provider::Opencode => (
+                                usage.input_tokens,
+                                usage.output_tokens,
+                                TokenUsage {
+                                    input_tokens: previous
+                                        .input_tokens
+                                        .saturating_add(usage.input_tokens),
+                                    output_tokens: previous
+                                        .output_tokens
+                                        .saturating_add(usage.output_tokens),
+                                },
+                            ),
+                            Provider::Claude | Provider::Codex => (
+                                token_delta(usage.input_tokens, previous.input_tokens),
+                                token_delta(usage.output_tokens, previous.output_tokens),
+                                usage,
+                            ),
+                        };
+                        self.usage = Some(total);
+                        if input > 0 || output > 0 {
+                            crate::analytics::record_token_usage(input, output);
+                        }
                     }
                 }
             }

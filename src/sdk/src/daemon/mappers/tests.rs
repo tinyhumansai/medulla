@@ -108,6 +108,28 @@ fn opencode_step_usage_is_summed_instead_of_delta_folded() {
 }
 
 #[test]
+fn claude_assistant_call_usage_is_summed_and_result_total_is_not_counted_twice() {
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("claude", false);
+    for (input, output) in [(8, 900), (12, 1500), (6, 700)] {
+        let line = format!(
+            r#"{{"type":"assistant","message":{{"usage":{{"input_tokens":{input},"output_tokens":{output}}},"content":[]}}}}"#
+        );
+        let _ = mapper.map_line(&line, 0);
+    }
+    let _ = mapper.map_line(
+        r#"{"type":"result","usage":{"input_tokens":26,"output_tokens":3100}}"#,
+        3,
+    );
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 26,
+            output_tokens: 3100,
+        })
+    );
+}
+
+#[test]
 fn token_delta_reports_the_new_portion_of_a_cumulative_counter() {
     assert_eq!(token_delta(50, 10), 40);
     assert_eq!(token_delta(10, 10), 0);

@@ -80,12 +80,17 @@ fn main() -> anyhow::Result<()> {
         // only a DSN supplied by the invoking environment so an untrusted
         // checkout cannot redirect crash reports to its own collector.
         let trusted_sentry_dsn = std::env::var_os(medulla::observability::DSN_ENV);
+        let trusted_analytics_url = std::env::var_os(medulla::analytics::API_URL_ENV);
         medulla::home::load_dotenv_from_cwd();
         match trusted_sentry_dsn {
             Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
             None => std::env::remove_var(medulla::observability::DSN_ENV),
         }
-        set_stored_telemetry_user();
+        match trusted_analytics_url {
+            Some(url) => std::env::set_var(medulla::analytics::API_URL_ENV, url),
+            None => std::env::remove_var(medulla::analytics::API_URL_ENV),
+        }
+        set_stored_telemetry_user(&raw);
         (!is_mock).then(medulla::observability::init)
     };
 
@@ -106,10 +111,21 @@ fn main() -> anyhow::Result<()> {
 
 /// Attribute non-TUI harness and daemon analytics to a stored account only
 /// when config/environment credentials do not override that session.
-fn set_stored_telemetry_user() {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+fn set_stored_telemetry_user(raw: &[String]) {
+    let env: std::collections::HashMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let user_id = medulla::config::load_config(None, &env, &cwd)
+    let explicit_config = raw.iter().enumerate().find_map(|(index, arg)| {
+        arg.strip_prefix("--config=")
+            .map(str::to_owned)
+            .or_else(|| {
+                (arg == "--config")
+                    .then(|| raw.get(index + 1).cloned())
+                    .flatten()
+            })
+    });
+    let user_id = medulla::config::load_config(explicit_config.as_deref(), &env, &cwd)
         .ok()
         .and_then(|loaded| {
             let backend = loaded.config.backend;

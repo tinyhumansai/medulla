@@ -178,7 +178,7 @@ fn long_messages_are_truncated_on_a_char_boundary() {
 fn configured_home_paths_end_at_punctuation() {
     assert_eq!(
         scrub_paths("panic at /srv/alice),", Some("/srv/alice")),
-        "panic at ~/),"
+        "panic at ~),"
     );
     assert_eq!(
         scrub_paths("/srv/alice2/file", Some("/srv/alice")),

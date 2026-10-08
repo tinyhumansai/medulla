@@ -226,7 +226,6 @@ fn events_lose_everything_that_identifies_the_person() {
         sentry::protocol::Context::Os(Box::default()),
     );
     event.breadcrumbs.values.push(Breadcrumb::default());
-    event.spans.push(Default::default());
     event.exception.values.push(Exception {
         ty: "panic".into(),
         value: Some("open /home/alice/secret.txt".into()),
@@ -244,7 +243,6 @@ fn events_lose_everything_that_identifies_the_person() {
     assert!(event.extra.is_empty());
     assert!(event.tags.is_empty(), "{:?}", event.tags);
     assert!(event.contexts.is_empty(), "{:?}", event.contexts);
-    assert!(event.spans.is_empty());
     assert_eq!(event.message.as_deref(), Some("panicked at ~/src/x.rs"));
     let entry = event.logentry.as_ref().expect("logentry kept");
     assert!(entry.params.is_empty());

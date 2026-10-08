@@ -60,7 +60,6 @@ impl ReqwestTransport {
     fn new(options: &ClientOptions, last_status: Arc<AtomicU16>) -> Self {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_DEPTH);
         let stopping = Arc::new(AtomicBool::new(false));
-        let sender_stopping = Arc::clone(&stopping);
         let cancelled = Arc::new(AtomicBool::new(false));
         let sender_cancelled = Arc::clone(&cancelled);
         let target = options.dsn.as_ref().map(|dsn| {

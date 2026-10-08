@@ -18,7 +18,7 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
         let num = |keys: [&str; 2]| {
             keys.iter()
                 .find_map(|k| obj.get(*k))
-                .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                .and_then(Value::as_i64)
         };
         if let (Some(input), Some(output)) = (
             num(["input_tokens", "inputTokens"]),
@@ -35,9 +35,7 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
         // object rather than the *_tokens naming the other harnesses use.
         if let Some(tokens) = obj.get("tokens").and_then(|v| v.as_object()) {
             let tnum = |key: &str| {
-                tokens
-                    .get(key)
-                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                tokens.get(key).and_then(Value::as_i64)
             };
             if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
                 if input >= 0 && output >= 0 {

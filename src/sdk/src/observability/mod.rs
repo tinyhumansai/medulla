@@ -53,7 +53,12 @@ pub const DISABLED_ENV: &str = "MEDULLA_ANALYTICS_DISABLED";
 
 /// The crate modules whose frames Sentry marks as the application's own.
 const IN_APP_CRATES: &[&str] = &["medulla", "medulla_tui", "medulla_link"];
-static LAST_STATUS: OnceLock<Arc<AtomicU16>> = OnceLock::new();
+struct ClientState {
+    client: Arc<sentry::Client>,
+    last_status: Arc<AtomicU16>,
+}
+
+static CLIENT: OnceLock<ClientState> = OnceLock::new();
 
 /// Start crash reporting for this process.
 ///
@@ -69,7 +74,7 @@ pub fn init() -> CrashReportingGuard {
     };
 
     let home = dirs::home_dir().map(|path| path.to_string_lossy().into_owned());
-    let last_status = Arc::clone(LAST_STATUS.get_or_init(|| Arc::new(AtomicU16::new(0))));
+    let last_status = Arc::new(AtomicU16::new(0));
     let client = sentry::init(sentry::ClientOptions {
         dsn: Some(dsn),
         release: Some(Cow::Owned(config::release())),
@@ -97,7 +102,10 @@ pub fn init() -> CrashReportingGuard {
         ..Default::default()
     });
     if let Some(client) = sentry::Hub::main().client() {
-        let _ = CLIENT.set(client);
+        let _ = CLIENT.set(ClientState {
+            client,
+            last_status,
+        });
     }
     CrashReportingGuard {
         client: Some(client),
@@ -127,13 +135,16 @@ pub fn set_user(user_id: Option<&str>) {
 /// client to send through.
 pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReportingStatus> {
     let status = status();
-    let Some(client) = CLIENT.get().filter(|client| client.is_enabled()) else {
+    let Some(state) = CLIENT.get().filter(|state| state.client.is_enabled()) else {
         return Err(match status {
             CrashReportingStatus::Active => CrashReportingStatus::Uninitialized,
             other => other,
         });
     };
-    let hub = sentry::Hub::new(Some(Arc::clone(client)), Arc::new(sentry::Scope::default()));
+    let hub = sentry::Hub::new(
+        Some(Arc::clone(&state.client)),
+        Arc::new(sentry::Scope::default()),
+    );
     let event_id = hub.capture_event(sentry::protocol::Event {
         message: Some("medulla sentry-test: verifying crash-report ingestion".into()),
         level: sentry::Level::Info,
@@ -142,13 +153,11 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
             .collect(),
         ..Default::default()
     });
-    let flushed = client.flush(Some(timeout));
+    let flushed = state.client.flush(Some(timeout));
     Ok(TestEventReport {
         event_id,
         flushed,
-        http_status: LAST_STATUS
-            .get()
-            .and_then(|status| transport::last_status(status)),
+        http_status: transport::last_status(&state.last_status),
     })
 }
 
@@ -166,7 +175,6 @@ static STATUS: OnceLock<CrashReportingStatus> = OnceLock::new();
 
 /// The client initialized by this module, used by diagnostics without relying
 /// on later mutations to Sentry's process-global main hub.
-static CLIENT: OnceLock<Arc<sentry::Client>> = OnceLock::new();
 
 /// Work out whether to start, and with which DSN, from the process
 /// environment. Under this crate's unit tests it always resolves as opted

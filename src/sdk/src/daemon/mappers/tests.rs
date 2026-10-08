@@ -85,6 +85,12 @@ fn scan_usage_skips_negative_match_and_continues_nested_scan() {
 }
 
 #[test]
+fn scan_usage_rejects_fractional_token_counts() {
+    let value = json!({"input_tokens": -0.5, "output_tokens": 1});
+    assert_eq!(scan_usage(&value, 0), None);
+}
+
+#[test]
 fn mapper_accumulates_latest_usage() {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override("codex", false);
     assert_eq!(mapper.usage(), None);
@@ -110,7 +116,7 @@ fn opencode_step_usage_is_summed_instead_of_delta_folded() {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override("opencode", false);
     for (input, output) in [(100, 10), (120, 12)] {
         let line = format!(
-            r#"{{"type":"step-finish","tokens":{{"input_tokens":{input},"output_tokens":{output}}}}}"#
+            r#"{{"type":"step-finish","tokens":{{"input":{input},"output":{output}}}}}"#
         );
         let _ = mapper.map_line(&line, 0);
     }

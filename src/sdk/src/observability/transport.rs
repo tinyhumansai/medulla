@@ -223,10 +223,16 @@ impl Drop for ReqwestTransport {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
         let _ = self.sender.try_send(Task::Shutdown);
-        // Shutdown is queued after outstanding work. Joining ensures the
-        // thread and its reqwest client cannot outlive this transport.
+        // Give the sender a short grace period to finish, but never let a
+        // stalled request extend process shutdown beyond its caller's budget.
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !handle.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
         }
     }
 }

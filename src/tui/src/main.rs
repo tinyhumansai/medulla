@@ -125,7 +125,8 @@ fn main() -> anyhow::Result<()> {
 /// A blind scan of the argv misreads arguments that are not Medulla flags:
 /// harness wrapper flags belong to the child CLI (Codex's `--config key=value`
 /// is a model override), and `medulla run` accepts only `--config <path>`, so a
-/// `--config=...` token there is instruction text, not a config path. The
+/// `--config=...` token there is instruction text, not a config path. Which
+/// occurrence wins differs too, and is followed here. The
 /// daemon has two parsers: its TUI takes either spelling (first wins) and
 /// discovers from the process directory, while the headless daemon takes only
 /// `--config <path>` (last wins) and discovers from its `--workspace`. Of the
@@ -153,20 +154,13 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(cwd),
         },
-        command => at_cwd(raw.iter().enumerate().find_map(|(index, arg)| {
-            matches!(
-                command,
-                Command::Mcp | Command::Remote | Command::DaemonDirect
-            )
-            .then(|| arg.strip_prefix("--config="))
-            .flatten()
-            .map(str::to_owned)
-            .or_else(|| {
-                (arg == "--config")
-                    .then(|| raw.get(index + 1).cloned())
-                    .flatten()
-            })
-        })),
+        // These read the first `--config`, in either spelling.
+        Command::Mcp | Command::Remote | Command::DaemonDirect => {
+            at_cwd(flag_value(&raw[1..], "--config"))
+        }
+        // The rest parse `--config <path>` alone, each occurrence overwriting
+        // the last, so the final one is what the command loads.
+        _ => at_cwd(last_separate_flag(&raw[1..], "--config")),
     }
 }
 
@@ -197,7 +191,8 @@ struct ConfigSource {
 }
 
 /// The last value of a `--name <value>` flag, read the way the headless
-/// daemon's tokenizer does: separate-token form only, later wins.
+/// daemon's tokenizer and the overwrite-as-you-go command parsers do:
+/// separate-token form only, later wins.
 fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .rev()

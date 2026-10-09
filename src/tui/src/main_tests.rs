@@ -115,3 +115,28 @@ fn a_wrapper_takes_its_config_only_from_an_inherited_config_path() {
         None
     );
 }
+
+#[test]
+fn a_repeated_config_flag_resolves_the_way_each_parser_reads_it() {
+    let argv = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let config = |raw: &[String]| super::config_source(raw, false).config;
+    // Overwrite-as-you-go parsers (`workflow`, `init`, `login`, …): last wins.
+    assert_eq!(
+        config(&argv(&[
+            "workflow", "list", "--config", "/a.toml", "--config", "/b.toml"
+        ]))
+        .as_deref(),
+        Some("/b.toml")
+    );
+    // `remote` (and `mcp`, `daemon --direct`) stop at the first.
+    assert_eq!(
+        config(&argv(&[
+            "remote",
+            "--config=/a.toml",
+            "--config",
+            "/b.toml"
+        ]))
+        .as_deref(),
+        Some("/a.toml")
+    );
+}

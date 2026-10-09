@@ -125,11 +125,20 @@ pub fn status() -> CrashReportingStatus {
 
 /// Associate later reports with an authenticated account id, or clear it.
 ///
-/// Only the opaque id is ever sent — no email, name, or token. Safe to call
-/// whether or not crash reporting is active.
+/// Only the opaque id is ever sent — no email, name, or token. The id must
+/// have an account id's shape (see [`crate::home::user::sanitize_account_id`])
+/// and at most [`MAX_USER_ID_LEN`] bytes; anything else (an email, a token, a
+/// path, a prompt fragment) clears the slot instead of being attached to
+/// reports unscrubbed. Safe to call whether or not crash reporting is active.
 pub fn set_user(user_id: Option<&str>) {
-    *user_slot().lock().unwrap_or_else(|e| e.into_inner()) = user_id.map(str::to_owned);
+    let user_id = user_id
+        .and_then(crate::home::user::sanitize_account_id)
+        .filter(|id| id.len() <= MAX_USER_ID_LEN);
+    *user_slot().lock().unwrap_or_else(|e| e.into_inner()) = user_id;
 }
+
+/// Longest account id [`set_user`] accepts.
+const MAX_USER_ID_LEN: usize = 128;
 
 /// Send one diagnostic event and wait up to `timeout` for it to be delivered.
 ///

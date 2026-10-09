@@ -98,3 +98,20 @@ fn the_hub_resolves_telemetry_config_from_the_account_home() {
     ];
     assert_eq!(super::config_source(&raw, false).config, None);
 }
+
+#[test]
+fn a_wrapper_takes_its_config_only_from_an_inherited_config_path() {
+    let inherited: std::collections::HashMap<String, String> = [(
+        medulla::config::CONFIG_PATH_ENV.to_string(),
+        "/tmp/parent.toml".to_string(),
+    )]
+    .into();
+    assert_eq!(
+        super::wrapper_config_source(&inherited).config.as_deref(),
+        Some("/tmp/parent.toml")
+    );
+    assert_eq!(
+        super::wrapper_config_source(&Default::default()).config,
+        None
+    );
+}

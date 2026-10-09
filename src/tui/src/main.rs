@@ -135,13 +135,7 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
     let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
     match parse_command(raw) {
-        // A wrapper's own flags belong to the child harness; its Medulla
-        // config comes only from an inherited `MEDULLA_CONFIG_PATH`, which is
-        // what `run_wrapper` and `build_bridge` load.
-        Command::Wrapper(_) => at_cwd(
-            medulla::config::explicit_config_from_env(&std::env::vars().collect())
-                .map(str::to_owned),
-        ),
+        Command::Wrapper(_) => wrapper_config_source(&std::env::vars().collect()),
         Command::Tui => at_cwd(medulla_tui::cli::parse_tui_args(raw).config),
         Command::Run => at_cwd(
             medulla_tui::cli::parse_run_args(&raw[1..])
@@ -173,6 +167,16 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                     .flatten()
             })
         })),
+    }
+}
+
+/// A wrapper's own flags belong to the child harness, so its Medulla config
+/// comes only from an inherited `MEDULLA_CONFIG_PATH` — what `run_wrapper` and
+/// `build_bridge` load — discovered from the directory it was launched in.
+fn wrapper_config_source(env: &std::collections::HashMap<String, String>) -> ConfigSource {
+    ConfigSource {
+        config: medulla::config::explicit_config_from_env(env).map(str::to_owned),
+        dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     }
 }
 

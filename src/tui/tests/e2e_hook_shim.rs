@@ -49,6 +49,8 @@ fn run_shim(
     payload: &str,
 ) -> std::process::ExitStatus {
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .args(["hook", event])
         .env("MEDULLA_HOOK_SOCKET", socket)
         .env("MEDULLA_HOOK_GRANT", token)
@@ -120,6 +122,8 @@ async fn a_harness_with_no_medulla_to_report_to_still_succeeds() {
     // tools off: the same hook command runs, finds no grant, and exits without
     // costing the turn anything.
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .args(["hook", "Stop"])
         .env_remove("MEDULLA_HOOK_SOCKET")
         .env_remove("MEDULLA_HOOK_GRANT")
@@ -154,6 +158,8 @@ async fn a_blocking_env_file_does_not_delay_the_shim() {
     assert!(fifo_status.success(), "mkfifo failed");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .args(["hook", "Stop"])
         .current_dir(dir.path())
         .env_remove("MEDULLA_HOOK_SOCKET")

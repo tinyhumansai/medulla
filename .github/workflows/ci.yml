@@ -12,6 +12,12 @@ concurrency:
 permissions:
   contents: read
 
+# Crash reports and analytics are on by default in every build. Nothing CI runs
+# may report to the live Sentry or OpenPanel projects; the e2e tests that cover
+# the success path opt back in against their own loopback listeners.
+env:
+  MEDULLA_ANALYTICS_DISABLED: "1"
+
 jobs:
   rust-sdk:
     name: Rust SDK

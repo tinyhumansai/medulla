@@ -19,6 +19,8 @@ use tempfile::TempDir;
 /// or model keys, mirroring the `e2e_cli` harness.
 fn run(args: &[&str], home: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .args(args)
         .current_dir(home)
         .env("MEDULLA_HOME", home)

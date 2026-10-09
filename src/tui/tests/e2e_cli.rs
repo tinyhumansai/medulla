@@ -444,6 +444,21 @@ fn run_mcp(
     (replies, output.status.success())
 }
 
+/// The reply to request `id` (`None` for a frame with no usable id).
+///
+/// The server answers requests concurrently, so replies may arrive in any
+/// order; JSON-RPC pairs them by id, and so must these assertions.
+fn reply_with_id(
+    replies: &[serde_json::Value],
+    id: impl Into<Option<i64>>,
+) -> &serde_json::Value {
+    let id = id.into().map_or(serde_json::Value::Null, Into::into);
+    replies
+        .iter()
+        .find(|reply| reply["id"] == id)
+        .unwrap_or_else(|| panic!("no reply with id {id}: {replies:?}"))
+}
+
 #[test]
 fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
     let home = TempDir::new().unwrap();
@@ -461,10 +476,11 @@ fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
 
     assert!(exited_cleanly, "closing stdin should end the session");
     assert_eq!(replies.len(), 2, "one reply per request: {replies:?}");
-    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "medulla");
-    assert_eq!(replies[0]["result"]["protocolVersion"], "2024-11-05");
+    let initialize = reply_with_id(&replies, 1);
+    assert_eq!(initialize["result"]["serverInfo"]["name"], "medulla");
+    assert_eq!(initialize["result"]["protocolVersion"], "2024-11-05");
 
-    let names: Vec<&str> = replies[1]["result"]["tools"]
+    let names: Vec<&str> = reply_with_id(&replies, 2)["result"]["tools"]
         .as_array()
         .expect("a tool list")
         .iter()
@@ -557,8 +573,8 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
 
     // One bad frame does not end the session: the client that sent it is still
     // a client, and the next request is answered normally.
-    assert_eq!(replies[0]["error"]["code"], -32700);
-    assert_eq!(replies[1]["id"], 7);
+    assert_eq!(reply_with_id(&replies, None)["error"]["code"], -32700);
+    assert!(reply_with_id(&replies, 7)["result"].is_object(), "{replies:?}");
 }
 
 /// Read one HTTP request in full, answer it `200 OK`, and return its body.

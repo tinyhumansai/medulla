@@ -101,9 +101,10 @@ pub fn init() -> CrashReportingGuard {
         })),
         // Spans live only on transactions, never on the error events
         // `before_send` scrubs, and their descriptions and data are free-form
-        // caller input. Tracing is not sampled, but drop every transaction
-        // outright so enabling it later can never ship span data unscrubbed.
-        before_send_transaction: Some(Arc::new(|_| None)),
+        // caller input. A sampler that always answers zero takes precedence
+        // over `traces_sample_rate`, so no transaction (and so no span) is
+        // ever sent, even if a sample rate is set here later.
+        traces_sampler: Some(Arc::new(|_| 0.0)),
         transport: Some(Arc::new(move |options: &sentry::ClientOptions| {
             transport::factory(options, Arc::clone(&transport_status))
         })),

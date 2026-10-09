@@ -84,6 +84,16 @@ fn the_home_prefix_only_matches_a_whole_path_component() {
 }
 
 #[test]
+fn a_home_prefix_followed_by_a_non_ascii_letter_is_another_directory() {
+    // `aliceé` is its own path component, not the operator's `alice`.
+    assert_eq!(
+        scrub_paths("/home/aliceé/private", Some("/home/alice")),
+        "/home/<user>/private"
+    );
+    assert_eq!(scrub_paths("/home/alice/é", Some("/home/alice")), "~/é");
+}
+
+#[test]
 fn other_user_directories_are_masked_on_every_platform() {
     assert_eq!(
         scrub_paths("/Users/bob/.medulla", None),
@@ -202,6 +212,11 @@ fn events_lose_everything_that_identifies_the_person() {
     };
     let mut event = Event {
         server_name: Some("alices-laptop".into()),
+        logger: Some("alice@example.com".into()),
+        template: Some(sentry::protocol::TemplateInfo {
+            filename: Some("/home/alice/templates/x.html".into()),
+            ..Default::default()
+        }),
         message: Some("panicked at /home/alice/src/x.rs".into()),
         logentry: Some(LogEntry {
             message: "read {}".into(),
@@ -266,6 +281,8 @@ fn events_lose_everything_that_identifies_the_person() {
     assert!(frame.pre_context.is_empty());
     assert_eq!(frame.context_line, None);
     assert!(event.debug_meta.is_empty());
+    assert!(event.logger.is_none());
+    assert!(event.template.is_none());
 }
 
 #[test]

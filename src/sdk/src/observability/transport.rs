@@ -233,7 +233,15 @@ impl Transport for ReqwestTransport {
         let (done_tx, done_rx) = mpsc::sync_channel(1);
         let mut task = Task::Flush(done_tx);
         loop {
-            match self.sender.try_send(task) {
+            // Taken per attempt, as `send_envelope` does: an envelope already
+            // past the gate is then queued ahead of this marker rather than
+            // overtaken by it, so the marker really trails every send that
+            // started before this flush.
+            let sent = {
+                let _gate = self.send_gate.lock().unwrap_or_else(|e| e.into_inner());
+                self.sender.try_send(task)
+            };
+            match sent {
                 Ok(()) => break,
                 Err(mpsc::TrySendError::Disconnected(_)) => return false,
                 Err(mpsc::TrySendError::Full(returned)) => {

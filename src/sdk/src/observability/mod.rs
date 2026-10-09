@@ -159,6 +159,11 @@ pub fn send_test_event(timeout: Duration) -> Result<TestEventReport, CrashReport
             other => other,
         });
     };
+    // The status slot is shared by every attempt through this client, so a
+    // concurrent diagnostic could reset it or report its own status as ours;
+    // one attempt at a time keeps reset, send, and read about the same event.
+    static ATTEMPT: Mutex<()> = Mutex::new(());
+    let _attempt = ATTEMPT.lock().unwrap_or_else(|e| e.into_inner());
     // A diagnostic result must describe this attempt, not a successful event
     // sent earlier in the process.
     state.last_status.store(0, Ordering::SeqCst);

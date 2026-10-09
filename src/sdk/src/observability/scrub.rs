@@ -138,7 +138,7 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
             // plus path punctuation, remain part of the component, so neither
             // `/home/alice2` nor `/home/aliceé` is mistaken for `/home/alice`.
             Regex::new(&format!(
-                r#"{}([/\\]|[^/\\\p{L}\p{N}\p{M}._-]|$)"#,
+                r#"{}([/\\]|[^/\\\p{{L}}\p{{N}}\p{{M}}._-]|$)"#,
                 regex::escape(home)
             ))
             .ok()

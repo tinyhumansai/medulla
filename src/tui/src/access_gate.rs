@@ -206,6 +206,8 @@ fn sign_out(env: &HashMap<String, String>, backend: &medulla::config::BackendCon
     if let Err(e) = medulla::auth::clear(env) {
         return format!("The stored session could not be removed: {e}");
     }
+    // As every other sign-out does: a crash from here on is not that account's.
+    medulla::observability::set_user(None);
     if let Some(user_id) = signed_out_user {
         medulla::analytics::spawn_tracked(async move {
             let _ = medulla::analytics::record_sign_out(&user_id).await;

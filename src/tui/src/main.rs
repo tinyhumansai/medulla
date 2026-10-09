@@ -132,11 +132,15 @@ fn main() -> anyhow::Result<()> {
 /// `--config <path>` (last wins) and discovers from its `--workspace`. Of the
 /// remaining commands only `mcp`, `remote`, and `daemon --direct` accept the
 /// `--config=<path>` spelling.
-fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
+fn config_source(
+    raw: &[String],
+    env: &std::collections::HashMap<String, String>,
+    stdout_is_terminal: bool,
+) -> ConfigSource {
     let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
     match parse_command(raw) {
-        Command::Wrapper(_) => wrapper_config_source(&std::env::vars().collect()),
+        Command::Wrapper(_) => wrapper_config_source(env),
         Command::Tui => at_cwd(medulla_tui::cli::parse_tui_args(raw).config),
         Command::Run => at_cwd(
             medulla_tui::cli::parse_run_args(&raw[1..])
@@ -144,7 +148,7 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .and_then(|args| args.config),
         ),
         Command::DaemonTui => at_cwd(flag_value(&raw[1..], "--config")),
-        Command::Hub => hub_config_source(&std::env::vars().collect()),
+        Command::Hub => hub_config_source(env),
         Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
             at_cwd(flag_value(&raw[1..], "--config"))
         }
@@ -205,7 +209,7 @@ fn set_stored_telemetry_user(raw: &[String]) {
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
         .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
         .collect();
-    let source = config_source(raw, io::stdout().is_terminal());
+    let source = config_source(raw, &env, io::stdout().is_terminal());
     let user_id = medulla::config::load_config(source.config.as_deref(), &env, &source.dir)
         .ok()
         .and_then(|loaded| {

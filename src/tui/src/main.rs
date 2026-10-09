@@ -124,7 +124,9 @@ fn main() -> anyhow::Result<()> {
 /// A blind scan of the argv misreads arguments that are not Medulla flags:
 /// harness wrapper flags belong to the child CLI (Codex's `--config key=value`
 /// is a model override), and `medulla run` accepts only `--config <path>`, so a
-/// `--config=...` token there is instruction text, not a config path.
+/// `--config=...` token there is instruction text, not a config path. Of the
+/// remaining commands only `mcp` accepts the `--config=<path>` spelling; the
+/// rest take `--config <path>` alone.
 fn explicit_config_path(raw: &[String]) -> Option<String> {
     match parse_command(raw) {
         Command::Wrapper(_) => None,
@@ -186,6 +188,17 @@ fn install_crypto_provider() {
 }
 
 async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
+    let result = dispatch(raw).await;
+    // The runtime drops as soon as this returns, aborting any analytics event
+    // still in flight (a TUI's last screen view, a `daemon --once` task's
+    // token usage); give them a bounded chance to land first. Returns at once
+    // when nothing is pending, so the deadline-bound hook pays nothing.
+    medulla::analytics::flush_pending().await;
+    result
+}
+
+/// Run the selected command.
+async fn dispatch(raw: Vec<String>) -> anyhow::Result<()> {
     // `.env` was already loaded by `main`, ahead of crash reporting.
     match parse_command(&raw) {
         Command::Run => run_core(&raw[1..]).await,
@@ -287,14 +300,7 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
-        Command::Tui => {
-            let result = run_tui(&raw).await;
-            // The runtime drops right after this returns, aborting any event
-            // still in flight; give the last screen views and actions a
-            // bounded chance to land first.
-            medulla::analytics::flush_pending().await;
-            result
-        }
+        Command::Tui => run_tui(&raw).await,
     }
 }
 

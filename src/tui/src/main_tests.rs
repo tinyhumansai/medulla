@@ -33,4 +33,19 @@ fn the_telemetry_config_path_comes_from_the_selected_commands_parser() {
         super::explicit_config_path(&argv(&["--config", "/tmp/t.toml"])).as_deref(),
         Some("/tmp/t.toml")
     );
+    // Only `mcp` takes the joined spelling; elsewhere it is not a config path.
+    assert_eq!(
+        super::explicit_config_path(&argv(&["workflow", "run", "x", "--config=/tmp/b.toml"])),
+        None
+    );
+    assert_eq!(
+        super::explicit_config_path(&argv(&["workflow", "run", "x", "--config", "/tmp/b.toml"]))
+            .as_deref(),
+        Some("/tmp/b.toml")
+    );
+    #[cfg(feature = "workflows")]
+    assert_eq!(
+        super::explicit_config_path(&argv(&["mcp", "--config=/tmp/m.toml"])).as_deref(),
+        Some("/tmp/m.toml")
+    );
 }

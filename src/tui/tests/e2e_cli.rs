@@ -75,12 +75,21 @@ fn run_with_env(
         .env_remove("MEDULLA_TOKEN")
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("MEDULLA_BACKEND_URL")
-        // An opted-out machine running the suite must not silently turn the
-        // telemetry success-path tests into no-ops; the opt-out tests set it
-        // back through `extra`.
-        .env_remove("MEDULLA_ANALYTICS_DISABLED")
         .env_remove("MEDULLA_SENTRY_DSN")
         .env_remove(medulla::analytics::API_URL_ENV);
+    // Telemetry is on by default, and with no endpoint override it reports to
+    // the live projects, so every child is opted out unless the test points
+    // telemetry at its own loopback listener. Then the opt-out is removed, so
+    // an opted-out machine cannot turn those success-path tests into no-ops;
+    // the opt-out tests set it back through `extra`.
+    let local_endpoint = extra
+        .iter()
+        .any(|(name, _)| *name == "MEDULLA_SENTRY_DSN" || *name == medulla::analytics::API_URL_ENV);
+    if local_endpoint {
+        command.env_remove("MEDULLA_ANALYTICS_DISABLED");
+    } else {
+        command.env("MEDULLA_ANALYTICS_DISABLED", "1");
+    }
     for (name, value) in extra {
         command.env(name, value);
     }
@@ -283,6 +292,8 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
     };
 
     let mut command = Command::new(binary);
+    // Never report a test run to the live telemetry projects.
+    command.env("MEDULLA_ANALYTICS_DISABLED", "1");
     command
         .args(["--mock", "--no-alt-screen"])
         .env("MEDULLA_HOME", dir.path())
@@ -413,6 +424,8 @@ fn run_mcp(
     home: &std::path::Path,
 ) -> (Vec<serde_json::Value>, bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home)
         .env("MEDULLA_MCP_ATTACHED", "test-launch")
@@ -495,6 +508,8 @@ fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
 fn mcp_rejects_an_ambient_registration_not_attached_by_medulla() {
     let home = TempDir::new().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home.path())
         .env_remove("MEDULLA_MCP_ATTACHED")
@@ -538,6 +553,8 @@ fn mcp_answers_a_notification_with_nothing() {
 fn mcp_answers_a_malformed_frame_and_keeps_going() {
     let home = TempDir::new().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home.path())
         .env("MEDULLA_MCP_ATTACHED", "test-launch")

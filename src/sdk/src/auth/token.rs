@@ -22,6 +22,20 @@ use std::collections::HashMap;
 /// failure than the mismatch it guarded against. The store records the issuing
 /// origin for diagnostics ([`crate::auth::StoredSession::base_url`]) and leaves
 /// the decision to the call that fails with a 401.
+/// Whether a configured or environment token (rather than the stored
+/// session) is what authenticates against `backend`.
+///
+/// Asks [`resolve_backend_token`] itself with no session, so it cannot drift
+/// from the real precedence: an inline `backend.token` wins even when empty.
+/// Telemetry uses this to avoid attributing a run to the stored account when
+/// some other credential is the one actually in use.
+pub fn external_token_wins(
+    env: &HashMap<String, String>,
+    backend: &crate::config::BackendConfig,
+) -> bool {
+    resolve_backend_token(env, backend, None).is_some()
+}
+
 pub fn resolve_backend_token(
     env: &HashMap<String, String>,
     backend: &crate::config::BackendConfig,

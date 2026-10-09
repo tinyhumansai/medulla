@@ -57,7 +57,7 @@ pub use session::{
 // owner-only atomic write the session store uses, reused by any surface
 // persisting something that should not be world-readable.
 pub use session::write_private as write_private_file;
-pub use token::{is_one_time_login_token, resolve_backend_token};
+pub use token::{external_token_wins, is_one_time_login_token, resolve_backend_token};
 pub use types::{Credentials, LoginError, LoopbackConfig, Provider, DEFAULT_LOGIN_TIMEOUT};
 pub use url::{
     code_login_url, describe_me, login_url, random_state_nonce, redirect_uri, user_id_from_me,

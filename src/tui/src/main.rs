@@ -196,15 +196,7 @@ fn set_stored_telemetry_user(raw: &[String]) {
     let user_id = medulla::config::load_config(source.config.as_deref(), &env, &source.dir)
         .ok()
         .and_then(|loaded| {
-            let backend = loaded.config.backend;
-            let external_token = backend
-                .token
-                .as_ref()
-                .is_some_and(|token| !token.is_empty())
-                || env
-                    .get(&backend.token_env)
-                    .is_some_and(|token| !token.is_empty());
-            (!external_token)
+            (!medulla::auth::external_token_wins(&env, &loaded.config.backend))
                 .then(|| medulla::auth::state(&env).user_id)
                 .flatten()
         });

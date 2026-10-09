@@ -278,11 +278,77 @@ fn the_account_id_can_be_set_and_cleared() {
 }
 
 #[test]
+fn only_an_account_shaped_id_is_attached_to_reports() {
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    for rejected in [
+        "alice@example.com",
+        "Bearer abc.def",
+        "../other",
+        "a prompt fragment",
+        &"x".repeat(129),
+    ] {
+        set_user(Some("user-42"));
+        set_user(Some(rejected));
+        assert_eq!(current_user(), None, "{rejected:?} was attached");
+    }
+    set_user(Some("69dd5bd7b91b0aea0494789d"));
+    assert_eq!(current_user().as_deref(), Some("69dd5bd7b91b0aea0494789d"));
+    set_user(None);
+}
+
+#[test]
 fn a_test_event_without_a_client_reports_why() {
-    // No test calls `init`, so the main hub has no client.
+    // No test calls `init`, so the main hub has no client. Serialized with the
+    // other tests that touch process-wide Sentry state all the same.
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
     let error = super::send_test_event(Duration::from_millis(10)).expect_err("no client");
     assert_ne!(error, CrashReportingStatus::Active);
     assert!(!error.to_string().is_empty());
+}
+
+/// A loopback server that accepts connections and never answers them, so a
+/// request to it stays in flight until the server is stopped.
+///
+/// Accepting is non-blocking and polled, so stopping never depends on how many
+/// connections the transport happened to open; [`StalledServer::stop`] joins
+/// the thread rather than leaving it parked for the rest of the test run.
+struct StalledServer {
+    port: u16,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StalledServer {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        listener.set_nonblocking(true).expect("non-blocking listener");
+        let port = listener.local_addr().expect("addr").port();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let mut stalled = Vec::new();
+            while !stopping.load(std::sync::atomic::Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((stream, _)) => stalled.push(stream),
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            port,
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for StalledServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// The byte offset of the first occurrence of `needle` in `haystack`, if any.
@@ -370,21 +436,8 @@ fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
     // A listener that accepts every connection but never reads or responds:
     // the sender thread's in-flight request never completes, so every
     // subsequent task piles up behind it in the bounded channel.
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    let _server = std::thread::spawn(move || {
-        // Keep accepted connections alive for the life of the test so the
-        // sender thread's request never gets a response.
-        let mut stalled = Vec::new();
-        for _ in 0..40 {
-            match listener.accept() {
-                Ok((stream, _)) => stalled.push(stream),
-                Err(_) => break,
-            }
-        }
-        std::thread::sleep(Duration::from_secs(15));
-        drop(stalled);
-    });
+    let server = StalledServer::start();
+    let port = server.port;
 
     let options = sentry::ClientOptions {
         dsn: Some(
@@ -423,13 +476,8 @@ fn a_flush_marker_discarded_by_a_stopping_sender_ends_the_wait() {
     let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
     // Hold the sender thread on a request that never completes, so the flush
     // marker below queues behind it instead of being answered.
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    let _server = std::thread::spawn(move || {
-        let stalled = listener.accept();
-        std::thread::sleep(Duration::from_secs(15));
-        drop(stalled);
-    });
+    let server = StalledServer::start();
+    let port = server.port;
 
     let options = sentry::ClientOptions {
         dsn: Some(

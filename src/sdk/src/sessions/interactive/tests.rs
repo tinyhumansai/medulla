@@ -262,6 +262,27 @@ fn fake_harness(dir: &std::path::Path, body: &str) -> InteractiveSpec {
     }
 }
 
+/// Spawn a fake harness, retrying while Linux reports it busy.
+///
+/// Publishing the script by rename narrows but cannot close the ETXTBSY
+/// window: a child that another test thread forks while the script's write
+/// handle is open inherits that handle until its own `exec`, and the renamed
+/// file is the same inode. The window is momentary, so a short retry is the
+/// reliable fix; any other spawn error is returned at once.
+#[cfg(unix)]
+async fn open_fake(spec: &InteractiveSpec) -> Result<std::sync::Arc<InteractiveSession>, String> {
+    let mut attempts = 0;
+    loop {
+        match InteractiveSession::open(spec).await {
+            Err(err) if err.contains("os error 26") && attempts < 50 => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Answers every turn: announce the session once, emit a line of non-JSON noise
 /// (the reader must tolerate it), stream a text block, then a `result`. An
 /// interrupt is answered with the error-flagged terminator.
@@ -291,7 +312,7 @@ async fn a_turn_streams_its_events_and_settles_on_the_result_frame() {
     use std::sync::{Arc, Mutex};
 
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), ANSWERING_BODY))
+    let session = open_fake(&fake_harness(dir.path(), ANSWERING_BODY))
         .await
         .expect("the fake harness must spawn");
 
@@ -339,7 +360,7 @@ async fn a_turn_streams_its_events_and_settles_on_the_result_frame() {
 #[tokio::test]
 async fn a_second_turn_reuses_the_same_live_session() {
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), ANSWERING_BODY))
+    let session = open_fake(&fake_harness(dir.path(), ANSWERING_BODY))
         .await
         .expect("spawn");
 
@@ -372,7 +393,7 @@ while IFS= read -r line; do
 done
 "#;
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), body))
+    let session = open_fake(&fake_harness(dir.path(), body))
         .await
         .expect("spawn");
     let outcome = tokio::time::timeout(
@@ -406,7 +427,7 @@ while IFS= read -r line; do
 done
 "#;
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), body))
+    let session = open_fake(&fake_harness(dir.path(), body))
         .await
         .expect("spawn");
     let abort = Abort::new();
@@ -458,7 +479,7 @@ while IFS= read -r line; do
 done
 "#;
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), body))
+    let session = open_fake(&fake_harness(dir.path(), body))
         .await
         .expect("spawn");
     let abort = Abort::new();
@@ -483,7 +504,7 @@ done
 #[tokio::test]
 async fn submitting_after_close_is_a_clean_error() {
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), ANSWERING_BODY))
+    let session = open_fake(&fake_harness(dir.path(), ANSWERING_BODY))
         .await
         .expect("spawn");
     session.close().await;
@@ -502,7 +523,7 @@ async fn a_child_that_exits_before_a_result_errors_rather_than_hanging() {
     // completion — the turn must error, not settle empty.
     let body = "IFS= read -r line";
     let dir = tempfile::tempdir().unwrap();
-    let session = InteractiveSession::open(&fake_harness(dir.path(), body))
+    let session = open_fake(&fake_harness(dir.path(), body))
         .await
         .expect("spawn");
     let err = tokio::time::timeout(

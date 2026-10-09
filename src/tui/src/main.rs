@@ -280,7 +280,7 @@ fn stored_telemetry_user(
     // `.env` may also re-select the stored session itself (`MEDULLA_HOME`,
     // `MEDULLA_USER`) without supplying a token: the command then runs as that
     // session's account, so the id is named only when both views agree on it.
-    let user_id = match (external_wins(invoking), external_wins(effective)) {
+    match (external_wins(invoking), external_wins(effective)) {
         // Same id is not enough: another root can hold a session that repeats
         // the id with a different token. The session must come from the same
         // account home in both views.
@@ -288,8 +288,7 @@ fn stored_telemetry_user(
             medulla::auth::state(invoking).user_id
         }
         _ => None,
-    };
-    user_id
+    }
 }
 
 /// Pick the TLS backend before anything opens a connection.

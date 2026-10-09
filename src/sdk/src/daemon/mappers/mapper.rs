@@ -15,13 +15,6 @@ use super::usage::scan_usage;
 /// Codex records each assistant message twice within this window; drop the repeat.
 const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 
-/// How much of `current` is new since `previous`, given cumulative provider
-/// counters.
-///
-/// A decrease means the provider reset its counter — a new sub-session
-/// started counting from zero, not that usage went backwards — so the whole
-/// new snapshot is the delta; `current.saturating_sub(previous)` alone would
-/// floor that case to zero and silently drop it.
 /// The usage to report for one Codex `token_count` record.
 ///
 /// Codex's total is cumulative over the whole conversation, so on a mapper's
@@ -39,20 +32,29 @@ pub(super) fn codex_reported_usage(
 ) -> (i64, i64) {
     match first_call {
         Some(call) => (call.input_tokens, call.output_tokens),
-        None => (
-            token_delta(total.input_tokens, previous.input_tokens),
-            token_delta(total.output_tokens, previous.output_tokens),
-        ),
+        None => usage_delta(previous, total),
     }
 }
 
-pub(super) fn token_delta(current: i64, previous: i64) -> i64 {
-    if current < 0 {
-        0
-    } else if current < previous {
-        current
+/// How much of `current` is new since `previous`, given a provider's
+/// cumulative input/output counters.
+///
+/// A decrease means the provider reset its counters (a new sub-session started
+/// from zero), not that usage went backwards. The two counters belong to one
+/// snapshot and reset together, so a decrease in *either* makes the whole new
+/// snapshot the delta. Judging each counter alone would undercount the one
+/// that had already climbed past its old value: a reset from `(1000, 10)` to
+/// `(50, 20)` is `(50, 20)` of new usage, not `(50, 10)`.
+pub(super) fn usage_delta(previous: TokenUsage, current: TokenUsage) -> (i64, i64) {
+    let reset = current.input_tokens < previous.input_tokens
+        || current.output_tokens < previous.output_tokens;
+    if reset {
+        (current.input_tokens.max(0), current.output_tokens.max(0))
     } else {
-        current - previous
+        (
+            current.input_tokens - previous.input_tokens,
+            current.output_tokens - previous.output_tokens,
+        )
     }
 }
 
@@ -189,11 +191,10 @@ impl HarnessLineMapper {
                                 );
                                 (input, output, usage)
                             }
-                            Provider::Claude => (
-                                token_delta(usage.input_tokens, previous.input_tokens),
-                                token_delta(usage.output_tokens, previous.output_tokens),
-                                usage,
-                            ),
+                            Provider::Claude => {
+                                let (input, output) = usage_delta(previous, usage);
+                                (input, output, usage)
+                            }
                         };
                         self.usage = Some(total);
                         if input > 0 || output > 0 {

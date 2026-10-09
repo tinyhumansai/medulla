@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
-use super::mapper::{codex_reported_usage, token_delta};
+use super::mapper::{codex_reported_usage, usage_delta};
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,
 };
@@ -150,18 +150,28 @@ fn claude_assistant_call_usage_is_summed_and_result_total_is_not_counted_twice()
     );
 }
 
-#[test]
-fn token_delta_reports_the_new_portion_of_a_cumulative_counter() {
-    assert_eq!(token_delta(50, 10), 40);
-    assert_eq!(token_delta(10, 10), 0);
+fn usage(input_tokens: i64, output_tokens: i64) -> TokenUsage {
+    TokenUsage {
+        input_tokens,
+        output_tokens,
+    }
 }
 
 #[test]
-fn token_delta_treats_a_counter_reset_as_a_new_baseline() {
-    // A provider that resets its cumulative counter (e.g. a fresh sub-session)
-    // reports a value below the previous snapshot; the whole new snapshot is
-    // the delta, not zero.
-    assert_eq!(token_delta(50, 1000), 50);
+fn usage_delta_reports_the_new_portion_of_cumulative_counters() {
+    assert_eq!(usage_delta(usage(10, 2), usage(50, 5)), (40, 3));
+    assert_eq!(usage_delta(usage(10, 2), usage(10, 2)), (0, 0));
+}
+
+#[test]
+fn a_counter_reset_makes_the_whole_new_snapshot_the_delta() {
+    // A provider that resets its cumulative counters (a fresh sub-session)
+    // reports values below the previous snapshot; the new snapshot is the
+    // delta, not zero.
+    assert_eq!(usage_delta(usage(1000, 10), usage(50, 5)), (50, 5));
+    // The pair resets together: one counter already past its old value is
+    // still all new usage, not just the excess.
+    assert_eq!(usage_delta(usage(1000, 10), usage(50, 20)), (50, 20));
 }
 
 fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {

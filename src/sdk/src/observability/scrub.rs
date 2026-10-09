@@ -38,6 +38,11 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     // `debug_file`, and image names). None are needed for the stack shape.
     event.debug_meta = Default::default();
     event.fingerprint = Default::default();
+    // `logger` is free text an integration can set to anything, and a
+    // template frame carries file paths and source lines; neither is needed
+    // to identify the failure.
+    event.logger = None;
+    event.template = None;
     event.user = event.user.and_then(|user| user.id).map(|id| User {
         id: Some(id),
         ..Default::default()
@@ -129,10 +134,11 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
         .and_then(|home| {
             // A path separator or any non-path punctuation terminates the
             // configured directory. Capture and restore it because regex has
-            // no lookahead. Alphanumerics and path punctuation remain part of
-            // the component, so `/home/alice2` is not mistaken for `/home/alice`.
+            // no lookahead. Letters, digits, and combining marks in any script,
+            // plus path punctuation, remain part of the component, so neither
+            // `/home/alice2` nor `/home/aliceé` is mistaken for `/home/alice`.
             Regex::new(&format!(
-                r#"{}([/\\]|[^/\\A-Za-z0-9._-]|$)"#,
+                r#"{}([/\\]|[^/\\\p{L}\p{N}\p{M}._-]|$)"#,
                 regex::escape(home)
             ))
             .ok()

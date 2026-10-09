@@ -284,3 +284,21 @@ fn only_a_dispatched_command_becomes_a_ui_action() {
     );
     assert!(super::ui_action_properties("send_message: hello").is_none());
 }
+
+#[test]
+fn a_cancelled_delivery_releases_its_pending_count() {
+    use std::sync::atomic::Ordering;
+    let before = super::PENDING_EVENTS.load(Ordering::Acquire);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        // Never completes: only cancellation can end it.
+        super::spawn_tracked(std::future::pending());
+    });
+    assert_eq!(super::PENDING_EVENTS.load(Ordering::Acquire), before + 1);
+    // Shutting the runtime down drops the task mid-delivery.
+    drop(runtime);
+    assert_eq!(super::PENDING_EVENTS.load(Ordering::Acquire), before);
+}

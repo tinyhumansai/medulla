@@ -74,3 +74,18 @@ fn the_daemon_resolves_telemetry_config_the_way_each_of_its_modes_does() {
     assert_eq!(headless.config.as_deref(), Some("/tmp/c.toml"));
     assert_eq!(headless.dir, std::path::PathBuf::from("/repo/b"));
 }
+
+#[test]
+fn the_hub_resolves_telemetry_config_from_the_account_home() {
+    let raw = vec![
+        "hub".to_string(),
+        "--config".into(),
+        "/tmp/ignored.toml".into(),
+    ];
+    let hub = super::config_source(&raw, false);
+    assert_eq!(hub.config, None);
+    assert_eq!(
+        hub.dir,
+        medulla::home::medulla_home(&std::env::vars().collect())
+    );
+}

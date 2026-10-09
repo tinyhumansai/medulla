@@ -54,6 +54,9 @@ fn the_daemon_resolves_telemetry_config_the_way_each_of_its_modes_does() {
     let tui = super::config_source(&argv(&["daemon", "--config=/tmp/b.toml"]), true);
     assert_eq!(tui.config.as_deref(), Some("/tmp/b.toml"));
     assert_eq!(tui.dir, std::env::current_dir().unwrap());
+    // `daemon --tui` is its own command, read by the same parser.
+    let explicit = super::config_source(&argv(&["daemon", "--tui", "--config=/tmp/b.toml"]), false);
+    assert_eq!(explicit.config.as_deref(), Some("/tmp/b.toml"));
     // The headless daemon discovers from its workspace, last value winning.
     let headless = super::config_source(
         &argv(&[

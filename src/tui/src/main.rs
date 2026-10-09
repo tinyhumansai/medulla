@@ -141,6 +141,7 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .ok()
                 .and_then(|args| args.config),
         ),
+        Command::DaemonTui => at_cwd(flag_value(&raw[1..], "--config")),
         Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
             at_cwd(flag_value(&raw[1..], "--config"))
         }

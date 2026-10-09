@@ -248,3 +248,42 @@ fn only_an_account_shaped_id_becomes_a_profile_id() {
         );
     }
 }
+
+#[test]
+fn every_top_level_screen_and_only_those_become_a_screen_view() {
+    for screen in ["Sessions", "Workflows", "Subconscious", "Feedback", "Settings"] {
+        let properties = super::screen_view_properties(screen).expect(screen);
+        assert_eq!(
+            serde_json::to_value(Payload::track("screen_viewed", Some("user-42"), properties))
+                .unwrap(),
+            json!({
+                "type": "track",
+                "payload": {
+                    "name": "screen_viewed",
+                    "profileId": "user-42",
+                    "properties": { "screen": screen },
+                },
+            })
+        );
+    }
+    for other in ["Chat", "sessions", "", "Settings/Keys"] {
+        assert!(super::screen_view_properties(other).is_none(), "{other:?}");
+    }
+}
+
+#[test]
+fn only_a_dispatched_command_becomes_a_ui_action() {
+    let properties = super::ui_action_properties("command_dispatched").expect("reported");
+    assert_eq!(
+        serde_json::to_value(Payload::track("ui_action", Some("user-42"), properties)).unwrap(),
+        json!({
+            "type": "track",
+            "payload": {
+                "name": "ui_action",
+                "profileId": "user-42",
+                "properties": { "action": "command_dispatched" },
+            },
+        })
+    );
+    assert!(super::ui_action_properties("send_message: hello").is_none());
+}

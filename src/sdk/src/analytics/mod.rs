@@ -154,10 +154,15 @@ fn screen_view_properties(screen: &str) -> Option<[(&'static str, String); 1]> {
 /// Record a normalized TUI interaction name (never its payload) for the
 /// signed-in account. Fire-and-forget, as [`record_screen_view`].
 pub fn record_ui_action(action: &str) {
-    if action != "command_dispatched" {
-        return;
+    if let Some(properties) = ui_action_properties(action) {
+        spawn_for_current_user("ui_action", properties);
     }
-    spawn_for_current_user("ui_action", [("action", action.to_owned())]);
+}
+
+/// The `ui_action` properties for `action`, or `None` for anything but the
+/// one normalized action name that is reported.
+fn ui_action_properties(action: &str) -> Option<[(&'static str, String); 1]> {
+    (action == "command_dispatched").then(|| [("action", action.to_owned())])
 }
 
 /// Record provider-reported token counts for the signed-in account.

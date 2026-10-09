@@ -215,24 +215,31 @@ impl Transport for ReqwestTransport {
     /// for far less. This matters because `flush` runs during Sentry shutdown
     /// and after a panic, where exceeding the caller's deadline can make
     /// Medulla appear hung.
+    ///
+    /// The marker carries the only sender for its reply: if the sender thread
+    /// exits with the marker still queued (after a shutdown, say), dropping it
+    /// disconnects the reply channel and this returns at once, rather than
+    /// waiting out `timeout` for an answer that can no longer come.
     fn flush(&self, timeout: Duration) -> bool {
-        let deadline = std::time::Instant::now() + timeout;
+        let started = std::time::Instant::now();
+        // An effectively unbounded timeout must not overflow `Instant`.
+        let remaining = || timeout.saturating_sub(started.elapsed());
         let (done_tx, done_rx) = mpsc::sync_channel(1);
+        let mut task = Task::Flush(done_tx);
         loop {
-            match self.sender.try_send(Task::Flush(done_tx.clone())) {
+            match self.sender.try_send(task) {
                 Ok(()) => break,
                 Err(mpsc::TrySendError::Disconnected(_)) => return false,
-                Err(mpsc::TrySendError::Full(_)) => {
-                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                    if remaining.is_zero() {
+                Err(mpsc::TrySendError::Full(returned)) => {
+                    if remaining().is_zero() {
                         return false;
                     }
-                    std::thread::sleep(remaining.min(Duration::from_millis(5)));
+                    task = returned;
+                    std::thread::sleep(remaining().min(Duration::from_millis(5)));
                 }
             }
         }
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        done_rx.recv_timeout(remaining).is_ok()
+        done_rx.recv_timeout(remaining()).is_ok()
     }
 
     fn shutdown(&self, timeout: Duration) -> bool {

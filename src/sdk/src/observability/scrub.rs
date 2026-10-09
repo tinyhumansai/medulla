@@ -155,11 +155,16 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
 }
 
 /// Redact bearer credentials and JWTs.
+///
+/// Then every credential shape the transcript uploader already strips before
+/// anything leaves the machine ([`crate::history_upload::redact_text`]): bare
+/// provider keys (`sk-…`, AWS, GitHub, Slack, Google), PEM private keys, and
+/// `api_key=` / `password:` / `token=`-style assignments. One list, so the two
+/// outbound paths cannot drift apart on what counts as a secret.
 fn scrub_secrets(value: &str) -> String {
     let value = bearer_pattern().replace_all(value, "${scheme} <redacted>");
-    jwt_pattern()
-        .replace_all(&value, "<redacted-jwt>")
-        .into_owned()
+    let value = jwt_pattern().replace_all(&value, "<redacted-jwt>");
+    crate::history_upload::redact_text(&value).0
 }
 
 /// Cap a value at [`MAX_TEXT_LEN`] bytes on a character boundary.

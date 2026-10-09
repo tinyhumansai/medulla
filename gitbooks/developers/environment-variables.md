@@ -14,10 +14,12 @@ these can be set either way. Truthy values are `1` and `true`, case-insensitive.
 
 ## Home, account, and config
 
+`MEDULLA_HOME`, `MEDULLA_DEV`, `MEDULLA_USER`, and `MEDULLA_CONFIG_PATH`, along with `HOME` and `USERPROFILE`, are only honoured from the environment Medulla is started with. A `.env` in the current directory can't set them; see [Configuration](configuration.md#medulla-home).
+
 | Variable | What it does | Default |
 | --- | --- | --- |
 | `MEDULLA_HOME` | Overrides the Medulla root, the directory holding one subdirectory per account. | `~/.medulla`, or `./.medulla` under `MEDULLA_DEV` |
-| `MEDULLA_DEV` | Truthy makes the root `./.medulla`, relative to the cwd. Set it in the shell: like the other variables in this table except the last two, a cwd `.env` can't set it. | unset |
+| `MEDULLA_DEV` | Truthy makes the root `./.medulla`, relative to the cwd. | unset |
 | `MEDULLA_USER` | Selects the account for one process, ahead of the `active_user.toml` marker and without changing it. `local` reaches the pre-login home. | the marker, else `local` |
 | `MEDULLA_CONFIG_PATH` | The `--config` path a subprocess should use. Set by the parent at startup so a spawned MCP tool server or ACP harness inherits the same config file instead of rediscovering one from its own cwd. | unset |
 | `MEDULLA_STATE_DIR` | Where local state is written. Beats an explicit `stateDir` in config. | `<home>/state` |

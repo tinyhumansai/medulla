@@ -330,11 +330,36 @@ fn spawn_tracked_on(
     runtime: &tokio::runtime::Handle,
     delivery: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
-    PENDING_EVENTS.fetch_add(1, Ordering::AcqRel);
-    let notify = PENDING_EVENTS_CHANGED.get_or_init(tokio::sync::Notify::new);
+    let pending = PendingEvent::start();
     runtime.spawn(async move {
+        // Moved in so it drops with the task: on completion, and equally if
+        // the task is aborted or its runtime shuts down first.
+        let _pending = pending;
         delivery.await;
-        PENDING_EVENTS.fetch_sub(1, Ordering::AcqRel);
-        notify.notify_waiters();
     });
+}
+
+/// One event counted in [`PENDING_EVENTS`] for as long as this lives.
+///
+/// The count is released in `Drop` rather than after the delivery's `.await`:
+/// a task cancelled mid-delivery (an aborted task, a dropped runtime) never
+/// runs the code after its await point, and a leaked count would make every
+/// later [`flush_pending`] wait out its whole timeout for an event that is
+/// already gone.
+struct PendingEvent;
+
+impl PendingEvent {
+    fn start() -> Self {
+        PENDING_EVENTS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for PendingEvent {
+    fn drop(&mut self) {
+        PENDING_EVENTS.fetch_sub(1, Ordering::AcqRel);
+        PENDING_EVENTS_CHANGED
+            .get_or_init(tokio::sync::Notify::new)
+            .notify_waiters();
+    }
 }

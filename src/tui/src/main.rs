@@ -142,6 +142,12 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .and_then(|args| args.config),
         ),
         Command::DaemonTui => at_cwd(flag_value(&raw[1..], "--config")),
+        // `run_hub` loads its configuration from the account home alone,
+        // never from a checkout it happens to be launched in.
+        Command::Hub => ConfigSource {
+            config: None,
+            dir: medulla::home::medulla_home(&std::env::vars().collect()),
+        },
         Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
             at_cwd(flag_value(&raw[1..], "--config"))
         }

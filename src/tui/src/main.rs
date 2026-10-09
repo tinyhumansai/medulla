@@ -118,20 +118,21 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Attribute non-TUI harness and daemon analytics to a stored account only
-/// when config/environment credentials do not override that session.
-fn set_stored_telemetry_user(raw: &[String]) {
-    // Harness wrapper flags belong to the child CLI. In particular, Codex's
-    // `--config key=value` is a model override, not a Medulla config path.
-    let is_wrapper = matches!(parse_command(raw), Command::Wrapper(_));
-    let env: std::collections::HashMap<String, String> = std::env::vars_os()
-        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
-        .collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let explicit_config = if is_wrapper {
-        None
-    } else {
-        raw.iter().enumerate().find_map(|(index, arg)| {
+/// The `--config` path the selected command will actually load, read through
+/// that command's own parser wherever one exists.
+///
+/// A blind scan of the argv misreads arguments that are not Medulla flags:
+/// harness wrapper flags belong to the child CLI (Codex's `--config key=value`
+/// is a model override), and `medulla run` accepts only `--config <path>`, so a
+/// `--config=...` token there is instruction text, not a config path.
+fn explicit_config_path(raw: &[String]) -> Option<String> {
+    match parse_command(raw) {
+        Command::Wrapper(_) => None,
+        Command::Tui => medulla_tui::cli::parse_tui_args(raw).config,
+        Command::Run => medulla_tui::cli::parse_run_args(&raw[1..])
+            .ok()
+            .and_then(|args| args.config),
+        _ => raw.iter().enumerate().find_map(|(index, arg)| {
             arg.strip_prefix("--config=")
                 .map(str::to_owned)
                 .or_else(|| {
@@ -139,8 +140,18 @@ fn set_stored_telemetry_user(raw: &[String]) {
                         .then(|| raw.get(index + 1).cloned())
                         .flatten()
                 })
-        })
-    };
+        }),
+    }
+}
+
+/// Attribute non-TUI harness and daemon analytics to a stored account only
+/// when config/environment credentials do not override that session.
+fn set_stored_telemetry_user(raw: &[String]) {
+    let env: std::collections::HashMap<String, String> = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let explicit_config = explicit_config_path(raw);
     let user_id = medulla::config::load_config(explicit_config.as_deref(), &env, &cwd)
         .ok()
         .and_then(|loaded| {

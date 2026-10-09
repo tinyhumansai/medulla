@@ -549,3 +549,19 @@ fn an_unbounded_flush_timeout_does_not_overflow() {
     let transport = transport::factory(&sentry::ClientOptions::default(), status);
     assert!(!transport.flush(Duration::MAX));
 }
+
+#[test]
+fn bare_provider_keys_and_secret_assignments_are_redacted() {
+    // Assembled at runtime so the source never holds a credential-shaped
+    // literal for secret scanners to flag.
+    let key = format!("sk-{}", "abcdefghijklmnop0123456789");
+    let text = scrub_text(
+        &format!("called with {key} and OPENROUTER_API_KEY=or-v1-0123456789abcdef"),
+        None,
+    );
+    assert!(!text.contains(&key), "{text}");
+    assert!(!text.contains("or-v1-0123456789abcdef"), "{text}");
+    assert!(text.contains("[REDACTED]"), "{text}");
+    // Token counts in a panic message are not secrets and survive.
+    assert!(scrub_text("input_tokens=12345678", None).contains("12345678"));
+}

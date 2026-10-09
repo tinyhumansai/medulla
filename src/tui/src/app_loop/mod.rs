@@ -81,6 +81,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let externally_authenticated =
         medulla::runtime::cloud::connect::external_credential_source(&env, &loaded.config.backend)
             .is_some();
+    // Whether this launch signed the account in itself (a login screen, first
+    // account or returning), as opposed to finding a stored session: only then
+    // is it a sign-in.
+    let mut signed_in_here = false;
     if !args.mock && !account_is_active(&env) && !externally_authenticated {
         let issuer = loaded.config.backend.base_url.clone();
         match sign_in_first_account(&env, &issuer, args.alt_screen).await? {
@@ -99,6 +103,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     .map_err(|e| {
                         anyhow::anyhow!("signed in, but the session could not be stored: {e}")
                     })?;
+                signed_in_here = true;
                 // Now the marker names the authenticated account, so this
                 // resolves that account's own config file — the one that wins
                 // from here on.
@@ -304,6 +309,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 return Err(e);
             }
             Ok(SignIn::SameAccount) => {
+                signed_in_here = true;
                 match medulla::runtime::cloud::connect::client_from_config(
                     &env,
                     &loaded.config.backend,
@@ -332,6 +338,33 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 }
             }
         }
+    }
+
+    // Tie crash reports to the signed-in account — its opaque id only — now
+    // that both boot paths (stored session, fresh sign-in) have settled on one.
+    // A config/env bearer can authenticate as an account different from the
+    // stored login. Its identity is unknown locally, so never attribute this
+    // run's reports to the stale stored account.
+    let external_token = medulla::auth::external_token_wins(&env, &loaded.config.backend);
+    // A session the cwd `.env` re-selected is the checkout's choice, not the
+    // operator's (see `DOTENV_RESELECTED_SESSION`): name it only once this
+    // process has signed that account in itself.
+    let reselected = crate::DOTENV_RESELECTED_SESSION.load(std::sync::atomic::Ordering::Acquire);
+    let telemetry_user_id = (!external_token && (!reselected || signed_in_here))
+        .then(|| account.as_ref().and_then(|state| state.user_id.clone()))
+        .flatten();
+    medulla::observability::set_user(telemetry_user_id.as_deref());
+    // Product analytics reads the same account slot. Spawned so a slow or
+    // unreachable OpenPanel never delays the first frame.
+    if let Some(user_id) = telemetry_user_id {
+        medulla::analytics::spawn_tracked(async move {
+            // A sign-in through the login screen is reported like one through
+            // `medulla login`, ahead of the start it led to.
+            if signed_in_here {
+                let _ = medulla::analytics::record_sign_in(&user_id).await;
+            }
+            let _ = medulla::analytics::record_application_started(&user_id).await;
+        });
     }
 
     // `mut` because a relogin rebuilds it around a fresh client.
@@ -698,6 +731,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 // every other one reports that it holds none, so its logout
                 // never succeeds and this arm is unreachable for it.
                 if client_arc.is_some() {
+                    // The runtime's own logout already cleared authentication,
+                    // but not the global reporting identity: left set, a crash
+                    // on the relogin screen itself would still be attributed
+                    // to the account that just signed out.
+                    medulla::observability::set_user(None);
                     match relogin(&mut terminal, &env, &loaded.config.backend.base_url).await {
                         // Signing in as a different account re-homes the
                         // install, and this process cannot follow: its config,
@@ -710,6 +748,19 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         }
                         Ok(SignIn::SameAccount) => {
                             (_, account) = session_of(&env, &loaded.config.backend);
+                            // Restore the reporting identity now that the
+                            // same account is signed back in — unless an
+                            // external token still authenticates this run, the
+                            // same case startup withholds the stored account in.
+                            let user_id = (!external_token)
+                                .then(|| account.as_ref().and_then(|state| state.user_id.clone()))
+                                .flatten();
+                            medulla::observability::set_user(user_id.as_deref());
+                            if let Some(user_id) = user_id {
+                                medulla::analytics::spawn_tracked(async move {
+                                    let _ = medulla::analytics::record_sign_in(&user_id).await;
+                                });
+                            }
                             // Rebuilt rather than reused: the relogin replaced
                             // the stored token, and the client captured its
                             // bearer at construction — carrying the old one

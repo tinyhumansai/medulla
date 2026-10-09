@@ -18,30 +18,30 @@ pub(super) fn scan_usage(value: &Value, depth: usize) -> Option<TokenUsage> {
         let num = |keys: [&str; 2]| {
             keys.iter()
                 .find_map(|k| obj.get(*k))
-                .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+                .and_then(Value::as_i64)
         };
         if let (Some(input), Some(output)) = (
             num(["input_tokens", "inputTokens"]),
             num(["output_tokens", "outputTokens"]),
         ) {
-            return Some(TokenUsage {
-                input_tokens: input,
-                output_tokens: output,
-            });
-        }
-        // opencode reports a nested `tokens: { input, output, reasoning, cache }`
-        // object rather than the *_tokens naming the other harnesses use.
-        if let Some(tokens) = obj.get("tokens").and_then(|v| v.as_object()) {
-            let tnum = |key: &str| {
-                tokens
-                    .get(key)
-                    .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
-            };
-            if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
+            if input >= 0 && output >= 0 {
                 return Some(TokenUsage {
                     input_tokens: input,
                     output_tokens: output,
                 });
+            }
+        }
+        // opencode reports a nested `tokens: { input, output, reasoning, cache }`
+        // object rather than the *_tokens naming the other harnesses use.
+        if let Some(tokens) = obj.get("tokens").and_then(|v| v.as_object()) {
+            let tnum = |key: &str| tokens.get(key).and_then(Value::as_i64);
+            if let (Some(input), Some(output)) = (tnum("input"), tnum("output")) {
+                if input >= 0 && output >= 0 {
+                    return Some(TokenUsage {
+                        input_tokens: input,
+                        output_tokens: output,
+                    });
+                }
             }
         }
         return obj.values().find_map(|v| scan_usage(v, depth + 1));

@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
+use super::mapper::{codex_reported_usage, usage_delta};
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,
 };
@@ -68,6 +69,28 @@ fn scan_usage_finds_nested_counts_in_all_shapes() {
 }
 
 #[test]
+fn scan_usage_skips_negative_match_and_continues_nested_scan() {
+    let value = json!({
+        "input_tokens": -1,
+        "output_tokens": 2,
+        "nested": { "input_tokens": 3, "output_tokens": 4 }
+    });
+    assert_eq!(
+        scan_usage(&value, 0),
+        Some(TokenUsage {
+            input_tokens: 3,
+            output_tokens: 4
+        })
+    );
+}
+
+#[test]
+fn scan_usage_rejects_fractional_token_counts() {
+    let value = json!({"input_tokens": -0.5, "output_tokens": 1});
+    assert_eq!(scan_usage(&value, 0), None);
+}
+
+#[test]
 fn mapper_accumulates_latest_usage() {
     let mut mapper = HarnessLineMapper::new_with_gh_repo_override("codex", false);
     assert_eq!(mapper.usage(), None);
@@ -86,6 +109,69 @@ fn mapper_accumulates_latest_usage() {
             output_tokens: 11
         })
     );
+}
+
+#[test]
+fn opencode_step_usage_is_summed_instead_of_delta_folded() {
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("opencode", false);
+    for (input, output) in [(100, 10), (120, 12)] {
+        let line =
+            format!(r#"{{"type":"step-finish","tokens":{{"input":{input},"output":{output}}}}}"#);
+        let _ = mapper.map_line(&line, 0);
+    }
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 220,
+            output_tokens: 22,
+        })
+    );
+}
+
+#[test]
+fn claude_assistant_call_usage_is_summed_and_result_total_is_not_counted_twice() {
+    let mut mapper = HarnessLineMapper::new_with_gh_repo_override("claude", false);
+    for (input, output) in [(8, 900), (12, 1500), (6, 700)] {
+        let line = format!(
+            r#"{{"type":"assistant","message":{{"usage":{{"input_tokens":{input},"output_tokens":{output}}},"content":[]}}}}"#
+        );
+        let _ = mapper.map_line(&line, 0);
+    }
+    let _ = mapper.map_line(
+        r#"{"type":"result","usage":{"input_tokens":26,"output_tokens":3100}}"#,
+        3,
+    );
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 26,
+            output_tokens: 3100,
+        })
+    );
+}
+
+fn usage(input_tokens: i64, output_tokens: i64) -> TokenUsage {
+    TokenUsage {
+        input_tokens,
+        output_tokens,
+    }
+}
+
+#[test]
+fn usage_delta_reports_the_new_portion_of_cumulative_counters() {
+    assert_eq!(usage_delta(usage(10, 2), usage(50, 5)), (40, 3));
+    assert_eq!(usage_delta(usage(10, 2), usage(10, 2)), (0, 0));
+}
+
+#[test]
+fn a_counter_reset_makes_the_whole_new_snapshot_the_delta() {
+    // A provider that resets its cumulative counters (a fresh sub-session)
+    // reports values below the previous snapshot; the new snapshot is the
+    // delta, not zero.
+    assert_eq!(usage_delta(usage(1000, 10), usage(50, 5)), (50, 5));
+    // The pair resets together: one counter already past its old value is
+    // still all new usage, not just the excess.
+    assert_eq!(usage_delta(usage(1000, 10), usage(50, 20)), (50, 20));
 }
 
 fn map_all(provider: &str, lines: &[&str]) -> Vec<HarnessSemanticEvent> {
@@ -556,4 +642,79 @@ fn codex_turn_failed_without_a_message_still_reports_the_failure() {
         vec!["status", "error"]
     );
     assert_eq!(events[1].event.payload["fatal"], true);
+}
+
+#[test]
+fn codex_usage_follows_the_cumulative_total_not_the_last_call() {
+    // A real `token_count` record carries both the latest call's usage and the
+    // running total; `last_token_usage` comes first, and it is the total that
+    // the cumulative fold must track.
+    let record = |last_in: i64, total_in: i64, total_out: i64| {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": { "input_tokens": last_in, "output_tokens": 1 },
+                    "total_token_usage": { "input_tokens": total_in, "output_tokens": total_out },
+                },
+            },
+        })
+        .to_string()
+    };
+    let mut mapper = HarnessLineMapper::new("codex");
+    mapper.map_line(&record(7_713, 7_713, 10), 1);
+    mapper.map_line(&record(8_176, 15_889, 20), 2);
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 15_889,
+            output_tokens: 20
+        })
+    );
+}
+
+#[test]
+fn an_invalid_codex_total_is_skipped_not_replaced_by_the_last_call() {
+    let mut mapper = HarnessLineMapper::new("codex");
+    mapper.map_line(
+        &json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": { "input_tokens": 5, "output_tokens": 1 },
+                    "total_token_usage": { "input_tokens": -1, "output_tokens": 2 },
+                },
+            },
+        })
+        .to_string(),
+        1,
+    );
+    assert_eq!(mapper.usage(), None);
+}
+
+#[test]
+fn a_resumed_codex_conversation_reports_only_the_new_call_first() {
+    let usage = |input, output| TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+    };
+    let none = usage(0, 0);
+    // Resumed: the first total carries 15,000 tokens of earlier turns, but this
+    // call used 400 of them.
+    assert_eq!(
+        codex_reported_usage(Some(usage(400, 20)), none, usage(15_400, 900)),
+        (400, 20)
+    );
+    // A new conversation: the first call is the whole total either way.
+    assert_eq!(
+        codex_reported_usage(Some(usage(7, 3)), none, usage(7, 3)),
+        (7, 3)
+    );
+    // Later records report the delta between totals.
+    assert_eq!(
+        codex_reported_usage(None, usage(15_400, 900), usage(16_000, 950)),
+        (600, 50)
+    );
 }

@@ -15,7 +15,7 @@ use crate::protocol::HarnessProvider;
 use super::args::parse_wrapper_args;
 use super::bridge::{
     build_bridge, drain_and_inject, mint_session_id, now_ms, provider_bin_env_key, pump_tailer,
-    sync_harness_id,
+    sync_harness_id, UsageTap,
 };
 use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
 
@@ -123,6 +123,10 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
     let timings = WrapperTimings::resolve(config.provider, &config.env);
     let mut bridge = build_bridge(&config, &wrapper_session_id, start_ms).await;
     let receive_active = bridge.as_ref().map(|b| b.receive_active).unwrap_or(false);
+    let mut usage_tap = bridge
+        .is_none()
+        .then(|| UsageTap::new(&config, start_ms))
+        .flatten();
 
     // Extra args from `MEDULLA_<P>_ARGS` are prepended to the child argv.
     let mut child_args = tp_env::provider_args(config.provider, &config.env);
@@ -202,6 +206,8 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
             _ = tail_tick.tick() => {
                 if let Some(bridge) = bridge.as_mut() {
                     pump_tailer(bridge).await;
+                } else if let Some(tap) = usage_tap.as_mut() {
+                    tap.pump();
                 }
             }
             _ = recv_tick.tick() => {
@@ -241,6 +247,9 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
         }
         bridge.lifecycle("session_end").await;
         bridge.finish_publications(PUBLISH_DRAIN_TIMEOUT).await;
+    }
+    if let Some(tap) = usage_tap {
+        tap.finish();
     }
 
     Ok(code)

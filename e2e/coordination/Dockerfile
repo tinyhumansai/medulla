@@ -91,6 +91,9 @@ COPY e2e/coordination /app/e2e/coordination
 # Hand run.sh its prebuilt binaries so it never shells out to cargo. The coding
 # CLIs' own `*_BIN` variables come from the base image. `E2E_HARNESS` chooses
 # which of them a run actually drives.
+# Telemetry is on by default in every build; a test container must never
+# report to the live Sentry and OpenPanel projects.
+ENV MEDULLA_ANALYTICS_DISABLED=1
 ENV MEDULLA_BIN=/usr/local/bin/medulla \
     FORWARDER_BIN=/usr/local/bin/mock_link_forwarder \
     OWNER_BIN=/usr/local/bin/coordination_owner \

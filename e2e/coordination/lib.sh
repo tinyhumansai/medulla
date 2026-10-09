@@ -28,6 +28,11 @@
 # All state lands in the shared globals RUN_DIR / SESSION / FORWARDER_ADDR /
 # LLM_PORT / HARNESS / WORKER_ID. Loopback only; deterministic; no real keys.
 
+# Crash reports and analytics are on by default in every build; nothing this
+# harness starts may report to the live projects. `launch` repeats this in each
+# tmux script, which does not inherit these exports.
+export MEDULLA_ANALYTICS_DISABLED=1
+
 # ── logging + diagnostics ───────────────────────────────────────────────────
 log()  { printf '[e2e] %s\n' "$*" >&2; }
 fail() { printf '[e2e] FAIL: %s\n' "$*" >&2; dump_diagnostics; exit 1; }
@@ -166,6 +171,10 @@ launch() {
   local script="$RUN_DIR/$name.cmd"
   {
     printf '#!/usr/bin/env bash\nset -uo pipefail\ncd %q\n' "$RUN_DIR"
+    # Crash reports and analytics are on by default in every build; a test
+    # run must never reach the live projects. Set in each launched script
+    # because tmux windows do not inherit this shell's exports.
+    printf 'export MEDULLA_ANALYTICS_DISABLED=1\n'
     cat
   } > "$script"
   chmod +x "$script"

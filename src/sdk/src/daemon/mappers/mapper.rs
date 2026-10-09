@@ -15,6 +15,49 @@ use super::usage::scan_usage;
 /// Codex records each assistant message twice within this window; drop the repeat.
 const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 
+/// The usage to report for one Codex `token_count` record.
+///
+/// Codex's total is cumulative over the whole conversation, so on a mapper's
+/// first record it may already include turns this mapper never saw: a resumed
+/// conversation, or a PTY reused for a later turn. Subtracting a zero baseline
+/// would report all of that history again. The record's `last_token_usage`
+/// (`first_call`) is exactly what the latest call used, so it is reported for
+/// the first record, and the total becomes the baseline. For a new
+/// conversation the two are equal. Later records report the delta between
+/// totals; a record with no per-call usage falls back to that delta as well.
+pub(super) fn codex_reported_usage(
+    first_call: Option<TokenUsage>,
+    previous: TokenUsage,
+    total: TokenUsage,
+) -> (i64, i64) {
+    match first_call {
+        Some(call) => (call.input_tokens, call.output_tokens),
+        None => usage_delta(previous, total),
+    }
+}
+
+/// How much of `current` is new since `previous`, given a provider's
+/// cumulative input/output counters.
+///
+/// A decrease means the provider reset its counters (a new sub-session started
+/// from zero), not that usage went backwards. The two counters belong to one
+/// snapshot and reset together, so a decrease in *either* makes the whole new
+/// snapshot the delta. Judging each counter alone would undercount the one
+/// that had already climbed past its old value: a reset from `(1000, 10)` to
+/// `(50, 20)` is `(50, 20)` of new usage, not `(50, 10)`.
+pub(super) fn usage_delta(previous: TokenUsage, current: TokenUsage) -> (i64, i64) {
+    let reset = current.input_tokens < previous.input_tokens
+        || current.output_tokens < previous.output_tokens;
+    if reset {
+        (current.input_tokens.max(0), current.output_tokens.max(0))
+    } else {
+        (
+            current.input_tokens - previous.input_tokens,
+            current.output_tokens - previous.output_tokens,
+        )
+    }
+}
+
 impl HarnessLineMapper {
     /// Seed repository context retained by a reused interactive session.
     pub fn set_workspace_context(
@@ -59,6 +102,7 @@ impl HarnessLineMapper {
             last_text: None,
             last_at_ms: i64::MIN,
             usage: None,
+            saw_claude_call_usage: false,
             pull_request_calls: Default::default(),
             workspace_cwd: None,
             workspace_branch: None,
@@ -67,9 +111,8 @@ impl HarnessLineMapper {
         }
     }
 
-    /// The most recent token usage seen on the stream, if any. Providers report
-    /// cumulative counts (claude on the result record, codex via token_count
-    /// events), so latest-wins is the correct fold.
+    /// The most recent total token usage seen on the stream, if any. Claude and
+    /// Codex report cumulative counters; OpenCode reports per-step counts.
     pub fn usage(&self) -> Option<TokenUsage> {
         self.usage
     }
@@ -80,8 +123,84 @@ impl HarnessLineMapper {
         // line that plausibly carries counts and keep the latest.
         if raw.contains("okens") {
             if let Ok(value) = serde_json::from_str::<Value>(raw) {
-                if let Some(usage) = scan_usage(&value, 0) {
-                    self.usage = Some(usage);
+                // Codex `token_count` records carry the latest call's usage
+                // (`last_token_usage`) beside the running total, and the scan
+                // would take whichever comes first. The fold below is
+                // cumulative, so it must read the total — and only the total:
+                // a record whose total is present but invalid is skipped,
+                // never re-read through its per-call sibling.
+                let codex_total = (self.provider == Provider::Codex)
+                    .then(|| value.pointer("/payload/info/total_token_usage"))
+                    .flatten();
+                let usage = match codex_total {
+                    Some(total) => scan_usage(total, 0),
+                    None => scan_usage(&value, 0),
+                };
+                // The same record's per-call usage, for a first snapshot.
+                let codex_last = (self.provider == Provider::Codex)
+                    .then(|| value.pointer("/payload/info/last_token_usage"))
+                    .flatten()
+                    .and_then(|last| scan_usage(last, 0));
+                if let Some(usage) = usage {
+                    let record_type = value.get("type").and_then(Value::as_str);
+                    let duplicate_claude_result = self.provider == Provider::Claude
+                        && record_type == Some("result")
+                        && self.saw_claude_call_usage;
+                    if !duplicate_claude_result {
+                        let first_snapshot = self.usage.is_none();
+                        let previous = self.usage.unwrap_or(TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                        });
+                        // OpenCode's step-finish usage is per-step; Claude and
+                        // Codex emit cumulative snapshots. Preserve total usage
+                        // for callers while reporting the appropriate amount.
+                        let (input, output, total) = match self.provider {
+                            Provider::Claude if record_type == Some("assistant") => {
+                                self.saw_claude_call_usage = true;
+                                (
+                                    usage.input_tokens,
+                                    usage.output_tokens,
+                                    TokenUsage {
+                                        input_tokens: previous
+                                            .input_tokens
+                                            .saturating_add(usage.input_tokens),
+                                        output_tokens: previous
+                                            .output_tokens
+                                            .saturating_add(usage.output_tokens),
+                                    },
+                                )
+                            }
+                            Provider::Opencode => (
+                                usage.input_tokens,
+                                usage.output_tokens,
+                                TokenUsage {
+                                    input_tokens: previous
+                                        .input_tokens
+                                        .saturating_add(usage.input_tokens),
+                                    output_tokens: previous
+                                        .output_tokens
+                                        .saturating_add(usage.output_tokens),
+                                },
+                            ),
+                            Provider::Codex => {
+                                let (input, output) = codex_reported_usage(
+                                    first_snapshot.then_some(codex_last).flatten(),
+                                    previous,
+                                    usage,
+                                );
+                                (input, output, usage)
+                            }
+                            Provider::Claude => {
+                                let (input, output) = usage_delta(previous, usage);
+                                (input, output, usage)
+                            }
+                        };
+                        self.usage = Some(total);
+                        if input > 0 || output > 0 {
+                            crate::analytics::record_token_usage(input, output);
+                        }
+                    }
                 }
             }
         }

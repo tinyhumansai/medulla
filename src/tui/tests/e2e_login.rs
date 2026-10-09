@@ -268,6 +268,8 @@ async fn run_medulla_with_stdin(
 ) -> std::process::Output {
     tokio::task::spawn_blocking(move || {
         let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_medulla"));
+        // Never report a test run to the live telemetry projects.
+        cmd.env("MEDULLA_ANALYTICS_DISABLED", "1");
         cmd.args(&args)
             .current_dir(&home)
             .env("MEDULLA_HOME", &home)

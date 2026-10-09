@@ -74,7 +74,28 @@ fn run_with_env(
         .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
         .env_remove("OPENROUTER_API_KEY")
-        .env_remove("MEDULLA_BACKEND_URL");
+        .env_remove("MEDULLA_BACKEND_URL")
+        .env_remove("MEDULLA_SENTRY_DSN")
+        .env_remove(medulla::analytics::API_URL_ENV);
+    // Telemetry is on by default, and with no endpoint override it reports to
+    // the live projects, so every child is opted out unless the test points
+    // telemetry at its own loopback listener. Then the opt-out is removed, so
+    // an opted-out machine cannot turn those success-path tests into no-ops;
+    // the opt-out tests set it back through `extra`.
+    let local_endpoint = extra
+        .iter()
+        .any(|(name, _)| *name == "MEDULLA_SENTRY_DSN" || *name == medulla::analytics::API_URL_ENV);
+    if local_endpoint {
+        // Clearing the opt-out enables both transports, so the one the test
+        // does not redirect is aimed at a closed loopback port rather than left
+        // on its live default; `extra` overrides either with a real listener.
+        command
+            .env_remove("MEDULLA_ANALYTICS_DISABLED")
+            .env("MEDULLA_SENTRY_DSN", "http://unused@127.0.0.1:9/0")
+            .env(medulla::analytics::API_URL_ENV, "http://127.0.0.1:9");
+    } else {
+        command.env("MEDULLA_ANALYTICS_DISABLED", "1");
+    }
     for (name, value) in extra {
         command.env(name, value);
     }
@@ -277,6 +298,8 @@ fn interactive_tui_drives_commands_and_quits_on_ctrl_c() {
     };
 
     let mut command = Command::new(binary);
+    // Never report a test run to the live telemetry projects.
+    command.env("MEDULLA_ANALYTICS_DISABLED", "1");
     command
         .args(["--mock", "--no-alt-screen"])
         .env("MEDULLA_HOME", dir.path())
@@ -407,6 +430,8 @@ fn run_mcp(
     home: &std::path::Path,
 ) -> (Vec<serde_json::Value>, bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home)
         .env("MEDULLA_MCP_ATTACHED", "test-launch")
@@ -438,6 +463,18 @@ fn run_mcp(
     (replies, output.status.success())
 }
 
+/// The reply to request `id` (`None` for a frame with no usable id).
+///
+/// The server answers requests concurrently, so replies may arrive in any
+/// order; JSON-RPC pairs them by id, and so must these assertions.
+fn reply_with_id(replies: &[serde_json::Value], id: impl Into<Option<i64>>) -> &serde_json::Value {
+    let id = id.into().map_or(serde_json::Value::Null, Into::into);
+    replies
+        .iter()
+        .find(|reply| reply["id"] == id)
+        .unwrap_or_else(|| panic!("no reply with id {id}: {replies:?}"))
+}
+
 #[test]
 fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
     let home = TempDir::new().unwrap();
@@ -455,10 +492,11 @@ fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
 
     assert!(exited_cleanly, "closing stdin should end the session");
     assert_eq!(replies.len(), 2, "one reply per request: {replies:?}");
-    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "medulla");
-    assert_eq!(replies[0]["result"]["protocolVersion"], "2024-11-05");
+    let initialize = reply_with_id(&replies, 1);
+    assert_eq!(initialize["result"]["serverInfo"]["name"], "medulla");
+    assert_eq!(initialize["result"]["protocolVersion"], "2024-11-05");
 
-    let names: Vec<&str> = replies[1]["result"]["tools"]
+    let names: Vec<&str> = reply_with_id(&replies, 2)["result"]["tools"]
         .as_array()
         .expect("a tool list")
         .iter()
@@ -476,6 +514,8 @@ fn mcp_serves_the_workflow_tools_and_exits_when_stdin_closes() {
 fn mcp_rejects_an_ambient_registration_not_attached_by_medulla() {
     let home = TempDir::new().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home.path())
         .env_remove("MEDULLA_MCP_ATTACHED")
@@ -519,6 +559,8 @@ fn mcp_answers_a_notification_with_nothing() {
 fn mcp_answers_a_malformed_frame_and_keeps_going() {
     let home = TempDir::new().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        // Never report a test run to the live telemetry projects.
+        .env("MEDULLA_ANALYTICS_DISABLED", "1")
         .arg("mcp")
         .env("MEDULLA_HOME", home.path())
         .env("MEDULLA_MCP_ATTACHED", "test-launch")
@@ -551,8 +593,366 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
 
     // One bad frame does not end the session: the client that sent it is still
     // a client, and the next request is answered normally.
-    assert_eq!(replies[0]["error"]["code"], -32700);
-    assert_eq!(replies[1]["id"], 7);
+    assert_eq!(reply_with_id(&replies, None)["error"]["code"], -32700);
+    assert!(
+        reply_with_id(&replies, 7)["result"].is_object(),
+        "{replies:?}"
+    );
+}
+
+/// Read one HTTP request in full, answer it `200 OK`, and return its body.
+fn answer_analytics_request(mut stream: std::net::TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("timeout");
+    let mut request = Vec::new();
+    let mut buf = [0u8; 4096];
+    let headers_end = loop {
+        if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        let read = stream.read(&mut buf).expect("read headers");
+        assert_ne!(read, 0, "connection closed before headers completed");
+        request.extend_from_slice(&buf[..read]);
+    };
+    let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .map(str::to_owned)
+        })
+        .and_then(|value| value.trim().parse().ok())
+        .expect("content length");
+    while request.len() < headers_end + content_length {
+        let read = stream.read(&mut buf).expect("read body");
+        assert_ne!(read, 0, "connection closed before body completed");
+        request.extend_from_slice(&buf[..read]);
+    }
+    stream
+        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+        .expect("respond");
+    String::from_utf8_lossy(&request[headers_end..headers_end + content_length]).into_owned()
+}
+
+/// Accept requests until `stop` is set, answering each `200 OK`, and return
+/// every body received.
+///
+/// Accepting is polled, so the server always stops and can be joined, even
+/// when the command under test never connects.
+fn collect_requests() -> (
+    u16,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<Vec<String>>,
+) {
+    use std::sync::atomic::Ordering;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    listener
+        .set_nonblocking(true)
+        .expect("non-blocking listener");
+    let port = listener.local_addr().expect("listener address").port();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopping = std::sync::Arc::clone(&stop);
+    let server = std::thread::spawn(move || {
+        let mut bodies = Vec::new();
+        while !stopping.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).expect("blocking stream");
+                    bodies.push(answer_analytics_request(stream));
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        bodies
+    });
+    (port, stop, server)
+}
+
+#[test]
+fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() {
+    let dir = TempDir::new().unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(bodies.len(), 1, "analytics requests: {bodies:?}");
+    let body: serde_json::Value = serde_json::from_str(&bodies[0]).expect("analytics JSON");
+    assert_eq!(body["type"], "track");
+    assert_eq!(body["payload"]["name"], "signed_out");
+    assert_eq!(body["payload"]["profileId"], "user-42");
+}
+
+/// A plain passthrough wrapper session (`--no-bridge`) has no host link to
+/// publish to, but its token usage still reaches analytics.
+#[cfg(unix)]
+#[test]
+fn a_bridgeless_wrapper_session_reports_its_token_usage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    // `run_with_env` points Codex discovery here; `rollout-*.jsonl` is the
+    // transcript name it matches.
+    let sessions = dir.path().join("codex-sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join("rollout-usage.jsonl");
+    // The script is fixed text: the transcript path and both JSON lines reach
+    // it through its environment, so no path is ever spliced into shell
+    // source, however it is spelled.
+    let fake_codex = dir.path().join("codex");
+    std::fs::write(
+        &fake_codex,
+        "#!/bin/sh\n\
+         printf '%s\\n' \"$FAKE_CODEX_META\" \"$FAKE_CODEX_USAGE\" >> \"$FAKE_CODEX_ROLLOUT\"\n",
+    )
+    .unwrap();
+    let meta = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "session_id": "codex-usage-e2e", "cwd": workspace },
+    })
+    .to_string();
+    let usage_line = serde_json::json!({
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": { "total_token_usage": { "input_tokens": 7, "output_tokens": 3 } },
+        },
+    })
+    .to_string();
+    std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = run_with_env(
+        &["codex", "--no-bridge"],
+        &workspace,
+        dir.path(),
+        &[
+            (medulla::analytics::API_URL_ENV, api_url.as_str()),
+            ("MEDULLA_CODEX_BIN", fake_codex.to_str().unwrap()),
+            ("FAKE_CODEX_META", meta.as_str()),
+            ("FAKE_CODEX_USAGE", usage_line.as_str()),
+            ("FAKE_CODEX_ROLLOUT", rollout.to_str().unwrap()),
+        ],
+    );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let usage: Vec<serde_json::Value> = bodies
+        .iter()
+        .map(|body| serde_json::from_str(body).expect("analytics JSON"))
+        .filter(|body: &serde_json::Value| body["payload"]["name"] == "token_usage_reported")
+        .collect();
+    assert_eq!(usage.len(), 1, "token usage events: {bodies:?}");
+    assert_eq!(usage[0]["payload"]["profileId"], "user-42");
+    let properties = &usage[0]["payload"]["properties"];
+    assert_eq!(properties["input_tokens"], "7", "{properties}");
+    assert_eq!(properties["output_tokens"], "3", "{properties}");
+}
+
+/// A checkout's `.env` cannot redirect telemetry: only the invoking
+/// environment's DSN and analytics endpoint are honoured. (The other half —
+/// a `.env`-only override is dropped in favour of the built-in endpoint — is
+/// not driven here, since it would send to the live project.)
+#[test]
+fn a_workspace_env_file_cannot_redirect_telemetry_away_from_the_invoker() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    let (planted_port, planted_stop, planted) = collect_requests();
+    let (trusted_port, trusted_stop, trusted) = collect_requests();
+    std::fs::write(
+        dir.path().join(".env"),
+        format!(
+            "MEDULLA_SENTRY_DSN=http://publickey@127.0.0.1:{planted_port}/7\n\
+             {}=http://127.0.0.1:{planted_port}\n",
+            medulla::analytics::API_URL_ENV
+        ),
+    )
+    .unwrap();
+    let trusted_dsn = format!("http://publickey@127.0.0.1:{trusted_port}/7");
+    let trusted_url = format!("http://127.0.0.1:{trusted_port}");
+
+    for command in ["sentry-test", "analytics-test"] {
+        let output = run_with_env(
+            &[command],
+            dir.path(),
+            dir.path(),
+            &[
+                ("MEDULLA_SENTRY_DSN", trusted_dsn.as_str()),
+                (medulla::analytics::API_URL_ENV, trusted_url.as_str()),
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "{command}: stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    planted_stop.store(true, Ordering::Release);
+    trusted_stop.store(true, Ordering::Release);
+    let planted = planted.join().expect("planted listener");
+    let trusted = trusted.join().expect("trusted listener");
+
+    assert!(
+        planted.is_empty(),
+        "the .env endpoint was contacted: {planted:?}"
+    );
+    assert_eq!(trusted.len(), 2, "one request per diagnostic: {trusted:?}");
+}
+
+/// When an external credential is what authenticates, the stored session's
+/// account is not the one signing out, so no `signed_out` is reported for it.
+#[test]
+fn logout_under_an_external_token_reports_no_sign_out() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    // Whether logout itself succeeds here is covered elsewhere; this pins
+    // only what it reports.
+    let _ = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[
+            (medulla::analytics::API_URL_ENV, api_url.as_str()),
+            ("MEDULLA_TOKEN", "an-external-credential"),
+        ],
+    );
+    stop.store(true, Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        !bodies.iter().any(|body| body.contains("signed_out")),
+        "signed_out was reported for the stored account: {bodies:?}"
+    );
+}
+
+#[test]
+fn sentry_test_reaches_a_configured_dsn_end_to_end() {
+    let home = TempDir::new().unwrap();
+    let (port, stop, server) = collect_requests();
+    let dsn = format!("http://publickey@127.0.0.1:{port}/7");
+
+    let output = run_with_env(
+        &["sentry-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_SENTRY_DSN", dsn.as_str())],
+    );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    server.join().expect("sentry server");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sentry event id:"), "{stdout}");
+    assert!(stdout.contains("HTTP 200"), "{stdout}");
+}
+
+#[test]
+fn sentry_test_reports_why_when_reporting_is_opted_out() {
+    let home = TempDir::new().unwrap();
+
+    let output = run_with_env(
+        &["sentry-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_ANALYTICS_DISABLED", "1")],
+    );
+
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
+#[test]
+fn analytics_test_reports_why_when_analytics_is_opted_out() {
+    // The opt-out path verifies the command's inactive status without network
+    // access; the successful path is exercised against a local listener below.
+    let home = TempDir::new().unwrap();
+
+    let output = run_with_env(
+        &["analytics-test"],
+        home.path(),
+        home.path(),
+        &[("MEDULLA_ANALYTICS_DISABLED", "1")],
+    );
+
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
+#[test]
+fn analytics_test_reaches_a_configured_endpoint_end_to_end() {
+    let home = TempDir::new().unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}");
+    let output = run_with_env(
+        &["analytics-test"],
+        home.path(),
+        home.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    server.join().expect("analytics server");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("HTTP 200"));
 }
 
 #[cfg(unix)]

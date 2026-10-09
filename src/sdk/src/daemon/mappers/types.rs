@@ -33,6 +33,9 @@ pub struct HarnessLineMapper {
     pub(super) last_at_ms: i64,
     /// Latest token usage observed on the stream, if any.
     pub(super) usage: Option<TokenUsage>,
+    /// Claude assistant messages report per-call usage; when present, ignore
+    /// the trailing result snapshot so it is not counted twice.
+    pub(super) saw_claude_call_usage: bool,
     /// Claude shell calls whose results may authoritatively report a PR URL.
     pub(super) pull_request_calls: HashMap<String, super::workspace::PendingPullRequestCall>,
     /// Latest checkout authoritatively reported by a worktree helper.

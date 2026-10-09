@@ -1,0 +1,596 @@
+//! Unit tests for crash-report configuration, scrubbing, and transport.
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use sentry::protocol::{Breadcrumb, Event, Exception, Frame, LogEntry, Stacktrace, User};
+
+use super::config::{is_opted_out, release, resolve_dsn, resolve_environment, DEFAULT_DSN};
+use super::scrub::{scrub_event, scrub_paths, scrub_text};
+use super::{current_user, set_user, transport, CrashReportingStatus};
+
+static TRANSPORT_STATUS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn the_runtime_dsn_overrides_the_compiled_in_default() {
+    assert_eq!(
+        resolve_dsn(Some(" https://k@rt.example/1 ")),
+        "https://k@rt.example/1"
+    );
+}
+
+#[test]
+fn every_build_carries_the_medulla_project_dsn() {
+    assert_eq!(resolve_dsn(None), DEFAULT_DSN);
+    assert_eq!(
+        DEFAULT_DSN,
+        "https://40b6883c6f8013c8382f8b0bc5986108@sentry.tinyhumans.ai/12"
+    );
+    assert!(DEFAULT_DSN.parse::<sentry::types::Dsn>().is_ok());
+    // A blank override falls back to the default rather than breaking it.
+    assert_eq!(resolve_dsn(Some("  ")), DEFAULT_DSN);
+}
+
+#[test]
+fn this_crates_tests_never_start_real_crash_reporting() {
+    assert_eq!(
+        super::resolve_status(),
+        (CrashReportingStatus::Disabled, None)
+    );
+}
+
+#[test]
+fn only_a_truthy_opt_out_disables_reporting() {
+    for value in ["1", "true", "TRUE", " yes "] {
+        assert!(is_opted_out(Some(value)), "{value:?} should opt out");
+    }
+    for value in ["", "0", "false", "no", "off"] {
+        assert!(!is_opted_out(Some(value)), "{value:?} should not opt out");
+    }
+    assert!(!is_opted_out(None));
+}
+
+#[test]
+fn release_is_tagged_with_the_crate_version() {
+    assert_eq!(release(), format!("medulla@{}", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn environment_defaults_by_build_profile_and_accepts_an_override() {
+    assert_eq!(resolve_environment(None, true), "development");
+    assert_eq!(resolve_environment(Some(" "), false), "production");
+    assert_eq!(resolve_environment(Some("Staging"), false), "staging");
+}
+
+#[test]
+fn home_directory_paths_are_replaced_with_a_tilde() {
+    let scrubbed = scrub_paths(
+        "failed to open /home/alice/project/src/main.rs",
+        Some("/home/alice"),
+    );
+    assert_eq!(scrubbed, "failed to open ~/project/src/main.rs");
+}
+
+#[test]
+fn the_home_prefix_only_matches_a_whole_path_component() {
+    // `/home/al` must not swallow part of `/home/alice`; the generic mask
+    // still hides the other user's name.
+    assert_eq!(
+        scrub_paths("/home/alice/x", Some("/home/al")),
+        "/home/<user>/x"
+    );
+}
+
+#[test]
+fn a_home_prefix_followed_by_a_non_ascii_letter_is_another_directory() {
+    // `aliceé` is its own path component, not the operator's `alice`.
+    assert_eq!(
+        scrub_paths("/home/aliceé/private", Some("/home/alice")),
+        "/home/<user>/private"
+    );
+    assert_eq!(scrub_paths("/home/alice/é", Some("/home/alice")), "~/é");
+}
+
+#[test]
+fn other_user_directories_are_masked_on_every_platform() {
+    assert_eq!(
+        scrub_paths("/Users/bob/.medulla", None),
+        "/Users/<user>/.medulla"
+    );
+    assert_eq!(
+        scrub_paths(r"C:\Users\carol\AppData\medulla.exe", None),
+        r"C:\Users\<user>\AppData\medulla.exe"
+    );
+    // Windows paths normalized to forward slashes must be masked too.
+    assert_eq!(
+        scrub_paths("C:/Users/carol/AppData/medulla.exe", None),
+        "C:/Users/<user>/AppData/medulla.exe"
+    );
+}
+
+#[test]
+fn a_longer_account_directory_is_not_mistaken_for_the_configured_home() {
+    // `/home/alice2` shares the `/home/alice` prefix but is a different
+    // account's directory; only the generic mask should touch it, not the
+    // operator's own `~` substitution.
+    assert_eq!(
+        scrub_paths("/home/alice2/Documents/report.txt", Some("/home/alice")),
+        "/home/<user>/Documents/report.txt"
+    );
+}
+
+#[test]
+fn frame_paths_outside_any_users_home_are_still_dropped() {
+    // A build/CI checkout path (`/opt/checkout/...`) carries no user
+    // directory to mask, but still describes the machine's layout — the
+    // frame path fields must be dropped outright, not passed through
+    // unmasked because they didn't match a home/user-dir pattern.
+    let mut event = Event::default();
+    event.exception.values.push(Exception {
+        ty: "panic".into(),
+        stacktrace: Some(Stacktrace {
+            frames: vec![Frame {
+                abs_path: Some("/opt/checkout/src/main.rs".into()),
+                filename: Some("/opt/checkout/src/main.rs".into()),
+                package: Some("/opt/checkout/target/debug/medulla".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let event = scrub_event(event, None);
+
+    let frame = &event.exception.values[0]
+        .stacktrace
+        .as_ref()
+        .expect("stack")
+        .frames[0];
+    assert_eq!(frame.abs_path, None);
+    assert_eq!(frame.filename, None);
+    assert_eq!(frame.package, None);
+}
+
+#[test]
+fn credentials_in_messages_are_redacted() {
+    let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl";
+    let scrubbed = scrub_text(
+        &format!("auth failed: Bearer abcdefghijklmnop, token {jwt}"),
+        None,
+    );
+    assert!(!scrubbed.contains("abcdefghijklmnop"), "{scrubbed}");
+    assert!(!scrubbed.contains(jwt), "{scrubbed}");
+    assert!(scrubbed.contains("Bearer <redacted>"), "{scrubbed}");
+}
+
+#[test]
+fn short_bearer_credentials_are_still_redacted() {
+    // A short Basic credential must not slip through an undocumented minimum
+    // length: this is the last line of defence before a panic message leaves
+    // the machine.
+    let scrubbed = scrub_text("Authorization: Basic dTph", None);
+    assert!(!scrubbed.contains("dTph"), "{scrubbed}");
+    assert!(scrubbed.contains("Basic <redacted>"), "{scrubbed}");
+}
+
+#[test]
+fn long_messages_are_truncated_on_a_char_boundary() {
+    let scrubbed = scrub_text(&"é".repeat(2000), None);
+    assert!(scrubbed.len() <= 1024);
+    assert!(scrubbed.ends_with('…'));
+    assert_eq!(scrub_text(&"a".repeat(2000), None).len(), 1024);
+}
+
+#[test]
+fn configured_home_paths_end_at_punctuation() {
+    assert_eq!(
+        scrub_paths("panic at /srv/alice),", Some("/srv/alice")),
+        "panic at ~),"
+    );
+    assert_eq!(
+        scrub_paths("/srv/alice2/file", Some("/srv/alice")),
+        "/srv/alice2/file"
+    );
+}
+
+#[test]
+fn events_lose_everything_that_identifies_the_person() {
+    let frame = Frame {
+        function: Some("run_wrapper".into()),
+        abs_path: Some("/home/alice/src/medulla/src/main.rs".into()),
+        filename: Some("/home/alice/src/medulla/src/main.rs".into()),
+        package: Some("/home/alice/.cargo/bin/medulla".into()),
+        context_line: Some("let prompt = \"secret\";".into()),
+        pre_context: vec!["line".into()],
+        vars: [("prompt".to_owned(), "secret plans".into())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    let mut event = Event {
+        server_name: Some("alices-laptop".into()),
+        logger: Some("alice@example.com".into()),
+        template: Some(sentry::protocol::TemplateInfo {
+            filename: Some("/home/alice/templates/x.html".into()),
+            ..Default::default()
+        }),
+        message: Some("panicked at /home/alice/src/x.rs".into()),
+        logentry: Some(LogEntry {
+            message: "read {}".into(),
+            params: vec!["/home/alice/notes.txt".into()],
+        }),
+        user: Some(User {
+            id: Some("user-42".into()),
+            email: Some("alice@example.com".into()),
+            username: Some("alice".into()),
+            ..Default::default()
+        }),
+        extra: [("argv".to_owned(), "--config secret.toml".into())]
+            .into_iter()
+            .collect(),
+        tags: [("user_email".to_owned(), "alice@example.com".to_owned())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    event.contexts.insert(
+        "os".to_owned(),
+        sentry::protocol::Context::Os(Box::default()),
+    );
+    event.breadcrumbs.values.push(Breadcrumb::default());
+    event.exception.values.push(Exception {
+        ty: "panic".into(),
+        value: Some("open /home/alice/secret.txt".into()),
+        stacktrace: Some(Stacktrace {
+            frames: vec![frame],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let event = scrub_event(event, Some("/home/alice"));
+
+    assert_eq!(event.server_name, None);
+    assert!(event.breadcrumbs.values.is_empty());
+    assert!(event.extra.is_empty());
+    assert!(event.tags.is_empty(), "{:?}", event.tags);
+    assert!(event.contexts.is_empty(), "{:?}", event.contexts);
+    assert_eq!(event.message.as_deref(), Some("panicked at ~/src/x.rs"));
+    let entry = event.logentry.as_ref().expect("logentry kept");
+    assert!(entry.params.is_empty());
+    let user = event.user.as_ref().expect("account id kept");
+    assert_eq!(user.id.as_deref(), Some("user-42"));
+    assert_eq!(user.email, None);
+    assert_eq!(user.username, None);
+    let exception = &event.exception.values[0];
+    assert_eq!(exception.value.as_deref(), Some("open ~/secret.txt"));
+    let frame = &exception.stacktrace.as_ref().expect("stack").frames[0];
+    // Frame paths are dropped outright, not masked: a build/CI checkout path
+    // carries no user directory to mask but still describes the machine's
+    // layout.
+    assert_eq!(frame.filename, None);
+    assert_eq!(frame.abs_path, None);
+    assert_eq!(frame.package, None);
+    assert_eq!(frame.function.as_deref(), Some("run_wrapper"));
+    assert_eq!(frame.symbol, None);
+    assert_eq!(frame.module, None);
+    assert!(frame.vars.is_empty());
+    assert!(frame.pre_context.is_empty());
+    assert_eq!(frame.context_line, None);
+    assert!(event.debug_meta.is_empty());
+    assert!(event.logger.is_none());
+    assert!(event.template.is_none());
+}
+
+#[test]
+fn the_account_id_can_be_set_and_cleared() {
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    set_user(Some("user-42"));
+    assert_eq!(current_user().as_deref(), Some("user-42"));
+    set_user(None);
+    assert_eq!(current_user(), None);
+}
+
+#[test]
+fn only_an_account_shaped_id_is_attached_to_reports() {
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    for rejected in [
+        "alice@example.com",
+        "Bearer abc.def",
+        "../other",
+        "a prompt fragment",
+        &"x".repeat(129),
+    ] {
+        set_user(Some("user-42"));
+        set_user(Some(rejected));
+        assert_eq!(current_user(), None, "{rejected:?} was attached");
+    }
+    set_user(Some("69dd5bd7b91b0aea0494789d"));
+    assert_eq!(current_user().as_deref(), Some("69dd5bd7b91b0aea0494789d"));
+    set_user(None);
+}
+
+#[test]
+fn a_test_event_without_a_client_reports_why() {
+    // No test calls `init`, so the main hub has no client. Serialized with the
+    // other tests that touch process-wide Sentry state all the same.
+    let _state_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    let error = super::send_test_event(Duration::from_millis(10)).expect_err("no client");
+    assert_ne!(error, CrashReportingStatus::Active);
+    assert!(!error.to_string().is_empty());
+}
+
+/// A loopback server that accepts connections and never answers them, so a
+/// request to it stays in flight until the server is stopped.
+///
+/// Accepting is non-blocking and polled, so stopping never depends on how many
+/// connections the transport happened to open; [`StalledServer::stop`] joins
+/// the thread rather than leaving it parked for the rest of the test run.
+struct StalledServer {
+    port: u16,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StalledServer {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        listener
+            .set_nonblocking(true)
+            .expect("non-blocking listener");
+        let port = listener.local_addr().expect("addr").port();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let mut stalled = Vec::new();
+            while !stopping.load(std::sync::atomic::Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((stream, _)) => stalled.push(stream),
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            port,
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for StalledServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The byte offset of the first occurrence of `needle` in `haystack`, if any.
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+#[test]
+fn the_transport_posts_envelopes_to_the_dsn_and_records_the_status() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("addr").port();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let mut request = Vec::new();
+        let mut buf = [0u8; 4096];
+        // Read the headers first, then read exactly the declared body length —
+        // stopping as soon as a marker appears anywhere in the buffered bytes
+        // would let this respond while the client is still mid-upload if the
+        // envelope arrives split across TCP writes.
+        let headers_end = loop {
+            if let Some(pos) = find_subslice(&request, b"\r\n\r\n") {
+                break pos + 4;
+            }
+            let read = stream.read(&mut buf).expect("read headers");
+            assert_ne!(read, 0, "connection closed before headers completed");
+            request.extend_from_slice(&buf[..read]);
+        };
+        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|v| v.trim().to_owned())
+            })
+            .expect("content-length header")
+            .parse()
+            .expect("numeric content-length");
+        while request.len() < headers_end + content_length {
+            let read = stream.read(&mut buf).expect("read body");
+            assert_ne!(
+                read, 0,
+                "connection closed before the declared body arrived"
+            );
+            request.extend_from_slice(&buf[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            .expect("respond");
+        String::from_utf8_lossy(&request).into_owned()
+    });
+
+    let options = sentry::ClientOptions {
+        dsn: Some(
+            format!("http://publickey@127.0.0.1:{port}/7")
+                .parse()
+                .expect("dsn"),
+        ),
+        ..Default::default()
+    };
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, Arc::clone(&status));
+    let mut envelope = sentry::Envelope::new();
+    envelope.add_item(Event {
+        message: Some("sentry-test-transport".into()),
+        ..Default::default()
+    });
+    transport.send_envelope(envelope);
+    assert!(transport.flush(Duration::from_secs(10)), "flushed");
+
+    let request = server.join().expect("server thread");
+    assert!(request.starts_with("POST /api/7/envelope/"), "{request}");
+    assert!(request.to_ascii_lowercase().contains("x-sentry-auth"));
+    assert_eq!(transport::last_status(&status), Some(200));
+}
+
+#[test]
+fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    // A listener that accepts every connection but never reads or responds:
+    // the sender thread's in-flight request never completes, so every
+    // subsequent task piles up behind it in the bounded channel.
+    let server = StalledServer::start();
+    let port = server.port;
+
+    let options = sentry::ClientOptions {
+        dsn: Some(
+            format!("http://publickey@127.0.0.1:{port}/7")
+                .parse()
+                .expect("dsn"),
+        ),
+        ..Default::default()
+    };
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, status);
+    // One to occupy the sender thread indefinitely, then fill the 30-slot
+    // queue behind it.
+    for _ in 0..40 {
+        let mut envelope = sentry::Envelope::new();
+        envelope.add_item(Event {
+            message: Some("queue-filler".into()),
+            ..Default::default()
+        });
+        transport.send_envelope(envelope);
+    }
+
+    let started = std::time::Instant::now();
+    let flushed = transport.flush(Duration::from_millis(200));
+    let elapsed = started.elapsed();
+
+    assert!(!flushed, "a full queue cannot flush within its own timeout");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "flush blocked for {elapsed:?} despite a 200ms timeout"
+    );
+    // As Sentry does on close: shut down (cancelling the stalled request)
+    // before the drop, which would otherwise drain for the full request
+    // timeout behind the stalled queue.
+    transport.shutdown(Duration::ZERO);
+}
+
+#[test]
+fn a_flush_marker_discarded_by_a_stopping_sender_ends_the_wait() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    // Hold the sender thread on a request that never completes, so the flush
+    // marker below queues behind it instead of being answered.
+    let server = StalledServer::start();
+    let port = server.port;
+
+    let options = sentry::ClientOptions {
+        dsn: Some(
+            format!("http://publickey@127.0.0.1:{port}/7")
+                .parse()
+                .expect("dsn"),
+        ),
+        ..Default::default()
+    };
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, status);
+    let mut envelope = sentry::Envelope::new();
+    envelope.add_item(Event {
+        message: Some("stalled".into()),
+        ..Default::default()
+    });
+    transport.send_envelope(envelope);
+
+    let waiting = Arc::clone(&transport);
+    let flusher = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let flushed = waiting.flush(Duration::from_secs(5));
+        (flushed, started.elapsed())
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    // Shutdown cancels the stalled request, and the sender thread exits with
+    // the marker above still queued. Sentry drops the transport right after
+    // this, and that drop flushes again, so a discarded marker that is not
+    // noticed stalls process exit for the whole flush timeout.
+    transport.shutdown(Duration::from_millis(50));
+
+    let (flushed, elapsed) = flusher.join().expect("flusher thread");
+    assert!(!flushed, "a discarded marker is not a completed flush");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "flush waited {elapsed:?} for a marker the sender had already discarded"
+    );
+}
+
+#[test]
+fn an_unbounded_flush_timeout_does_not_overflow() {
+    // No DSN: the sender thread exits at once, so the flush resolves (as not
+    // flushed) instead of waiting; what matters is that `Duration::MAX` is
+    // accepted rather than overflowing a deadline computation.
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&sentry::ClientOptions::default(), status);
+    assert!(!transport.flush(Duration::MAX));
+}
+
+#[test]
+fn bare_provider_keys_and_secret_assignments_are_redacted() {
+    // Assembled at runtime so the source never holds a credential-shaped
+    // literal for secret scanners to flag.
+    let key = format!("sk-{}", "abcdefghijklmnop0123456789");
+    let text = scrub_text(
+        &format!("called with {key} and OPENROUTER_API_KEY=or-v1-0123456789abcdef"),
+        None,
+    );
+    assert!(!text.contains(&key), "{text}");
+    assert!(!text.contains("or-v1-0123456789abcdef"), "{text}");
+    assert!(text.contains("[REDACTED]"), "{text}");
+    // Token counts in a panic message are not secrets and survive.
+    assert!(scrub_text("input_tokens=12345678", None).contains("12345678"));
+}
+
+#[test]
+fn a_home_prefix_followed_by_name_punctuation_is_another_directory() {
+    assert_eq!(
+        scrub_paths("/home/alice@company/file", Some("/home/alice")),
+        "/home/<user>/file"
+    );
+    assert_eq!(
+        scrub_paths("/home/alice+dev/x", Some("/home/alice")),
+        "/home/<user>/x"
+    );
+    // Real boundaries still end the configured home.
+    assert_eq!(scrub_paths("(/home/alice/x)", Some("/home/alice")), "(~/x)");
+}
+
+#[test]
+fn an_integration_supplied_user_id_that_is_not_an_account_id_is_dropped() {
+    let event = scrub_event(
+        Event {
+            user: Some(User {
+                id: Some("alice@example.com".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        None,
+    );
+    assert!(event.user.is_none());
+}

@@ -10,7 +10,9 @@ use medulla_tui::cli::{parse_command, sessions_json, Command};
 
 use crate::app_loop::run_tui;
 use crate::commands::run_hook_cmd;
-use crate::commands::{run_hub, run_init, run_login, run_logout, run_workspace};
+use crate::commands::{
+    run_analytics_test, run_hub, run_init, run_login, run_logout, run_sentry_test, run_workspace,
+};
 #[cfg(feature = "workflows")]
 use crate::commands::{run_mcp_cmd, run_skills_cmd, run_workflow_cmd};
 use crate::run::run_core;
@@ -45,18 +47,247 @@ mod worker_loop;
 fn main() -> anyhow::Result<()> {
     install_crypto_provider();
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    let is_hook = matches!(parse_command(&raw), Command::Hook);
+    // `--mock` is the offline demo runtime: no backend, no login, and per
+    // README no network — starting crash reporting here would let a
+    // configured (or `.env`-overridden) DSN reach out during what is supposed
+    // to be an entirely local demo.
+    let is_mock =
+        matches!(parse_command(&raw), Command::Tui) && medulla_tui::cli::parse_tui_args(&raw).mock;
+
+    // Load a cwd `.env` into the process env before anything reads it (this is
+    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
+    // Done ahead of crash reporting so a `.env` can carry a DSN override or the
+    // opt-out.
+    //
+    // The hook shim is the exception: it runs inside the operator's live turn,
+    // with the harness waiting on this process under a hard deadline, and the
+    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
+    // read there would burn the shim's whole budget before `run_hook_cmd`'s
+    // own deadline even starts, so the harness would kill it as a hung hook.
+    // For the same reason it never starts crash reporting — no transport
+    // thread, and no flush on exit.
+    //
+    // The guard is bound here, outside the runtime, so it outlives every task
+    // and its drop flushes queued reports on the way out. Initialized after the
+    // TLS provider (the transport opens connections) and before the runtime, so
+    // Sentry's panic hook is installed first; the TUI's terminal-restoring hook
+    // is chained on top of it later, which means a panic restores the screen
+    // before the report is captured and flushed.
+    let _crash_reporting = if is_hook {
+        None
+    } else {
+        // A cwd `.env` is controlled by the repository being opened. Preserve
+        // only a DSN supplied by the invoking environment so an untrusted
+        // checkout cannot redirect crash reports to its own collector.
+        let trusted_sentry_dsn = std::env::var_os(medulla::observability::DSN_ENV);
+        let trusted_analytics_url = std::env::var_os(medulla::analytics::API_URL_ENV);
+        // For the same reason the stored account reports are attributed to is
+        // resolved from the invoking environment, as it was before the `.env`
+        // loaded: a checkout must not be able to plant a home or config whose
+        // session names an account of its choosing.
+        let invoking_env = decoded_env();
+        medulla::home::load_dotenv_from_cwd();
+        match trusted_sentry_dsn {
+            Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
+            None => std::env::remove_var(medulla::observability::DSN_ENV),
+        }
+        match trusted_analytics_url {
+            Some(url) => std::env::set_var(medulla::analytics::API_URL_ENV, url),
+            None => std::env::remove_var(medulla::analytics::API_URL_ENV),
+        }
+        if is_mock {
+            // The demo makes no network connections at all, so it opts out
+            // of analytics too; set before anything resolves the tracker,
+            // and before the runtime starts any thread.
+            std::env::set_var(medulla::observability::DISABLED_ENV, "1");
+            None
+        } else {
+            set_stored_telemetry_user(&raw, &invoking_env, &decoded_env());
+            Some(medulla::observability::init())
+        }
+    };
+
     // The hook shim runs inside an operator's live turn under a 3-5 second
     // harness deadline (see `commands::hook`'s module docs), so it gets a
     // single-thread runtime rather than paying to spin up the multi-thread,
     // 16 MiB-per-worker-stack runtime every other command needs to host an
     // agent turn.
-    if matches!(parse_command(&raw), Command::Hook) {
+    if is_hook {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
             .block_on(async_main(raw))
     } else {
         medulla::tokio_tuning::build_runtime()?.block_on(async_main(raw))
+    }
+}
+
+/// Where the selected command will load its configuration from: the explicit
+/// `--config` path, if any, and the directory layered discovery starts in.
+/// Each is read through that command's own parser wherever one exists.
+///
+/// A blind scan of the argv misreads arguments that are not Medulla flags:
+/// harness wrapper flags belong to the child CLI (Codex's `--config key=value`
+/// is a model override), and `medulla run` accepts only `--config <path>`, so a
+/// `--config=...` token there is instruction text, not a config path. Which
+/// occurrence wins differs too, and is followed here. The
+/// daemon has two parsers: its TUI takes either spelling (first wins) and
+/// discovers from the process directory, while the headless daemon takes only
+/// `--config <path>` (last wins) and discovers from its `--workspace`. Of the
+/// remaining commands only `mcp`, `remote`, and `daemon --direct` accept the
+/// `--config=<path>` spelling.
+fn config_source(
+    raw: &[String],
+    env: &std::collections::HashMap<String, String>,
+    stdout_is_terminal: bool,
+) -> ConfigSource {
+    let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
+    match parse_command(raw) {
+        Command::Wrapper(_) => wrapper_config_source(env),
+        Command::Tui => at_cwd(medulla_tui::cli::parse_tui_args(raw).config),
+        Command::Run => at_cwd(
+            medulla_tui::cli::parse_run_args(&raw[1..])
+                .ok()
+                .and_then(|args| args.config),
+        ),
+        Command::DaemonTui => at_cwd(flag_value(&raw[1..], "--config")),
+        Command::Hub => hub_config_source(env),
+        Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
+            at_cwd(flag_value(&raw[1..], "--config"))
+        }
+        Command::Daemon => ConfigSource {
+            config: last_separate_flag(&raw[1..], "--config"),
+            dir: last_separate_flag(&raw[1..], "--workspace")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(cwd),
+        },
+        // These read the first `--config`, in either spelling.
+        // `mcp` is usually spawned by a parent that passes its selection down
+        // as `MEDULLA_CONFIG_PATH`; an argv `--config` overrides it, and
+        // `serve_stdio` loads whichever results.
+        Command::Mcp => at_cwd(
+            flag_value(&raw[1..], "--config")
+                .or_else(|| medulla::config::explicit_config_from_env(env).map(str::to_owned)),
+        ),
+        Command::Remote | Command::DaemonDirect => at_cwd(flag_value(&raw[1..], "--config")),
+        // The rest parse `--config <path>` alone, each occurrence overwriting
+        // the last, so the final one is what the command loads.
+        _ => at_cwd(last_separate_flag(&raw[1..], "--config")),
+    }
+}
+
+/// A wrapper's own flags belong to the child harness, so its Medulla config
+/// comes only from an inherited `MEDULLA_CONFIG_PATH` — what `run_wrapper` and
+/// `build_bridge` load — discovered from the directory it was launched in.
+fn wrapper_config_source(env: &std::collections::HashMap<String, String>) -> ConfigSource {
+    ConfigSource {
+        config: medulla::config::explicit_config_from_env(env).map(str::to_owned),
+        dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    }
+}
+
+/// `run_hub` loads its configuration from the account home alone, never from
+/// a checkout it happens to be launched in.
+fn hub_config_source(env: &std::collections::HashMap<String, String>) -> ConfigSource {
+    ConfigSource {
+        config: None,
+        dir: medulla::home::medulla_home(env),
+    }
+}
+
+/// See [`config_source`].
+#[derive(Debug, PartialEq, Eq)]
+struct ConfigSource {
+    config: Option<String>,
+    dir: std::path::PathBuf,
+}
+
+/// The last value of a `--name <value>` flag, read the way the headless
+/// daemon's tokenizer and the overwrite-as-you-go command parsers do:
+/// separate-token form only, later wins.
+fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
+    args.windows(2)
+        .rev()
+        .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
+}
+
+/// Set at startup when the cwd `.env` moved this process onto a different
+/// stored session than the one it was invoked with.
+///
+/// The TUI rebuilds its account from the effective environment, so without
+/// this it would undo the startup decision and attribute telemetry to whatever
+/// session the checkout pointed it at. It reads this and names the stored
+/// account only when this process signed it in itself.
+pub(crate) static DOTENV_RESELECTED_SESSION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the `.env` re-selected the stored session: a different account home,
+/// or a different account in it.
+fn session_reselected(
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+) -> bool {
+    medulla::home::medulla_home(invoking) != medulla::home::medulla_home(effective)
+        || medulla::auth::state(invoking).user_id != medulla::auth::state(effective).user_id
+}
+
+/// The process environment as a map, dropping any entry that is not valid
+/// UTF-8 rather than panicking on it as `std::env::vars()` would.
+fn decoded_env() -> std::collections::HashMap<String, String> {
+    std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect()
+}
+
+/// Attribute non-TUI harness and daemon analytics to a stored account only
+/// when config/environment credentials do not override that session.
+///
+/// `invoking` is the environment captured before a cwd `.env` loaded, so the
+/// checkout being opened cannot choose the home, config, or session the
+/// account id is read from. The credential check also consults `effective`,
+/// the environment after the `.env`: a credential the checkout supplies (a
+/// `MEDULLA_TOKEN`, a config with an inline token) is what the command will
+/// authenticate with, so the stored account must not be named then either;
+/// nor when the `.env` re-selects a different stored session.
+fn set_stored_telemetry_user(
+    raw: &[String],
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+) {
+    DOTENV_RESELECTED_SESSION.store(
+        session_reselected(invoking, effective),
+        std::sync::atomic::Ordering::Release,
+    );
+    let user_id = stored_telemetry_user(raw, invoking, effective, io::stdout().is_terminal());
+    medulla::observability::set_user(user_id.as_deref());
+}
+
+/// The decision behind [`set_stored_telemetry_user`], without setting it.
+fn stored_telemetry_user(
+    raw: &[String],
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+    terminal: bool,
+) -> Option<String> {
+    let external_wins = |env: &std::collections::HashMap<String, String>| {
+        let source = config_source(raw, env, terminal);
+        medulla::config::load_config(source.config.as_deref(), env, &source.dir)
+            .map(|loaded| medulla::auth::external_token_wins(env, &loaded.config.backend))
+    };
+    // Unreadable config in either view attributes nothing, as before. And the
+    // `.env` may also re-select the stored session itself (`MEDULLA_HOME`,
+    // `MEDULLA_USER`) without supplying a token: the command then runs as that
+    // session's account, so the id is named only when both views agree on it.
+    match (external_wins(invoking), external_wins(effective)) {
+        // Same id is not enough: another root can hold a session that repeats
+        // the id with a different token. The session must come from the same
+        // account home in both views.
+        (Ok(false), Ok(false)) if !session_reselected(invoking, effective) => {
+            medulla::auth::state(invoking).user_id
+        }
+        _ => None,
     }
 }
 
@@ -76,21 +307,19 @@ fn install_crypto_provider() {
 }
 
 async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
-    let command = parse_command(&raw);
+    let result = dispatch(raw).await;
+    // The runtime drops as soon as this returns, aborting any analytics event
+    // still in flight (a TUI's last screen view, a `daemon --once` task's
+    // token usage); give them a bounded chance to land first. Returns at once
+    // when nothing is pending, so the deadline-bound hook pays nothing.
+    medulla::analytics::flush_pending().await;
+    result
+}
 
-    // Load a cwd `.env` into the process env before anything reads it (this is
-    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    //
-    // The hook shim is the exception: it runs inside the operator's live turn,
-    // with the harness waiting on this process under a hard deadline, and the
-    // workspace `.env` can be a FIFO/device (or just enormous). An unbounded
-    // read there would burn the shim's whole budget before `run_hook_cmd`'s
-    // own deadline even starts, so the harness would kill it as a hung hook.
-    if !matches!(&command, Command::Hook) {
-        medulla::home::load_dotenv_from_cwd();
-    }
-
-    match command {
+/// Run the selected command.
+async fn dispatch(raw: Vec<String>) -> anyhow::Result<()> {
+    // `.env` was already loaded by `main`, ahead of crash reporting.
+    match parse_command(&raw) {
         Command::Run => run_core(&raw[1..]).await,
         Command::Daemon if daemon_uses_tui(io::stdout().is_terminal(), &raw) => {
             run_worker_tui_command(&raw[1..]).await
@@ -140,6 +369,8 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             run_hook_cmd(&raw[1..], &env).await;
             Ok(())
         }
+        Command::SentryTest => run_sentry_test().await,
+        Command::AnalyticsTest => run_analytics_test().await,
         Command::Login => run_login(&raw[1..]).await,
         Command::Logout => run_logout().await,
         Command::Init => run_init(&raw[1..]).await,
@@ -183,6 +414,8 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
                 Some(medulla_tui::harness_pty::spawner()),
             )
             .await?;
+            medulla::analytics::flush_pending().await;
+            medulla::observability::flush(std::time::Duration::from_secs(2));
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.

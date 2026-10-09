@@ -10,20 +10,24 @@
 //! harness-skill verbs, which are large enough to warrant their own files;
 //! everything else lives here.
 
+pub(crate) mod analytics_test;
 pub(crate) mod hook;
 pub(crate) mod login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) mod mcp;
+pub(crate) mod sentry_test;
 #[cfg(feature = "workflows")]
 pub(crate) mod skills;
 #[cfg(feature = "workflows")]
 pub(crate) mod workflow;
 pub(crate) mod workspace;
 
+pub(crate) use analytics_test::run_analytics_test;
 pub(crate) use hook::run_hook_cmd;
 pub(crate) use login_screen::run_login_screen;
 #[cfg(feature = "workflows")]
 pub(crate) use mcp::run_mcp_cmd;
+pub(crate) use sentry_test::run_sentry_test;
 #[cfg(feature = "workflows")]
 pub(crate) use skills::run_skills_cmd;
 #[cfg(feature = "workflows")]
@@ -138,6 +142,23 @@ pub(crate) async fn run_login(args: &[String]) -> anyhow::Result<()> {
                 medulla::home::user::MEDULLA_USER_ENV,
             );
         }
+        // Verified by `/auth/me` and durably stored: later crash reports from
+        // this process carry the account id (and nothing else about it).
+        medulla::observability::set_user(Some(&account));
+        // Best-effort, bounded by one shared deadline rather than the
+        // tracker's own per-request timeout: `record_sign_in` makes two
+        // sequential requests (identify, then the event), so awaiting each of
+        // their individual three-second ceilings could delay this
+        // already-completed login by nearly six seconds. `medulla login`
+        // exits right after this, so the event has to be awaited somewhat —
+        // a detached task would almost always be cancelled by the runtime
+        // shutting down before it lands — but one request timeout is the
+        // most a finished login should ever wait on it.
+        let _ = tokio::time::timeout(
+            medulla::analytics::REQUEST_TIMEOUT,
+            medulla::analytics::record_sign_in(&account),
+        )
+        .await;
     }
 
     adopt_legacy_credentials(&env, &loaded.config.backend).await;
@@ -325,8 +346,32 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     let home = medulla::home::medulla_home(&env);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
+    // Read the account before deleting the session that names it, but do not
+    // report or clear anything yet: a `signed_out` event and a cleared crash
+    // report user for a logout that then fails to clear (a read-only mount, a
+    // permissions change, a file another process still holds open) would lie
+    // about the session's real state — the bearer stays active while every
+    // signal says otherwise.
+    let user_id = medulla::auth::state(&env).user_id;
     medulla::auth::clear(&env)
         .map_err(|e| anyhow::anyhow!("the stored session could not be removed: {e}"))?;
+    let external_credential_remains = load_config(None, &env, &cwd).ok().is_some_and(|loaded| {
+        medulla::auth::resolve_backend_token(&env, &loaded.config.backend, None).is_some()
+    });
+    // Only now is the sign-out real: report it (bounded by the tracker's
+    // timeout, since this process exits right after) and clear the crash
+    // report user, so no later report is attributed to the retired session.
+    // An analytics failure never blocks the sign-out itself.
+    if !external_credential_remains {
+        if let Some(user_id) = user_id {
+            let _ = tokio::time::timeout(
+                medulla::analytics::REQUEST_TIMEOUT,
+                medulla::analytics::record_sign_out(&user_id),
+            )
+            .await;
+        }
+    }
+    medulla::observability::set_user(None);
 
     // Retired credential files go too. Adoption is a *startup* behaviour — an
     // install that predates the store is signed in and should stay signed in —

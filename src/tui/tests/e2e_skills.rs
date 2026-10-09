@@ -93,6 +93,8 @@ impl Workspace {
     /// Run `medulla skills …` from [`cwd`](Self::cwd) against this scratch home.
     fn skills(&self, args: &[&str]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_medulla"));
+        // Never report a test run to the live telemetry projects.
+        command.env("MEDULLA_ANALYTICS_DISABLED", "1");
         command
             .arg("skills")
             .args(args)

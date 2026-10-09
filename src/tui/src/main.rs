@@ -213,6 +213,26 @@ fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
         .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
 }
 
+/// Set at startup when the cwd `.env` moved this process onto a different
+/// stored session than the one it was invoked with.
+///
+/// The TUI rebuilds its account from the effective environment, so without
+/// this it would undo the startup decision and attribute telemetry to whatever
+/// session the checkout pointed it at. It reads this and names the stored
+/// account only when this process signed it in itself.
+pub(crate) static DOTENV_RESELECTED_SESSION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the `.env` re-selected the stored session: a different account home,
+/// or a different account in it.
+fn session_reselected(
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+) -> bool {
+    medulla::home::medulla_home(invoking) != medulla::home::medulla_home(effective)
+        || medulla::auth::state(invoking).user_id != medulla::auth::state(effective).user_id
+}
+
 /// The process environment as a map, dropping any entry that is not valid
 /// UTF-8 rather than panicking on it as `std::env::vars()` would.
 fn decoded_env() -> std::collections::HashMap<String, String> {
@@ -236,6 +256,10 @@ fn set_stored_telemetry_user(
     invoking: &std::collections::HashMap<String, String>,
     effective: &std::collections::HashMap<String, String>,
 ) {
+    DOTENV_RESELECTED_SESSION.store(
+        session_reselected(invoking, effective),
+        std::sync::atomic::Ordering::Release,
+    );
     let user_id = stored_telemetry_user(raw, invoking, effective, io::stdout().is_terminal());
     medulla::observability::set_user(user_id.as_deref());
 }
@@ -260,12 +284,8 @@ fn stored_telemetry_user(
         // Same id is not enough: another root can hold a session that repeats
         // the id with a different token. The session must come from the same
         // account home in both views.
-        (Ok(false), Ok(false))
-            if medulla::home::medulla_home(invoking) == medulla::home::medulla_home(effective) =>
-        {
-            medulla::auth::state(invoking)
-                .user_id
-                .filter(|id| medulla::auth::state(effective).user_id.as_deref() == Some(id))
+        (Ok(false), Ok(false)) if !session_reselected(invoking, effective) => {
+            medulla::auth::state(invoking).user_id
         }
         _ => None,
     };

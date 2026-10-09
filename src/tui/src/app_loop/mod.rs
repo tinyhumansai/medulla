@@ -346,7 +346,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // stored login. Its identity is unknown locally, so never attribute this
     // run's reports to the stale stored account.
     let external_token = medulla::auth::external_token_wins(&env, &loaded.config.backend);
-    let telemetry_user_id = (!external_token)
+    // A session the cwd `.env` re-selected is the checkout's choice, not the
+    // operator's (see `DOTENV_RESELECTED_SESSION`): name it only once this
+    // process has signed that account in itself.
+    let reselected = crate::DOTENV_RESELECTED_SESSION.load(std::sync::atomic::Ordering::Acquire);
+    let telemetry_user_id = (!external_token && (!reselected || signed_in_here))
         .then(|| account.as_ref().and_then(|state| state.user_id.clone()))
         .flatten();
     medulla::observability::set_user(telemetry_user_id.as_deref());

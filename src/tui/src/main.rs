@@ -175,9 +175,8 @@ struct ConfigSource {
 /// daemon's tokenizer does: separate-token form only, later wins.
 fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
-        .filter(|pair| pair[0] == name)
-        .map(|pair| pair[1].clone())
-        .last()
+        .rev()
+        .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
 }
 
 /// Attribute non-TUI harness and daemon analytics to a stored account only

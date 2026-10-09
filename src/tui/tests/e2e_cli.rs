@@ -733,6 +733,58 @@ fn a_bridgeless_wrapper_session_reports_its_token_usage() {
     assert_eq!(properties["output_tokens"], "3", "{properties}");
 }
 
+/// A checkout's `.env` cannot redirect telemetry: only the invoking
+/// environment's DSN and analytics endpoint are honoured. (The other half —
+/// a `.env`-only override is dropped in favour of the built-in endpoint — is
+/// not driven here, since it would send to the live project.)
+#[test]
+fn a_workspace_env_file_cannot_redirect_telemetry_away_from_the_invoker() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    let (planted_port, planted_stop, planted) = collect_requests();
+    let (trusted_port, trusted_stop, trusted) = collect_requests();
+    std::fs::write(
+        dir.path().join(".env"),
+        format!(
+            "MEDULLA_SENTRY_DSN=http://publickey@127.0.0.1:{planted_port}/7\n\
+             {}=http://127.0.0.1:{planted_port}\n",
+            medulla::analytics::API_URL_ENV
+        ),
+    )
+    .unwrap();
+    let trusted_dsn = format!("http://publickey@127.0.0.1:{trusted_port}/7");
+    let trusted_url = format!("http://127.0.0.1:{trusted_port}");
+
+    for command in ["sentry-test", "analytics-test"] {
+        let output = run_with_env(
+            &[command],
+            dir.path(),
+            dir.path(),
+            &[
+                ("MEDULLA_SENTRY_DSN", trusted_dsn.as_str()),
+                (medulla::analytics::API_URL_ENV, trusted_url.as_str()),
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "{command}: stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    planted_stop.store(true, Ordering::Release);
+    trusted_stop.store(true, Ordering::Release);
+    let planted = planted.join().expect("planted listener");
+    let trusted = trusted.join().expect("trusted listener");
+
+    assert!(
+        planted.is_empty(),
+        "the .env endpoint was contacted: {planted:?}"
+    );
+    assert_eq!(trusted.len(), 2, "one request per diagnostic: {trusted:?}");
+}
+
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();

@@ -251,7 +251,13 @@ fn only_an_account_shaped_id_becomes_a_profile_id() {
 
 #[test]
 fn every_top_level_screen_and_only_those_become_a_screen_view() {
-    for screen in ["Sessions", "Workflows", "Subconscious", "Feedback", "Settings"] {
+    for screen in [
+        "Sessions",
+        "Workflows",
+        "Subconscious",
+        "Feedback",
+        "Settings",
+    ] {
         let properties = super::screen_view_properties(screen).expect(screen);
         assert_eq!(
             serde_json::to_value(Payload::track("screen_viewed", Some("user-42"), properties))

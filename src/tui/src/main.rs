@@ -229,7 +229,8 @@ fn decoded_env() -> std::collections::HashMap<String, String> {
 /// account id is read from. The credential check also consults `effective`,
 /// the environment after the `.env`: a credential the checkout supplies (a
 /// `MEDULLA_TOKEN`, a config with an inline token) is what the command will
-/// authenticate with, so the stored account must not be named then either.
+/// authenticate with, so the stored account must not be named then either;
+/// nor when the `.env` re-selects a different stored session.
 fn set_stored_telemetry_user(
     raw: &[String],
     invoking: &std::collections::HashMap<String, String>,
@@ -241,9 +242,14 @@ fn set_stored_telemetry_user(
         medulla::config::load_config(source.config.as_deref(), env, &source.dir)
             .map(|loaded| medulla::auth::external_token_wins(env, &loaded.config.backend))
     };
-    // Unreadable config in either view attributes nothing, as before.
+    // Unreadable config in either view attributes nothing, as before. And the
+    // `.env` may also re-select the stored session itself (`MEDULLA_HOME`,
+    // `MEDULLA_USER`) without supplying a token: the command then runs as that
+    // session's account, so the id is named only when both views agree on it.
     let user_id = match (external_wins(invoking), external_wins(effective)) {
-        (Ok(false), Ok(false)) => medulla::auth::state(invoking).user_id,
+        (Ok(false), Ok(false)) => medulla::auth::state(invoking)
+            .user_id
+            .filter(|id| medulla::auth::state(effective).user_id.as_deref() == Some(id)),
         _ => None,
     };
     medulla::observability::set_user(user_id.as_deref());

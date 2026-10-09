@@ -55,10 +55,12 @@ fn main() -> anyhow::Result<()> {
     let is_mock =
         matches!(parse_command(&raw), Command::Tui) && medulla_tui::cli::parse_tui_args(&raw).mock;
 
-    // Load a cwd `.env` into the process env before anything reads it (this is
-    // how local dev opts into `MEDULLA_DEV=1`). Never overrides existing vars.
-    // Done ahead of crash reporting so a `.env` can carry a DSN override or the
-    // opt-out.
+    // Load a cwd `.env` into the process env before anything reads it. Never
+    // overrides existing vars, and never sets the variables that choose the
+    // home or the account in it (`home::dotenv::HOME_SELECTORS`): a `.env`
+    // belongs to the repository being opened, so `MEDULLA_DEV=1` and the
+    // like must come from the invoking shell. Done ahead of crash reporting so
+    // a `.env` can carry the opt-out.
     //
     // The hook shim is the exception: it runs inside the operator's live turn,
     // with the harness waiting on this process under a hard deadline, and the
@@ -87,7 +89,16 @@ fn main() -> anyhow::Result<()> {
         // loaded: a checkout must not be able to plant a home or config whose
         // session names an account of its choosing.
         let invoking_env = decoded_env();
-        medulla::home::load_dotenv_from_cwd();
+        let refused = medulla::home::load_dotenv_from_cwd();
+        if !refused.is_empty() {
+            // stderr: stdout can be a protocol stream (`medulla mcp`).
+            eprintln!(
+                "medulla: ignored {} from ./.env — a repository's .env cannot choose \
+                 Medulla's home or account; set {} in your shell instead",
+                refused.join(", "),
+                if refused.len() == 1 { "it" } else { "them" },
+            );
+        }
         match trusted_sentry_dsn {
             Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
             None => std::env::remove_var(medulla::observability::DSN_ENV),

@@ -81,7 +81,10 @@ fn is_home_selector(key: &str) -> bool {
 /// that were refused, in file order, for the caller to report.
 ///
 /// The pure counterpart of [`load_dotenv_from_cwd`], over an injected map.
-pub fn apply_dotenv(env: &mut HashMap<String, String>, pairs: Vec<(String, String)>) -> Vec<String> {
+pub fn apply_dotenv(
+    env: &mut HashMap<String, String>,
+    pairs: Vec<(String, String)>,
+) -> Vec<String> {
     let mut refused = Vec::new();
     for (key, value) in pairs {
         if is_home_selector(&key) {

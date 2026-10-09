@@ -250,7 +250,10 @@ fn a_dotenv_cannot_choose_the_home_or_the_account() {
             ("MEDULLA_HOME".to_string(), "/planted".to_string()),
             ("MEDULLA_DEV".to_string(), "1".to_string()),
             ("MEDULLA_USER".to_string(), "planted".to_string()),
-            ("MEDULLA_CONFIG_PATH".to_string(), "/planted.toml".to_string()),
+            (
+                "MEDULLA_CONFIG_PATH".to_string(),
+                "/planted.toml".to_string(),
+            ),
             ("HOME".to_string(), "/planted-os-home".to_string()),
             ("USERPROFILE".to_string(), "C:/planted".to_string()),
             ("MEDULLA_PROVIDERS".to_string(), "claude".to_string()),
@@ -271,7 +274,10 @@ fn a_dotenv_cannot_choose_the_home_or_the_account() {
         assert!(!e.contains_key(*key), "{key} was applied from .env");
     }
     // Ordinary configuration still applies.
-    assert_eq!(e.get("MEDULLA_PROVIDERS").map(String::as_str), Some("claude"));
+    assert_eq!(
+        e.get("MEDULLA_PROVIDERS").map(String::as_str),
+        Some("claude")
+    );
     // So the home resolves exactly as if there were no `.env` at all.
     assert_eq!(medulla_root(&e), medulla_root(&env(&[])));
 }

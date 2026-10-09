@@ -590,3 +590,20 @@ mod session {
         assert_eq!(mode & 0o777, 0o600, "session file is {mode:o}");
     }
 }
+
+#[test]
+fn an_external_token_wins_exactly_when_the_resolver_would_pick_it() {
+    let mut env = HashMap::new();
+    let mut backend = BackendConfig::default();
+    // Nothing configured: the stored session authenticates.
+    assert!(!super::external_token_wins(&env, &backend));
+    // An empty environment value is absent to the resolver too.
+    env.insert("MEDULLA_TOKEN".to_string(), String::new());
+    assert!(!super::external_token_wins(&env, &backend));
+    env.insert("MEDULLA_TOKEN".to_string(), "from-env".to_string());
+    assert!(super::external_token_wins(&env, &backend));
+    // An inline token wins even when empty, as the resolver selects it.
+    env.clear();
+    backend.token = Some(String::new());
+    assert!(super::external_token_wins(&env, &backend));
+}

@@ -196,18 +196,20 @@ impl Screen {
 /// they are signed out while the bearer is still on disk is the one outcome a
 /// security action must never produce.
 fn sign_out(env: &HashMap<String, String>, backend: &medulla::config::BackendConfig) -> String {
-    // Reported before the session is cleared (the account id lives in it),
-    // like the other sign-out paths; only when the stored session is what
+    // The account id lives in the session, so it is read before the clear;
+    // the event is sent only once the clear succeeded, since a session that
+    // survives is not a sign-out. Only when the stored session is what
     // authenticated this run, or the event would name the wrong account.
-    if !medulla::auth::external_token_wins(env, backend) {
-        if let Some(user_id) = medulla::auth::state(env).user_id {
-            medulla::analytics::spawn_tracked(async move {
-                let _ = medulla::analytics::record_sign_out(&user_id).await;
-            });
-        }
-    }
+    let signed_out_user = (!medulla::auth::external_token_wins(env, backend))
+        .then(|| medulla::auth::state(env).user_id)
+        .flatten();
     if let Err(e) = medulla::auth::clear(env) {
         return format!("The stored session could not be removed: {e}");
+    }
+    if let Some(user_id) = signed_out_user {
+        medulla::analytics::spawn_tracked(async move {
+            let _ = medulla::analytics::record_sign_out(&user_id).await;
+        });
     }
     // Retired credential files go too, for the reason `medulla logout` gives:
     // the next launch would adopt one and sign the operator straight back in to

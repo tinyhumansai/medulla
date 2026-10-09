@@ -135,7 +135,13 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
     let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
     match parse_command(raw) {
-        Command::Wrapper(_) => at_cwd(None),
+        // A wrapper's own flags belong to the child harness; its Medulla
+        // config comes only from an inherited `MEDULLA_CONFIG_PATH`, which is
+        // what `run_wrapper` and `build_bridge` load.
+        Command::Wrapper(_) => at_cwd(
+            medulla::config::explicit_config_from_env(&std::env::vars().collect())
+                .map(str::to_owned),
+        ),
         Command::Tui => at_cwd(medulla_tui::cli::parse_tui_args(raw).config),
         Command::Run => at_cwd(
             medulla_tui::cli::parse_run_args(&raw[1..])

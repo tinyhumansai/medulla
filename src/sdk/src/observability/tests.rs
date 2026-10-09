@@ -565,3 +565,32 @@ fn bare_provider_keys_and_secret_assignments_are_redacted() {
     // Token counts in a panic message are not secrets and survive.
     assert!(scrub_text("input_tokens=12345678", None).contains("12345678"));
 }
+
+#[test]
+fn a_home_prefix_followed_by_name_punctuation_is_another_directory() {
+    assert_eq!(
+        scrub_paths("/home/alice@company/file", Some("/home/alice")),
+        "/home/<user>/file"
+    );
+    assert_eq!(
+        scrub_paths("/home/alice+dev/x", Some("/home/alice")),
+        "/home/<user>/x"
+    );
+    // Real boundaries still end the configured home.
+    assert_eq!(scrub_paths("(/home/alice/x)", Some("/home/alice")), "(~/x)");
+}
+
+#[test]
+fn an_integration_supplied_user_id_that_is_not_an_account_id_is_dropped() {
+    let event = scrub_event(
+        Event {
+            user: Some(User {
+                id: Some("alice@example.com".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        None,
+    );
+    assert!(event.user.is_none());
+}

@@ -43,10 +43,16 @@ pub(super) fn scrub_event(mut event: Event<'static>, home: Option<&str>) -> Even
     // to identify the failure.
     event.logger = None;
     event.template = None;
-    event.user = event.user.and_then(|user| user.id).map(|id| User {
-        id: Some(id),
-        ..Default::default()
-    });
+    // Only an account-shaped id survives; whatever else an integration put in
+    // `user.id` (an email, a token) is dropped with the rest of the user.
+    event.user = event
+        .user
+        .and_then(|user| user.id)
+        .and_then(|id| super::account_id(&id))
+        .map(|id| User {
+            id: Some(id),
+            ..Default::default()
+        });
 
     let text = |value: &mut Option<String>| {
         if let Some(value) = value.as_mut() {
@@ -135,10 +141,12 @@ pub(super) fn scrub_paths(value: &str, home: Option<&str>) -> String {
             // A path separator or any non-path punctuation terminates the
             // configured directory. Capture and restore it because regex has
             // no lookahead. Letters, digits, and combining marks in any script,
-            // plus path punctuation, remain part of the component, so neither
-            // `/home/alice2` nor `/home/aliceé` is mistaken for `/home/alice`.
+            // plus the punctuation that appears inside directory names
+            // (`._-@+~`), remain part of the component, so none of
+            // `/home/alice2`, `/home/aliceé`, or `/home/alice@corp` is mistaken
+            // for `/home/alice`.
             Regex::new(&format!(
-                r#"{}([/\\]|[^/\\\p{{L}}\p{{N}}\p{{M}}._-]|$)"#,
+                r#"{}([/\\]|[^/\\\p{{L}}\p{{N}}\p{{M}}._@+~-]|$)"#,
                 regex::escape(home)
             ))
             .ok()

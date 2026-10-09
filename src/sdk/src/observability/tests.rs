@@ -338,7 +338,9 @@ struct StalledServer {
 impl StalledServer {
     fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        listener.set_nonblocking(true).expect("non-blocking listener");
+        listener
+            .set_nonblocking(true)
+            .expect("non-blocking listener");
         let port = listener.local_addr().expect("addr").port();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopping = Arc::clone(&stop);

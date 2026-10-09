@@ -15,7 +15,7 @@ use crate::protocol::HarnessProvider;
 use super::args::parse_wrapper_args;
 use super::bridge::{
     build_bridge, drain_and_inject, mint_session_id, now_ms, provider_bin_env_key, pump_tailer,
-    sync_harness_id,
+    sync_harness_id, UsageTap,
 };
 use super::types::{PtySpawner, WrapperConfig, WrapperTimings};
 

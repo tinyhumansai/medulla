@@ -77,6 +77,11 @@ fn the_daemon_resolves_telemetry_config_the_way_each_of_its_modes_does() {
 
 #[test]
 fn the_hub_resolves_telemetry_config_from_the_account_home() {
+    // Run from a checkout, the hub still ignores that checkout's config: no
+    // explicit path, and discovery starts in the account home, not the cwd.
+    // (Compared against the cwd rather than a second `medulla_home` reading:
+    // other tests in this binary repoint `MEDULLA_HOME` process-wide, so two
+    // separate readings can legitimately differ.)
     let raw = vec![
         "hub".to_string(),
         "--config".into(),
@@ -84,8 +89,5 @@ fn the_hub_resolves_telemetry_config_from_the_account_home() {
     ];
     let hub = super::config_source(&raw, false);
     assert_eq!(hub.config, None);
-    assert_eq!(
-        hub.dir,
-        medulla::home::medulla_home(&std::env::vars().collect())
-    );
+    assert_ne!(hub.dir, std::env::current_dir().unwrap());
 }

@@ -611,40 +611,76 @@ fn accept_one_analytics_event() -> (u16, std::thread::JoinHandle<String>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let port = listener.local_addr().expect("listener address").port();
     let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("analytics request");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("timeout");
-        let mut request = Vec::new();
-        let mut buf = [0u8; 4096];
-        let headers_end = loop {
-            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                break pos + 4;
-            }
-            let read = stream.read(&mut buf).expect("read headers");
-            assert_ne!(read, 0, "connection closed before headers completed");
-            request.extend_from_slice(&buf[..read]);
-        };
-        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
-            .lines()
-            .find_map(|line| {
-                line.to_ascii_lowercase()
-                    .strip_prefix("content-length:")
-                    .map(str::to_owned)
-            })
-            .and_then(|value| value.trim().parse().ok())
-            .expect("content length");
-        while request.len() < headers_end + content_length {
-            let read = stream.read(&mut buf).expect("read body");
-            assert_ne!(read, 0, "connection closed before body completed");
-            request.extend_from_slice(&buf[..read]);
-        }
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-            .expect("respond");
-        String::from_utf8_lossy(&request[headers_end..headers_end + content_length]).into_owned()
+        let (stream, _) = listener.accept().expect("analytics request");
+        answer_analytics_request(stream)
     });
     (port, server)
+}
+
+/// Read one HTTP request in full, answer it `200 OK`, and return its body.
+fn answer_analytics_request(mut stream: std::net::TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("timeout");
+    let mut request = Vec::new();
+    let mut buf = [0u8; 4096];
+    let headers_end = loop {
+        if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        let read = stream.read(&mut buf).expect("read headers");
+        assert_ne!(read, 0, "connection closed before headers completed");
+        request.extend_from_slice(&buf[..read]);
+    };
+    let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .map(str::to_owned)
+        })
+        .and_then(|value| value.trim().parse().ok())
+        .expect("content length");
+    while request.len() < headers_end + content_length {
+        let read = stream.read(&mut buf).expect("read body");
+        assert_ne!(read, 0, "connection closed before body completed");
+        request.extend_from_slice(&buf[..read]);
+    }
+    stream
+        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+        .expect("respond");
+    String::from_utf8_lossy(&request[headers_end..headers_end + content_length]).into_owned()
+}
+
+/// Accept analytics requests until `stop` is set, answering each `200 OK`, and
+/// return every body received.
+fn collect_analytics_events() -> (
+    u16,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<Vec<String>>,
+) {
+    use std::sync::atomic::Ordering;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    listener
+        .set_nonblocking(true)
+        .expect("non-blocking listener");
+    let port = listener.local_addr().expect("listener address").port();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopping = std::sync::Arc::clone(&stop);
+    let server = std::thread::spawn(move || {
+        let mut bodies = Vec::new();
+        while !stopping.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).expect("blocking stream");
+                    bodies.push(answer_analytics_request(stream));
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        bodies
+    });
+    (port, stop, server)
 }
 
 #[test]
@@ -678,6 +714,74 @@ fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() 
     assert_eq!(body["type"], "track");
     assert_eq!(body["payload"]["name"], "signed_out");
     assert_eq!(body["payload"]["profileId"], "user-42");
+}
+
+/// A plain passthrough wrapper session (`--no-bridge`) has no host link to
+/// publish to, but its token usage still reaches analytics.
+#[cfg(unix)]
+#[test]
+fn a_bridgeless_wrapper_session_reports_its_token_usage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    // `run_with_env` points Codex discovery here; `rollout-*.jsonl` is the
+    // transcript name it matches.
+    let sessions = dir.path().join("codex-sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join("rollout-usage.jsonl");
+    let fake_codex = dir.path().join("codex");
+    std::fs::write(
+        &fake_codex,
+        format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' '{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"codex-usage-e2e\",\"cwd\":\"{cwd}\"}}}}' >> '{rollout}'\n\
+             printf '%s\\n' '{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"input_tokens\":7,\"output_tokens\":3}}}}}}}}' >> '{rollout}'\n",
+            cwd = workspace.display(),
+            rollout = rollout.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (port, stop, server) = collect_analytics_events();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = run_with_env(
+        &["codex", "--no-bridge"],
+        &workspace,
+        dir.path(),
+        &[
+            (medulla::analytics::API_URL_ENV, api_url.as_str()),
+            ("MEDULLA_CODEX_BIN", fake_codex.to_str().unwrap()),
+        ],
+    );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let usage: Vec<serde_json::Value> = bodies
+        .iter()
+        .map(|body| serde_json::from_str(body).expect("analytics JSON"))
+        .filter(|body: &serde_json::Value| body["payload"]["name"] == "token_usage_reported")
+        .collect();
+    assert_eq!(usage.len(), 1, "token usage events: {bodies:?}");
+    assert_eq!(usage[0]["payload"]["profileId"], "user-42");
+    let properties = &usage[0]["payload"]["properties"];
+    assert_eq!(properties["input_tokens"], "7", "{properties}");
+    assert_eq!(properties["output_tokens"], "3", "{properties}");
 }
 
 #[test]

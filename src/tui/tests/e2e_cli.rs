@@ -74,7 +74,13 @@ fn run_with_env(
         .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
         .env_remove("OPENROUTER_API_KEY")
-        .env_remove("MEDULLA_BACKEND_URL");
+        .env_remove("MEDULLA_BACKEND_URL")
+        // An opted-out machine running the suite must not silently turn the
+        // telemetry success-path tests into no-ops; the opt-out tests set it
+        // back through `extra`.
+        .env_remove("MEDULLA_ANALYTICS_DISABLED")
+        .env_remove("MEDULLA_SENTRY_DSN")
+        .env_remove(medulla::analytics::API_URL_ENV);
     for (name, value) in extra {
         command.env(name, value);
     }
@@ -555,68 +561,6 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
     assert_eq!(replies[1]["id"], 7);
 }
 
-/// A minimal HTTP server that accepts one request, reads its full declared
-/// body, and answers `200 OK` — enough to stand in for Sentry's envelope
-/// endpoint. Returns the port to point `MEDULLA_SENTRY_DSN` at.
-fn accept_one_and_respond_ok() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("addr").port();
-    std::thread::spawn(move || {
-        let Ok((mut stream, _)) = listener.accept() else {
-            return;
-        };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("timeout");
-        let mut request = Vec::new();
-        let mut buf = [0u8; 4096];
-        let headers_end = loop {
-            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                break pos + 4;
-            }
-            let Ok(read) = stream.read(&mut buf) else {
-                return;
-            };
-            if read == 0 {
-                return;
-            }
-            request.extend_from_slice(&buf[..read]);
-        };
-        let content_length: usize = String::from_utf8_lossy(&request[..headers_end])
-            .lines()
-            .find_map(|line| {
-                line.to_ascii_lowercase()
-                    .strip_prefix("content-length:")
-                    .map(|v| v.trim().to_owned())
-            })
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        while request.len() < headers_end + content_length {
-            let Ok(read) = stream.read(&mut buf) else {
-                return;
-            };
-            if read == 0 {
-                return;
-            }
-            request.extend_from_slice(&buf[..read]);
-        }
-        let _ =
-            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
-    });
-    port
-}
-
-/// Accept one OpenPanel event and return its body after responding successfully.
-fn accept_one_analytics_event() -> (u16, std::thread::JoinHandle<String>) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let port = listener.local_addr().expect("listener address").port();
-    let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("analytics request");
-        answer_analytics_request(stream)
-    });
-    (port, server)
-}
-
 /// Read one HTTP request in full, answer it `200 OK`, and return its body.
 fn answer_analytics_request(mut stream: std::net::TcpStream) -> String {
     stream
@@ -652,9 +596,12 @@ fn answer_analytics_request(mut stream: std::net::TcpStream) -> String {
     String::from_utf8_lossy(&request[headers_end..headers_end + content_length]).into_owned()
 }
 
-/// Accept analytics requests until `stop` is set, answering each `200 OK`, and
-/// return every body received.
-fn collect_analytics_events() -> (
+/// Accept requests until `stop` is set, answering each `200 OK`, and return
+/// every body received.
+///
+/// Accepting is polled, so the server always stops and can be joined, even
+/// when the command under test never connects.
+fn collect_requests() -> (
     u16,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     std::thread::JoinHandle<Vec<String>>,
@@ -693,7 +640,7 @@ fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() 
         r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
     )
     .unwrap();
-    let (port, server) = accept_one_analytics_event();
+    let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}/api");
 
     let output = run_with_env(
@@ -702,6 +649,8 @@ fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() 
         dir.path(),
         &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
     );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    let bodies = server.join().expect("analytics server");
 
     assert!(
         output.status.success(),
@@ -709,8 +658,8 @@ fn logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint() 
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let body: serde_json::Value =
-        serde_json::from_str(&server.join().expect("server thread")).expect("analytics JSON");
+    assert_eq!(bodies.len(), 1, "analytics requests: {bodies:?}");
+    let body: serde_json::Value = serde_json::from_str(&bodies[0]).expect("analytics JSON");
     assert_eq!(body["type"], "track");
     assert_eq!(body["payload"]["name"], "signed_out");
     assert_eq!(body["payload"]["profileId"], "user-42");
@@ -751,7 +700,7 @@ fn a_bridgeless_wrapper_session_reports_its_token_usage() {
     )
     .unwrap();
     std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let (port, stop, server) = collect_analytics_events();
+    let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}/api");
 
     let output = run_with_env(
@@ -787,7 +736,7 @@ fn a_bridgeless_wrapper_session_reports_its_token_usage() {
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();
-    let port = accept_one_and_respond_ok();
+    let (port, stop, server) = collect_requests();
     let dsn = format!("http://publickey@127.0.0.1:{port}/7");
 
     let output = run_with_env(
@@ -796,6 +745,8 @@ fn sentry_test_reaches_a_configured_dsn_end_to_end() {
         home.path(),
         &[("MEDULLA_SENTRY_DSN", dsn.as_str())],
     );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    server.join().expect("sentry server");
 
     assert!(
         output.status.success(),
@@ -843,7 +794,7 @@ fn analytics_test_reports_why_when_analytics_is_opted_out() {
 #[test]
 fn analytics_test_reaches_a_configured_endpoint_end_to_end() {
     let home = TempDir::new().unwrap();
-    let port = accept_one_and_respond_ok();
+    let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}");
     let output = run_with_env(
         &["analytics-test"],
@@ -851,6 +802,8 @@ fn analytics_test_reaches_a_configured_endpoint_end_to_end() {
         home.path(),
         &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
     );
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    server.join().expect("analytics server");
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",

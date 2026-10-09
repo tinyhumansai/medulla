@@ -81,6 +81,10 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     let externally_authenticated =
         medulla::runtime::cloud::connect::external_credential_source(&env, &loaded.config.backend)
             .is_some();
+    // Whether this launch signed the account in itself (a login screen, first
+    // account or returning), as opposed to finding a stored session: only then
+    // is it a sign-in.
+    let mut signed_in_here = false;
     if !args.mock && !account_is_active(&env) && !externally_authenticated {
         let issuer = loaded.config.backend.base_url.clone();
         match sign_in_first_account(&env, &issuer, args.alt_screen).await? {
@@ -99,6 +103,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                     .map_err(|e| {
                         anyhow::anyhow!("signed in, but the session could not be stored: {e}")
                     })?;
+                signed_in_here = true;
                 // Now the marker names the authenticated account, so this
                 // resolves that account's own config file — the one that wins
                 // from here on.
@@ -279,9 +284,6 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // the alt-screen session already set up, and resolves to a signed-in core or
     // a clean quit — there is no third option, because a TUI with no runtime has
     // nothing to show.
-    // Whether this launch signed the account in itself (the login screen),
-    // as opposed to finding a stored session: only then is it a sign-in.
-    let mut signed_in_here = false;
     if let Some(base_url) = need_login.take() {
         // Same flow as a mid-session relogin, and deliberately the same code: an
         // install with an account whose session went missing is signing in

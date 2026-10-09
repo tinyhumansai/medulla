@@ -211,4 +211,10 @@ fn a_dotenv_that_reselects_the_session_attributes_nothing() {
         super::stored_telemetry_user(&raw, &env_for(&invoker), &env_for(&planted), false),
         None
     );
+    // Another root repeating the same account id is still another session.
+    let lookalike = home_with("user-a");
+    assert_eq!(
+        super::stored_telemetry_user(&raw, &env_for(&invoker), &env_for(&lookalike), false),
+        None
+    );
 }

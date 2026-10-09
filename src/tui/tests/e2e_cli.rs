@@ -838,6 +838,43 @@ fn a_workspace_env_file_cannot_redirect_telemetry_away_from_the_invoker() {
     assert_eq!(trusted.len(), 2, "one request per diagnostic: {trusted:?}");
 }
 
+/// When an external credential is what authenticates, the stored session's
+/// account is not the one signing out, so no `signed_out` is reported for it.
+#[test]
+fn logout_under_an_external_token_reports_no_sign_out() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    let account_home = dir.path().join("local");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join("session.json"),
+        r#"{"token":"jwt-1","userId":"user-42","baseUrl":"http://example"}"#,
+    )
+    .unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    // Whether logout itself succeeds here is covered elsewhere; this pins
+    // only what it reports.
+    let _ = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[
+            (medulla::analytics::API_URL_ENV, api_url.as_str()),
+            ("MEDULLA_TOKEN", "an-external-credential"),
+        ],
+    );
+    stop.store(true, Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        !bodies.iter().any(|body| body.contains("signed_out")),
+        "signed_out was reported for the stored account: {bodies:?}"
+    );
+}
+
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();

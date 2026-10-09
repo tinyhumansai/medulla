@@ -257,9 +257,16 @@ fn stored_telemetry_user(
     // `MEDULLA_USER`) without supplying a token: the command then runs as that
     // session's account, so the id is named only when both views agree on it.
     let user_id = match (external_wins(invoking), external_wins(effective)) {
-        (Ok(false), Ok(false)) => medulla::auth::state(invoking)
-            .user_id
-            .filter(|id| medulla::auth::state(effective).user_id.as_deref() == Some(id)),
+        // Same id is not enough: another root can hold a session that repeats
+        // the id with a different token. The session must come from the same
+        // account home in both views.
+        (Ok(false), Ok(false))
+            if medulla::home::medulla_home(invoking) == medulla::home::medulla_home(effective) =>
+        {
+            medulla::auth::state(invoking)
+                .user_id
+                .filter(|id| medulla::auth::state(effective).user_id.as_deref() == Some(id))
+        }
         _ => None,
     };
     user_id

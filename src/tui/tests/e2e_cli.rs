@@ -86,7 +86,13 @@ fn run_with_env(
         .iter()
         .any(|(name, _)| *name == "MEDULLA_SENTRY_DSN" || *name == medulla::analytics::API_URL_ENV);
     if local_endpoint {
-        command.env_remove("MEDULLA_ANALYTICS_DISABLED");
+        // Clearing the opt-out enables both transports, so the one the test
+        // does not redirect is aimed at a closed loopback port rather than left
+        // on its live default; `extra` overrides either with a real listener.
+        command
+            .env_remove("MEDULLA_ANALYTICS_DISABLED")
+            .env("MEDULLA_SENTRY_DSN", "http://unused@127.0.0.1:9/0")
+            .env(medulla::analytics::API_URL_ENV, "http://127.0.0.1:9");
     } else {
         command.env("MEDULLA_ANALYTICS_DISABLED", "1");
     }

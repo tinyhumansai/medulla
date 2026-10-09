@@ -175,3 +175,40 @@ fn mcp_falls_back_to_the_config_its_parent_passed_down() {
         Some("/tmp/own.toml")
     );
 }
+
+#[test]
+fn a_dotenv_that_reselects_the_session_attributes_nothing() {
+    let home_with = |user: &str| {
+        let dir = tempfile::TempDir::new().unwrap();
+        let local = dir.path().join("local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(
+            local.join("session.json"),
+            format!(r#"{{"token":"jwt","userId":"{user}","baseUrl":"http://example"}}"#),
+        )
+        .unwrap();
+        dir
+    };
+    let env_for = |home: &tempfile::TempDir| -> std::collections::HashMap<String, String> {
+        [(
+            "MEDULLA_HOME".to_string(),
+            home.path().display().to_string(),
+        )]
+        .into()
+    };
+    let invoker = home_with("user-a");
+    let planted = home_with("user-b");
+    let raw = vec!["sessions".to_string()];
+
+    // Same session before and after the `.env`: that account is named.
+    assert_eq!(
+        super::stored_telemetry_user(&raw, &env_for(&invoker), &env_for(&invoker), false)
+            .as_deref(),
+        Some("user-a")
+    );
+    // The `.env` moved the command onto another session: name neither.
+    assert_eq!(
+        super::stored_telemetry_user(&raw, &env_for(&invoker), &env_for(&planted), false),
+        None
+    );
+}

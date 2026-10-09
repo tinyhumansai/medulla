@@ -236,7 +236,17 @@ fn set_stored_telemetry_user(
     invoking: &std::collections::HashMap<String, String>,
     effective: &std::collections::HashMap<String, String>,
 ) {
-    let terminal = io::stdout().is_terminal();
+    let user_id = stored_telemetry_user(raw, invoking, effective, io::stdout().is_terminal());
+    medulla::observability::set_user(user_id.as_deref());
+}
+
+/// The decision behind [`set_stored_telemetry_user`], without setting it.
+fn stored_telemetry_user(
+    raw: &[String],
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+    terminal: bool,
+) -> Option<String> {
     let external_wins = |env: &std::collections::HashMap<String, String>| {
         let source = config_source(raw, env, terminal);
         medulla::config::load_config(source.config.as_deref(), env, &source.dir)
@@ -252,7 +262,7 @@ fn set_stored_telemetry_user(
             .filter(|id| medulla::auth::state(effective).user_id.as_deref() == Some(id)),
         _ => None,
     };
-    medulla::observability::set_user(user_id.as_deref());
+    user_id
 }
 
 /// Pick the TLS backend before anything opens a connection.

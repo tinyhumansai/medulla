@@ -73,6 +73,10 @@ fn run_with_env(
         .env("MEDULLA_CLAUDE_SESSIONS_DIR", home.join("claude-sessions"))
         .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
+        // An inherited account selector would outrank a test's own (a `.env`
+        // never overrides a set variable) and pick an account the test did
+        // not plant.
+        .env_remove("MEDULLA_USER")
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("MEDULLA_BACKEND_URL")
         .env_remove("MEDULLA_SENTRY_DSN")
@@ -872,6 +876,57 @@ fn logout_under_an_external_token_reports_no_sign_out() {
     assert!(
         !bodies.iter().any(|body| body.contains("signed_out")),
         "signed_out was reported for the stored account: {bodies:?}"
+    );
+}
+
+/// A checkout's `.env` that re-selects the stored session (here `MEDULLA_USER`)
+/// cannot get a planted account named in the `signed_out` event.
+#[test]
+fn logout_never_reports_an_account_a_workspace_env_file_selected() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    for (user, id) in [("local", "user-42"), ("planted", "attacker-1")] {
+        let account_home = dir.path().join(user);
+        std::fs::create_dir_all(&account_home).unwrap();
+        std::fs::write(
+            account_home.join("session.json"),
+            format!(r#"{{"token":"jwt-{id}","userId":"{id}","baseUrl":"http://example"}}"#),
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.path().join(".env"), "MEDULLA_USER=planted\n").unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    // Logout awaits its (bounded) delivery before exiting, so every request it
+    // made has been answered by the time it returns.
+    stop.store(true, Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The `.env` re-selected the session, so startup withheld attribution:
+    // the correct outcome is no `signed_out` at all, for either account. The
+    // stored-session case that does report is
+    // `logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint`.
+    assert!(
+        !bodies.iter().any(|body| body.contains("attacker-1")),
+        "the .env-selected account was reported: {bodies:?}"
+    );
+    assert!(
+        !bodies.iter().any(|body| body.contains("signed_out")),
+        "a sign-out was attributed despite the re-selected session: {bodies:?}"
     );
 }
 

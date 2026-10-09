@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::protocol::TokenUsage;
 
-use super::mapper::token_delta;
+use super::mapper::{codex_reported_usage, token_delta};
 use super::shared::{
     bound_tool_input, normalize_tool_kind, tool_display, truncate, ELISION, INPUT_CAP, OUTPUT_CAP,
 };
@@ -682,4 +682,29 @@ fn an_invalid_codex_total_is_skipped_not_replaced_by_the_last_call() {
         1,
     );
     assert_eq!(mapper.usage(), None);
+}
+
+#[test]
+fn a_resumed_codex_conversation_reports_only_the_new_call_first() {
+    let usage = |input, output| TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+    };
+    let none = usage(0, 0);
+    // Resumed: the first total carries 15,000 tokens of earlier turns, but this
+    // call used 400 of them.
+    assert_eq!(
+        codex_reported_usage(Some(usage(400, 20)), none, usage(15_400, 900)),
+        (400, 20)
+    );
+    // A new conversation: the first call is the whole total either way.
+    assert_eq!(
+        codex_reported_usage(Some(usage(7, 3)), none, usage(7, 3)),
+        (7, 3)
+    );
+    // Later records report the delta between totals.
+    assert_eq!(
+        codex_reported_usage(None, usage(15_400, 900), usage(16_000, 950)),
+        (600, 50)
+    );
 }

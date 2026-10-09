@@ -22,6 +22,30 @@ const CODEX_DUPLICATE_WINDOW_MS: i64 = 2000;
 /// started counting from zero, not that usage went backwards — so the whole
 /// new snapshot is the delta; `current.saturating_sub(previous)` alone would
 /// floor that case to zero and silently drop it.
+/// The usage to report for one Codex `token_count` record.
+///
+/// Codex's total is cumulative over the whole conversation, so on a mapper's
+/// first record it may already include turns this mapper never saw: a resumed
+/// conversation, or a PTY reused for a later turn. Subtracting a zero baseline
+/// would report all of that history again. The record's `last_token_usage`
+/// (`first_call`) is exactly what the latest call used, so it is reported for
+/// the first record, and the total becomes the baseline. For a new
+/// conversation the two are equal. Later records report the delta between
+/// totals; a record with no per-call usage falls back to that delta as well.
+pub(super) fn codex_reported_usage(
+    first_call: Option<TokenUsage>,
+    previous: TokenUsage,
+    total: TokenUsage,
+) -> (i64, i64) {
+    match first_call {
+        Some(call) => (call.input_tokens, call.output_tokens),
+        None => (
+            token_delta(total.input_tokens, previous.input_tokens),
+            token_delta(total.output_tokens, previous.output_tokens),
+        ),
+    }
+}
+
 pub(super) fn token_delta(current: i64, previous: i64) -> i64 {
     if current < 0 {
         0
@@ -110,12 +134,18 @@ impl HarnessLineMapper {
                     Some(total) => scan_usage(total, 0),
                     None => scan_usage(&value, 0),
                 };
+                // The same record's per-call usage, for a first snapshot.
+                let codex_last = (self.provider == Provider::Codex)
+                    .then(|| value.pointer("/payload/info/last_token_usage"))
+                    .flatten()
+                    .and_then(|last| scan_usage(last, 0));
                 if let Some(usage) = usage {
                     let record_type = value.get("type").and_then(Value::as_str);
                     let duplicate_claude_result = self.provider == Provider::Claude
                         && record_type == Some("result")
                         && self.saw_claude_call_usage;
                     if !duplicate_claude_result {
+                        let first_snapshot = self.usage.is_none();
                         let previous = self.usage.unwrap_or(TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
@@ -151,7 +181,15 @@ impl HarnessLineMapper {
                                         .saturating_add(usage.output_tokens),
                                 },
                             ),
-                            Provider::Claude | Provider::Codex => (
+                            Provider::Codex => {
+                                let (input, output) = codex_reported_usage(
+                                    first_snapshot.then_some(codex_last).flatten(),
+                                    previous,
+                                    usage,
+                                );
+                                (input, output, usage)
+                            }
+                            Provider::Claude => (
                                 token_delta(usage.input_tokens, previous.input_tokens),
                                 token_delta(usage.output_tokens, previous.output_tokens),
                                 usage,

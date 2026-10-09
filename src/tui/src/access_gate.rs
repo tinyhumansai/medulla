@@ -196,14 +196,11 @@ impl Screen {
 /// they are signed out while the bearer is still on disk is the one outcome a
 /// security action must never produce.
 fn sign_out(env: &HashMap<String, String>, backend: &medulla::config::BackendConfig) -> String {
-    // The account id lives in the session, so it is read before the clear;
-    // the event is sent only once the clear succeeded, since a session that
-    // survives is not a sign-out. Only when the stored session is what
-    // authenticated this run, or the event would name the wrong account.
-    //
-    // The account is the one reports are attributed to, already held to every
-    // trust rule (external credential, a session the cwd `.env` re-selected),
-    // never re-read from the environment's current session.
+    // The event names the account reports are attributed to, read before the
+    // clear: that identity already honours every trust rule (an external
+    // credential, a session the cwd `.env` re-selected), so it is never
+    // re-read from the environment's current session. It is sent only once
+    // the clear succeeded, since a session that survives is not a sign-out.
     let signed_out_user = medulla::observability::reported_user();
     if let Err(e) = medulla::auth::clear(env) {
         return format!("The stored session could not be removed: {e}");

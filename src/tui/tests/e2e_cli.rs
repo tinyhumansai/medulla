@@ -875,6 +875,41 @@ fn logout_under_an_external_token_reports_no_sign_out() {
     );
 }
 
+/// A checkout's `.env` that re-selects the stored session (here `MEDULLA_USER`)
+/// cannot get a planted account named in the `signed_out` event.
+#[test]
+fn logout_never_reports_an_account_a_workspace_env_file_selected() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    for (user, id) in [("local", "user-42"), ("planted", "attacker-1")] {
+        let account_home = dir.path().join(user);
+        std::fs::create_dir_all(&account_home).unwrap();
+        std::fs::write(
+            account_home.join("session.json"),
+            format!(r#"{{"token":"jwt-{id}","userId":"{id}","baseUrl":"http://example"}}"#),
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.path().join(".env"), "MEDULLA_USER=planted\n").unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let _ = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    stop.store(true, Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    assert!(
+        !bodies.iter().any(|body| body.contains("attacker-1")),
+        "the .env-selected account was reported: {bodies:?}"
+    );
+}
+
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();

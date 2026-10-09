@@ -103,7 +103,7 @@ fn main() -> anyhow::Result<()> {
             std::env::set_var(medulla::observability::DISABLED_ENV, "1");
             None
         } else {
-            set_stored_telemetry_user(&raw, &invoking_env);
+            set_stored_telemetry_user(&raw, &invoking_env, &decoded_env());
             Some(medulla::observability::init())
         }
     };
@@ -224,18 +224,28 @@ fn decoded_env() -> std::collections::HashMap<String, String> {
 /// Attribute non-TUI harness and daemon analytics to a stored account only
 /// when config/environment credentials do not override that session.
 ///
-/// `env` is the invoking environment, captured before a cwd `.env` loaded, so
-/// the checkout being opened cannot choose the home, config, or session the
-/// account id is read from.
-fn set_stored_telemetry_user(raw: &[String], env: &std::collections::HashMap<String, String>) {
-    let source = config_source(raw, env, io::stdout().is_terminal());
-    let user_id = medulla::config::load_config(source.config.as_deref(), env, &source.dir)
-        .ok()
-        .and_then(|loaded| {
-            (!medulla::auth::external_token_wins(env, &loaded.config.backend))
-                .then(|| medulla::auth::state(env).user_id)
-                .flatten()
-        });
+/// `invoking` is the environment captured before a cwd `.env` loaded, so the
+/// checkout being opened cannot choose the home, config, or session the
+/// account id is read from. The credential check also consults `effective`,
+/// the environment after the `.env`: a credential the checkout supplies (a
+/// `MEDULLA_TOKEN`, a config with an inline token) is what the command will
+/// authenticate with, so the stored account must not be named then either.
+fn set_stored_telemetry_user(
+    raw: &[String],
+    invoking: &std::collections::HashMap<String, String>,
+    effective: &std::collections::HashMap<String, String>,
+) {
+    let terminal = io::stdout().is_terminal();
+    let external_wins = |env: &std::collections::HashMap<String, String>| {
+        let source = config_source(raw, env, terminal);
+        medulla::config::load_config(source.config.as_deref(), env, &source.dir)
+            .map(|loaded| medulla::auth::external_token_wins(env, &loaded.config.backend))
+    };
+    // Unreadable config in either view attributes nothing, as before.
+    let user_id = match (external_wins(invoking), external_wins(effective)) {
+        (Ok(false), Ok(false)) => medulla::auth::state(invoking).user_id,
+        _ => None,
+    };
     medulla::observability::set_user(user_id.as_deref());
 }
 

@@ -103,7 +103,13 @@ fn run_sender(
     };
     // reqwest wires its connector to the ambient reactor at build time.
     let _context = runtime.enter();
-    let Ok(client) = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build() else {
+    // Every request carries the DSN credential in `X-Sentry-Auth`, which
+    // reqwest does not strip on a cross-origin redirect; never follow one.
+    let Ok(client) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+    else {
         sentry_debug!("could not build the Sentry HTTP client");
         return;
     };

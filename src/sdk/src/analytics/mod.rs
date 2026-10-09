@@ -136,13 +136,19 @@ fn checked_account_id(user_id: &str) -> Result<String, AnalyticsError> {
 /// Fire-and-forget: spawns onto the current tokio runtime, and does nothing
 /// outside one, without a signed-in account, or while analytics is inactive.
 pub fn record_screen_view(screen: &str) {
-    if !matches!(
+    if let Some(properties) = screen_view_properties(screen) {
+        spawn_for_current_user("screen_viewed", properties);
+    }
+}
+
+/// The `screen_viewed` properties for `screen`, or `None` for anything but a
+/// top-level TUI screen: only the five named screens are ever reported.
+fn screen_view_properties(screen: &str) -> Option<[(&'static str, String); 1]> {
+    matches!(
         screen,
         "Sessions" | "Workflows" | "Subconscious" | "Feedback" | "Settings"
-    ) {
-        return;
-    }
-    spawn_for_current_user("screen_viewed", [("screen", screen.to_owned())]);
+    )
+    .then(|| [("screen", screen.to_owned())])
 }
 
 /// Record a normalized TUI interaction name (never its payload) for the

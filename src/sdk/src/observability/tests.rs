@@ -486,6 +486,10 @@ fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
         elapsed < Duration::from_secs(2),
         "flush blocked for {elapsed:?} despite a 200ms timeout"
     );
+    // As Sentry does on close: shut down (cancelling the stalled request)
+    // before the drop, which would otherwise drain for the full request
+    // timeout behind the stalled queue.
+    transport.shutdown(Duration::ZERO);
 }
 
 #[test]

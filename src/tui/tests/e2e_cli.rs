@@ -875,6 +875,59 @@ fn logout_under_an_external_token_reports_no_sign_out() {
     );
 }
 
+/// A repository's `.env` cannot pick which account Medulla uses: its
+/// `MEDULLA_USER` is refused (with a warning), so logout acts on — and reports —
+/// the invoker's own account, and the planted session is left untouched.
+#[test]
+fn a_workspace_env_file_cannot_select_the_account() {
+    use std::sync::atomic::Ordering;
+
+    let dir = TempDir::new().unwrap();
+    for (user, id) in [("local", "user-42"), ("planted", "attacker-1")] {
+        let account_home = dir.path().join(user);
+        std::fs::create_dir_all(&account_home).unwrap();
+        std::fs::write(
+            account_home.join("session.json"),
+            format!(r#"{{"token":"jwt-{id}","userId":"{id}","baseUrl":"http://example"}}"#),
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.path().join(".env"), "MEDULLA_USER=planted\n").unwrap();
+    let (port, stop, server) = collect_requests();
+    let api_url = format!("http://127.0.0.1:{port}/api");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_medulla"))
+        .arg("logout")
+        .current_dir(dir.path())
+        .env("MEDULLA_HOME", dir.path())
+        .env_remove("MEDULLA_USER")
+        .env_remove("MEDULLA_TOKEN")
+        .env_remove("MEDULLA_ANALYTICS_DISABLED")
+        .env("MEDULLA_SENTRY_DSN", "http://unused@127.0.0.1:9/0")
+        .env(medulla::analytics::API_URL_ENV, &api_url)
+        .output()
+        .expect("the medulla binary should run");
+    stop.store(true, Ordering::Release);
+    let bodies = server.join().expect("analytics server");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("ignored MEDULLA_USER from ./.env"),
+        "{stderr}"
+    );
+    // The invoker's own account was the one signed out and reported.
+    assert!(!dir.path().join("local/session.json").exists());
+    assert!(dir.path().join("planted/session.json").exists());
+    let signed_out: Vec<serde_json::Value> = bodies
+        .iter()
+        .map(|body| serde_json::from_str(body).expect("analytics JSON"))
+        .filter(|body: &serde_json::Value| body["payload"]["name"] == "signed_out")
+        .collect();
+    assert_eq!(signed_out.len(), 1, "{bodies:?}");
+    assert_eq!(signed_out[0]["payload"]["profileId"], "user-42");
+}
+
 #[test]
 fn sentry_test_reaches_a_configured_dsn_end_to_end() {
     let home = TempDir::new().unwrap();

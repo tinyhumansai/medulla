@@ -100,14 +100,17 @@ impl HarnessLineMapper {
                 // Codex `token_count` records carry the latest call's usage
                 // (`last_token_usage`) beside the running total, and the scan
                 // would take whichever comes first. The fold below is
-                // cumulative, so it must read the total.
+                // cumulative, so it must read the total — and only the total:
+                // a record whose total is present but invalid is skipped,
+                // never re-read through its per-call sibling.
                 let codex_total = (self.provider == Provider::Codex)
                     .then(|| value.pointer("/payload/info/total_token_usage"))
                     .flatten();
-                if let Some(usage) = codex_total
-                    .and_then(|total| scan_usage(total, 0))
-                    .or_else(|| scan_usage(&value, 0))
-                {
+                let usage = match codex_total {
+                    Some(total) => scan_usage(total, 0),
+                    None => scan_usage(&value, 0),
+                };
+                if let Some(usage) = usage {
                     let record_type = value.get("type").and_then(Value::as_str);
                     let duplicate_claude_result = self.provider == Provider::Claude
                         && record_type == Some("result")

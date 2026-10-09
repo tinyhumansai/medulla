@@ -224,3 +224,27 @@ async fn a_rejected_event_is_an_error_but_its_status_is_reported() {
     );
     server.join().expect("server");
 }
+
+#[test]
+fn only_an_account_shaped_id_becomes_a_profile_id() {
+    assert_eq!(
+        super::checked_account_id("69dd5bd7b91b0aea0494789d")
+            .ok()
+            .as_deref(),
+        Some("69dd5bd7b91b0aea0494789d")
+    );
+    for rejected in [
+        "alice@example.com",
+        "../other",
+        "a prompt",
+        &"x".repeat(129),
+    ] {
+        assert!(
+            matches!(
+                super::checked_account_id(rejected),
+                Err(super::AnalyticsError::InvalidAccountId)
+            ),
+            "{rejected:?} was accepted"
+        );
+    }
+}

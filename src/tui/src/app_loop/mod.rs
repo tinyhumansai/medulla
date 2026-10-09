@@ -747,7 +747,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                             // same case startup withholds the stored account in.
                             medulla::observability::set_user(
                                 (!external_token)
-                                    .then(|| account.as_ref().and_then(|state| state.user_id.as_deref()))
+                                    .then(|| {
+                                        account.as_ref().and_then(|state| state.user_id.as_deref())
+                                    })
                                     .flatten(),
                             );
                             // Rebuilt rather than reused: the relogin replaced

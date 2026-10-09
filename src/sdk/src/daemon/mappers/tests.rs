@@ -663,3 +663,23 @@ fn codex_usage_follows_the_cumulative_total_not_the_last_call() {
         })
     );
 }
+
+#[test]
+fn an_invalid_codex_total_is_skipped_not_replaced_by_the_last_call() {
+    let mut mapper = HarnessLineMapper::new("codex");
+    mapper.map_line(
+        &json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": { "input_tokens": 5, "output_tokens": 1 },
+                    "total_token_usage": { "input_tokens": -1, "output_tokens": 2 },
+                },
+            },
+        })
+        .to_string(),
+        1,
+    );
+    assert_eq!(mapper.usage(), None);
+}

@@ -242,6 +242,41 @@ fn apply_dotenv_never_overrides_existing() {
 }
 
 #[test]
+fn a_dotenv_cannot_choose_the_home_or_the_account() {
+    let mut e = env(&[]);
+    let refused = apply_dotenv(
+        &mut e,
+        vec![
+            ("MEDULLA_HOME".to_string(), "/planted".to_string()),
+            ("MEDULLA_DEV".to_string(), "1".to_string()),
+            ("MEDULLA_USER".to_string(), "planted".to_string()),
+            ("MEDULLA_CONFIG_PATH".to_string(), "/planted.toml".to_string()),
+            ("HOME".to_string(), "/planted-os-home".to_string()),
+            ("USERPROFILE".to_string(), "C:/planted".to_string()),
+            ("MEDULLA_PROVIDERS".to_string(), "claude".to_string()),
+        ],
+    );
+    assert_eq!(
+        refused,
+        [
+            "MEDULLA_HOME",
+            "MEDULLA_DEV",
+            "MEDULLA_USER",
+            "MEDULLA_CONFIG_PATH",
+            "HOME",
+            "USERPROFILE"
+        ]
+    );
+    for key in super::dotenv::HOME_SELECTORS {
+        assert!(!e.contains_key(*key), "{key} was applied from .env");
+    }
+    // Ordinary configuration still applies.
+    assert_eq!(e.get("MEDULLA_PROVIDERS").map(String::as_str), Some("claude"));
+    // So the home resolves exactly as if there were no `.env` at all.
+    assert_eq!(medulla_root(&e), medulla_root(&env(&[])));
+}
+
+#[test]
 fn is_truthy_matches_one_and_true() {
     assert!(is_truthy("1"));
     assert!(is_truthy(" TRUE "));

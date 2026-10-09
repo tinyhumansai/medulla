@@ -82,6 +82,11 @@ fn main() -> anyhow::Result<()> {
         // checkout cannot redirect crash reports to its own collector.
         let trusted_sentry_dsn = std::env::var_os(medulla::observability::DSN_ENV);
         let trusted_analytics_url = std::env::var_os(medulla::analytics::API_URL_ENV);
+        // For the same reason the stored account reports are attributed to is
+        // resolved from the invoking environment, as it was before the `.env`
+        // loaded: a checkout must not be able to plant a home or config whose
+        // session names an account of its choosing.
+        let invoking_env = decoded_env();
         medulla::home::load_dotenv_from_cwd();
         match trusted_sentry_dsn {
             Some(dsn) => std::env::set_var(medulla::observability::DSN_ENV, dsn),
@@ -98,7 +103,7 @@ fn main() -> anyhow::Result<()> {
             std::env::set_var(medulla::observability::DISABLED_ENV, "1");
             None
         } else {
-            set_stored_telemetry_user(&raw);
+            set_stored_telemetry_user(&raw, &invoking_env);
             Some(medulla::observability::init())
         }
     };
@@ -208,18 +213,23 @@ fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
         .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
 }
 
+/// The process environment as a map, dropping any entry that is not valid
+/// UTF-8 rather than panicking on it as `std::env::vars()` would.
+fn decoded_env() -> std::collections::HashMap<String, String> {
+    std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect()
+}
+
 /// Attribute non-TUI harness and daemon analytics to a stored account only
 /// when config/environment credentials do not override that session.
-fn set_stored_telemetry_user(raw: &[String]) {
-    let env: std::collections::HashMap<String, String> = std::env::vars_os()
-        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
-        .collect();
-    let source = config_source(raw, &env, io::stdout().is_terminal());
-    let user_id = medulla::config::load_config(source.config.as_deref(), &env, &source.dir)
+fn set_stored_telemetry_user(raw: &[String], env: &std::collections::HashMap<String, String>) {
+    let source = config_source(raw, env, io::stdout().is_terminal());
+    let user_id = medulla::config::load_config(source.config.as_deref(), env, &source.dir)
         .ok()
         .and_then(|loaded| {
-            (!medulla::auth::external_token_wins(&env, &loaded.config.backend))
-                .then(|| medulla::auth::state(&env).user_id)
+            (!medulla::auth::external_token_wins(env, &loaded.config.backend))
+                .then(|| medulla::auth::state(env).user_id)
                 .flatten()
         });
     medulla::observability::set_user(user_id.as_deref());

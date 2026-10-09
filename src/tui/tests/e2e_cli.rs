@@ -73,6 +73,10 @@ fn run_with_env(
         .env("MEDULLA_CLAUDE_SESSIONS_DIR", home.join("claude-sessions"))
         .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
+        // An inherited account selector would outrank a test's own (a `.env`
+        // never overrides a set variable) and pick an account the test did
+        // not plant.
+        .env_remove("MEDULLA_USER")
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("MEDULLA_BACKEND_URL")
         .env_remove("MEDULLA_SENTRY_DSN")

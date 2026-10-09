@@ -352,6 +352,58 @@ fn wrapper_line_mapper(
     )
 }
 
+/// Token-usage reporting for a session that runs without a bridge.
+///
+/// The bridge's mapper is what reports token usage to analytics, so a plain
+/// passthrough session (`--no-bridge`, no link owner, no host link) would
+/// otherwise report none. This tails the same transcript through the same
+/// mapper purely for that side effect; the semantic events are discarded,
+/// since there is nowhere to publish them.
+pub(super) struct UsageTap {
+    tailer: SessionTailer,
+    mapper: HarnessLineMapper,
+}
+
+impl UsageTap {
+    /// Start a tap for `config`, or `None` when nothing would be recorded:
+    /// analytics is inactive, no account is signed in, or the provider has no
+    /// transcript to tail.
+    pub(super) fn new(config: &WrapperConfig, start_ms: i64) -> Option<Self> {
+        if crate::analytics::status() != crate::analytics::AnalyticsStatus::Active
+            || crate::observability::current_user().is_none()
+        {
+            return None;
+        }
+        let kind = agent_kind(config.provider)?;
+        Some(Self {
+            tailer: SessionTailer::new(config.env.clone(), kind, config.cwd.clone(), start_ms),
+            mapper: wrapper_line_mapper(
+                config.provider.as_str(),
+                &config.env,
+                std::env::var_os("GH_REPO").is_some(),
+            ),
+        })
+    }
+
+    /// Map the lines appended since the last poll.
+    pub(super) fn pump(&mut self) {
+        let lines = self.tailer.poll().lines;
+        self.map(lines);
+    }
+
+    /// Map whatever the transcript gained before the child exited.
+    pub(super) fn finish(mut self) {
+        let lines = self.tailer.drain();
+        self.map(lines);
+    }
+
+    fn map(&mut self, lines: Vec<TailLine>) {
+        for line in lines {
+            let _ = self.mapper.map_line(&line.text, line.line_no);
+        }
+    }
+}
+
 /// Poll the tailer, latch the harness id on first sighting, and ingest new lines.
 pub(super) async fn pump_tailer(bridge: &mut Bridge) {
     let mut tailer = match bridge.tailer.take() {

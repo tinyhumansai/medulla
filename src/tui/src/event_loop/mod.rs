@@ -227,11 +227,18 @@ pub(crate) async fn run(
                         // real: report it and clear the crash-report user
                         // before the account leaves `app` state, matching the
                         // CLI `medulla logout` path.
-                        if let Some(user_id) = app.account_user_id() {
+                        //
+                        // The event names the account reports are attributed
+                        // to, which already honours every trust rule, rather
+                        // than re-reading the session `app` holds.
+                        if app.account_user_id().is_some() {
+                            let reported = medulla::observability::reported_user();
                             medulla::observability::set_user(None);
-                            medulla::analytics::spawn_tracked(async move {
-                                let _ = medulla::analytics::record_sign_out(&user_id).await;
-                            });
+                            if let Some(user_id) = reported {
+                                medulla::analytics::spawn_tracked(async move {
+                                    let _ = medulla::analytics::record_sign_out(&user_id).await;
+                                });
+                            }
                         }
                         app.set_status("Account · logged out. Returning to the login screen…");
                         app.logged_out();

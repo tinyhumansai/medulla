@@ -233,6 +233,15 @@ fn user_slot() -> &'static Mutex<Option<String>> {
     USER.get_or_init(|| Mutex::new(None))
 }
 
+/// The account id reports are currently attributed to, if any.
+///
+/// The one identity every trust decision has already been applied to (an
+/// external credential, a session a cwd `.env` re-selected): a sign-out event
+/// names this account, not whatever session the environment points at now.
+pub fn reported_user() -> Option<String> {
+    current_user()
+}
+
 /// Read the account id to attach, if a signed-in run recorded one.
 ///
 /// Also the identity product analytics attributes its events to, so crash

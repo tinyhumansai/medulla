@@ -200,9 +200,11 @@ fn sign_out(env: &HashMap<String, String>, backend: &medulla::config::BackendCon
     // the event is sent only once the clear succeeded, since a session that
     // survives is not a sign-out. Only when the stored session is what
     // authenticated this run, or the event would name the wrong account.
-    let signed_out_user = (!medulla::auth::external_token_wins(env, backend))
-        .then(|| medulla::auth::state(env).user_id)
-        .flatten();
+    //
+    // The account is the one reports are attributed to, already held to every
+    // trust rule (external credential, a session the cwd `.env` re-selected),
+    // never re-read from the environment's current session.
+    let signed_out_user = medulla::observability::reported_user();
     if let Err(e) = medulla::auth::clear(env) {
         return format!("The stored session could not be removed: {e}");
     }

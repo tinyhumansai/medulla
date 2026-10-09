@@ -31,7 +31,13 @@ fn the_telemetry_config_path_comes_from_the_selected_commands_parser() {
         config(&argv(&["--config", "/tmp/t.toml"])).as_deref(),
         Some("/tmp/t.toml")
     );
-    // Only `mcp` takes the joined spelling; elsewhere it is not a config path.
+    // `remote` and `daemon --direct` take the joined spelling too.
+    assert_eq!(
+        config(&argv(&["remote", "--config=/tmp/r.toml"])).as_deref(),
+        Some("/tmp/r.toml")
+    );
+    // Only those commands take the joined spelling; elsewhere it is not a
+    // config path.
     assert_eq!(
         config(&argv(&["workflow", "run", "x", "--config=/tmp/b.toml"])),
         None
@@ -77,17 +83,18 @@ fn the_daemon_resolves_telemetry_config_the_way_each_of_its_modes_does() {
 
 #[test]
 fn the_hub_resolves_telemetry_config_from_the_account_home() {
-    // Run from a checkout, the hub still ignores that checkout's config: no
-    // explicit path, and discovery starts in the account home, not the cwd.
-    // (Compared against the cwd rather than a second `medulla_home` reading:
-    // other tests in this binary repoint `MEDULLA_HOME` process-wide, so two
-    // separate readings can legitimately differ.)
+    // An explicit environment, not the process one: other tests in this binary
+    // repoint `MEDULLA_HOME` process-wide.
+    let env: std::collections::HashMap<String, String> =
+        [("MEDULLA_HOME".to_string(), "/srv/medulla-home".to_string())].into();
+    let hub = super::hub_config_source(&env);
+    assert_eq!(hub.config, None);
+    assert_eq!(hub.dir, medulla::home::medulla_home(&env));
+    // And `hub` routes there however it is invoked.
     let raw = vec![
         "hub".to_string(),
         "--config".into(),
         "/tmp/ignored.toml".into(),
     ];
-    let hub = super::config_source(&raw, false);
-    assert_eq!(hub.config, None);
-    assert_ne!(hub.dir, std::env::current_dir().unwrap());
+    assert_eq!(super::config_source(&raw, false).config, None);
 }

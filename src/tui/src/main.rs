@@ -129,7 +129,8 @@ fn main() -> anyhow::Result<()> {
 /// daemon has two parsers: its TUI takes either spelling (first wins) and
 /// discovers from the process directory, while the headless daemon takes only
 /// `--config <path>` (last wins) and discovers from its `--workspace`. Of the
-/// remaining commands only `mcp` accepts the `--config=<path>` spelling.
+/// remaining commands only `mcp`, `remote`, and `daemon --direct` accept the
+/// `--config=<path>` spelling.
 fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
     let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
@@ -142,12 +143,7 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .and_then(|args| args.config),
         ),
         Command::DaemonTui => at_cwd(flag_value(&raw[1..], "--config")),
-        // `run_hub` loads its configuration from the account home alone,
-        // never from a checkout it happens to be launched in.
-        Command::Hub => ConfigSource {
-            config: None,
-            dir: medulla::home::medulla_home(&std::env::vars().collect()),
-        },
+        Command::Hub => hub_config_source(&std::env::vars().collect()),
         Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
             at_cwd(flag_value(&raw[1..], "--config"))
         }
@@ -158,16 +154,28 @@ fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
                 .unwrap_or_else(cwd),
         },
         command => at_cwd(raw.iter().enumerate().find_map(|(index, arg)| {
-            matches!(command, Command::Mcp)
-                .then(|| arg.strip_prefix("--config="))
-                .flatten()
-                .map(str::to_owned)
-                .or_else(|| {
-                    (arg == "--config")
-                        .then(|| raw.get(index + 1).cloned())
-                        .flatten()
-                })
+            matches!(
+                command,
+                Command::Mcp | Command::Remote | Command::DaemonDirect
+            )
+            .then(|| arg.strip_prefix("--config="))
+            .flatten()
+            .map(str::to_owned)
+            .or_else(|| {
+                (arg == "--config")
+                    .then(|| raw.get(index + 1).cloned())
+                    .flatten()
+            })
         })),
+    }
+}
+
+/// `run_hub` loads its configuration from the account home alone, never from
+/// a checkout it happens to be launched in.
+fn hub_config_source(env: &std::collections::HashMap<String, String>) -> ConfigSource {
+    ConfigSource {
+        config: None,
+        dir: medulla::home::medulla_home(env),
     }
 }
 

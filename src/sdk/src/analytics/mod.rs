@@ -124,6 +124,13 @@ pub async fn record_sign_out(user_id: &str) -> Result<(), AnalyticsError> {
         .await
 }
 
+/// The signed-in account id for an event, if there is one with an account
+/// id's shape. `set_user` already refuses anything else, so this only re-checks
+/// at the point of sending, where the privacy boundary actually is.
+fn current_account_id() -> Option<String> {
+    crate::observability::current_user().and_then(|id| crate::observability::account_id(&id))
+}
+
 /// The account id to send as `profileId`, held to the same shape crash
 /// reports require ([`crate::observability::set_user`]): an email, token,
 /// path, or prompt fragment is refused rather than sent.
@@ -191,7 +198,7 @@ pub async fn send_test_event() -> Result<u16, AnalyticsError> {
     let tracker = tracker().map_err(AnalyticsError::Inactive)?;
     let payload = Payload::track(
         "analytics_test",
-        crate::observability::current_user().as_deref(),
+        current_account_id().as_deref(),
         [("diagnostic", "analytics-test".to_owned())],
     );
     tracker.send(&payload).await
@@ -301,7 +308,7 @@ fn spawn_for_current_user<const N: usize>(
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    let Some(user_id) = crate::observability::current_user() else {
+    let Some(user_id) = current_account_id() else {
         return;
     };
     let Ok(tracker) = tracker() else {

@@ -895,18 +895,34 @@ fn logout_never_reports_an_account_a_workspace_env_file_selected() {
     let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}/api");
 
-    let _ = run_with_env(
+    let output = run_with_env(
         &["logout"],
         dir.path(),
         dir.path(),
         &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
     );
+    // Logout awaits its (bounded) delivery before exiting, so every request it
+    // made has been answered by the time it returns.
     stop.store(true, Ordering::Release);
     let bodies = server.join().expect("analytics server");
 
     assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The `.env` re-selected the session, so startup withheld attribution:
+    // the correct outcome is no `signed_out` at all, for either account. The
+    // stored-session case that does report is
+    // `logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint`.
+    assert!(
         !bodies.iter().any(|body| body.contains("attacker-1")),
         "the .env-selected account was reported: {bodies:?}"
+    );
+    assert!(
+        !bodies.iter().any(|body| body.contains("signed_out")),
+        "a sign-out was attributed despite the re-selected session: {bodies:?}"
     );
 }
 

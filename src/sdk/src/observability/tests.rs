@@ -417,3 +417,54 @@ fn flush_never_blocks_past_its_timeout_behind_a_full_queue() {
         "flush blocked for {elapsed:?} despite a 200ms timeout"
     );
 }
+
+#[test]
+fn a_flush_marker_discarded_by_a_stopping_sender_ends_the_wait() {
+    let _status_guard = TRANSPORT_STATUS_TEST_LOCK.lock().unwrap();
+    // Hold the sender thread on a request that never completes, so the flush
+    // marker below queues behind it instead of being answered.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("addr").port();
+    let _server = std::thread::spawn(move || {
+        let stalled = listener.accept();
+        std::thread::sleep(Duration::from_secs(15));
+        drop(stalled);
+    });
+
+    let options = sentry::ClientOptions {
+        dsn: Some(
+            format!("http://publickey@127.0.0.1:{port}/7")
+                .parse()
+                .expect("dsn"),
+        ),
+        ..Default::default()
+    };
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&options, status);
+    let mut envelope = sentry::Envelope::new();
+    envelope.add_item(Event {
+        message: Some("stalled".into()),
+        ..Default::default()
+    });
+    transport.send_envelope(envelope);
+
+    let waiting = Arc::clone(&transport);
+    let flusher = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let flushed = waiting.flush(Duration::from_secs(5));
+        (flushed, started.elapsed())
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    // Shutdown cancels the stalled request, and the sender thread exits with
+    // the marker above still queued. Sentry drops the transport right after
+    // this, and that drop flushes again, so a discarded marker that is not
+    // noticed stalls process exit for the whole flush timeout.
+    transport.shutdown(Duration::from_millis(50));
+
+    let (flushed, elapsed) = flusher.join().expect("flusher thread");
+    assert!(!flushed, "a discarded marker is not a completed flush");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "flush waited {elapsed:?} for a marker the sender had already discarded"
+    );
+}

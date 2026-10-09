@@ -223,6 +223,10 @@ fn decoded_env() -> std::collections::HashMap<String, String> {
 
 /// Attribute non-TUI harness and daemon analytics to a stored account only
 /// when config/environment credentials do not override that session.
+///
+/// `env` is the invoking environment, captured before a cwd `.env` loaded, so
+/// the checkout being opened cannot choose the home, config, or session the
+/// account id is read from.
 fn set_stored_telemetry_user(raw: &[String], env: &std::collections::HashMap<String, String>) {
     let source = config_source(raw, env, io::stdout().is_terminal());
     let user_id = medulla::config::load_config(source.config.as_deref(), env, &source.dir)

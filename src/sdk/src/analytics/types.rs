@@ -39,6 +39,9 @@ pub enum AnalyticsError {
     /// The request did not complete.
     #[error("OpenPanel request failed: {0}")]
     Request(#[from] reqwest::Error),
+    /// The account id is not an account id's shape, so nothing was sent.
+    #[error("not an account id; nothing was sent")]
+    InvalidAccountId,
     /// OpenPanel answered with a non-success status.
     #[error("OpenPanel rejected the event with HTTP {0}")]
     Rejected(u16),

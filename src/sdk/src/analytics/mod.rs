@@ -91,11 +91,12 @@ pub fn status() -> AnalyticsStatus {
 /// of the app, so callers discard the error.
 pub async fn record_application_started(user_id: &str) -> Result<(), AnalyticsError> {
     let tracker = tracker().map_err(AnalyticsError::Inactive)?;
-    tracker.deliver(&Payload::identify(user_id)).await?;
+    let user_id = checked_account_id(user_id)?;
+    tracker.deliver(&Payload::identify(&user_id)).await?;
     tracker
         .deliver(&Payload::track(
             "application_started",
-            Some(user_id),
+            Some(&user_id),
             [
                 ("os", std::env::consts::OS.to_owned()),
                 ("architecture", std::env::consts::ARCH.to_owned()),
@@ -107,18 +108,27 @@ pub async fn record_application_started(user_id: &str) -> Result<(), AnalyticsEr
 /// Identify an account and record a completed sign-in.
 pub async fn record_sign_in(user_id: &str) -> Result<(), AnalyticsError> {
     let tracker = tracker().map_err(AnalyticsError::Inactive)?;
-    tracker.deliver(&Payload::identify(user_id)).await?;
+    let user_id = checked_account_id(user_id)?;
+    tracker.deliver(&Payload::identify(&user_id)).await?;
     tracker
-        .deliver(&Payload::track("signed_in", Some(user_id), []))
+        .deliver(&Payload::track("signed_in", Some(&user_id), []))
         .await
 }
 
 /// Record a sign-out. Call before the stored session is removed.
 pub async fn record_sign_out(user_id: &str) -> Result<(), AnalyticsError> {
     let tracker = tracker().map_err(AnalyticsError::Inactive)?;
+    let user_id = checked_account_id(user_id)?;
     tracker
-        .deliver(&Payload::track("signed_out", Some(user_id), []))
+        .deliver(&Payload::track("signed_out", Some(&user_id), []))
         .await
+}
+
+/// The account id to send as `profileId`, held to the same shape crash
+/// reports require ([`crate::observability::set_user`]): an email, token,
+/// path, or prompt fragment is refused rather than sent.
+fn checked_account_id(user_id: &str) -> Result<String, AnalyticsError> {
+    crate::observability::account_id(user_id).ok_or(AnalyticsError::InvalidAccountId)
 }
 
 /// Record a top-level TUI screen view for the signed-in account.

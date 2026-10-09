@@ -742,9 +742,13 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                         Ok(SignIn::SameAccount) => {
                             (_, account) = session_of(&env, &loaded.config.backend);
                             // Restore the reporting identity now that the
-                            // same account is signed back in.
+                            // same account is signed back in — unless an
+                            // external token still authenticates this run, the
+                            // same case startup withholds the stored account in.
                             medulla::observability::set_user(
-                                account.as_ref().and_then(|state| state.user_id.as_deref()),
+                                (!external_token)
+                                    .then(|| account.as_ref().and_then(|state| state.user_id.as_deref()))
+                                    .flatten(),
                             );
                             // Rebuilt rather than reused: the relogin replaced
                             // the stored token, and the client captured its

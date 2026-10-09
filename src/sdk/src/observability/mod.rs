@@ -137,10 +137,15 @@ pub fn status() -> CrashReportingStatus {
 /// path, a prompt fragment) clears the slot instead of being attached to
 /// reports unscrubbed. Safe to call whether or not crash reporting is active.
 pub fn set_user(user_id: Option<&str>) {
-    let user_id = user_id
-        .and_then(crate::home::user::sanitize_account_id)
-        .filter(|id| id.len() <= MAX_USER_ID_LEN);
-    *user_slot().lock().unwrap_or_else(|e| e.into_inner()) = user_id;
+    *user_slot().lock().unwrap_or_else(|e| e.into_inner()) = user_id.and_then(account_id);
+}
+
+/// `user_id` if it has an account id's shape, else `None`: the one check every
+/// telemetry identity passes, shared with product analytics
+/// ([`crate::analytics`]) so a report and an event can never disagree about
+/// what counts as an account id.
+pub(crate) fn account_id(user_id: &str) -> Option<String> {
+    crate::home::user::sanitize_account_id(user_id).filter(|id| id.len() <= MAX_USER_ID_LEN)
 }
 
 /// Longest account id [`set_user`] accepts.

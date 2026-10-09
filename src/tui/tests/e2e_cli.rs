@@ -448,10 +448,7 @@ fn run_mcp(
 ///
 /// The server answers requests concurrently, so replies may arrive in any
 /// order; JSON-RPC pairs them by id, and so must these assertions.
-fn reply_with_id(
-    replies: &[serde_json::Value],
-    id: impl Into<Option<i64>>,
-) -> &serde_json::Value {
+fn reply_with_id(replies: &[serde_json::Value], id: impl Into<Option<i64>>) -> &serde_json::Value {
     let id = id.into().map_or(serde_json::Value::Null, Into::into);
     replies
         .iter()
@@ -574,7 +571,10 @@ fn mcp_answers_a_malformed_frame_and_keeps_going() {
     // One bad frame does not end the session: the client that sent it is still
     // a client, and the next request is answered normally.
     assert_eq!(reply_with_id(&replies, None)["error"]["code"], -32700);
-    assert!(reply_with_id(&replies, 7)["result"].is_object(), "{replies:?}");
+    assert!(
+        reply_with_id(&replies, 7)["result"].is_object(),
+        "{replies:?}"
+    );
 }
 
 /// Read one HTTP request in full, answer it `200 OK`, and return its body.

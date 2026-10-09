@@ -633,3 +633,33 @@ fn codex_turn_failed_without_a_message_still_reports_the_failure() {
     );
     assert_eq!(events[1].event.payload["fatal"], true);
 }
+
+#[test]
+fn codex_usage_follows_the_cumulative_total_not_the_last_call() {
+    // A real `token_count` record carries both the latest call's usage and the
+    // running total; `last_token_usage` comes first, and it is the total that
+    // the cumulative fold must track.
+    let record = |last_in: i64, total_in: i64, total_out: i64| {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": { "input_tokens": last_in, "output_tokens": 1 },
+                    "total_token_usage": { "input_tokens": total_in, "output_tokens": total_out },
+                },
+            },
+        })
+        .to_string()
+    };
+    let mut mapper = HarnessLineMapper::new("codex");
+    mapper.map_line(&record(7_713, 7_713, 10), 1);
+    mapper.map_line(&record(8_176, 15_889, 20), 2);
+    assert_eq!(
+        mapper.usage(),
+        Some(TokenUsage {
+            input_tokens: 15_889,
+            output_tokens: 20
+        })
+    );
+}

@@ -118,23 +118,39 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// The `--config` path the selected command will actually load, read through
-/// that command's own parser wherever one exists.
+/// Where the selected command will load its configuration from: the explicit
+/// `--config` path, if any, and the directory layered discovery starts in.
+/// Each is read through that command's own parser wherever one exists.
 ///
 /// A blind scan of the argv misreads arguments that are not Medulla flags:
 /// harness wrapper flags belong to the child CLI (Codex's `--config key=value`
 /// is a model override), and `medulla run` accepts only `--config <path>`, so a
-/// `--config=...` token there is instruction text, not a config path. Of the
-/// remaining commands only `mcp` accepts the `--config=<path>` spelling; the
-/// rest take `--config <path>` alone.
-fn explicit_config_path(raw: &[String]) -> Option<String> {
+/// `--config=...` token there is instruction text, not a config path. The
+/// daemon has two parsers: its TUI takes either spelling (first wins) and
+/// discovers from the process directory, while the headless daemon takes only
+/// `--config <path>` (last wins) and discovers from its `--workspace`. Of the
+/// remaining commands only `mcp` accepts the `--config=<path>` spelling.
+fn config_source(raw: &[String], stdout_is_terminal: bool) -> ConfigSource {
+    let cwd = || std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let at_cwd = |config: Option<String>| ConfigSource { config, dir: cwd() };
     match parse_command(raw) {
-        Command::Wrapper(_) => None,
-        Command::Tui => medulla_tui::cli::parse_tui_args(raw).config,
-        Command::Run => medulla_tui::cli::parse_run_args(&raw[1..])
-            .ok()
-            .and_then(|args| args.config),
-        command => raw.iter().enumerate().find_map(|(index, arg)| {
+        Command::Wrapper(_) => at_cwd(None),
+        Command::Tui => at_cwd(medulla_tui::cli::parse_tui_args(raw).config),
+        Command::Run => at_cwd(
+            medulla_tui::cli::parse_run_args(&raw[1..])
+                .ok()
+                .and_then(|args| args.config),
+        ),
+        Command::Daemon if daemon_uses_tui(stdout_is_terminal, raw) => {
+            at_cwd(flag_value(&raw[1..], "--config"))
+        }
+        Command::Daemon => ConfigSource {
+            config: last_separate_flag(&raw[1..], "--config"),
+            dir: last_separate_flag(&raw[1..], "--workspace")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(cwd),
+        },
+        command => at_cwd(raw.iter().enumerate().find_map(|(index, arg)| {
             matches!(command, Command::Mcp)
                 .then(|| arg.strip_prefix("--config="))
                 .flatten()
@@ -144,8 +160,24 @@ fn explicit_config_path(raw: &[String]) -> Option<String> {
                         .then(|| raw.get(index + 1).cloned())
                         .flatten()
                 })
-        }),
+        })),
     }
+}
+
+/// See [`config_source`].
+#[derive(Debug, PartialEq, Eq)]
+struct ConfigSource {
+    config: Option<String>,
+    dir: std::path::PathBuf,
+}
+
+/// The last value of a `--name <value>` flag, read the way the headless
+/// daemon's tokenizer does: separate-token form only, later wins.
+fn last_separate_flag(args: &[String], name: &str) -> Option<String> {
+    args.windows(2)
+        .filter(|pair| pair[0] == name)
+        .map(|pair| pair[1].clone())
+        .last()
 }
 
 /// Attribute non-TUI harness and daemon analytics to a stored account only
@@ -154,9 +186,8 @@ fn set_stored_telemetry_user(raw: &[String]) {
     let env: std::collections::HashMap<String, String> = std::env::vars_os()
         .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
         .collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let explicit_config = explicit_config_path(raw);
-    let user_id = medulla::config::load_config(explicit_config.as_deref(), &env, &cwd)
+    let source = config_source(raw, io::stdout().is_terminal());
+    let user_id = medulla::config::load_config(source.config.as_deref(), &env, &source.dir)
         .ok()
         .and_then(|loaded| {
             let backend = loaded.config.backend;

@@ -73,6 +73,10 @@ fn run_with_env(
         .env("MEDULLA_CLAUDE_SESSIONS_DIR", home.join("claude-sessions"))
         .env("MEDULLA_CODEX_SESSIONS_DIR", home.join("codex-sessions"))
         .env_remove("MEDULLA_TOKEN")
+        // An inherited account selector would outrank a test's own (a `.env`
+        // never overrides a set variable) and pick an account the test did
+        // not plant.
+        .env_remove("MEDULLA_USER")
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("MEDULLA_BACKEND_URL")
         .env_remove("MEDULLA_SENTRY_DSN")
@@ -877,7 +881,8 @@ fn logout_under_an_external_token_reports_no_sign_out() {
 
 /// A repository's `.env` cannot pick which account Medulla uses: its
 /// `MEDULLA_USER` is refused (with a warning), so logout acts on — and reports —
-/// the invoker's own account, and the planted session is left untouched.
+/// the invoker's own account, never the planted one, whose session is left
+/// untouched.
 #[test]
 fn a_workspace_env_file_cannot_select_the_account() {
     use std::sync::atomic::Ordering;
@@ -896,17 +901,14 @@ fn a_workspace_env_file_cannot_select_the_account() {
     let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}/api");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_medulla"))
-        .arg("logout")
-        .current_dir(dir.path())
-        .env("MEDULLA_HOME", dir.path())
-        .env_remove("MEDULLA_USER")
-        .env_remove("MEDULLA_TOKEN")
-        .env_remove("MEDULLA_ANALYTICS_DISABLED")
-        .env("MEDULLA_SENTRY_DSN", "http://unused@127.0.0.1:9/0")
-        .env(medulla::analytics::API_URL_ENV, &api_url)
-        .output()
-        .expect("the medulla binary should run");
+    let output = run_with_env(
+        &["logout"],
+        dir.path(),
+        dir.path(),
+        &[(medulla::analytics::API_URL_ENV, api_url.as_str())],
+    );
+    // Logout awaits its (bounded) delivery before exiting, so every request it
+    // made has been answered by the time it returns.
     stop.store(true, Ordering::Release);
     let bodies = server.join().expect("analytics server");
 
@@ -919,6 +921,10 @@ fn a_workspace_env_file_cannot_select_the_account() {
     // The invoker's own account was the one signed out and reported.
     assert!(!dir.path().join("local/session.json").exists());
     assert!(dir.path().join("planted/session.json").exists());
+    assert!(
+        !bodies.iter().any(|body| body.contains("attacker-1")),
+        "the planted account was reported: {bodies:?}"
+    );
     let signed_out: Vec<serde_json::Value> = bodies
         .iter()
         .map(|body| serde_json::from_str(body).expect("analytics JSON"))

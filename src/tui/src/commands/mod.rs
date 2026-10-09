@@ -352,7 +352,13 @@ pub(crate) async fn run_logout() -> anyhow::Result<()> {
     // permissions change, a file another process still holds open) would lie
     // about the session's real state — the bearer stays active while every
     // signal says otherwise.
-    let user_id = medulla::auth::state(&env).user_id;
+    //
+    // The account is the one reports are attributed to, which startup has
+    // already held to every trust rule (an external credential, a session a
+    // cwd `.env` re-selected), as the TUI's sign-out paths do; re-reading the
+    // session from the environment would let a checkout's `.env` name a
+    // planted account in the `signed_out` event.
+    let user_id = medulla::observability::reported_user();
     medulla::auth::clear(&env)
         .map_err(|e| anyhow::anyhow!("the stored session could not be removed: {e}"))?;
     let external_credential_remains = load_config(None, &env, &cwd).ok().is_some_and(|loaded| {

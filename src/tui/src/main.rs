@@ -134,8 +134,10 @@ fn explicit_config_path(raw: &[String]) -> Option<String> {
         Command::Run => medulla_tui::cli::parse_run_args(&raw[1..])
             .ok()
             .and_then(|args| args.config),
-        _ => raw.iter().enumerate().find_map(|(index, arg)| {
-            arg.strip_prefix("--config=")
+        command => raw.iter().enumerate().find_map(|(index, arg)| {
+            matches!(command, Command::Mcp)
+                .then(|| arg.strip_prefix("--config="))
+                .flatten()
                 .map(str::to_owned)
                 .or_else(|| {
                     (arg == "--config")

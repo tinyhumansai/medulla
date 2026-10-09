@@ -703,18 +703,29 @@ fn a_bridgeless_wrapper_session_reports_its_token_usage() {
     let sessions = dir.path().join("codex-sessions");
     std::fs::create_dir_all(&sessions).unwrap();
     let rollout = sessions.join("rollout-usage.jsonl");
+    // The script is fixed text: the transcript path and both JSON lines reach
+    // it through its environment, so no path is ever spliced into shell
+    // source, however it is spelled.
     let fake_codex = dir.path().join("codex");
     std::fs::write(
         &fake_codex,
-        format!(
-            "#!/bin/sh\n\
-             printf '%s\\n' '{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"codex-usage-e2e\",\"cwd\":\"{cwd}\"}}}}' >> '{rollout}'\n\
-             printf '%s\\n' '{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"input_tokens\":7,\"output_tokens\":3}}}}}}}}' >> '{rollout}'\n",
-            cwd = workspace.display(),
-            rollout = rollout.display(),
-        ),
+        "#!/bin/sh\n\
+         printf '%s\\n' \"$FAKE_CODEX_META\" \"$FAKE_CODEX_USAGE\" >> \"$FAKE_CODEX_ROLLOUT\"\n",
     )
     .unwrap();
+    let meta = serde_json::json!({
+        "type": "session_meta",
+        "payload": { "session_id": "codex-usage-e2e", "cwd": workspace },
+    })
+    .to_string();
+    let usage_line = serde_json::json!({
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": { "total_token_usage": { "input_tokens": 7, "output_tokens": 3 } },
+        },
+    })
+    .to_string();
     std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755)).unwrap();
     let (port, stop, server) = collect_requests();
     let api_url = format!("http://127.0.0.1:{port}/api");
@@ -726,6 +737,9 @@ fn a_bridgeless_wrapper_session_reports_its_token_usage() {
         &[
             (medulla::analytics::API_URL_ENV, api_url.as_str()),
             ("MEDULLA_CODEX_BIN", fake_codex.to_str().unwrap()),
+            ("FAKE_CODEX_META", meta.as_str()),
+            ("FAKE_CODEX_USAGE", usage_line.as_str()),
+            ("FAKE_CODEX_ROLLOUT", rollout.to_str().unwrap()),
         ],
     );
     stop.store(true, std::sync::atomic::Ordering::Release);

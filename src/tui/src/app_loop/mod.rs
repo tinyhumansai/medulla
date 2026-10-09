@@ -279,6 +279,9 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // the alt-screen session already set up, and resolves to a signed-in core or
     // a clean quit — there is no third option, because a TUI with no runtime has
     // nothing to show.
+    // Whether this launch signed the account in itself (the login screen),
+    // as opposed to finding a stored session: only then is it a sign-in.
+    let mut signed_in_here = false;
     if let Some(base_url) = need_login.take() {
         // Same flow as a mid-session relogin, and deliberately the same code: an
         // install with an account whose session went missing is signing in
@@ -304,6 +307,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                 return Err(e);
             }
             Ok(SignIn::SameAccount) => {
+                signed_in_here = true;
                 match medulla::runtime::cloud::connect::client_from_config(
                     &env,
                     &loaded.config.backend,
@@ -356,6 +360,11 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // unreachable OpenPanel never delays the first frame.
     if let Some(user_id) = telemetry_user_id {
         medulla::analytics::spawn_tracked(async move {
+            // A sign-in through the login screen is reported like one through
+            // `medulla login`, ahead of the start it led to.
+            if signed_in_here {
+                let _ = medulla::analytics::record_sign_in(&user_id).await;
+            }
             let _ = medulla::analytics::record_application_started(&user_id).await;
         });
     }
@@ -745,13 +754,15 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
                             // same account is signed back in — unless an
                             // external token still authenticates this run, the
                             // same case startup withholds the stored account in.
-                            medulla::observability::set_user(
-                                (!external_token)
-                                    .then(|| {
-                                        account.as_ref().and_then(|state| state.user_id.as_deref())
-                                    })
-                                    .flatten(),
-                            );
+                            let user_id = (!external_token)
+                                .then(|| account.as_ref().and_then(|state| state.user_id.clone()))
+                                .flatten();
+                            medulla::observability::set_user(user_id.as_deref());
+                            if let Some(user_id) = user_id {
+                                medulla::analytics::spawn_tracked(async move {
+                                    let _ = medulla::analytics::record_sign_in(&user_id).await;
+                                });
+                            }
                             // Rebuilt rather than reused: the relogin replaced
                             // the stored token, and the client captured its
                             // bearer at construction — carrying the old one

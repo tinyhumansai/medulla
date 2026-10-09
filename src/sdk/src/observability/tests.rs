@@ -468,3 +468,13 @@ fn a_flush_marker_discarded_by_a_stopping_sender_ends_the_wait() {
         "flush waited {elapsed:?} for a marker the sender had already discarded"
     );
 }
+
+#[test]
+fn an_unbounded_flush_timeout_does_not_overflow() {
+    // No DSN: the sender thread exits at once, so the flush resolves (as not
+    // flushed) instead of waiting; what matters is that `Duration::MAX` is
+    // accepted rather than overflowing a deadline computation.
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let transport = transport::factory(&sentry::ClientOptions::default(), status);
+    assert!(!transport.flush(Duration::MAX));
+}

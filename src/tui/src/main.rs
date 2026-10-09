@@ -159,9 +159,14 @@ fn config_source(
                 .unwrap_or_else(cwd),
         },
         // These read the first `--config`, in either spelling.
-        Command::Mcp | Command::Remote | Command::DaemonDirect => {
-            at_cwd(flag_value(&raw[1..], "--config"))
-        }
+        // `mcp` is usually spawned by a parent that passes its selection down
+        // as `MEDULLA_CONFIG_PATH`; an argv `--config` overrides it, and
+        // `serve_stdio` loads whichever results.
+        Command::Mcp => at_cwd(
+            flag_value(&raw[1..], "--config")
+                .or_else(|| medulla::config::explicit_config_from_env(env).map(str::to_owned)),
+        ),
+        Command::Remote | Command::DaemonDirect => at_cwd(flag_value(&raw[1..], "--config")),
         // The rest parse `--config <path>` alone, each occurrence overwriting
         // the last, so the final one is what the command loads.
         _ => at_cwd(last_separate_flag(&raw[1..], "--config")),

@@ -152,3 +152,26 @@ fn a_repeated_config_flag_resolves_the_way_each_parser_reads_it() {
         Some("/a.toml")
     );
 }
+
+#[test]
+fn mcp_falls_back_to_the_config_its_parent_passed_down() {
+    let argv = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let inherited: std::collections::HashMap<String, String> = [(
+        medulla::config::CONFIG_PATH_ENV.to_string(),
+        "/tmp/parent.toml".to_string(),
+    )]
+    .into();
+    assert_eq!(
+        super::config_source(&argv(&["mcp"]), &inherited, false)
+            .config
+            .as_deref(),
+        Some("/tmp/parent.toml")
+    );
+    // An explicit `--config` still wins over the inherited one.
+    assert_eq!(
+        super::config_source(&argv(&["mcp", "--config=/tmp/own.toml"]), &inherited, false)
+            .config
+            .as_deref(),
+        Some("/tmp/own.toml")
+    );
+}

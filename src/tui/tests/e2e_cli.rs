@@ -879,10 +879,12 @@ fn logout_under_an_external_token_reports_no_sign_out() {
     );
 }
 
-/// A checkout's `.env` that re-selects the stored session (here `MEDULLA_USER`)
-/// cannot get a planted account named in the `signed_out` event.
+/// A repository's `.env` cannot pick which account Medulla uses: its
+/// `MEDULLA_USER` is refused (with a warning), so logout acts on — and reports —
+/// the invoker's own account, never the planted one, whose session is left
+/// untouched.
 #[test]
-fn logout_never_reports_an_account_a_workspace_env_file_selected() {
+fn a_workspace_env_file_cannot_select_the_account() {
     use std::sync::atomic::Ordering;
 
     let dir = TempDir::new().unwrap();
@@ -910,24 +912,26 @@ fn logout_never_reports_an_account_a_workspace_env_file_selected() {
     stop.store(true, Ordering::Release);
     let bodies = server.join().expect("analytics server");
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
     assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        stderr.contains("ignored MEDULLA_USER from ./.env"),
+        "{stderr}"
     );
-    // The `.env` re-selected the session, so startup withheld attribution:
-    // the correct outcome is no `signed_out` at all, for either account. The
-    // stored-session case that does report is
-    // `logout_reports_the_signed_out_account_to_the_configured_analytics_endpoint`.
+    // The invoker's own account was the one signed out and reported.
+    assert!(!dir.path().join("local/session.json").exists());
+    assert!(dir.path().join("planted/session.json").exists());
     assert!(
         !bodies.iter().any(|body| body.contains("attacker-1")),
-        "the .env-selected account was reported: {bodies:?}"
+        "the planted account was reported: {bodies:?}"
     );
-    assert!(
-        !bodies.iter().any(|body| body.contains("signed_out")),
-        "a sign-out was attributed despite the re-selected session: {bodies:?}"
-    );
+    let signed_out: Vec<serde_json::Value> = bodies
+        .iter()
+        .map(|body| serde_json::from_str(body).expect("analytics JSON"))
+        .filter(|body: &serde_json::Value| body["payload"]["name"] == "signed_out")
+        .collect();
+    assert_eq!(signed_out.len(), 1, "{bodies:?}");
+    assert_eq!(signed_out[0]["payload"]["profileId"], "user-42");
 }
 
 #[test]

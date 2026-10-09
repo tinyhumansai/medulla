@@ -22,7 +22,9 @@ Under the home:
 <home>/workflows          saved workflow documents
 ```
 
-A `.env` file in the current directory is loaded at startup (`KEY=VALUE`, `#` comments, optional `export`, quotes stripped). It never overrides a variable already set in the environment. This is the usual way to set `MEDULLA_DEV=1` for local development.
+A `.env` file in the current directory is loaded at startup (`KEY=VALUE`, `#` comments, optional `export`, quotes stripped). It never overrides a variable already set in the environment.
+
+That `.env` belongs to whatever repository Medulla is opened in, so it can't choose where the home is or which account in it is used. `MEDULLA_HOME`, `MEDULLA_DEV`, `MEDULLA_USER`, `MEDULLA_CONFIG_PATH`, `HOME`, and `USERPROFILE` are ignored when they come from a `.env`, and Medulla prints a one-line warning naming them. Otherwise a repository could point Medulla at a session or credentials it planted. Set these variables in your shell instead: for local development, `export MEDULLA_DEV=1`, or put it in a shell-level tool such as direnv.
 
 ## Layered config
 

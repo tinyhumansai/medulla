@@ -14,6 +14,8 @@ these can be set either way. Truthy values are `1` and `true`, case-insensitive.
 
 ## Home, account, and config
 
+`MEDULLA_HOME`, `MEDULLA_DEV`, `MEDULLA_USER`, and `MEDULLA_CONFIG_PATH`, along with `HOME` and `USERPROFILE`, are only honoured from the environment Medulla is started with. A `.env` in the current directory can't set them; see [Configuration](configuration.md#medulla-home).
+
 | Variable | What it does | Default |
 | --- | --- | --- |
 | `MEDULLA_HOME` | Overrides the Medulla root, the directory holding one subdirectory per account. | `~/.medulla`, or `./.medulla` under `MEDULLA_DEV` |

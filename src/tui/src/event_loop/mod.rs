@@ -229,7 +229,7 @@ pub(crate) async fn run(
                         // CLI `medulla logout` path.
                         if let Some(user_id) = app.account_user_id() {
                             medulla::observability::set_user(None);
-                            tokio::spawn(async move {
+                            medulla::analytics::spawn_tracked(async move {
                                 let _ = medulla::analytics::record_sign_out(&user_id).await;
                             });
                         }

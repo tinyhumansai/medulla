@@ -91,8 +91,16 @@ fn main() -> anyhow::Result<()> {
             Some(url) => std::env::set_var(medulla::analytics::API_URL_ENV, url),
             None => std::env::remove_var(medulla::analytics::API_URL_ENV),
         }
-        set_stored_telemetry_user(&raw);
-        (!is_mock).then(medulla::observability::init)
+        if is_mock {
+            // The demo makes no network connections at all, so it opts out
+            // of analytics too; set before anything resolves the tracker,
+            // and before the runtime starts any thread.
+            std::env::set_var(medulla::observability::DISABLED_ENV, "1");
+            None
+        } else {
+            set_stored_telemetry_user(&raw);
+            Some(medulla::observability::init())
+        }
     };
 
     // The hook shim runs inside an operator's live turn under a 3-5 second
@@ -268,7 +276,14 @@ async fn async_main(raw: Vec<String>) -> anyhow::Result<()> {
             std::process::exit(code);
         }
         // Bare invocation, or the TUI's own --config/--no-alt-screen flags.
-        Command::Tui => run_tui(&raw).await,
+        Command::Tui => {
+            let result = run_tui(&raw).await;
+            // The runtime drops right after this returns, aborting any event
+            // still in flight; give the last screen views and actions a
+            // bounded chance to land first.
+            medulla::analytics::flush_pending().await;
+            result
+        }
     }
 }
 

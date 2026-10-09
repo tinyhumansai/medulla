@@ -286,12 +286,33 @@ fn spawn_for_current_user<const N: usize>(
     let Ok(tracker) = tracker() else {
         return;
     };
-    PENDING_EVENTS.fetch_add(1, Ordering::AcqRel);
-    let notify = PENDING_EVENTS_CHANGED.get_or_init(tokio::sync::Notify::new);
-    runtime.spawn(async move {
+    spawn_tracked_on(&runtime, async move {
         let _ = tracker
             .deliver(&Payload::track(name, Some(&user_id), properties))
             .await;
+    });
+}
+
+/// Spawn a best-effort analytics delivery that [`flush_pending`] waits for.
+///
+/// For callers that send an event themselves (sign-out, application start)
+/// rather than through a fire-and-forget `record_*` helper: a bare
+/// `tokio::spawn` is aborted when its runtime drops at exit, losing the event
+/// with no chance to drain it. Does nothing outside a tokio runtime.
+pub fn spawn_tracked(delivery: impl std::future::Future<Output = ()> + Send + 'static) {
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        spawn_tracked_on(&runtime, delivery);
+    }
+}
+
+fn spawn_tracked_on(
+    runtime: &tokio::runtime::Handle,
+    delivery: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    PENDING_EVENTS.fetch_add(1, Ordering::AcqRel);
+    let notify = PENDING_EVENTS_CHANGED.get_or_init(tokio::sync::Notify::new);
+    runtime.spawn(async move {
+        delivery.await;
         PENDING_EVENTS.fetch_sub(1, Ordering::AcqRel);
         notify.notify_waiters();
     });

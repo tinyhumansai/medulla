@@ -355,7 +355,7 @@ pub(crate) async fn run_tui(raw: &[String]) -> anyhow::Result<()> {
     // Product analytics reads the same account slot. Spawned so a slow or
     // unreachable OpenPanel never delays the first frame.
     if let Some(user_id) = telemetry_user_id {
-        tokio::spawn(async move {
+        medulla::analytics::spawn_tracked(async move {
             let _ = medulla::analytics::record_application_started(&user_id).await;
         });
     }

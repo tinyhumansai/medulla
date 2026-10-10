@@ -18,7 +18,7 @@ description: >-
 # as first-party and strips their rlibs and fingerprints out of the cache — so
 # every Rust lane recompiled them from scratch on each run, cache hit or not.
 # The volume is far smaller since the embedded OpenHuman core left (it alone was
-# ~497k compiled lines under medulla's feature set), but tinyagents and
+# ~497k compiled lines under medulla's feature set), but openhuman-embed and
 # tinyflows are still worth not rebuilding five times per run.
 #
 # sccache is the fix rather than a rust-cache option because rust-cache has no

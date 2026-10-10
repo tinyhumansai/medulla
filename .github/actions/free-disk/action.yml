@@ -9,7 +9,7 @@ runs:
   steps:
     # A stock ubuntu-latest runner ships ~25 GB of Android SDK, .NET, GHC and
     # CodeQL that nothing in this repository touches, and leaves roughly 14 GB
-    # free. This workspace does not fit in that: the vendored `tinyagents`,
+    # free. This workspace does not fit in that: the vendored `openhuman-embed`,
     # `tinyflows` and `tinyhumans-sdk` crates plus every member crate, built
     # `--all-targets` with debuginfo, on top of a restored rust-cache and the
     # sccache disk cache.

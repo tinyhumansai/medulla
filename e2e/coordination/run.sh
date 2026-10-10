@@ -35,7 +35,7 @@
 # Shared-boot helpers + all env knobs are documented in lib.sh; overrides:
 #   MEDULLA_BIN / FORWARDER_BIN / OWNER_BIN            prebuilt binaries
 #   OPENCODE_BIN / CLAUDE_BIN / CODEX_BIN              prebuilt coding CLIs
-#   E2E_HARNESS=opencode|claude|codex  which CLI to drive (default: opencode)
+#   E2E_HARNESS=opencode|claude|codex|openhuman  which CLI to drive (default: opencode)
 #   E2E_KEEP=1     keep the run dir + tmux session on exit (debugging)
 #   E2E_SMOKE=0    skip the interactive TUI smoke leg
 set -euo pipefail
@@ -45,7 +45,7 @@ SDK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-SESSION="medulla-e2e-$$"
+SESSION="agent-medulla-e2e-$$"
 OWNER_TASK="emit the coordination marker E2E-$$-$RANDOM"
 
 main() {
@@ -113,7 +113,7 @@ PY
   assert_bidirectional_delivery "$RUN_DIR/owner.json"
   log "  (c) bidirectional delivery across the forwarder confirmed"
 
-  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via the real %s CLI, LLM saw the task, bidirectional link delivery confirmed.\n' "$HARNESS" >&2
+  printf '\n[e2e] PASS: coordination round trip green — owner=Reply(COORDINATION_OK) via the real %s harness, LLM saw the task, bidirectional link delivery confirmed.\n' "$HARNESS" >&2
 }
 
 main "$@"

@@ -246,9 +246,9 @@ tokenEnv = "MEDULLA_TOKEN"
 # providerOnly = ["streamlake"]
 
 # baseHarness = "openhuman" runs the turn in-process on the vendored
-# tinyagents agent loop with Medulla's own tools, rather than spawning a CLI,
-# so there is nothing to install. There is no embedded OpenHuman core anymore
-# and nothing for the model or endpoint to fall back to: both are resolved
+# openhuman-embed agent loop with OpenHuman builtin tools and scoped Medulla host tools, rather than spawning a CLI,
+# so there is no coding CLI to install. The daemon owns one embedded runtime;
+# its model and endpoint never fall back to ambient account settings: both are resolved
 # entirely from this preset and the environment. The order (highest first) is
 # MEDULLA_OPENHUMAN_MODEL / MEDULLA_HARNESS_MODEL, then the workflow node's own
 # model, then this preset's model, then `[workflows] defaultModel`. The

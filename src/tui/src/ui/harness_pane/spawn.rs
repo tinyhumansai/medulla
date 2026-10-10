@@ -133,13 +133,9 @@ impl LocalSessions {
 
     /// Start a plain interactive shell in `cwd`.
     ///
-    /// The whole of the difference from a harness launch is what is *not* here:
-    /// no MCP registration, no managed skills, no router injection, no
-    /// attribution environment. What is left is the operator's own environment
-    /// with the embedded core's state scrubbed out of it — the one thing a
-    /// shell must not inherit, because a `cargo test` run started from it would
-    /// otherwise resolve the live credential store as its keyring (see
-    /// the spawn environment).
+    /// The shell receives the operator's environment directly. Harness-specific
+    /// MCP registration, managed skills, routing and attribution setup belongs
+    /// to the harness launch path.
     ///
     /// `bin` is the shell the picker row named, already resolved. No argv: a
     /// shell handed a tty and no command is interactive by definition, and

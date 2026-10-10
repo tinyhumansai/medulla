@@ -27,6 +27,7 @@ pub async fn run_local_task(options: RunTaskOptions) -> Result<RunTaskResult, St
         on_stdin,
         hooks,
         origin,
+        skip_permissions,
         ..
     } = options;
     if abort.is_aborted() {
@@ -107,7 +108,7 @@ pub async fn run_local_task(options: RunTaskOptions) -> Result<RunTaskResult, St
     } else {
         drop(input_tx);
     }
-    if origin != RunTaskOrigin::Workflow && origin.has_operator_in_the_loop() {
+    if !skip_permissions && origin != RunTaskOrigin::Workflow && origin.has_operator_in_the_loop() {
         let approvals = super::super::permissions::Approvals::new(input_rx, native_tx.clone());
         spec = spec.can_use_tool(move |ctx| {
             let ctx = ctx.clone();

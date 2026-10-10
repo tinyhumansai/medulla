@@ -132,6 +132,17 @@ fn native_agents_scenario() {
             assert_eq!(rb.reply, "done");
             assert_ne!(ra.session_id, rb.session_id);
             assert_eq!(ra.usage.unwrap().input_tokens, 6);
+            // A second account cannot borrow the process singleton's credentials
+            // or native session store, even through a separately constructed host.
+            let other_home = tempfile::tempdir().unwrap();
+            let before_account_switch = mock.received_requests().await.unwrap().len();
+            for other_host in [host.clone(), Arc::new(EmbedHost::default())] {
+                let error = run_local_task(options(other_host, other_home.path(), a.path(), &mock, "other-account"))
+                    .await.unwrap_err();
+                assert!(error.contains("account"), "{error}");
+            }
+            assert_eq!(mock.received_requests().await.unwrap().len(), before_account_switch);
+
             for (dir, owner) in [(a.path(), "worker-a"), (b.path(), "worker-b")] {
                 let payload: Value = serde_json::from_str(
                     &std::fs::read_to_string(dir.join("hook-payload.json")).unwrap(),
@@ -209,6 +220,11 @@ fn native_agents_scenario() {
         }));
         assert!(!run_local_task(denied).await.unwrap_err().is_empty());
         assert!(!a.path().join("hook-payload.json").exists());
+        // Explicit permission bypass works without an attached input surface.
+        let mut bypassed = options(host.clone(), home.path(), a.path(), &mock, "bypassed");
+        bypassed.origin = RunTaskOrigin::Interactive;
+        bypassed.skip_permissions = true;
+        assert_eq!(run_local_task(bypassed).await.unwrap().reply, "done");
         #[cfg(target_os = "linux")]
         for timeout in [false, true] {
             let slow_dir = tempfile::tempdir().unwrap();

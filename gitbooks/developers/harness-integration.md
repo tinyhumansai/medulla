@@ -38,8 +38,9 @@ each run as well. Concurrent turns on the same native session are refused while
 other sessions can run independently.
 
 Only operator-authored workflow nodes receive unattended automation access.
-Other operator-facing runs require an inline approval for each tool call; an
-absent or closed input surface denies the call. Approval events identify the
+Other operator-facing runs require an inline approval for each tool call unless
+the operator explicitly selected the permission-bypass option. An absent or
+closed input surface denies calls that require approval. Approval events identify the
 pending `call_id`, and input answers carry that same id with `decision` equal to
 `allow` or `deny`. Abort and idle timeout cancel the turn and await subprocess
 cleanup. A configured token budget refuses exhausted runs before dispatch and

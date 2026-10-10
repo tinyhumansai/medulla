@@ -36,7 +36,10 @@ impl Hooks {
     ) -> anyhow::Result<Vec<Value>> {
         let mut replies = Vec::new();
         for hook in &self.hooks {
-            if hook.event != event || !matches_tool(&hook.matcher, tool) {
+            if hook.event != event
+                || (matches!(event, HookEvent::PreToolUse | HookEvent::PostToolUse)
+                    && !matches_tool(&hook.matcher, tool))
+            {
                 continue;
             }
             let HookHandler::Command { command, timeout } = &hook.handler;
@@ -157,6 +160,25 @@ impl ToolHook for Hooks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_hooks_run_even_with_a_tool_matcher() {
+        let directory = tempfile::tempdir().unwrap();
+        let config: HooksConfig = serde_json::from_value(json!([{
+            "event":"Stop", "matcher":"write_file", "type":"command",
+            "command":"cat > stop-payload.json", "harnesses":["openhuman"]
+        }]))
+        .unwrap();
+        let hooks = Hooks::new(&config, HashMap::new(), directory.path().to_owned());
+        hooks.stop("native-session", "done").await.unwrap();
+        let payload: Value = serde_json::from_str(
+            &std::fs::read_to_string(directory.path().join("stop-payload.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload["hook_event_name"], "Stop");
+        assert_eq!(payload["last_assistant_message"], "done");
+    }
+
     #[test]
     fn matchers_are_tool_scoped() {
         assert!(matches_tool("shell|write_file", "shell"));

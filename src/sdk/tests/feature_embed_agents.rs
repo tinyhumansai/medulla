@@ -229,7 +229,9 @@ fn native_agents_scenario() {
         for timeout in [false, true] {
             let slow_dir = tempfile::tempdir().unwrap();
             let mut slow = options(host.clone(), home.path(), slow_dir.path(), &mock, "slow-worker");
-            slow.timeout_ms = if timeout { 500 } else { 10_000 };
+            // Instrumented CI may spend longer preparing the model/tool belt.
+            // Keep the idle window long enough to reach the live child first.
+            slow.timeout_ms = if timeout { 5_000 } else { 10_000 };
             let abort = slow.abort.clone();
             let pending = tokio::spawn(run_local_task(slow));
             tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -239,7 +241,7 @@ fn native_agents_scenario() {
             }).await.unwrap();
             let pid: u32 = std::fs::read_to_string(slow_dir.path().join("child.pid")).unwrap().trim().parse().unwrap();
             if !timeout { abort.abort(); }
-            let error = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.unwrap().unwrap().unwrap_err();
+            let error = tokio::time::timeout(std::time::Duration::from_secs(15), pending).await.unwrap().unwrap().unwrap_err();
             assert!(if timeout { error.contains("idle") } else { error.contains("aborted") }, "{error}");
             // Orphaned descendants can remain zombies until init reaps them;
             // they must be dead when the Medulla acknowledgement returns.

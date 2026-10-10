@@ -134,13 +134,6 @@ fn a_shell_session_is_spawned_bare() {
     let sessions = PtyManager::new();
     let mut harnesses = harnesses(sessions.clone());
     harnesses.workspace = dir.path().to_string_lossy().into_owned();
-    // The one variable a shell must not inherit: a `cargo test` started from it
-    // would otherwise resolve the live credential store as its keyring.
-    harnesses.env.insert(
-        "OPENHUMAN_WORKSPACE".to_string(),
-        "/the/live/core".to_string(),
-    );
-
     let choice = HarnessChoice::shell(ShellChoice {
         name: "fake-shell".to_string(),
         bin: bin.to_string_lossy().into_owned(),
@@ -164,10 +157,6 @@ fn a_shell_session_is_spawned_bare() {
     assert!(
         !recorded.contains(medulla::control_socket::MCP_GRANT_ENV),
         "a shell calls no Medulla tools, so it is minted no grant: {recorded}"
-    );
-    assert!(
-        !recorded.contains("OPENHUMAN_WORKSPACE"),
-        "the embedded core's state must not reach a shell: {recorded}"
     );
     assert_eq!(row.provider, HarnessProvider::Shell);
     assert_eq!(row.control, SessionControl::User);

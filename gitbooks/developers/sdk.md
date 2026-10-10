@@ -8,7 +8,7 @@ description: >-
 
 `medulla` is the library crate at [`src/sdk/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/): a UI-free logic
 library holding the account-side backend client and the `Backend` trait over
-it, the in-process agent loop, the coding-agent daemon, sessions, the local
+it, the native OpenHuman adapter, the coding-agent daemon, sessions, the local
 dispatch hub, workflows, the host-link integration, and the UI-facing data
 surface the terminal app renders.
 The `medulla-tui` crate consumes it; nothing in the SDK depends on the TUI.
@@ -140,7 +140,6 @@ of truth. `lib.rs` defines the public surface.
 | Module | Responsibility |
 | --- | --- |
 | [`access/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/access/) | Who may use Medulla: the plan-entitlement verdict derived from `/auth/me`. |
-| [`agent/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/agent/) | Medulla's own local agent: a `tinyagents` harness, a tool surface (`fs`, `shell`, and the guard around them), and one turn driver. What the `openhuman` harness id runs on. |
 | [`attribution/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/attribution/) | Git commit attribution: the `Co-authored-by` trailer and the hook shims that carry it without disabling a repository's own hooks. |
 | [`auth/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/auth/) | An RFC 8252 loopback OAuth flow against the backend, plus the pure URL and query helpers the CLI and tests share. |
 | [`backend/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/backend/) | The `Backend` trait and its `CloudBackend`, `MockBackend`, and `OfflineBackend` implementations, plus `connect`. |
@@ -152,6 +151,7 @@ of truth. `lib.rs` defines the public surface.
 | [`config/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/config/) | The `medulla.tui.json`-compatible config the TUI reads, plus the `backend` section. Permissive: missing fields take defaults, unknown fields are ignored. |
 | [`control_socket/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/control_socket/) | The local control socket a spawned harness reaches, and the grant tokens that scope it. |
 | [`daemon/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/daemon/) | The headless `medulla daemon`: offering this machine's coding-agent CLIs as an addressable agent, over plain prompts and the `medulla-task/1` protocol. |
+| [`daemon/providers/embed/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/daemon/providers/embed/) | Native OpenHuman workers: shared runtime, scoped tools, hooks, approvals, session storage and cancellation. |
 | [`fleet/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/fleet/) | The declared-capacity contracts: the `Host → Harness → Workspace → Agent` chain, agent declarations, and the `CapacitySnapshot` roll-up. |
 | [`flow_engine/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/flow_engine/) | The adapter seam between Medulla and the `tinyflows` workflow engine (`workflows` feature). |
 | [`harness_contract/`](https://github.com/tinyhumansai/medulla/tree/main/src/sdk/src/harness_contract/) | The public agent-harness wire-contract types. See [Harness integration](harness-integration.md#the-wire-contract). |

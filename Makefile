@@ -84,3 +84,7 @@ e2e-remote-hosts: ## Run the remote-host suite: real sshd, real UDP, two contain
 	status=$$?; \
 	docker compose -f e2e/remote-hosts/compose.yaml down -v; \
 	exit $$status
+
+.PHONY: e2e-native
+e2e-native: ## Run native OpenHuman coordination against the loopback mock LLM
+	E2E_HARNESS=openhuman E2E_SMOKE=0 bash e2e/coordination/run.sh

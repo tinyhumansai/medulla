@@ -34,6 +34,9 @@ impl DaemonRuntime {
         let accessible_dirs = config.accessible_dirs.clone();
         DaemonRuntime {
             inner: Arc::new(Inner {
+                embed: Arc::new(super::providers::EmbedHost::with_budget(
+                    config.budget.clone(),
+                )),
                 config,
                 run_task,
                 send,

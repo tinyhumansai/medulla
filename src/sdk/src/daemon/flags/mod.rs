@@ -99,10 +99,10 @@ impl Flags {
 /// known names on failure.
 pub(super) fn parse_provider(value: &str) -> Result<HarnessProvider, String> {
     HarnessProvider::from_wire(value)
-        .filter(|provider| DAEMON_PROVIDERS.contains(provider))
+        .filter(|provider| provider.is_dispatchable())
         .ok_or_else(|| {
             format!(
-                "unknown provider \"{value}\" (expected: {})",
+                "unknown provider \"{value}\" (expected: {}, openhuman)",
                 DAEMON_PROVIDERS
                     .iter()
                     .map(|p| p.as_str())

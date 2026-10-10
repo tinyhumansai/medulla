@@ -57,8 +57,8 @@ HARNESS_KEY_VALUE="mock-key"
 # otherwise boot the whole stack and fail as "the daemon offers no provider",
 # which reads like a detection bug.
 case "$HARNESS" in
-  opencode | claude | codex) ;;
-  *) printf '[e2e] FAIL: unknown E2E_HARNESS=%s (want opencode|claude|codex)\n' "$HARNESS" >&2; exit 1 ;;
+  opencode | claude | codex | openhuman) ;;
+  *) printf '[e2e] FAIL: unknown E2E_HARNESS=%s (want opencode|claude|codex|openhuman)\n' "$HARNESS" >&2; exit 1 ;;
 esac
 
 case "$TRANSPORT" in
@@ -80,6 +80,12 @@ harness_bin_var() {
 # Also keeps OPENCODE_BIN populated for the opencode leg, because `run-live.sh`
 # and the Docker image both speak in terms of that variable.
 resolve_harness() {
+  if [ "$HARNESS" = "openhuman" ]; then
+    HARNESS_BIN="${MEDULLA_BIN:-medulla}"
+    HARNESS_DIR="/usr/bin"
+    log "harness: openhuman (in-process runtime)"
+    return 0
+  fi
   local var bin
   var="$(harness_bin_var)"
   bin="${!var:-}"
@@ -106,7 +112,7 @@ write_harness_config() {
       OC_CONFIG="$RUN_DIR/opencode.json"
       sed "s/MOCK_LLM_PORT/$LLM_PORT/" "$SCRIPT_DIR/opencode.json" > "$OC_CONFIG"
       ;;
-    claude | codex)
+    claude | codex | openhuman)
       MEDULLA_CONFIG="$RUN_DIR/medulla.json"
       sed "s/MOCK_LLM_PORT/$LLM_PORT/" "$SCRIPT_DIR/medulla.$HARNESS.json" > "$MEDULLA_CONFIG"
       ;;
@@ -187,6 +193,9 @@ harness_env() {
       printf 'export OPENCODE_CONFIG=%q\n' "$OC_CONFIG"
       printf 'export OPENCODE_DISABLE_AUTOUPDATE=1\n'
       ;;
+    openhuman)
+      printf 'export %s=%q\n' "$HARNESS_KEY_ENV" "$HARNESS_KEY_VALUE"
+      ;;
     claude)
       printf 'export %s=%q\n' "$HARNESS_KEY_ENV" "$HARNESS_KEY_VALUE"
       # Nothing here may reach api.anthropic.com, and an inherited operator
@@ -237,7 +246,7 @@ harness_transport_env() {
 harness_daemon_routing_flags() {
   case "$HARNESS" in
     opencode) printf '' ;;
-    claude | codex) printf -- '--config %q' "$MEDULLA_CONFIG" ;;
+    claude | codex | openhuman) printf -- '--config %q' "$MEDULLA_CONFIG" ;;
   esac
 }
 
@@ -251,7 +260,7 @@ harness_daemon_flags() {
   routing="$(harness_daemon_routing_flags)"
   case "$HARNESS" in
     opencode) printf '%s' "$routing" ;;
-    claude | codex) printf -- '%s --dangerously-skip-permissions' "$routing" ;;
+    claude | codex | openhuman) printf -- '%s --dangerously-skip-permissions' "$routing" ;;
   esac
 }
 
@@ -406,7 +415,7 @@ harness_model() {
 # somehow answered over chat-completions would be a routing bug, not a pass.
 harness_llm_kind() {
   case "$HARNESS" in
-    opencode) printf 'chat' ;;
+    opencode | openhuman) printf 'chat' ;;
     claude) printf 'messages' ;;
     codex) printf 'responses' ;;
   esac

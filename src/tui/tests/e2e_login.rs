@@ -245,7 +245,7 @@ async fn start_auth_stub(me: &'static str) -> (String, tokio::task::JoinHandle<(
 /// does *not* override it with the stub this test just started. A developer with
 /// `BACKEND_URL=https://staging-api…` in their shell therefore had the stub's
 /// token checked against staging, which rejects it, and the test failed on their
-/// machine while passing in a bare CI environment. `OPENHUMAN_WORKSPACE` is
+/// machine while passing in a bare CI environment. the runtime state directory is
 /// cleared alongside them because it outranks the derived path the same way, and
 /// would put this run's session in the developer's real workspace.
 async fn run_medulla(
@@ -283,8 +283,7 @@ async fn run_medulla_with_stdin(
             .env_remove("OPENROUTER_API_KEY")
             .env_remove("BACKEND_URL")
             .env_remove("VITE_BACKEND_URL")
-            .env_remove("OPENHUMAN_MEDULLA_BASE_URL")
-            .env_remove("OPENHUMAN_WORKSPACE");
+            .env_remove("OPENHUMAN_MEDULLA_BASE_URL");
 
         let Some(input) = stdin else {
             return cmd.output().expect("the medulla binary should run");

@@ -34,6 +34,8 @@ async fn direct_runs_report_the_session_before_workspace_context() {
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let order = Arc::new(Mutex::new(Vec::new()));
     let options = RunTaskOptions {
+        embed: Default::default(),
+        budget: None,
         origin: super::types::RunTaskOrigin::DelegatedTask,
         transport: Default::default(),
         conversation: "peer".into(),
@@ -627,6 +629,8 @@ fn idle_probe_options(
     std::fs::write(&harness, body).unwrap();
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let options = RunTaskOptions {
+        embed: Default::default(),
+        budget: None,
         // A watchdog test drives a delegated task, exactly like a peer would.
         origin: super::types::RunTaskOrigin::DelegatedTask,
         transport: Default::default(),
@@ -732,5 +736,16 @@ async fn a_wholly_silent_child_is_still_killed_as_idle() {
     assert!(
         error.contains("idle for 300ms"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn explicit_native_provider_needs_no_executable_but_is_not_an_implicit_fallback() {
+    let env = HashMap::new();
+    let absent: ExistsOnPath = Box::new(|_| false);
+    assert!(detect_providers(&env, None, Some(&absent)).is_empty());
+    assert_eq!(
+        detect_providers(&env, Some(&[HarnessProvider::Openhuman]), Some(&absent)),
+        vec![HarnessProvider::Openhuman]
     );
 }

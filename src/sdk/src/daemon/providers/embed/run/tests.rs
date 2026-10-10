@@ -9,13 +9,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::super::super::types::Abort;
-use tinyagents::events::AgentEvent;
-use tinyagents::ids::{CallId, RunId};
-use tinyinference::message::MessageDelta;
+use openhuman_embed::agent_progress::AgentProgress;
 
 use super::types::ProgressFold;
 use super::watchdog::drive;
@@ -38,54 +35,59 @@ fn recording_sink() -> (EventSink, EventLog) {
 }
 
 /// A tool call event with the least interesting fields, for flush boundaries.
-fn a_tool_call() -> AgentEvent {
-    AgentEvent::ToolStarted {
-        call_id: CallId::from("call-9"),
-        tool_name: "shell".to_string(),
+fn a_tool_call() -> AgentProgress {
+    tool_start("call-9")
+}
+fn tool_start(id: &str) -> AgentProgress {
+    AgentProgress::ToolCallStarted {
+        call_id: id.into(),
+        tool_name: "shell".into(),
+        arguments: serde_json::Value::Null,
+        iteration: 1,
+        display_label: None,
+        display_detail: None,
     }
 }
-
-/// A text delta, the shape the harness streams per token.
-fn text(delta: &str) -> AgentEvent {
-    AgentEvent::ModelDelta {
-        run_id: RunId::from("run-1"),
-        call_id: CallId::from("call-1"),
-        delta: MessageDelta::text(delta),
+fn text(delta: &str) -> AgentProgress {
+    AgentProgress::TextDelta {
+        delta: delta.into(),
+        iteration: 1,
     }
 }
-
-/// A reasoning delta, for providers that stream thinking separately.
-fn thinking(delta: &str) -> AgentEvent {
-    AgentEvent::ModelDelta {
-        run_id: RunId::from("run-1"),
-        call_id: CallId::from("call-1"),
-        delta: MessageDelta::reasoning(delta),
+fn thinking(delta: &str) -> AgentProgress {
+    AgentProgress::ThinkingDelta {
+        delta: delta.into(),
+        iteration: 1,
     }
 }
-
-/// A completed tool call carrying captured output.
-fn tool_done(output: &str, error: Option<&str>) -> AgentEvent {
-    AgentEvent::ToolCompleted {
-        call_id: CallId::from("call-1"),
-        tool_name: "shell".to_string(),
-        started_at_ms: None,
-        input: Some(json!({ "command": "cargo test" })),
-        output: Some(json!(output)),
-        duration_ms: Some(90),
-        output_bytes: None,
-        error: error.map(str::to_string),
+fn tool_done(output: &str, error: Option<&str>) -> AgentProgress {
+    AgentProgress::ToolCallCompleted {
+        call_id: "call-1".into(),
+        tool_name: "shell".into(),
+        success: error.is_none(),
+        output_chars: output.chars().count(),
+        output: output.into(),
+        arguments: None,
+        elapsed_ms: 90,
+        iteration: 1,
+        failure: None,
+        display_label: None,
+        display_detail: None,
+        structured: None,
     }
 }
-
-/// A run-completion event.
-fn run_done() -> AgentEvent {
-    AgentEvent::RunCompleted {
-        run_id: RunId::from("run-1"),
+fn run_done() -> AgentProgress {
+    AgentProgress::turn_completed(1)
+}
+fn telemetry() -> AgentProgress {
+    AgentProgress::TurnContent {
+        input: None,
+        output: None,
     }
 }
 
 /// The single event one fresh fold step completes.
-fn only_event(fold: &mut ProgressFold, progress: &AgentEvent) -> (String, serde_json::Value) {
+fn only_event(fold: &mut ProgressFold, progress: &AgentProgress) -> (String, serde_json::Value) {
     let mut mapped = fold.fold(progress);
     assert_eq!(mapped.len(), 1, "expected exactly one event: {mapped:?}");
     mapped.remove(0)
@@ -115,26 +117,20 @@ fn run_completed_clears_text_but_still_flushes_thinking() {
 #[test]
 fn run_and_model_boundaries_fold_to_status() {
     let mut fold = ProgressFold::default();
-    let (kind, payload) = only_event(
-        &mut fold,
-        &AgentEvent::RunStarted {
-            run_id: RunId::from("run-1"),
-            thread_id: None,
-        },
-    );
+    let (kind, payload) = only_event(&mut fold, &AgentProgress::TurnStarted);
     assert_eq!(kind, "status");
     assert_eq!(payload["state"], "running");
     assert_eq!(payload["detail"], "turn started");
 
     let (kind, payload) = only_event(
         &mut fold,
-        &AgentEvent::ModelStarted {
-            call_id: CallId::from("call-1"),
-            model: "deepseek/v4".to_string(),
+        &AgentProgress::IterationStarted {
+            iteration: 1,
+            max_iterations: 40,
         },
     );
     assert_eq!(kind, "status");
-    assert_eq!(payload["detail"], "calling deepseek/v4");
+    assert_eq!(payload["detail"], "model iteration 1");
 
     let (kind, payload) = only_event(&mut fold, &run_done());
     assert_eq!(kind, "status");
@@ -186,15 +182,8 @@ fn thinking_deltas_accumulate_into_one_snapshot_at_a_boundary() {
 #[test]
 fn a_delta_carrying_both_fragments_splits_them() {
     let mut fold = ProgressFold::default();
-    fold.fold(&AgentEvent::ModelDelta {
-        run_id: RunId::from("run-1"),
-        call_id: CallId::from("call-1"),
-        delta: MessageDelta {
-            text: "visible".to_string(),
-            reasoning: "hidden".to_string(),
-            tool_call: None,
-        },
-    });
+    fold.fold(&text("visible"));
+    fold.fold(&thinking("hidden"));
     let events = fold.fold(&a_tool_call());
     let by_kind: std::collections::HashMap<_, _> = events
         .iter()
@@ -224,10 +213,7 @@ fn a_very_long_thinking_block_is_bounded_to_its_tail() {
 fn unmapped_events_do_not_split_an_utterance() {
     let mut fold = ProgressFold::default();
     fold.fold(&text("first half"));
-    let telemetry = fold.fold(&AgentEvent::CacheMiss {
-        call_id: CallId::from("call-1"),
-        key: "k".to_string(),
-    });
+    let telemetry = fold.fold(&telemetry());
     assert!(telemetry.is_empty(), "a cache miss carries no stream frame");
     fold.fold(&text(", second half"));
     let events = fold.fold(&a_tool_call());
@@ -241,13 +227,7 @@ fn unmapped_events_do_not_split_an_utterance() {
 #[test]
 fn a_tool_start_folds_to_a_tool_call_naming_the_tool() {
     let mut fold = ProgressFold::default();
-    let (kind, payload) = only_event(
-        &mut fold,
-        &AgentEvent::ToolStarted {
-            call_id: CallId::from("call-1"),
-            tool_name: "shell".to_string(),
-        },
-    );
+    let (kind, payload) = only_event(&mut fold, &tool_start("call-1"));
     assert_eq!(kind, "tool_call");
     assert_eq!(payload["call_id"], "call-1");
     assert_eq!(payload["tool_name"], "shell");
@@ -291,16 +271,7 @@ fn a_successful_tool_call_carries_its_output_unquoted() {
 #[test]
 fn a_tool_failure_folds_to_a_terminal_result() {
     let mut fold = ProgressFold::default();
-    let (kind, payload) = only_event(
-        &mut fold,
-        &AgentEvent::ToolFailed {
-            call_id: CallId::from("call-1"),
-            tool_name: "shell".to_string(),
-            started_at_ms: None,
-            duration_ms: None,
-            error: "the sky fell".to_string(),
-        },
-    );
+    let (kind, payload) = only_event(&mut fold, &tool_done("the sky fell", Some("failed")));
     assert_eq!(kind, "tool_result");
     assert_eq!(payload["ok"], false);
     assert!(
@@ -312,10 +283,7 @@ fn a_tool_failure_folds_to_a_terminal_result() {
 #[test]
 fn accounting_only_events_fold_to_nothing() {
     let mut fold = ProgressFold::default();
-    let mapped = fold.fold(&AgentEvent::CacheHit {
-        call_id: CallId::from("call-1"),
-        key: "k".to_string(),
-    });
+    let mapped = fold.fold(&telemetry());
     assert!(mapped.is_empty(), "a cache hit carries no stream frame");
 }
 
@@ -345,7 +313,7 @@ async fn a_working_turn_outlives_the_idle_ceiling() {
 
 #[tokio::test(start_paused = true)]
 async fn a_silent_turn_is_timed_out() {
-    let (_tx, mut rx) = mpsc::channel::<AgentEvent>(8);
+    let (_tx, mut rx) = mpsc::channel::<AgentProgress>(8);
     let (mut sink, _log) = recording_sink();
 
     let call = async {
@@ -391,7 +359,7 @@ async fn silence_after_progress_still_times_out() {
 
 #[tokio::test(start_paused = true)]
 async fn a_zero_timeout_sets_no_ceiling() {
-    let (_tx, mut rx) = mpsc::channel::<AgentEvent>(8);
+    let (_tx, mut rx) = mpsc::channel::<AgentProgress>(8);
     let (mut sink, _log) = recording_sink();
 
     let call = async {
@@ -406,7 +374,7 @@ async fn a_zero_timeout_sets_no_ceiling() {
 
 #[tokio::test(start_paused = true)]
 async fn an_abort_stops_the_turn() {
-    let (_tx, mut rx) = mpsc::channel::<AgentEvent>(8);
+    let (_tx, mut rx) = mpsc::channel::<AgentProgress>(8);
     let (mut sink, _log) = recording_sink();
     let abort = Abort::new();
     abort.abort();
@@ -456,7 +424,7 @@ async fn events_queued_when_the_call_resolves_are_drained() {
 
 #[tokio::test(start_paused = true)]
 async fn a_closed_progress_channel_does_not_spin_the_loop() {
-    let (tx, mut rx) = mpsc::channel::<AgentEvent>(8);
+    let (tx, mut rx) = mpsc::channel::<AgentProgress>(8);
     let (mut sink, _log) = recording_sink();
     drop(tx);
 

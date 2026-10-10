@@ -97,8 +97,8 @@ pub enum HarnessProvider {
     /// The in-process OpenHuman provider.
     ///
     /// The one provider with no binary behind it: a task dispatched to it runs
-    /// as an in-process agent turn on the tinyagents harness rather than a
-    /// spawned CLI — see [`crate::daemon::providers::local`].
+    /// as an in-process agent turn on the openhuman-embed harness rather than a
+    /// spawned CLI — see [`crate::daemon::providers::embed`].
     ///
     /// It is dispatchable, but never *auto-selected*: it is not
     /// interchangeable with a coding CLI, so a task reaches it only by naming

@@ -114,7 +114,9 @@ pub fn detect_providers(
     candidates
         .iter()
         .copied()
-        .filter(|provider| lookup(&provider_bin(*provider, env)))
+        .filter(|provider| {
+            *provider == HarnessProvider::Openhuman || lookup(&provider_bin(*provider, env))
+        })
         .collect()
 }
 
@@ -301,7 +303,10 @@ pub fn extract_session_id(provider: HarnessProvider, raw: &str) -> Option<String
 /// up front. Only `claude -p` accepts forwarded `input` frames over a live stdin
 /// pipe.
 pub fn supports_stdin(provider: HarnessProvider) -> bool {
-    matches!(provider, HarnessProvider::Claude)
+    matches!(
+        provider,
+        HarnessProvider::Claude | HarnessProvider::Openhuman
+    )
 }
 
 /// The wire name for a provider.

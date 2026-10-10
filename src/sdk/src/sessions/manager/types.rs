@@ -223,6 +223,7 @@ use super::*;
 /// A clock in epoch ms (injectable for tests).
 pub type NowFn = Arc<dyn Fn() -> i64 + Send + Sync>;
 pub(in super::super) struct Inner {
+    pub(in super::super) embed: Arc<crate::daemon::providers::EmbedHost>,
     pub(in super::super) config: SessionConfig,
     pub(in super::super) registry: SessionRegistry,
     pub(in super::super) run_task: RunTaskFn,

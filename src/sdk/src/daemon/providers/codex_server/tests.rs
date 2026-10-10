@@ -12,7 +12,7 @@ use crate::protocol::{HarnessProvider, HarnessTransport};
 use crate::sessions::{SessionClass, WorkspaceContext};
 
 use super::super::types::{Abort, RunTaskOptions};
-use super::execution::{child_env, medulla_thread_config, uses_app_server, HARNESS_TRANSPORT_ENV};
+use super::execution::{medulla_thread_config, uses_app_server, HARNESS_TRANSPORT_ENV};
 use super::fold::FoldState;
 
 /// Test fold plus its recorded workspace callbacks and semantic events.
@@ -26,6 +26,8 @@ type WorkspaceRecording = (
 /// matters to the two functions under test here.
 fn options(transport: HarnessTransport, env: &[(&str, &str)]) -> RunTaskOptions {
     RunTaskOptions {
+        embed: Default::default(),
+        budget: None,
         origin: super::super::types::RunTaskOrigin::DelegatedTask,
         provider: HarnessProvider::Codex,
         transport,
@@ -148,16 +150,6 @@ fn selects_the_app_server_from_the_environment_switch() {
 
     let nonsense = options(HarnessTransport::Cli, &[(HARNESS_TRANSPORT_ENV, "wat")]);
     assert!(!uses_app_server(&nonsense));
-}
-
-#[test]
-fn app_server_child_env_strips_the_embedded_core_workspace() {
-    let env = child_env(&options(
-        HarnessTransport::AppServer,
-        &[("OPENHUMAN_WORKSPACE", "/live-core-workspace")],
-    ));
-
-    assert!(!env.contains_key("OPENHUMAN_WORKSPACE"));
 }
 
 #[test]

@@ -1,15 +1,4 @@
-//! Executing one task as an in-process agent turn.
-//!
-//! The turn itself is a single [`crate::agent::turn::run`]; everything around
-//! it is supervision: [`types`] owns the per-turn state the fold and the sink
-//! share, [`progress`] folds the harness event stream into Medulla's event
-//! vocabulary, [`events`] implements the outgoing transcript sink, [`watchdog`]
-//! keeps the turn alive for as long as it is genuinely working, and
-//! [`execution`] ties them together into one task.
-//!
-//! What stays here is the routing question — whether a given [`RunTaskOptions`]
-//! belongs on this path at all ([`uses_embedded_core`]) — so the module reads
-//! as a launcher for code that lives in its submodules.
+//! Drive one embedded agent turn with scoped progress and an idle watchdog.
 
 mod events;
 mod execution;

@@ -24,25 +24,11 @@ medulla = { path = "src/sdk", default-features = false }
 # The host-link transport (docs/host-link-protocol.md). A plain path dep: it is
 # ours, has no registry coordinate, and is not vendored.
 medulla-link = { path = "src/link" }
-# The agent harness lives in the split `tinyagents-harness` package inside the
-# direct `tinyagents` submodule. Keep the dependency key as `tinyagents` so the
-# host code can migrate independently of the upstream package rename.
-#
-# `sqlite` brings the durable session store (`tinyagents::session`) that backs
-# Medulla's session surface; `tools` brings the builtin tool family the agent
-# loop dispatches. Neither is on by default in the crate.
-tinyagents = { package = "tinyagents-harness", path = "vendor/tinyagents/crates/tinyagents-harness", features = ["sqlite", "tools"] }
-# TinyAgents exposes provider messages and tool wire types through its
-# companion inference package; Medulla uses those types at its tool boundary.
-tinyinference = { path = "vendor/tinyagents/vendor/tinyinference/crates/tinyinference" }
-# The shared TinyHumans backend client. A direct submodule at
-# `vendor/tinyhumans-sdk`; it has no registry coordinate, so unlike the tiny*
-# crates around it, it is a plain path dep rather than declared-then-patched.
+# One daemon-owned native agent runtime. The facade re-exports the exact
+# vendored tool traits/results, so host tools do not link another tool graph.
+openhuman-embed = { path = "vendor/openhuman/crates/openhuman-embed", default-features = false, features = ["skills", "storage-sqlite"] }
+# The existing backend client and workflow engine keep their independent pins.
 tinyhumans-sdk = { path = "vendor/tinyhumans-sdk" }
-# The workflow engine is the package nested inside the direct `tinyflows`
-# submodule; the repository root is now its workspace manifest.
-# `mock` is a normal (not dev-only) feature: dry-run authoring uses the engine's
-# deterministic capability stand-ins in ordinary builds.
 tinyflows = { path = "vendor/tinyflows/crates/tinyflows", features = ["mock", "host-caps", "store"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -69,7 +55,7 @@ bytes = "1"
 # Depended on only to pick a TLS backend explicitly. rustls 0.23 refuses to
 # guess when more than one provider is compiled in, and this workspace has two:
 # `ring` arrives with reqwest's `rustls-tls`, `aws-lc-rs` with the vendored
-# `tinyagents` harness (`vendor/tinyagents`, via its `rustls-platform-verifier`
+# OpenHuman runtime (via its `rustls-platform-verifier`
 # dependency). Neither wins by default, so every TLS handshake panicked on
 # whichever tokio worker reached it first.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
@@ -118,5 +104,39 @@ unicode-width = "0.2"
 # Keep these package paths in lockstep with scripts/init-submodules.sh.
 # Dependency DWARF dominates target/ size and link time, so third-party crates
 # compile without it while this workspace's own crates keep full debuginfo.
+[patch."https://github.com/tinyhumansai/tinytools"]
+# tinymcp's `tools` feature names tinytools by git rev so it can be built on its
+# own. Redirect it to the copy tinyagents vendors — the one the harness and
+# every host tool link — so there is exactly one `tinytools` package and one
+# `Tool` trait. Without this, MCP tools would not satisfy the harness's trait.
+tinytools = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools" }
+tinytools-agent = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-agent" }
+
+[patch."https://github.com/tinyhumansai/tinystoragedrivers"]
+# tinyflows names the storage crates by git tag so it can build on its own.
+# Redirect them to the copy tinyagents vendors — the one the session store and
+# the core `storage` domain link — so there is exactly one `DocumentStore`
+# trait and one `libsqlite3-sys` (`links = "sqlite3"`) in the graph.
+tinystoragedrivers-core = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinystoragedrivers/crates/tinystoragedrivers-core" }
+tinystoragedrivers-sqlite = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinystoragedrivers/crates/tinystoragedrivers-sqlite" }
+
+[patch."https://github.com/tinyhumansai/tinyinference"]
+# tinymemes depends on the Jev client by git; resolve it to the vendored copy.
+tinyinference-core = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-core" }
+tinyinference-embeddings = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-embeddings" }
+tinyinference-llm = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-llm" }
+tinyinference-local = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-local" }
+tinyinference-providers = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-providers" }
+tinyinference-voice = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
+
+[patch.crates-io]
+tinyinference-core = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-core" }
+tinyinference-embeddings = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-embeddings" }
+tinyinference-llm = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-llm" }
+tinyinference-local = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-local" }
+tinyinference-providers = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-providers" }
+tinyinference-voice = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
+
+
 [profile.dev.package."*"]
 debug = false

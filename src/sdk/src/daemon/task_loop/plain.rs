@@ -36,6 +36,8 @@ impl DaemonRuntime {
             .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
+            embed: self.inner.embed.clone(),
+            budget: None,
             // A plain DM comes from the requester's own session, not from a
             // saved workflow graph, so it is a conversational run.
             origin: crate::daemon::providers::RunTaskOrigin::Conversation,

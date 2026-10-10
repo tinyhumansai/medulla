@@ -23,15 +23,33 @@ values exist, and only three of them are CLIs the daemon can detect and
 auto-select: `claude`, `codex`, and `opencode` (`daemon::providers::DAEMON_PROVIDERS`).
 The other two are named explicitly or not reached at all.
 
-`openhuman` is the in-process provider (`daemon::providers::local`). It has no
-binary behind it — a task dispatched to it runs as a bounded model/tool loop
-directly in this process, on the vendored `tinyagents` harness plus Medulla's
-own filesystem, shell, and guard tools, rather than a spawned and JSONL-folded
-CLI. It is dispatchable, but never auto-selected: a task reaches it only by
-naming it. Because there is no child process, it has no hooks, no managed
-skills, and no MCP tools — all three install onto a child's command line — and
-no approval gate: the harness runs what the model asks for rather than parking
-an external-effect tool call for approval.
+`openhuman` is the in-process provider (`daemon::providers::embed`). One daemon-owned
+OpenHuman runtime hosts its agents. A thread's hashed identity selects an agent;
+`Turn::session` resumes that thread through OpenHuman's session storage. Existing
+Medulla thread files are not imported; native conversations start fresh.
+
+Builtin filesystem and shell tools run under the turn's cwd and OpenHuman's path
+policy. Scoped command hooks run before and after tools, and `Stop` runs after a
+completed turn. Post-tool commands are awaited, so an auto-commit finishes before
+the next model call. Fleet and workflow tools use the same grant-checked handlers
+as MCP, in-process. Every turn rebuilds its host tool belt, including on resume,
+so revoked tool families stay revoked. Generated skill copies are replaced for
+each run as well. Concurrent turns on the same native session are refused while
+other sessions can run independently.
+
+Only operator-authored workflow nodes receive unattended automation access.
+Other operator-facing runs require an inline approval for each tool call unless
+the operator explicitly selected the permission-bypass option. An absent or
+closed input surface denies calls that require approval. Approval events identify the
+pending `call_id`, and input answers carry that same id with `decision` equal to
+`allow` or `deny`. Abort and idle timeout cancel the turn and await subprocess
+cleanup. A configured token budget refuses exhausted runs before dispatch and
+stops between model calls after its headroom is spent.
+
+A native turn requires a router preset and model. OpenRouter routes still use
+Medulla's loopback attribution proxy and its provider pin. Task credentials are
+scrubbed from model-authored subprocess environments. ACP remains available
+through the subprocess providers below.
 
 `shell` is a plain interactive shell (`bash`, `zsh`, whatever `$SHELL` names),
 not a coding agent. It is never detected as an available provider and never

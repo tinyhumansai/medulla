@@ -16,8 +16,8 @@
 mod acp;
 mod codex_server;
 mod detect;
+mod embed;
 mod execute;
-mod local;
 mod types;
 
 #[cfg(test)]
@@ -29,8 +29,8 @@ pub use detect::{
     build_run_args, detect_providers, make_path_lookup, provider_bin, provider_name,
     supports_stdin, DAEMON_PROVIDERS,
 };
+pub use embed::{run_local_task, uses_local_harness, EmbedHost};
 pub use execute::{is_transient_lock, run_provider_task, with_auth_hint};
-pub use local::{run_local_task, uses_local_harness};
 pub use types::{
     Abort, ExistsOnPath, OnEvent, OnStdin, OnWorkspaceContext, RunTaskFn, RunTaskOptions,
     RunTaskOrigin, RunTaskResult,

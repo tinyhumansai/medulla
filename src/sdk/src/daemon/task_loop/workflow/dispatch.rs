@@ -206,6 +206,8 @@ impl HarnessDispatch for RuntimeDispatch {
         ));
 
         let options = RunTaskOptions {
+            embed: self.runtime.inner.embed.clone(),
+            budget: None,
             origin: self.origin,
             conversation: self.conversation.clone(),
             // A workflow node is discrete work, like the task frame that

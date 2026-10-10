@@ -1,0 +1,19 @@
+{
+  "_comment": "Native OpenHuman fixture: all inference goes to the loopback mock through the normal router/preset seam.",
+  "router": {
+    "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT/v1",
+    "apiKeyEnv": "MOCK_LLM_API_KEY"
+  },
+  "customHarnesses": [
+    {
+      "id": "mock-harness",
+      "name": "Mock OpenHuman",
+      "baseHarness": "openhuman",
+      "model": "mock-model",
+      "hostId": "e2e",
+      "default": true,
+      "apiKeyEnv": "MOCK_LLM_API_KEY",
+      "baseUrl": "http://127.0.0.1:MOCK_LLM_PORT/v1"
+    }
+  ]
+}

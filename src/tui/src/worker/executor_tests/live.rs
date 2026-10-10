@@ -92,6 +92,8 @@ fn live_options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        embed: Default::default(),
+        budget: None,
         origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
         hooks: medulla::harness_hooks::HooksConfig::default(),
         transport: Default::default(),

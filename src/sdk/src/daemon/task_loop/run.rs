@@ -495,6 +495,8 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
+            embed: self.inner.embed.clone(),
+            budget: None,
             // `workflowNode` is trusted only from a device-local sender. The
             // workflow plane is a daemon-local dispatch: the workflow host runs
             // each `agent` node over an in-process loopback bridge, so the only

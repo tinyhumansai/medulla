@@ -57,7 +57,7 @@ RUN apt-get update \
       pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# The workspace's vendored path deps live under vendor/* (tinyagents, tinyflows,
+# The workspace's vendored path deps live under vendor/* (openhuman-embed, tinyflows,
 # tinyhumans-sdk). src/ carries every member crate (src/sdk, src/tui, src/link)
 # including their tests/ and examples/ trees.
 COPY Cargo.toml Cargo.lock ./

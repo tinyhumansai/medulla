@@ -463,12 +463,8 @@ fn agent_for_with_env(
             AcpAgentConfig::new("npx").args(["-y", "@agentclientprotocol/claude-agent-acp@latest"])
         }
         HarnessProvider::Codex => AcpAgentConfig::new("npx").args(codex_acp_args(options, &env)?),
-        // The provider-binary override is untrusted configuration that lands in
-        // an `env` argv (Unix) or `cmd.exe` line (Windows). A value containing
-        // `=` would be consumed as a variable assignment by `env` even after
-        // its `--` terminator — the name could never be executed, and the next
-        // argument would silently become the command. Reject it at the boundary
-        // instead of hoping the shell misparse is harmless.
+        // Keep provider-binary overrides literal command names, including
+        // when downstream launchers wrap the command in an environment tool.
         HarnessProvider::Opencode => {
             let bin = crate::protocol::env::provider_bin(HarnessProvider::Opencode, &options.env);
             if bin.contains('=') {
@@ -480,24 +476,16 @@ fn agent_for_with_env(
             AcpAgentConfig::new(bin).arg("acp")
         }
         HarnessProvider::Openhuman => {
-            unreachable!("OpenHuman's operator TUI is not an ACP coding provider")
+            return Err(
+                "OpenHuman runs in-process; ACP is available through the subprocess harness lanes"
+                    .into(),
+            )
         }
         HarnessProvider::Shell => {
             unreachable!("a shell takes no task frames, so it never reaches an ACP session")
         }
     };
-    // `AcpAgentConfig::envs` overlays an inheriting command instead of clearing
-    // it. Run the actual ACP command through `env -u` as well as scrubbing the
-    // overlay so the embedded core workspace cannot leak from Medulla's own
-    // process environment into an external harness.
-    #[cfg(unix)]
-    let config = config
-        .command_with_env_removals(crate::protocol::env::CORE_STATE_VARS)
-        .envs(env);
-    #[cfg(windows)]
-    let config = config
-        .command_with_env_removals(crate::protocol::env::CORE_STATE_VARS)
-        .envs(env);
+    let config = config.envs(env);
 
     Ok(AcpAgent::new(config))
 }
@@ -575,7 +563,6 @@ fn codex_acp_overrides_env(
 /// be sent to the configured gateway.
 pub(super) fn acp_env(options: &RunTaskOptions) -> Result<HashMap<String, String>, String> {
     let mut env = options.env.clone();
-    crate::protocol::env::scrub_core_state(&mut env, options.provider);
     // A fleet capability belongs only to the per-session MCP subprocess. The
     // ACP agent itself inherits this map, so retaining an ambient pair here
     // would let it redeem a grant minted for another process or session.
@@ -605,65 +592,6 @@ pub(super) fn acp_env(options: &RunTaskOptions) -> Result<HashMap<String, String
         }
     }
     Ok(env)
-}
-
-/// Adds a Unix `env -u` shim around an ACP command.
-///
-/// The ACP SDK deliberately preserves the ambient process environment, while
-/// `AcpAgentConfig` can only add or replace values.  The shim is therefore the
-/// launch-level counterpart to [`acp_env`]'s map scrubbing.
-#[cfg(unix)]
-trait AcpAgentConfigExt {
-    /// Return a command whose inherited values in `names` are removed before
-    /// it starts the original ACP executable.
-    fn command_with_env_removals(self, names: &[&str]) -> Self;
-}
-
-#[cfg(unix)]
-impl AcpAgentConfigExt for AcpAgentConfig {
-    fn command_with_env_removals(self, names: &[&str]) -> Self {
-        let mut args = names
-            .iter()
-            .flat_map(|name| ["-u".to_string(), (*name).to_string()])
-            .collect::<Vec<_>>();
-        // The provider-binary override is untrusted configuration: without the
-        // `--` terminator, a command starting with `-` or containing `=` is
-        // eaten by `env` as an option or a variable assignment instead of being
-        // executed.
-        args.push("--".to_string());
-        args.push(self.command().to_string_lossy().into_owned());
-        args.extend(self.arguments().iter().cloned());
-        AcpAgentConfig::new("env").args(args)
-    }
-}
-
-/// Adds a Windows `cmd` shim that clears inherited variables before launching
-/// an ACP command. `AcpAgentConfig` itself can only overlay values.
-#[cfg(windows)]
-trait AcpAgentConfigExt {
-    /// Return a command which clears `names` from its child environment before
-    /// it invokes the original ACP executable.
-    fn command_with_env_removals(self, names: &[&str]) -> Self;
-}
-
-#[cfg(windows)]
-impl AcpAgentConfigExt for AcpAgentConfig {
-    fn command_with_env_removals(self, names: &[&str]) -> Self {
-        let clears = names
-            .iter()
-            .map(|name| format!("set {name}="))
-            .collect::<Vec<_>>()
-            .join(" && ");
-        let command = std::iter::once(quote_windows_cmd_arg(&self.command().to_string_lossy()))
-            .chain(
-                self.arguments()
-                    .iter()
-                    .map(|argument| quote_windows_cmd_arg(argument)),
-            )
-            .collect::<Vec<_>>()
-            .join(" ");
-        AcpAgentConfig::new("cmd.exe").args(["/D", "/S", "/C", &format!("{clears} && {command}")])
-    }
 }
 
 /// Quote a command argument for `cmd.exe` without allowing its metacharacters

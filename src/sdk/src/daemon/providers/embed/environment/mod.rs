@@ -57,7 +57,14 @@ const SECRET_WORDS: [&str; 8] = [
 /// These carry no secret-bearing word but still hand a turn something it should
 /// not have: the account home is where the session store lives, and a command
 /// that can read it does not need the bearer in its environment to find one.
-const ALWAYS_DROPPED: [&str; 2] = ["MEDULLA_HOME", "MEDULLA_USER"];
+const ALWAYS_DROPPED: [&str; 6] = [
+    "MEDULLA_HOME",
+    "MEDULLA_USER",
+    "MEDULLA_MCP_GRANT",
+    "MEDULLA_MCP_PARENT_GRANT",
+    "MEDULLA_HOOK_GRANT",
+    "MEDULLA_MCP_ATTACHED",
+];
 
 /// Whether `name` looks like it holds a credential.
 ///

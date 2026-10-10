@@ -39,6 +39,7 @@ impl SessionManager {
         let (changed, _) = broadcast::channel(64);
         SessionManager {
             inner: Arc::new(Inner {
+                embed: Default::default(),
                 config,
                 registry: SessionRegistry::default(),
                 run_task,

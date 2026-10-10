@@ -133,13 +133,9 @@ impl LocalSessions {
 
     /// Start a plain interactive shell in `cwd`.
     ///
-    /// The whole of the difference from a harness launch is what is *not* here:
-    /// no MCP registration, no managed skills, no router injection, no
-    /// attribution environment. What is left is the operator's own environment
-    /// with the embedded core's state scrubbed out of it — the one thing a
-    /// shell must not inherit, because a `cargo test` run started from it would
-    /// otherwise resolve the live credential store as its keyring (see
-    /// [`medulla::protocol::env::scrub_core_state`]).
+    /// The shell receives the operator's environment directly. Harness-specific
+    /// MCP registration, managed skills, routing and attribution setup belongs
+    /// to the harness launch path.
     ///
     /// `bin` is the shell the picker row named, already resolved. No argv: a
     /// shell handed a tty and no command is interactive by definition, and
@@ -157,8 +153,7 @@ impl LocalSessions {
         cwd: &str,
         name: Option<String>,
     ) -> Result<String, String> {
-        let mut env = self.env.clone();
-        medulla::protocol::env::scrub_core_state(&mut env, choice.provider);
+        let env = self.env.clone();
         self.sessions.open(LaunchSpec {
             provider: choice.provider,
             preset: None,
@@ -224,7 +219,6 @@ impl LocalSessions {
         // harness opened by the operator must not inherit the embedded core's
         // workspace either, or its own nested OpenHuman commands can mutate
         // the live credential store.
-        medulla::protocol::env::scrub_core_state(&mut env, choice.provider);
         // A harness the operator opened by hand is still one Medulla launched,
         // so its commits carry the same trailer a dispatched task's do. This is
         // the seam the executor's own `spawn_env` cannot reach — without it,

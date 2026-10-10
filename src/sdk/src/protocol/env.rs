@@ -134,7 +134,7 @@ pub fn receive_enabled(provider: HarnessProvider, env: &HashMap<String, String>)
 /// kept behind the conventional pair rather than dropped: it names the
 /// standalone `openhuman-core` binary a bridged wrapper or PTY session spawns,
 /// which is a real process even though the *local, in-process* provider
-/// ([`crate::daemon::providers::local`]) spawns nothing. It says nothing
+/// ([`crate::daemon::providers::embed`]) spawns nothing. It says nothing
 /// about which model an in-process turn runs on — that is
 /// [`model_override`].
 fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
@@ -171,7 +171,7 @@ fn bin_keys(provider: HarnessProvider) -> &'static [&'static str] {
 /// that answers "run this machine's turns on that model right now" without
 /// editing a config file or a graph. Callers that resolve a model from several
 /// sources should consult this first — see
-/// [`crate::daemon::providers::local::model::effective_model`], which does
+/// [`crate::daemon::providers::embed::effective_model`], which does
 /// exactly that for the in-process (OpenHuman) provider.
 pub fn model_override(provider: HarnessProvider, env: &HashMap<String, String>) -> Option<String> {
     let provider_keys = provider_keys(provider, "MODEL");
@@ -257,38 +257,6 @@ pub fn provider_bin(provider: HarnessProvider, env: &HashMap<String, String>) ->
         }
     }
     default_bin(provider).to_string()
-}
-
-/// Variables that used to aim a process at the **embedded OpenHuman core's**
-/// state directory — the workspace holding its credential store.
-///
-/// Nothing in this process sets `OPENHUMAN_WORKSPACE` any more: the function
-/// that used to (`core_host::bind_workspace`) was removed along with the
-/// embedded core in v0.11.0. The scrub below is kept defensive rather than
-/// deleted, in case the variable is still inherited from an older environment
-/// a developer's shell was launched from — see [`scrub_core_state`] for why
-/// that inheritance was destructive.
-pub const CORE_STATE_VARS: &[&str] = &["OPENHUMAN_WORKSPACE"];
-
-/// Remove the legacy embedded-core state variables from a harness's spawn
-/// environment — unless that harness *is* the in-process OpenHuman provider.
-///
-/// [`HarnessProvider::Openhuman`] is the one child that must keep them, for
-/// backward compatibility with any environment that still carries them: a
-/// `claude` or `codex` session has no use for the old core's workspace, and one
-/// concrete use it *did* find was destructive — every secret the core owned
-/// lived in one file there, rewritten whole on each `set`, so a `cargo test`
-/// run started from a Medulla-spawned shell inherited the variable and the
-/// core's own test suite resolved that file as its keyring, writing thousands
-/// of per-test entries into it beside the live app session. Losing the session
-/// to one of those writes is what "I rebuilt and got logged out" was.
-pub fn scrub_core_state(env: &mut HashMap<String, String>, provider: HarnessProvider) {
-    if provider == HarnessProvider::Openhuman {
-        return;
-    }
-    for key in CORE_STATE_VARS {
-        env.remove(*key);
-    }
 }
 
 /// Extra args prepended to the child argv, from `MEDULLA_<P>_ARGS` (or the

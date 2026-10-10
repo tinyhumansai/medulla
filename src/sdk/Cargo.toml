@@ -32,11 +32,8 @@ medulla-link = { workspace = true }
 # percent-encoding, and the not-exposed-route gate all live in the SDK.
 tinyhumans-sdk = { workspace = true }
 tinyflows = { workspace = true, optional = true }
-# The agent harness a local turn runs on: the model loop, providers, streaming
-# and event bus. The tool surface it runs *with* is Medulla's own — see
-# `src/agent/tools`, and the crate's own docs on why it ships no shell.
-tinyagents = { workspace = true }
-tinyinference = { workspace = true }
+# Native agents share one process-owned OpenHuman runtime.
+openhuman-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
@@ -81,3 +78,4 @@ libc = "0.2"
 # (docs/host-link-protocol.md §6.3) is tested over multi-second windows, which
 # only stay a unit test because time can be advanced rather than waited out.
 tokio = { workspace = true, features = ["test-util"] }
+wiremock = "0.6"

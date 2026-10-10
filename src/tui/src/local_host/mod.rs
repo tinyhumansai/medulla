@@ -247,10 +247,10 @@ fn extra_options(
 /// Parse one configured provider name, naming the valid spellings on failure.
 fn parse_provider(name: &str) -> Result<HarnessProvider, String> {
     HarnessProvider::from_wire(name.trim())
-        .filter(|provider| medulla::daemon::providers::DAEMON_PROVIDERS.contains(provider))
+        .filter(|provider| provider.is_dispatchable())
         .ok_or_else(|| {
             format!(
-                "unknown harness \"{}\" in [host] — expected one of: claude, codex, opencode",
+                "unknown harness \"{}\" in [host] — expected one of: claude, codex, opencode, openhuman",
                 name.trim()
             )
         })

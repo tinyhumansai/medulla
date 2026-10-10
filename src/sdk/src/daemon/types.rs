@@ -260,6 +260,8 @@ impl Drop for AdmissionGuard {
 
 /// Shared, `Arc`-wrapped runtime state behind [`DaemonRuntime`].
 pub(super) struct Inner {
+    /// Owns the native runtime across tasks.
+    pub(super) embed: Arc<super::providers::EmbedHost>,
     /// Static configuration.
     pub(super) config: DaemonConfig,
     /// The task executor.

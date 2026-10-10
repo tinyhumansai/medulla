@@ -43,6 +43,8 @@ fn options(
     );
     (
         RunTaskOptions {
+            embed: Default::default(),
+            budget: None,
             origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
             provider: HarnessProvider::Codex,
             transport: HarnessTransport::AppServer,

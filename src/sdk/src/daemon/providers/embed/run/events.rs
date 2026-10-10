@@ -12,7 +12,7 @@ use crate::protocol::HarnessEvent;
 
 use super::super::super::types::OnEvent;
 use super::types::EventSink;
-use tinyagents::events::AgentEvent;
+use openhuman_embed::agent_progress::AgentProgress;
 
 impl EventSink {
     /// A sink feeding `on_event`, or counting silently when it is `None`.
@@ -54,7 +54,7 @@ impl EventSink {
     /// the last tool calls) instead of exhausting its cap on a streamed
     /// paragraph. The watchdog still credits every event as liveness, which is
     /// the point of keeping the two decisions apart.
-    pub(super) fn emit_progress(&mut self, progress: &AgentEvent) {
+    pub(super) fn emit_progress(&mut self, progress: &AgentProgress) {
         for (kind, payload) in self.fold.fold(progress) {
             self.emit(&kind, payload);
         }

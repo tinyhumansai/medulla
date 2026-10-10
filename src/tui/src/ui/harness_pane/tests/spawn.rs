@@ -170,23 +170,6 @@ fn an_operator_started_harness_omits_attribution_when_configured_off() {
     assert!(extra_args.is_empty(), "{extra_args:?}");
 }
 
-/// Manually opened harnesses bypass the task executor's spawn seam, so they
-/// must independently omit the embedded core workspace.
-#[test]
-fn an_operator_started_harness_strips_the_embedded_core_workspace() {
-    let mut harnesses = harnesses(PtyManager::new());
-    harnesses.env.insert(
-        "OPENHUMAN_WORKSPACE".to_string(),
-        "/live-core-workspace".to_string(),
-    );
-
-    let (env, _) = harnesses
-        .spawn_env(&HarnessChoice::native(HarnessProvider::Claude))
-        .expect("a native provider is launchable");
-
-    assert!(!env.contains_key("OPENHUMAN_WORKSPACE"), "{env:?}");
-}
-
 /// Codex has no `--settings` equivalent, so its attribution is the hook alone.
 /// Inventing a flag for it would be a spawn that exits on an unknown argument.
 #[test]

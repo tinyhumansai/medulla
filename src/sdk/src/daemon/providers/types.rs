@@ -91,6 +91,10 @@ impl Abort {
 
 /// Inputs for one headless run.
 pub struct RunTaskOptions {
+    /// Daemon-owned lazy native runtime, shared by every task on this host.
+    pub embed: Arc<super::EmbedHost>,
+    /// Optional per-agent admission and between-call token budget.
+    pub budget: Option<crate::harness_contract::AgentBudgetMetadata>,
     /// The coding-agent CLI to spawn.
     pub provider: HarnessProvider,
     /// The dispatch path that requested this run.

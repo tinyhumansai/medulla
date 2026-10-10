@@ -17,11 +17,11 @@
 //!
 //! OpenHuman was refused outright while it was not dispatchable at all. It is
 //! now — a workflow node may name the harness id `openhuman` and the turn runs
-//! in this process on the tinyagents harness — so the refusal only stopped an
+//! in this process on the openhuman-embed harness — so the refusal only stopped an
 //! operator naming the model that turn should use, which is the one thing a
 //! preset is for. A preset with `baseHarness = "openhuman"` therefore behaves
 //! like any other: its `model` reaches the turn (see
-//! [`crate::daemon::providers::local::model::effective_model`] for where it sits
+//! [`crate::daemon::providers::embed::effective_model`] for where it sits
 //! among the other routes).
 //!
 //! `baseUrl` and `apiKeyEnv` are live here too, though they arrive by a
@@ -31,7 +31,7 @@
 //! **per-call** route that applies to that turn alone and never persists. An
 //! OpenRouter endpoint is exchanged for a loopback mount and a machine-local
 //! token at the attribution proxy first; any other endpoint is handed over as
-//! spelled. See [`crate::daemon::providers::local::router::embedded_route`].
+//! spelled. See [`crate::daemon::providers::embed::embedded_route`].
 //!
 //! A preset that leaves them at their defaults still works and still needs no
 //! OpenRouter key: with no key exported under `apiKeyEnv` the turn runs on the

@@ -1,48 +1,12 @@
-//! Tokio runtime tuning for any process that may host an agent turn.
-//!
-//! These are process-level knobs, not SDK behaviour, but they live here rather
-//! than in the app crate because every process that can host a turn needs them
-//! and the SDK is what they all share.
-//!
-//! # These used to be re-exports
-//!
-//! They came from the embedded OpenHuman core, which is gone. Restating them is
-//! the one honest option left: tinyagents publishes no equivalent, and a host
-//! that silently took tokio's defaults would hit the failure below in front of
-//! a user rather than in CI. The numbers are this crate's own now — change them
-//! here, and say why.
+//! Tokio sizing shared with the embed runtime that executes native turns.
 
-/// Worker-thread stack size for a runtime that may host an agent turn.
-///
-/// tokio defaults worker threads to 2 MiB, which is not enough: an agent loop's
-/// async chain is deep on its own, and a turn that delegates to a sub-agent
-/// nests a second one inside the first — enough to overflow the default stack.
-///
-/// That failure mode is why this matters more than it looks: it reproduces only
-/// under real nesting, so it surfaces in front of a user rather than in a unit
-/// test, and it aborts the process rather than returning an error. 16 MiB is
-/// the value the embedded core used and the same figure `cargo test` needs as
-/// `RUST_MIN_STACK` for the suite's own 2 MiB test threads.
-pub const WORKER_STACK_BYTES: usize = 16 * 1024 * 1024;
+pub use openhuman_embed::process::{
+    AGENT_WORKER_STACK_BYTES as WORKER_STACK_BYTES, MAX_BLOCKING_THREADS,
+};
 
-/// Upper bound on tokio's blocking-thread pool.
-///
-/// tokio defaults to 512. Blocking work in this process is bursty and bounded
-/// (filesystem, sqlite, process spawn), so the default mostly buys idle
-/// footprint. Threads still retire on tokio's idle timeout, so this is a
-/// ceiling on a burst rather than a steady-state cost.
-pub const MAX_BLOCKING_THREADS: usize = 64;
-
-/// Build a multi-thread runtime tuned for hosting agent turns.
-///
-/// Callers use this instead of `#[tokio::main]`, which offers no way to set the
-/// worker stack size.
+/// Build a runtime sized for embedded agent turns and nested delegation.
 pub fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_stack_size(WORKER_STACK_BYTES)
-        .max_blocking_threads(MAX_BLOCKING_THREADS)
-        .build()
+    openhuman_embed::process::tokio_runtime_builder().build()
 }
 
 #[cfg(test)]

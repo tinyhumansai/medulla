@@ -1,27 +1,8 @@
-//! Translating the tinyagents [`AgentEvent`] stream into Medulla's semantic
-//! event vocabulary.
-//!
-//! A spawned CLI harness reports what it is doing by printing JSONL that
-//! [`crate::daemon::mappers`] folds into [`HarnessEventKind`] values. The local
-//! harness reports the same facts in-process, as typed enum variants, so this
-//! module is the in-process equivalent of a line mapper: same destination
-//! vocabulary, different source.
-//!
-//! The destination vocabulary is what makes the run view provider-agnostic — an
-//! operator reading a transcript should not be able to tell whether the turn ran
-//! in a child process or in this one.
-//!
-//! One shaping decision is deliberate. TinyAgents streams a `ModelDelta` per
-//! token, and this fold feeds a *bounded* transcript — see
-//! [`crate::harness_transcript`] — plus a status path that treats an
-//! `agent_thinking` event as the whole reasoning so far. Emitting one event per
-//! token would exhaust the transcript's cap before the turn ended and hand the
-//! throttler a fragment where it expects a cumulative snapshot, so deltas are
-//! accumulated here and emitted whole at the next structural boundary.
+//! Fold scoped embed progress into Medulla transcript events.
 
 use serde_json::{json, Value};
 
-use tinyagents::events::AgentEvent;
+use openhuman_embed::agent_progress::AgentProgress;
 
 use super::types::ProgressFold;
 use crate::protocol::{HarnessEventKind, StatusPayload, ToolCallPayload, ToolResultPayload};
@@ -58,21 +39,24 @@ impl ProgressFold {
     /// its own closing `agent_message` after the watchdog returns, so clearing
     /// the pending text here avoids doubling the turn's final words, while the
     /// reasoning is still flushed so the answer's thinking is recorded.
-    pub(super) fn fold(&mut self, progress: &AgentEvent) -> Vec<(String, Value)> {
+    pub(super) fn fold(&mut self, progress: &AgentProgress) -> Vec<(String, Value)> {
         match progress {
             // One event carries both fragments, and either may be empty — a
             // provider that streams reasoning separately sends them on distinct
             // deltas, one that does not sends only text.
-            AgentEvent::ModelDelta { delta, .. } => {
-                self.text.push_str(&delta.text);
-                self.thinking.push_str(&delta.reasoning);
+            AgentProgress::TextDelta { delta, .. } => {
+                self.text.push_str(delta);
+                Vec::new()
+            }
+            AgentProgress::ThinkingDelta { delta, .. } => {
+                self.thinking.push_str(delta);
                 Vec::new()
             }
             boundary => {
                 let mapped = event_kind(boundary);
                 let mut events = Vec::new();
                 if mapped.is_some() {
-                    if matches!(boundary, AgentEvent::RunCompleted { .. }) {
+                    if matches!(boundary, AgentProgress::TurnCompleted { .. }) {
                         self.text.clear();
                     } else if !self.text.is_empty() {
                         events.push((
@@ -104,70 +88,49 @@ impl ProgressFold {
 ///
 /// Delta variants are handled by [`ProgressFold::fold`] before they reach this
 /// matcher, so none are listed here.
-fn event_kind(progress: &AgentEvent) -> Option<HarnessEventKind> {
+fn event_kind(progress: &AgentProgress) -> Option<HarnessEventKind> {
     let kind = match progress {
-        AgentEvent::RunStarted { .. } => HarnessEventKind::Status(StatusPayload {
-            state: "running".to_string(),
-            detail: "turn started".to_string(),
+        AgentProgress::TurnStarted => HarnessEventKind::Status(StatusPayload {
+            state: "running".into(),
+            detail: "turn started".into(),
             active_call_id: None,
         }),
-        AgentEvent::ModelStarted { model, .. } => HarnessEventKind::Status(StatusPayload {
-            state: "running".to_string(),
-            detail: format!("calling {model}"),
-            active_call_id: None,
-        }),
-        // Announced at the start so a long build shows as running rather than
-        // as a gap. The arguments are not on this event — tinyagents carries
-        // them on the completion — so `input` is null here and the tool result
-        // below is what shows what was actually run.
-        AgentEvent::ToolStarted {
-            call_id, tool_name, ..
-        } => HarnessEventKind::ToolCall(ToolCallPayload {
-            call_id: call_id.to_string(),
-            tool_name: tool_name.clone(),
-            tool_kind: TOOL_KIND.to_string(),
-            display: tool_name.clone(),
-            input: Value::Null,
-        }),
-        AgentEvent::ToolCompleted {
-            call_id,
-            output,
-            error,
-            ..
-        } => {
-            let text = output.as_ref().map(render_output).unwrap_or_default();
-            HarnessEventKind::ToolResult(ToolResultPayload {
-                call_id: call_id.to_string(),
-                ok: error.is_none(),
-                // The tools run in-process; there is no exit status to report,
-                // and inventing 0/1 from the error flag would read as one.
-                exit_code: None,
-                is_error: error.is_some(),
-                // Byte length of what we carry, not a character count, which
-                // under-reports any non-ASCII output.
-                output_bytes: text.len() as i64,
-                output: text,
+        AgentProgress::IterationStarted { iteration, .. } => {
+            HarnessEventKind::Status(StatusPayload {
+                state: "running".into(),
+                detail: format!("model iteration {iteration}"),
+                active_call_id: None,
             })
         }
-        // Distinct from a completion carrying an error: that one was fed back
-        // to the model, which got to react. This means the run is aborting, so
-        // it is reported as a failed result rather than as ordinary output.
-        AgentEvent::ToolFailed {
+        AgentProgress::ToolCallStarted {
             call_id,
             tool_name,
-            error,
+            arguments,
+            display_label,
+            ..
+        } => HarnessEventKind::ToolCall(ToolCallPayload {
+            call_id: call_id.clone(),
+            tool_name: tool_name.clone(),
+            tool_kind: TOOL_KIND.into(),
+            display: display_label.clone().unwrap_or_else(|| tool_name.clone()),
+            input: arguments.clone(),
+        }),
+        AgentProgress::ToolCallCompleted {
+            call_id,
+            output,
+            success,
             ..
         } => HarnessEventKind::ToolResult(ToolResultPayload {
-            call_id: call_id.to_string(),
-            ok: false,
+            call_id: call_id.clone(),
+            ok: *success,
             exit_code: None,
-            is_error: true,
-            output_bytes: error.len() as i64,
-            output: format!("{tool_name}: {error}"),
+            is_error: !success,
+            output_bytes: output.len() as i64,
+            output: output.clone(),
         }),
-        AgentEvent::RunCompleted { .. } => HarnessEventKind::Status(StatusPayload {
-            state: "idle".to_string(),
-            detail: "turn completed".to_string(),
+        AgentProgress::TurnCompleted { .. } => HarnessEventKind::Status(StatusPayload {
+            state: "idle".into(),
+            detail: "turn completed".into(),
             active_call_id: None,
         }),
         // Everything else (middleware spans, cache hits, retry scheduling,
@@ -176,19 +139,6 @@ fn event_kind(progress: &AgentEvent) -> Option<HarnessEventKind> {
         _ => return None,
     };
     Some(kind)
-}
-
-/// A tool result's captured output as text.
-///
-/// The capture is `serde_json::Value` because a tool may answer structurally,
-/// but the overwhelmingly common case is a JSON string holding the tool's own
-/// text — and rendering that through `to_string` would show an operator a
-/// quoted, backslash-escaped version of output they can otherwise read.
-fn render_output(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
 }
 
 /// The wire `kind` string and `payload` object of a typed event.

@@ -191,7 +191,7 @@ async fn an_unknown_op_is_a_bad_request() {
 /// dispatch to.
 ///
 /// This asserted the opposite until OpenHuman gained a task executor of its
-/// own ([`crate::daemon::providers::local`]). The refusal was never about
+/// own ([`crate::daemon::providers::embed`]). The refusal was never about
 /// the control plane — it was that nothing could *run* the task — so with a
 /// runner in place the dispatch is admitted like any other.
 #[tokio::test]

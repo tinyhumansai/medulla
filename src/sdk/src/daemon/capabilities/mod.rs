@@ -94,6 +94,8 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         None => CAPABILITY_PROMPT.to_string(),
     };
     let run_options = RunTaskOptions {
+        embed: Default::default(),
+        budget: None,
         origin: crate::daemon::providers::RunTaskOrigin::CapabilityProbe,
         // Unattributed by design: the probe asks this machine about itself, on
         // no peer's behalf, so it must not join any conversation.

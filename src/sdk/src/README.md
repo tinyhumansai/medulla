@@ -4,7 +4,7 @@ The Rust module tree for the `medulla` SDK crate. `lib.rs` defines the public su
 
 ## Contents
 
-- [`agent/`](./agent/) — Medulla's own local agent: a tinyagents harness, a tool surface, and one turn driver.
+- [`daemon/providers/embed/`](./daemon/providers/embed/) — daemon-owned OpenHuman runtime, scoped host tools, hooks, and native turn supervision.
 - [`attribution/`](./attribution/) — Git commit attribution for Medulla-launched harnesses: the flags and environment that carry it, resolved from config.
 - [`auth/`](./auth/) — Login plumbing: an RFC 8252 loopback OAuth flow against the Medulla backend and the pure URL/query helpers the CLI and tests share.
 - [`bridge/`](./bridge/) — Message delivery bridges for local and remote agent communication.

@@ -3,8 +3,10 @@
 //! [`runtime`]. The HTTP/SSE client lives in [`client`]. The terminal app that
 //! consumes this crate is the sibling `medulla-tui` crate.
 
+#![recursion_limit = "512"]
+
 pub mod access;
-pub mod agent;
+
 pub mod analytics;
 pub mod attribution;
 pub mod auth;

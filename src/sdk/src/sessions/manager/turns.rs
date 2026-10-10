@@ -390,6 +390,8 @@ impl SessionManager {
     ) -> Result<TurnOutcome, String> {
         let provider = self.provider_for(request);
         let options = RunTaskOptions {
+            embed: self.inner.embed.clone(),
+            budget: None,
             origin: crate::daemon::providers::RunTaskOrigin::Interactive,
             conversation: String::new(),
             // A one-shot turn owns its process for exactly that turn; continuity

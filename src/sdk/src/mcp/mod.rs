@@ -311,19 +311,12 @@ fn origin_from_env(
     )
 }
 
-/// Serve MCP over stdin/stdout until the client closes the stream.
-///
-/// One JSON object per line, which is the stdio transport MCP defines and the
-/// one every ACP agent supports.
-///
-/// # Errors
-///
-/// Returns an error only when stdin or stdout fails; a malformed request is
-/// answered with a JSON-RPC error and the loop continues, because a client that
-/// sent one bad frame is still a client.
-pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<(), std::io::Error> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
+/// Build the same scoped tool policy for native and stdio clients.
+pub(crate) async fn session_for_env(
+    env: &HashMap<String, String>,
+    cwd: &Path,
+    notifications: Option<tokio::sync::mpsc::Sender<Value>>,
+) -> Result<Arc<McpSession>, std::io::Error> {
     if env
         .get(attach::ATTACHED_ENV)
         .is_none_or(|value| value.trim().is_empty())
@@ -369,8 +362,7 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     // holds a handle to it: a long tool call reports progress on the same
     // stdout its eventual response goes down, and the writer task below is what
     // keeps the two from interleaving mid-line.
-    let (responses, mut pending_responses) =
-        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
+
     // Resolved once, from the environment the harness's launch put it in. Every
     // run this server starts is attributed to that session, which is what lets
     // the Agents rail draw the run under the harness that asked for it instead
@@ -379,8 +371,10 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     let mut session = McpSession::local(store, policy, mode)
         .with_workflows_enabled(workflows_enabled)
         .with_fleet(backend::from_env(env).await)
-        .with_origin(origin)
-        .with_notifications(responses.clone());
+        .with_origin(origin);
+    if let Some(responses) = notifications {
+        session = session.with_notifications(responses);
+    }
     // Defence in depth for a launch whose workflow surface was withheld
     // ([`crate::harness_tools`]). The launcher already declines to serve this
     // family — it resolves `workflows_enabled` to false, which mints a
@@ -391,7 +385,25 @@ pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<()
     if crate::harness_tools::workflows_withheld(env) {
         session = session.without_workflow_tools();
     }
-    let session = Arc::new(session);
+    Ok(Arc::new(session))
+}
+
+/// Serve MCP over stdin/stdout until the client closes the stream.
+///
+/// One JSON object per line, which is the stdio transport MCP defines and the
+/// one every ACP agent supports.
+///
+/// # Errors
+///
+/// Returns an error only when stdin or stdout fails; a malformed request is
+/// answered with a JSON-RPC error and the loop continues, because a client that
+/// sent one bad frame is still a client.
+pub async fn serve_stdio(env: &HashMap<String, String>, cwd: &Path) -> Result<(), std::io::Error> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (responses, mut pending_responses) =
+        tokio::sync::mpsc::channel::<Value>(MAX_CONCURRENT_REQUESTS);
+    let session = session_for_env(env, cwd, Some(responses.clone())).await?;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();

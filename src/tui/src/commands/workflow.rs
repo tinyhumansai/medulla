@@ -317,7 +317,7 @@ fn local_context(
 /// the in-process OpenHuman provider, where it becomes the turn's model
 /// request — the one route to choosing that model without editing anything on
 /// disk, short of the `MEDULLA_OPENHUMAN_MODEL` environment override that
-/// outranks it (see `medulla::daemon::providers::local::model::effective_model`).
+/// outranks it (see `medulla::daemon::providers::embed::effective_model`).
 ///
 /// An explicitly empty `--model ""` clears the configured default for this run
 /// rather than being ignored, matching what the same flag means on

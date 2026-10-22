@@ -345,6 +345,12 @@ async fn a_turn_streams_its_events_and_settles_on_the_result_frame() {
         Some("sess-42"),
         "the announced id is recorded on the session"
     );
+    let registration = medulla_monitor::agents::agent_registry()
+        .snapshot()
+        .into_iter()
+        .find(|entry| entry.session_id.as_deref() == Some("sess-42"))
+        .expect("the live interactive child keeps its discovered session id");
+    assert_eq!(registration.provider, "claude");
 
     let events = seen.lock().unwrap().clone();
     assert!(events
@@ -354,6 +360,11 @@ async fn a_turn_streams_its_events_and_settles_on_the_result_frame() {
         .iter()
         .any(|e| matches!(e, StreamEvent::Result { .. })));
     session.close().await;
+    drop(session);
+    assert!(medulla_monitor::agents::agent_registry()
+        .snapshot()
+        .into_iter()
+        .all(|entry| entry.pid != registration.pid));
 }
 
 #[cfg(unix)]

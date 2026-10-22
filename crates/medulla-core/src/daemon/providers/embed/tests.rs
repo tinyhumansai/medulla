@@ -16,6 +16,7 @@ use super::run::uses_local_harness;
 /// Options naming `provider`, with everything else at its least interesting.
 fn options(provider: HarnessProvider) -> RunTaskOptions {
     RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: super::super::types::RunTaskOrigin::DelegatedTask,

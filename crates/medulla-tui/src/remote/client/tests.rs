@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 use medulla::bridge::LocalBridgeNetwork;
 use medulla::protocol::HarnessProvider;
+use medulla::protocol::{
+    encode_remote_message, RemoteMessage, RemoteSessionRow, RemoteSessionState,
+};
 
 use super::*;
 use crate::remote::serve::RemoteServer;
@@ -80,6 +83,96 @@ fn pair() -> (RemoteHost, RemoteServer) {
     );
     let client = RemoteHost::over("tower", Arc::new(client_bridge));
     (client, server)
+}
+
+#[tokio::test]
+async fn sessions_chunks_are_assembled_atomically_in_index_order() {
+    let network = LocalBridgeNetwork::new();
+    let server = network.bind("server").unwrap();
+    let client_bridge = network.bind("client").unwrap();
+    let mut client = RemoteHost::over("host", Arc::new(client_bridge));
+    let row = |id: &str| RemoteSessionRow {
+        id: id.into(),
+        label: id.into(),
+        provider: "shell".into(),
+        preset: None,
+        state: RemoteSessionState::Running,
+        cwd: "/tmp".into(),
+        name: None,
+        thread_name: None,
+        started_at: 1,
+        last_output_at: 1,
+        busy: false,
+        working: false,
+        attention: None,
+        bracketed_paste: false,
+        last_error: None,
+        usage: None,
+    };
+    client.rows = vec![row("previous")];
+    server
+        .send(
+            "client",
+            &encode_remote_message(&RemoteMessage::SessionsChunk {
+                batch_id: 9,
+                index: 1,
+                count: 2,
+                rows: vec![row("second")],
+            }),
+        )
+        .await
+        .unwrap();
+    client.pump().await;
+    assert_eq!(
+        client
+            .rows()
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["previous"]
+    );
+    server
+        .send(
+            "client",
+            &encode_remote_message(&RemoteMessage::SessionsChunk {
+                batch_id: 9,
+                index: 0,
+                count: 2,
+                rows: vec![row("first")],
+            }),
+        )
+        .await
+        .unwrap();
+    client.pump().await;
+    assert_eq!(
+        client
+            .rows()
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    server
+        .send(
+            "client",
+            &encode_remote_message(&RemoteMessage::SessionsChunk {
+                batch_id: 8,
+                index: 0,
+                count: 1,
+                rows: vec![row("stale")],
+            }),
+        )
+        .await
+        .unwrap();
+    client.pump().await;
+    assert_eq!(
+        client
+            .rows()
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
 }
 
 /// Let both sides make progress until `check` passes.

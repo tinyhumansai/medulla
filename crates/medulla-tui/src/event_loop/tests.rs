@@ -2,18 +2,32 @@
 
 use std::sync::Arc;
 
-use medulla::config::LoadedConfig;
+use medulla::config::{LoadedConfig, ResourceDisplay};
 use medulla::runtime::mock::MockRuntime;
 #[cfg(feature = "workflows")]
 use medulla::workflows::{FileWorkflowStore, WorkflowRecord, WorkflowStore};
-use medulla_tui::ui::app::App;
+use medulla_tui::ui::app::{App, TABS};
 #[cfg(feature = "workflows")]
 use serde_json::json;
 
 #[cfg(feature = "workflows")]
 use super::apply_workflow_deleted;
 use super::update_checker::spawn_update_checker;
-use super::{runtime_ping_needs_refresh, should_refresh_context};
+use super::{resource_sampling_period, runtime_ping_needs_refresh, should_refresh_context};
+
+#[test]
+fn device_footer_only_keeps_the_sampler_active_on_sessions() {
+    let mut config = LoadedConfig::defaults("medulla.tui.json".into());
+    config.config.appearance.device_cpu = ResourceDisplay::Percent;
+    let mut app = App::new(Arc::new(MockRuntime::demo()), config);
+    let sessions = TABS.iter().position(|tab| *tab == "Sessions").unwrap();
+    let settings = TABS.iter().position(|tab| *tab == "Settings").unwrap();
+
+    app.tab_index = sessions;
+    assert!(resource_sampling_period(&app).is_some());
+    app.tab_index = settings;
+    assert_eq!(resource_sampling_period(&app), None);
+}
 
 #[cfg(feature = "workflows")]
 #[test]

@@ -495,6 +495,7 @@ impl DaemonRuntime {
         };
 
         let options = RunTaskOptions {
+            task_id: Some(frame.task_id.clone()),
             embed: self.inner.embed.clone(),
             budget: None,
             // `workflowNode` is trusted only from a device-local sender. The

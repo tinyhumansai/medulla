@@ -42,6 +42,31 @@
 # environment — this is the usual way to set `MEDULLA_DEV=1` for local dev.
 
 # ---------------------------------------------------------------------------
+# resources — background resource sampler
+# ---------------------------------------------------------------------------
+# Samples CPU, memory, disks, and processes on a background task. Default: 2000 ms.
+# The accepted range is 100–10000 ms.
+# [resources]
+# updateMs = 2000
+# shownBoxes = "cpu,mem,net,agents"
+# presets = "cpu:0:default,mem:0:default,net:0:default,agents:1:default"
+# preset = 0
+# cpuBottom = false
+# memBelowNet = false
+# agentsLeft = false
+# memGraphs = true
+# showDisks = true
+# showSwap = true
+# swapDisk = true
+# onlyPhysical = true
+# useFstab = true
+# disksFilter = "exclude=/boot"
+# ioMode = false
+# ioGraphCombined = false
+# Per-mount graph ceilings in MiB/s; unmatched mounts use 100 MiB/s.
+# ioGraphSpeeds = "/mnt/media:100 /:20 /boot:1"
+
+# ---------------------------------------------------------------------------
 # backend — the Medulla HTTP API
 # ---------------------------------------------------------------------------
 [backend]
@@ -520,6 +545,47 @@ tokenEnv = "MEDULLA_TOKEN"
 # attention = "yellow"          # ⚠ rows, the tab badge, "N waiting on you"
 # attentionBlink = true         # false holds those cues steady and bright
 # attentionBlinkSeconds = 1.0   # one full pulse; clamped to 0.2–10.0
+
+# Resource panel colors follow btop's palette. Values accept named colors or
+# #rrggbb. Each gradient uses start/mid/end. Set mid = "" for a two-color ramp,
+# or set both mid = "" and end = "" for a solid color. Unset keys keep defaults.
+# Percentages are precomputed 0–100.
+# [theme.resources]
+# cpuBox = "#556d59"
+# memBox = "#6c6c4b"
+# netBox = "#5c588d"
+# procBox = "#805252"
+# divLine = "#303030"
+# meterBg = "#404040"
+# graphText = "#606060"
+# inactiveFg = "#404040"
+# cpuStart = "#77ca9b"
+# cpuMid = "#cbc06c"
+# cpuEnd = "#dc4c4c"
+# tempStart = "#4897d4"
+# tempMid = "#5474e8"
+# tempEnd = "#ff40b6"
+# usedStart = "#592b26"
+# usedMid = "#d9626d"
+# usedEnd = "#ff4769"
+# freeStart = "#384f21"
+# freeMid = "#b5e685"
+# freeEnd = "#dcff85"
+# cachedStart = "#163350"
+# cachedMid = "#74e6fc"
+# cachedEnd = "#26c5ff"
+# availableStart = "#4e3f0e"
+# availableMid = "#ffd77a"
+# availableEnd = "#ffb814"
+# downloadStart = "#291f75"
+# downloadMid = "#4f43a3"
+# downloadEnd = "#b0a9de"
+# uploadStart = "#620665"
+# uploadMid = "#7d4180"
+# uploadEnd = "#dcafde"
+# processStart = "#80d0a3"
+# processMid = "#dcd179"
+# processEnd = "#d45454"
 
 # ---------------------------------------------------------------------------
 # appearance — how the Agents sidebar arranges itself, plus the legacy

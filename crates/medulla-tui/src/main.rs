@@ -587,7 +587,8 @@ async fn run_worker_tui_command(args: &[String]) -> anyhow::Result<()> {
                 .unwrap_or_else(|_| path.clone())
         })
         .collect();
-    let theme = medulla_tui::ui::theme::Theme::from_config(&loaded.config.theme);
+    let theme = medulla_tui::ui::theme::Theme::from_config(&loaded.config.theme)
+        .with_depth(medulla_tui::ui::theme::ColorDepth::detect());
     let result = worker_loop::run_worker_tui(worker_loop::WorkerTuiConfig {
         env,
         workspace,

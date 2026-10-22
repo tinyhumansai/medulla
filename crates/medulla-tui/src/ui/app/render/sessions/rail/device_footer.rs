@@ -47,10 +47,18 @@ impl DeviceFooter {
             .count();
         let disk_visible =
             appearance.device_disk != ResourceDisplay::Off && device_budget > metrics_before_disk;
-        let snapshot = if enabled {
-            app.device_monitor.sample_for(disk_visible)
+        let snapshot = if enabled && disk_visible {
+            app.device_snapshot()
         } else {
-            Default::default()
+            let mut snapshot = app.device_snapshot();
+            if !enabled {
+                snapshot = Default::default();
+            }
+            if !disk_visible {
+                snapshot.disk_used_bytes = None;
+                snapshot.disk_total_bytes = None;
+            }
+            snapshot
         };
         let mut lines =
             crate::ui::resources::device_lines(appearance, snapshot, width, device_budget);

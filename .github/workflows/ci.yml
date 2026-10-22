@@ -435,3 +435,8 @@ jobs:
         run: |
           docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
             medulla-e2e:latest bash /app/e2e/coordination/tests_tui.sh
+
+      - name: Resources scenarios (tests_resources.sh, --network none)
+        run: |
+          docker run --rm --network none -e "E2E_HARNESS=$E2E_HARNESS" \
+            medulla-e2e:latest bash /app/e2e/coordination/tests_resources.sh

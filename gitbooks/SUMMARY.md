@@ -17,6 +17,7 @@
 * [Hosts](features/hosts.md)
 * [Harnesses](features/harnesses.md)
 * [Attention cues](features/attention.md)
+* [Resources](features/resources.md)
 * [Workflows](features/workflows.md)
 
 ## Developers

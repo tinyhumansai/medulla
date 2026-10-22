@@ -184,7 +184,7 @@ impl App {
             // alone left a configured bar too narrow to ever render.
             .chain(std::iter::once(crate::ui::resources::device_width_hint(
                 &self.loaded.config.appearance,
-                self.device_monitor.last(),
+                self.device_snapshot(),
             )))
             // The subscription meters share that footer, and their labels are
             // the longer ones — a rail sized without them clips every bar.

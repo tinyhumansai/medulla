@@ -96,6 +96,8 @@ pub struct Connection {
     alive: AtomicBool,
     /// Retained so dropping the connection kills the child.
     child: Mutex<Option<Child>>,
+    /// Keeps the process discoverable for the lifetime of the pooled child.
+    _agent_registration: Mutex<Option<medulla_monitor::agents::RegistrationGuard>>,
 }
 
 impl Connection {
@@ -122,6 +124,9 @@ impl Connection {
         let mut child = command
             .spawn()
             .map_err(|error| AppServerError::Process(format!("spawn {}: {error}", spec.bin)))?;
+        let agent_registration = child.id().and_then(|pid| {
+            medulla_monitor::agents::agent_registry().register(pid, None, None, "codex-app-server")
+        });
         let stdin = child
             .stdin
             .take()
@@ -139,11 +144,12 @@ impl Connection {
             next_id: AtomicI64::new(1),
             alive: AtomicBool::new(true),
             child: Mutex::new(Some(child)),
+            _agent_registration: Mutex::new(agent_registration),
         });
 
         // Writer: one task owns stdin, so concurrent callers never interleave
         // half-written lines.
-        let writer_connection = connection.clone();
+        let writer_connection = Arc::downgrade(&connection);
         tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(line) = outbound_rx.recv().await {
@@ -151,15 +157,18 @@ impl Connection {
                     || stdin.write_all(b"\n").await.is_err()
                     || stdin.flush().await.is_err()
                 {
-                    writer_connection.mark_dead("stdin closed");
+                    if let Some(connection) = writer_connection.upgrade() {
+                        connection.mark_dead("stdin closed");
+                    }
                     return;
                 }
             }
         });
 
-        // Reader: decodes stdout and dispatches. Owns the connection weakly
-        // enough that the process is torn down when the pool drops it.
-        let reader_connection = connection.clone();
+        // Reader: decodes stdout and dispatches. Weak ownership lets dropping
+        // the pool's last connection owner tear down the process and registry
+        // guard instead of keeping the connection alive through its own reader.
+        let reader_connection = Arc::downgrade(&connection);
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
@@ -169,17 +178,25 @@ impl Connection {
                             continue;
                         }
                         if let Some(message) = Message::parse(&line) {
-                            reader_connection.dispatch(message);
+                            if let Some(connection) = reader_connection.upgrade() {
+                                connection.dispatch(message);
+                            } else {
+                                break;
+                            }
                         }
                     }
                     Ok(None) => break,
                     Err(error) => {
-                        reader_connection.mark_dead(&format!("stdout read failed: {error}"));
+                        if let Some(connection) = reader_connection.upgrade() {
+                            connection.mark_dead(&format!("stdout read failed: {error}"));
+                        }
                         return;
                     }
                 }
             }
-            reader_connection.mark_dead("process exited");
+            if let Some(connection) = reader_connection.upgrade() {
+                connection.mark_dead("process exited");
+            }
         });
 
         connection
@@ -393,6 +410,12 @@ impl Connection {
         if let Some(mut child) = self.child.lock().expect("app-server child lock").take() {
             let _ = child.start_kill();
         }
+        drop(
+            self._agent_registration
+                .lock()
+                .expect("app-server registration lock")
+                .take(),
+        );
     }
 }
 
@@ -402,5 +425,38 @@ impl Drop for Connection {
         if let Some(mut child) = self.child.lock().expect("app-server child lock").take() {
             let _ = child.start_kill();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mark_dead_removes_the_app_server_registration() {
+        let registry = medulla_monitor::agents::agent_registry();
+        let registration = medulla_monitor::agents::AgentRegistration {
+            pid: u32::MAX - std::process::id(),
+            started_at_secs: u64::MAX - 7,
+            task_id: None,
+            session_id: None,
+            provider: "codex-app-server-test".into(),
+        };
+        let identity = (registration.pid, registration.started_at_secs);
+        let guard = registry.register_at(registration);
+        let (outbound, _receiver) = mpsc::unbounded_channel();
+        let connection = Connection {
+            outbound,
+            pending: Mutex::new(HashMap::new()),
+            threads: Mutex::new(HashMap::new()),
+            next_id: AtomicI64::new(1),
+            alive: AtomicBool::new(true),
+            child: Mutex::new(None),
+            _agent_registration: Mutex::new(Some(guard)),
+        };
+
+        connection.mark_dead("test process exit");
+
+        assert!(registry.current_for(identity.0, identity.1).is_none());
     }
 }

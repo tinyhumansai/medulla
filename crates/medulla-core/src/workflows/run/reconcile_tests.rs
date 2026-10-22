@@ -253,7 +253,10 @@ fn a_run_parked_on_approval_is_left_alone_even_when_its_process_died() {
 #[test]
 fn the_sweep_spans_every_workflow_in_the_scope() {
     let (_root, store) = store();
-    for (id, workflow) in [("run-a", "alpha"), ("run-b", "beta")] {
+    for (id, workflow) in [
+        ("run-reconcile-sweep-alpha", "alpha"),
+        ("run-reconcile-sweep-beta", "beta"),
+    ] {
         let mut record = running(id, Some(dead_executor()));
         record.workflow_id = workflow.to_string();
         store.record_run(&record).unwrap();

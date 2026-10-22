@@ -20,7 +20,7 @@ default = ["workflows"]
 # and out with the engine behind them. Without this the `cfg` blocks here would
 # silently evaluate false, since a crate only sees its *own* features.
 workflows = ["medulla/workflows"]
-tinyjuice = ["medulla/tinyjuice"]
+tinyjuice = ["medulla/tinyjuice", "medulla-juice/tinyjuice"]
 # Mirrors the SDK's test-only endpoint hatch; see its note there. The e2e login
 # suite is `#[ignore]`d unless this is on, because it cannot reach its stub
 # backend without it.
@@ -38,9 +38,11 @@ medulla-pty = { workspace = true }
 medulla-monitor = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+regex = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 ratatui = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 crossterm = { workspace = true }
 portable-pty = { workspace = true }
 vt100 = { workspace = true }
@@ -66,4 +68,5 @@ unicode-width = { workspace = true }
 libc = "0.2"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 tempfile = { workspace = true }

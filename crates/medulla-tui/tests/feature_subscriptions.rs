@@ -17,6 +17,7 @@ use medulla::config::{
 };
 use medulla::runtime::mock::MockRuntime;
 use medulla::subscriptions::{MeterReading, SubscriptionSnapshot};
+use medulla_monitor::sampler::ResourceSnapshot;
 use medulla_tui::ui::app::{App, Cmd, TABS};
 
 fn loaded() -> LoadedConfig {
@@ -89,6 +90,22 @@ fn settings_app(config: SubscriptionsConfig) -> App {
     let _ = app.focus_settings_subpage("Subscriptions");
     let _ = app.set_subscriptions(sample());
     app
+}
+
+#[test]
+fn render_with_enabled_resource_readings_does_not_wait_for_a_sampler_message() {
+    let mut config = loaded();
+    config.config.appearance = AppearanceConfig {
+        cpu: ResourceDisplay::Percent,
+        device_cpu: ResourceDisplay::Percent,
+        ..AppearanceConfig::default()
+    };
+    let mut app = App::new(Arc::new(MockRuntime::demo()), config);
+
+    // No resource snapshot has been delivered. The draw path must use the
+    // cached empty value and remain independent from the background task.
+    let buffer = draw(&mut app, 100, 40);
+    assert!(!text_of(&buffer).is_empty());
 }
 
 /// The Agents tab with `config` and the fixed sample already delivered.
@@ -402,10 +419,9 @@ fn the_device_and_meter_blocks_share_one_right_edge() {
             ..AppearanceConfig::default()
         },
     );
-    app.set_device_snapshot(medulla_tui::ui::resources::DeviceSnapshot {
-        cpu_fraction: Some(0.42),
-        ..Default::default()
-    });
+    let mut sample = ResourceSnapshot::default();
+    sample.cpu_percent = 42.0;
+    app.set_resource_snapshot(Arc::new(sample));
     let out = text_of(&draw(&mut app, 140, 40));
     // One footer, one layout: both blocks put their bar and percentage in the
     // same columns against the rail's border.

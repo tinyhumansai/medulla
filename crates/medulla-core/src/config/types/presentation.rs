@@ -35,6 +35,86 @@ pub struct ThemeConfig {
     /// than rejected, so a typo slows the pulse instead of disabling the config.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attention_blink_seconds: Option<f64>,
+    /// Optional btop-style resource panel colors and gradients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ResourcesThemeConfig>,
+}
+
+/// Optional color overrides for the resource panels. Keys use camelCase in
+/// configuration, for example `cpuBox` and `cpuStart`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ResourcesThemeConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_box: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_box: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_box: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proc_box: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub div_line: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meter_bg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inactive_fg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub free_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub free_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub free_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upload_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_end: Option<String>,
 }
 
 /// Onboarding state: what the welcome flow has already shown this user.

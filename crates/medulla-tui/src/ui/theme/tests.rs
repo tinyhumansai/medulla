@@ -1,6 +1,7 @@
 //! Tests for the theme module.
 
 use super::*;
+use medulla::config::ResourcesThemeConfig;
 
 #[test]
 fn parses_named_colors_case_insensitively() {
@@ -8,6 +9,96 @@ fn parses_named_colors_case_insensitively() {
     assert_eq!(parse_color("CYAN"), Some(Color::Cyan));
     assert_eq!(parse_color("  LightBlue "), Some(Color::LightBlue));
     assert_eq!(parse_color("grey"), Some(Color::Gray));
+}
+
+#[test]
+fn resource_theme_has_btop_cpu_gradient_defaults() {
+    let gradient = Theme::default().resources.cpu;
+    assert_eq!(gradient.at(0), Color::Rgb(0x77, 0xca, 0x9b));
+    assert_eq!(gradient.at(50), Color::Rgb(0xcb, 0xc0, 0x6c));
+    assert_eq!(gradient.at(100), Color::Rgb(0xdc, 0x4c, 0x4c));
+}
+
+#[test]
+fn gradients_support_two_colors_and_solid_fills() {
+    let two = Gradient::new(Color::Rgb(0, 10, 20), None, Some(Color::Rgb(100, 110, 120)));
+    assert_eq!(two.at(0), Color::Rgb(0, 10, 20));
+    assert_eq!(two.at(50), Color::Rgb(50, 60, 70));
+    assert_eq!(two.at(100), Color::Rgb(100, 110, 120));
+
+    let solid = Gradient::new(Color::Rgb(9, 8, 7), None, None);
+    assert_eq!(solid.at(0), Color::Rgb(9, 8, 7));
+    assert_eq!(solid.at(50), Color::Rgb(9, 8, 7));
+    assert_eq!(solid.at(100), Color::Rgb(9, 8, 7));
+}
+
+#[test]
+fn truecolor_fallback_matches_btop_256_color_indices() {
+    assert_eq!(truecolor_to_256(Color::Rgb(255, 0, 0)), Color::Indexed(196));
+    assert_eq!(
+        truecolor_to_256(Color::Rgb(128, 128, 128)),
+        Color::Indexed(244)
+    );
+    assert_eq!(
+        truecolor_to_256(Color::Rgb(0, 255, 255)),
+        Color::Indexed(51)
+    );
+}
+
+#[test]
+fn terminal_depth_prefers_colorterm_and_uses_ansi_colors_for_tty() {
+    assert_eq!(
+        ColorDepth::detect_from(Some("24bit"), None),
+        ColorDepth::TrueColor
+    );
+    assert_eq!(
+        ColorDepth::detect_from(None, Some("xterm-256color")),
+        ColorDepth::Color256
+    );
+    assert_eq!(
+        ColorDepth::detect_from(None, Some("vt100")),
+        ColorDepth::Color16
+    );
+    assert_eq!(truecolor_to_16(Color::Rgb(255, 0, 0)), Color::LightRed);
+}
+
+#[test]
+fn named_color_gradients_interpolate_between_their_rgb_values() {
+    let gradient = Gradient::new(Color::Red, None, Some(Color::Blue));
+    assert_eq!(gradient.at(0), Color::Red);
+    assert_eq!(gradient.at(100), Color::Blue);
+    assert_eq!(gradient.at(50), Color::Rgb(103, 0, 119));
+}
+
+#[test]
+fn resource_config_override_keeps_other_btop_defaults() {
+    let theme = Theme::from_config(&ThemeConfig {
+        resources: Some(ResourcesThemeConfig {
+            cpu_box: Some("#010203".into()),
+            ..ResourcesThemeConfig::default()
+        }),
+        ..ThemeConfig::default()
+    });
+    assert_eq!(theme.resources.cpu_box, Color::Rgb(1, 2, 3));
+    assert_eq!(theme.resources.mem_box, Color::Rgb(0x6c, 0x6c, 0x4b));
+}
+
+#[test]
+fn empty_gradient_controls_select_two_color_and_solid_forms() {
+    let theme = Theme::from_config(&ThemeConfig {
+        resources: Some(ResourcesThemeConfig {
+            cpu_start: Some("#000000".into()),
+            cpu_mid: Some(String::new()),
+            cpu_end: Some("#ffffff".into()),
+            temp_start: Some("#123456".into()),
+            temp_mid: Some(String::new()),
+            temp_end: Some(String::new()),
+            ..ResourcesThemeConfig::default()
+        }),
+        ..ThemeConfig::default()
+    });
+    assert_eq!(theme.resources.cpu.at(50), Color::Rgb(127, 127, 127));
+    assert_eq!(theme.resources.temp.at(100), Color::Rgb(0x12, 0x34, 0x56));
 }
 
 #[test]
@@ -34,6 +125,7 @@ fn from_config_falls_back_per_field() {
         attention: Some("lightyellow".into()),
         attention_blink: Some(false),
         attention_blink_seconds: None,
+        ..ThemeConfig::default()
     };
     let t = Theme::from_config(&cfg);
     assert_eq!(t.primary, Color::Rgb(0x12, 0x34, 0x56));

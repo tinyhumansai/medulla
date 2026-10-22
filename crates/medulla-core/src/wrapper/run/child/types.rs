@@ -21,4 +21,6 @@ pub(in super::super) struct ChildSession {
     /// Returns the terminal to cooked mode (PTY path only). Called by the run
     /// loop once the child's output has drained.
     pub(in super::super) restore: Option<Box<dyn FnOnce() + Send>>,
+    /// Tracks the direct harness child for resource attribution.
+    pub(in super::super) _agent_registration: Option<medulla_monitor::agents::RegistrationGuard>,
 }

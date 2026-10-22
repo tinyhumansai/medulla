@@ -160,6 +160,41 @@ async fn no_injection_inherits_stdio() {
     assert_eq!(session.done.await.unwrap(), 0);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn wrapper_stdio_child_registration_lives_until_the_session_drops() {
+    let registry = medulla_monitor::agents::agent_registry();
+    let before: std::collections::HashSet<u32> = registry
+        .snapshot()
+        .into_iter()
+        .map(|entry| entry.pid)
+        .collect();
+    let mut cfg = config(None);
+    let mut session = spawn_child_with(
+        "/bin/sh",
+        &["-c".into(), "sleep 30".into()],
+        &mut cfg,
+        false,
+        false,
+    )
+    .unwrap();
+    let registration = registry
+        .snapshot()
+        .into_iter()
+        .find(|entry| !before.contains(&entry.pid) && entry.provider == "/bin/sh")
+        .expect("the wrapper stdio child is registered");
+    assert_eq!(registration.task_id, None);
+    assert_eq!(registration.session_id, None);
+
+    session.kill.take().unwrap().send(()).unwrap();
+    assert_eq!((&mut session.done).await.unwrap(), 128 + 9);
+    drop(session);
+    assert!(registry
+        .snapshot()
+        .into_iter()
+        .all(|entry| entry.pid != registration.pid));
+}
+
 /// A missing binary is reported as an error by the stdio path.
 #[tokio::test]
 async fn missing_binary_errors() {

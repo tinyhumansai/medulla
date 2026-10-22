@@ -185,7 +185,7 @@ impl App {
     /// instead.
     fn harness_cost(&mut self, session_id: &str) -> Option<String> {
         let pid = self.local_sessions.as_ref()?.sessions.pid(session_id)?;
-        let sample = self.session_monitor.sample(pid)?;
+        let sample = self.resource_snapshot.session_snapshot(pid)?;
         Some(crate::ui::resources::session_usage(sample))
     }
 }

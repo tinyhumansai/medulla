@@ -26,6 +26,6 @@ mod tests;
 
 pub use codec::{encode_remote_message, parse_remote_message};
 pub use types::{
-    RemoteAttention, RemoteCapabilities, RemoteEnvelope, RemoteHarnessChoice, RemoteMessage,
-    RemoteSessionRow, RemoteSessionState, REMOTE_PROTO,
+    AgentUsage, RemoteAttention, RemoteCapabilities, RemoteEnvelope, RemoteHarnessChoice,
+    RemoteMessage, RemoteSessionRow, RemoteSessionState, REMOTE_PROTO,
 };

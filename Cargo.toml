@@ -90,7 +90,9 @@ base64 = "0.22"
 async-trait = "0.1"
 agent-client-protocol = "2"
 dirs = "6"
-sysinfo = { version = "0.37.2", default-features = false, features = ["disk", "system"] }
+# Keep 0.37.2: it already exposes tasks(), cmd/cwd/start_time and the process
+# refresh API needed here; upgrading to 0.39 would add churn without a needed fix.
+sysinfo = { version = "0.37.2", default-features = false, features = ["component", "disk", "network", "system"] }
 # Advisory file locks that work on both unix (flock) and Windows (LockFileEx)
 # and are released by the OS when the holding process dies — what lets a
 # crashed daemon's identity slot be reclaimed without a stale-pidfile dance.

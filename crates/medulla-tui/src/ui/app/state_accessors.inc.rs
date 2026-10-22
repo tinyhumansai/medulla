@@ -49,6 +49,20 @@ impl App {
         self.device_monitor.inject(snapshot);
     }
 
+    /// The device readings derived from the latest background resource snapshot.
+    pub(crate) fn device_snapshot(&self) -> crate::ui::resources::DeviceSnapshot {
+        self.resource_snapshot.device_snapshot()
+    }
+
+    /// Replace the cached background resources reading without sampling on the caller.
+    pub fn set_resource_snapshot(
+        &mut self,
+        snapshot: Arc<crate::ui::resources::sampler::ResourceSnapshot>,
+    ) {
+        self.resources.sample_network(&snapshot);
+        self.resource_snapshot = snapshot;
+    }
+
     /// Configure Account logout with a testable home; without it, logout reports no writable location.
     pub fn set_medulla_home(&mut self, home: std::path::PathBuf) {
         self.medulla_home = Some(home);

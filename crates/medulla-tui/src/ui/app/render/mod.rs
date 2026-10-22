@@ -25,6 +25,7 @@ mod frame_state;
 pub(super) mod graph;
 mod points;
 mod prompt;
+pub(super) mod resources;
 mod selection;
 mod session_modals;
 mod sessions;
@@ -272,6 +273,8 @@ impl App {
             "Tab views · ↑↓ pages · ⏎ open · Esc menu · 1-3 jump"
         } else if self.tab() == "Subconscious" {
             "Tab views · signal map · E decisions"
+        } else if self.tab() == "Resources" {
+            "Tab views · 1 CPU · 2 Mem · 3 Net · 4 Agents · p/P preset · +/- interval"
         } else if workflows {
             "Tab views · ⏎ open · Esc back · ←→ follow edges · ↑↓ steps · v layout · i inspect · c copilot · x run · d dry-run · r refresh"
         } else if self.tab() == "Sessions" && self.pane_view == PaneView::Diff {
@@ -340,6 +343,7 @@ impl App {
             // Not feature-gated: the tab exists in the slim build too, and a
             // placeholder has nothing to draw that the workflow engine provides.
             "Subconscious" => self.draw_subconscious(f, area),
+            "Resources" => self.draw_resources(f, area),
             "TokenMaxxxing" => self.draw_points(f, area),
             "Feedback" => self.draw_feedback(f, area),
             // Trace, Context, and Feedback are Settings subpages, not tabs.
@@ -377,6 +381,7 @@ fn compact_tab_label(name: &str, compact: bool) -> &str {
         "Sessions" => "Sess",
         "Workflows" => "Flows",
         "Subconscious" => "Sub",
+        "Resources" => "Res",
         "Feedback" => "Feed",
         "Settings" => "Set",
         _ => name,

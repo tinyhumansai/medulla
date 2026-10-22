@@ -15,8 +15,8 @@ use ratatui::Terminal;
 
 use medulla::config::{AppearanceConfig, LinkConfig, LoadedConfig, ResourceDisplay};
 use medulla::runtime::mock::MockRuntime;
+use medulla_monitor::sampler::{DiskSnapshot, ResourceSnapshot};
 use medulla_tui::ui::app::{App, Cmd, TABS};
-use medulla_tui::ui::resources::DeviceSnapshot;
 
 fn loaded() -> LoadedConfig {
     let mut l = LoadedConfig::defaults("medulla.tui.json".into());
@@ -24,16 +24,174 @@ fn loaded() -> LoadedConfig {
     l
 }
 
-fn focus_settings_page(app: &mut App, name: &str) {
-    let _ = app.focus_settings_subpage(name);
-    assert_eq!(app.settings_subpage(), name);
-}
-
 fn settings_app() -> App {
     let rt = Arc::new(MockRuntime::demo());
     let mut app = App::new(rt, loaded());
     app.tab_index = TABS.iter().position(|t| *t == "Settings").unwrap();
     app
+}
+
+#[test]
+fn resources_settings_page_exposes_every_resources_config_field() {
+    let mut app = settings_app();
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    let _ = key(&mut app, KeyCode::Char('o'));
+    assert_eq!(app.tab(), "Settings");
+    assert_eq!(app.settings_subpage(), "Resources");
+
+    let out = text_of(&draw(&mut app, 180, 80));
+    for field in [
+        "updateMs",
+        "shownBoxes",
+        "presets",
+        "preset",
+        "cpuBottom",
+        "memBelowNet",
+        "agentsLeft",
+        "cpuGraphUpper",
+        "cpuGraphLower",
+        "cpuInvertLower",
+        "cpuSingleGraph",
+        "tempScale",
+        "freqMode",
+        "showBattery",
+        "memGraphs",
+        "showDisks",
+        "showSwap",
+        "swapDisk",
+        "onlyPhysical",
+        "useFstab",
+        "disksFilter",
+        "ioMode",
+        "ioGraphCombined",
+        "ioGraphSpeeds",
+        "netAuto",
+        "netSync",
+        "netDownload",
+        "netUpload",
+        "netIface",
+        "swapUploadDownload",
+    ] {
+        assert!(
+            out.contains(field),
+            "Resources settings page missing {field}: {out}"
+        );
+    }
+    for group in ["GENERAL", "CPU", "MEM", "NET", "AGENTS"] {
+        assert!(
+            out.contains(group),
+            "Resources settings page missing {group} group: {out}"
+        );
+    }
+}
+
+#[test]
+fn resources_settings_interval_updates_live_and_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    let _ = key(&mut app, KeyCode::Char('o'));
+    let _ = key(&mut app, KeyCode::Right);
+
+    assert_eq!(app.loaded.config.resources.update_interval_ms(), 2_100);
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    assert!(text_of(&draw(&mut app, 160, 40)).contains("2100ms"));
+    let path_text = path.to_str().unwrap();
+    let loaded =
+        medulla::config::load_config(Some(path_text), &Default::default(), dir.path()).unwrap();
+    assert_eq!(loaded.config.resources.update_interval_ms(), 2_100);
+}
+
+#[test]
+fn resources_enter_only_toggles_flag_rows() {
+    let mut l = loaded();
+    l.config.resources.update_ms = 2_000;
+    l.config.resources.shown_boxes = "cpu,mem".into();
+    l.config.resources.net_iface = Some("eth0".into());
+    let rt = Arc::new(MockRuntime::demo());
+    let mut app = App::new(rt, l);
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    let _ = key(&mut app, KeyCode::Char('o'));
+
+    // A numeric setting and a choice must wait for ←/→.
+    let _ = key(&mut app, KeyCode::Enter);
+    assert_eq!(app.loaded.config.resources.update_ms, 2_000);
+    let _ = key(&mut app, KeyCode::Char('j'));
+    let _ = key(&mut app, KeyCode::Enter);
+    assert_eq!(app.loaded.config.resources.shown_boxes, "cpu,mem");
+
+    // Optional and regular flags remain togglable with Enter.
+    for _ in 0..3 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Enter); // cpuBottom (Auto -> On)
+    assert_eq!(app.loaded.config.resources.cpu_bottom, Some(true));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Enter); // cpuInvertLower
+    assert!(app.loaded.config.resources.cpu_invert_lower);
+
+    // netIface is a choice sourced from detected interfaces, so Enter must
+    // leave the configured interface untouched.
+    for _ in 0..19 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+    let _ = key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.loaded.config.resources.net_iface.as_deref(),
+        Some("eth0")
+    );
+}
+
+#[test]
+fn resources_optional_layout_settings_can_return_to_auto_and_persist() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[resources]\ncpuBottom = true\nnetAuto = false\n").unwrap();
+    let mut app = settings_app();
+    app.set_config_path(path.clone());
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    let _ = key(&mut app, KeyCode::Char('o'));
+    for _ in 0..4 {
+        let _ = key(&mut app, KeyCode::Char('j'));
+    }
+
+    let _ = key(&mut app, KeyCode::Right); // Auto -> On
+    assert_eq!(app.loaded.config.resources.cpu_bottom, Some(true));
+    let _ = key(&mut app, KeyCode::Right); // On -> Off
+    assert_eq!(app.loaded.config.resources.cpu_bottom, Some(false));
+    let _ = key(&mut app, KeyCode::Right); // Off -> Auto
+    assert_eq!(app.loaded.config.resources.cpu_bottom, None);
+
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !saved.contains("cpuBottom"),
+        "Auto removes the override: {saved}"
+    );
+    assert!(
+        saved.contains("netAuto = false"),
+        "unrelated settings survive: {saved}"
+    );
+    let loaded = medulla::config::load_config(
+        Some(path.to_str().unwrap()),
+        &Default::default(),
+        dir.path(),
+    )
+    .unwrap();
+    assert_eq!(loaded.config.resources.cpu_bottom, None);
+}
+
+#[test]
+fn resources_key_opens_settings_help() {
+    let mut app = settings_app();
+    app.tab_index = TABS.iter().position(|t| *t == "Resources").unwrap();
+    let _ = key(&mut app, KeyCode::Char('?'));
+    let out = text_of(&draw(&mut app, 120, 40));
+    assert!(out.contains("Resources key help"), "{out}");
+    assert!(out.contains("←/→"), "{out}");
 }
 
 fn key(app: &mut App, code: KeyCode) -> Option<Cmd> {
@@ -67,6 +225,7 @@ fn settings_tab_renders_nav_and_default_usage_subpage() {
         "Subscriptions",
         "Status line",
         "Config",
+        "Resources",
         "Feedback",
         "Trace",
         "Context",
@@ -96,15 +255,19 @@ fn number_keys_jump_subpages() {
     let _ = key(&mut app, KeyCode::Char('7'));
     assert_eq!(app.settings_subpage(), "Config");
     let _ = key(&mut app, KeyCode::Char('8'));
-    assert_eq!(app.settings_subpage(), "Feedback");
+    assert_eq!(app.settings_subpage(), "Resources");
     let _ = key(&mut app, KeyCode::Char('9'));
-    assert_eq!(app.settings_subpage(), "Trace");
-    // A digit also enters the pane; escape to the nav, then arrow through the
-    // unnumbered pages beyond Trace.
+    assert_eq!(app.settings_subpage(), "Feedback");
+    // Reach the unnumbered diagnostic and about pages through the nav.
     let _ = key(&mut app, KeyCode::Esc);
-    for _ in 0..3 {
-        let _ = key(&mut app, KeyCode::Down);
-    }
+    let _ = key(&mut app, KeyCode::Down);
+    assert_eq!(app.settings_subpage(), "Trace");
+    let _ = key(&mut app, KeyCode::Down);
+    assert_eq!(app.settings_subpage(), "Context");
+    let _ = key(&mut app, KeyCode::Down);
+    assert_eq!(app.settings_subpage(), "Account");
+    let _ = key(&mut app, KeyCode::Esc);
+    let _ = key(&mut app, KeyCode::Down);
     assert_eq!(app.settings_subpage(), "Help");
     // Render the full help page: this test verifies numeric subpage navigation,
     // while short-viewport scrolling has its own focused coverage.
@@ -133,7 +296,7 @@ fn arrow_keys_move_subpage_selector() {
 #[test]
 fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     // Walk to the final path-style qualifier. Thread name and worktree each add
     // two rows ahead of the path group, so this must cover the complete
     // status-line catalog.
@@ -152,7 +315,7 @@ fn status_line_selection_scrolls_into_view_on_a_short_terminal() {
 #[test]
 fn a_status_line_field_is_headed_described_and_its_choices_spelled_out() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     // Down four times: the harness group's "spelled" row.
     for _ in 0..4 {
         let _ = key(&mut app, KeyCode::Down);
@@ -184,7 +347,7 @@ fn a_status_line_field_is_headed_described_and_its_choices_spelled_out() {
 #[test]
 fn appearance_cycling_changes_live_theme() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance"); // Appearance
+    let _ = key(&mut app, KeyCode::Char('4')); // Appearance
     assert_eq!(app.theme_primary(), Color::Red);
     // The primary role is selected first; Right enters the next editor color.
     let _ = key(&mut app, KeyCode::Right);
@@ -203,7 +366,7 @@ fn appearance_cycling_changes_live_theme() {
 #[test]
 fn appearance_jk_selects_role_before_cycling() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance"); // Appearance
+    let _ = key(&mut app, KeyCode::Char('4')); // Appearance
     let primary_before = app.theme_primary();
     // Move off the primary role, then cycle: primary must be untouched.
     let _ = key(&mut app, KeyCode::Char('j')); // select accent
@@ -217,7 +380,7 @@ fn appearance_persists_theme_to_injected_path() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance"); // Appearance
+    let _ = key(&mut app, KeyCode::Char('4')); // Appearance
     let _ = key(&mut app, KeyCode::Right); // cycle primary
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.contains("[theme]"), "theme section written: {text}");
@@ -235,7 +398,7 @@ fn appearance_blink_status_reports_the_boolean_value() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     for _ in 0..5 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
@@ -254,7 +417,7 @@ fn appearance_cycles_the_attention_blink_rate_in_seconds() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     // Five colour rows and the blink toggle land on the rate.
     for _ in 0..6 {
         let _ = key(&mut app, KeyCode::Char('j'));
@@ -280,7 +443,7 @@ fn appearance_cycles_custom_attention_blink_rates_from_each_end() {
     let mut app = settings_app();
     app.set_config_path(path);
     app.set_attention_blink_ms(1_100);
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     for _ in 0..6 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
@@ -302,7 +465,7 @@ fn appearance_cycles_and_persists_process_indicators() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     // Five color rows and the two attention controls precede resources.
     for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
@@ -323,7 +486,7 @@ fn appearance_cycles_and_persists_the_sidebar_layout() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     // Five color rows, the two attention controls, and the seven option rows
     // before it.
     for _ in 0..14 {
@@ -360,7 +523,7 @@ fn appearance_sidebar_grouping_wraps_backwards() {
     // Left from the default is the last value, not a stuck row: the cycle is
     // how every other control on this page behaves.
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     for _ in 0..14 {
         let _ = key(&mut app, KeyCode::Char('j'));
     }
@@ -377,7 +540,7 @@ fn appearance_persists_process_indicators_to_json() {
     std::fs::write(&path, r#"{"unrelated":{"kept":true}}"#).unwrap();
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     // Five color rows and the two attention controls precede resources.
     for _ in 0..7 {
         let _ = key(&mut app, KeyCode::Char('j'));
@@ -392,14 +555,21 @@ fn appearance_persists_process_indicators_to_json() {
 }
 
 /// A fixed reading, so the sidebar says the same thing on every machine.
-fn device_sample() -> DeviceSnapshot {
-    DeviceSnapshot {
-        cpu_fraction: Some(0.42),
-        memory_used_bytes: Some(8 * 1024 * 1024 * 1024),
-        memory_total_bytes: Some(32 * 1024 * 1024 * 1024),
-        disk_used_bytes: Some(300 * 1024 * 1024 * 1024),
-        disk_total_bytes: Some(400 * 1024 * 1024 * 1024),
-    }
+fn device_sample() -> ResourceSnapshot {
+    let mut sample = ResourceSnapshot::default();
+    sample.cpu_percent = 42.0;
+    sample.memory_used_bytes = 8 * 1024 * 1024 * 1024;
+    sample.memory_total_bytes = 32 * 1024 * 1024 * 1024;
+    sample.disks = vec![DiskSnapshot {
+        device: "test".into(),
+        mount: "/".into(),
+        total_bytes: 400 * 1024 * 1024 * 1024,
+        used_bytes: 300 * 1024 * 1024 * 1024,
+        read_bytes_per_second: 0.0,
+        write_bytes_per_second: 0.0,
+        busy_percent: None,
+    }];
+    sample
 }
 
 /// Open the Agents tab with the given appearance and an injected device sample.
@@ -408,13 +578,13 @@ fn agents_app(appearance: AppearanceConfig) -> App {
     config.config.appearance = appearance;
     let runtime = Arc::new(MockRuntime::demo());
     let mut app = App::new(runtime, config);
-    app.set_device_snapshot(device_sample());
+    app.set_resource_snapshot(Arc::new(device_sample()));
     app.tab_index = TABS.iter().position(|tab| *tab == "Sessions").unwrap();
     app
 }
 
 #[test]
-fn enabled_device_indicators_render_in_the_agents_sidebar() {
+fn sidebar_footer_shows_device_cpu_before_the_resources_tab_is_opened() {
     let mut app = agents_app(AppearanceConfig {
         device_cpu: ResourceDisplay::Percent,
         device_ram: ResourceDisplay::Value,
@@ -469,7 +639,7 @@ fn appearance_cycles_and_persists_device_indicators_independently() {
     let path = dir.path().join("config.toml");
     let mut app = settings_app();
     app.set_config_path(path.clone());
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     // Five color rows, the two attention controls, three process indicators,
     // and Session titles lands on Device CPU.
     for _ in 0..11 {
@@ -519,8 +689,6 @@ fn each_settings_subpage_renders_its_signature() {
     // Trace and Context moved under Settings > DEBUG.
     let signatures = [
         ("Usage", "This session"),
-        ("Tokens", "Token usage"),
-        ("Harnesses", "Harnesses"),
         ("Appearance", "Appearance"),
         ("Status line", "as on the rail"),
         ("Config", "Effective configuration ·"),
@@ -528,6 +696,7 @@ fn each_settings_subpage_renders_its_signature() {
         ("Context", "Environment ·"),
         ("Account", "Account"),
         ("Help", "Keyboard & REPL help"),
+        ("Resources", "Sample interval"),
     ];
     for (name, sig) in signatures {
         let mut app = settings_app();
@@ -648,7 +817,7 @@ fn tab_leaves_the_settings_tab_from_both_focus_states() {
 #[test]
 fn appearance_opens_on_options_with_a_footer_for_the_selected_row() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     let out = text_of(&draw(&mut app, 150, 45));
 
     for group in ["Colors", "Attention", "Status line", "Sessions sidebar"] {
@@ -670,7 +839,7 @@ fn appearance_opens_on_options_with_a_footer_for_the_selected_row() {
 #[test]
 fn appearance_keeps_the_sidebar_settings_in_one_group() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     let out = text_of(&draw(&mut app, 150, 45));
 
     assert!(!out.contains("Agents sidebar"), "one sidebar group: {out}");
@@ -688,7 +857,7 @@ fn appearance_keeps_the_sidebar_settings_in_one_group() {
 #[test]
 fn appearance_puts_the_switches_beside_the_preview_when_it_fits() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     let out = text_of(&draw(&mut app, 150, 45));
 
     assert!(out.contains("Blink rate"), "the switches are drawn: {out}");
@@ -707,7 +876,7 @@ fn appearance_puts_the_switches_beside_the_preview_when_it_fits() {
 #[test]
 fn appearance_folds_to_tabs_on_a_narrow_pane() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     let out = text_of(&draw(&mut app, 90, 45));
 
     assert!(
@@ -735,7 +904,7 @@ fn appearance_folds_to_tabs_on_a_narrow_pane() {
 #[test]
 fn appearance_preview_follows_the_sidebar_grouping() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     assert!(
         text_of(&draw(&mut app, 150, 45)).contains("workstation"),
         "the default grouping sections the sample by host"
@@ -760,7 +929,7 @@ fn appearance_preview_follows_the_sidebar_grouping() {
 #[test]
 fn appearance_preview_shows_the_indicators_that_are_switched_on() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Appearance");
+    let _ = key(&mut app, KeyCode::Char('4'));
     assert!(
         text_of(&draw(&mut app, 150, 45)).contains("no process indicators are switched on"),
         "the default config enables none of them"
@@ -784,7 +953,7 @@ fn appearance_preview_shows_the_indicators_that_are_switched_on() {
 #[test]
 fn status_line_puts_every_field_beside_the_preview() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     let out = text_of(&draw(&mut app, 140, 40));
 
     assert!(
@@ -814,7 +983,7 @@ fn status_line_puts_every_field_beside_the_preview() {
 #[test]
 fn status_line_describes_the_selected_field_in_the_footer() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     let out = text_of(&draw(&mut app, 140, 40));
 
     assert!(
@@ -841,7 +1010,7 @@ fn status_line_describes_the_selected_field_in_the_footer() {
 #[test]
 fn status_line_folds_to_tabs_on_a_narrow_pane() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     let out = text_of(&draw(&mut app, 90, 40));
 
     assert!(
@@ -877,7 +1046,7 @@ fn status_line_folds_to_tabs_on_a_narrow_pane() {
 #[test]
 fn status_line_preview_reports_a_plausible_age_on_the_alert_row() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
 
     let out = text_of(&draw(&mut app, 140, 40));
     assert!(out.contains("45s"), "the sample's age is fixed: {out}");
@@ -887,7 +1056,7 @@ fn status_line_preview_reports_a_plausible_age_on_the_alert_row() {
 #[test]
 fn status_line_preview_redraws_as_the_selected_field_changes() {
     let mut app = settings_app();
-    focus_settings_page(&mut app, "Status line");
+    let _ = key(&mut app, KeyCode::Char('6'));
     let before = text_of(&draw(&mut app, 140, 40));
 
     // The state glyph's position is the selected row; hide it.

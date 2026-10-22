@@ -206,6 +206,7 @@ impl HarnessDispatch for RuntimeDispatch {
         ));
 
         let options = RunTaskOptions {
+            task_id: None,
             embed: self.runtime.inner.embed.clone(),
             budget: None,
             origin: self.origin,

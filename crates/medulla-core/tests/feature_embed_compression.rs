@@ -55,6 +55,7 @@ fn options(
     env.insert("MEDULLA_HOME".into(), home.to_string_lossy().into_owned());
     env.insert("LOCAL_ROUTER_KEY".into(), "fixture-key".into());
     RunTaskOptions {
+        task_id: None,
         embed: host,
         budget: None,
         provider: HarnessProvider::Openhuman,

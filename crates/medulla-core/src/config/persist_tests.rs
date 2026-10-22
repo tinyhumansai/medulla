@@ -6,6 +6,16 @@
 use super::*;
 
 #[test]
+fn theme_resources_config_deserializes_camel_case_overrides() {
+    let config: super::types::TuiConfig =
+        toml::from_str("[theme.resources]\ncpuBox = \"#010203\"\ncpuStart = \"green\"\n").unwrap();
+    let resources = config.theme.resources.unwrap();
+    assert_eq!(resources.cpu_box.as_deref(), Some("#010203"));
+    assert_eq!(resources.cpu_start.as_deref(), Some("green"));
+    assert!(resources.mem_box.is_none());
+}
+
+#[test]
 fn persists_the_welcome_flag_to_a_new_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("nested").join("config.toml");
@@ -286,6 +296,25 @@ fn clear_setting_removes_only_its_key() {
         toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("reparse");
     assert_eq!(parsed.medulla.max_passes, None, "cleared back to unset");
     assert_eq!(parsed.medulla.max_steps, Some(40));
+}
+
+#[test]
+fn clear_setting_removes_only_its_key_from_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r#"{"resources":{"cpuBottom":true,"netAuto":false},"other":{"kept":true}}"#,
+    )
+    .expect("seed");
+
+    super::clear_setting(&path, "resources", "cpuBottom").expect("clear");
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read")).expect("reparse");
+    assert!(saved["resources"].get("cpuBottom").is_none());
+    assert_eq!(saved["resources"]["netAuto"], false);
+    assert_eq!(saved["other"]["kept"], true);
 }
 
 #[test]

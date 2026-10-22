@@ -43,6 +43,7 @@ pub mod observability;
 pub mod onboarding;
 pub(crate) mod persistence;
 pub mod protocol;
+pub mod resources;
 pub use medulla_juice as juice;
 pub mod runtime;
 pub mod session_history;

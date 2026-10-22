@@ -9,6 +9,77 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
+// OpenHuman's native embedding keeps an account/runtime singleton in-process,
+// so scenarios that start it must not overlap within this integration-test
+// binary. The scenarios still run on their own large-stack worker threads.
+static EMBED_RUNTIME_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+async fn wait_for_pid(path: &std::path::Path) -> u32 {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(path).await {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    return pid;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("PID file {} was not populated", path.display()))
+}
+
+#[cfg(target_os = "linux")]
+fn current_process_records() -> Vec<medulla::resources::agents::ProcessRecord> {
+    use medulla::resources::agents::{ProcessRecord, ProcessUsage};
+    use sysinfo::{ProcessesToUpdate, System};
+
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    system
+        .processes()
+        .values()
+        .map(|process| ProcessRecord {
+            pid: process.pid().as_u32(),
+            ppid: process.parent().map(|pid| pid.as_u32()),
+            exe: process.exe().map(std::path::Path::to_path_buf),
+            argv: Some(
+                process
+                    .cmd()
+                    .iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect(),
+            ),
+            cwd: process.cwd().map(std::path::Path::to_path_buf),
+            started_at_secs: process.start_time(),
+            usage: ProcessUsage::default(),
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn process_tree_contains(node: &medulla::resources::agents::ProcessNode, pid: u32) -> bool {
+    node.pid == pid
+        || node
+            .children
+            .iter()
+            .any(|child| process_tree_contains(child, pid))
+}
+
+#[tokio::test]
+async fn pid_reader_waits_until_an_existing_empty_file_is_populated() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("child.pid");
+    std::fs::write(&path, "").unwrap();
+    let writer_path = path.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        std::fs::write(writer_path, "12345\n").unwrap();
+    });
+
+    assert_eq!(wait_for_pid(&path).await, 12_345);
+}
+
 #[derive(Clone)]
 struct Provider;
 impl Respond for Provider {
@@ -22,7 +93,7 @@ impl Respond for Provider {
                 .iter()
                 .any(|message| message["role"] == "tool");
         let command = if history.contains("slow-worker") {
-            "sleep 60 & echo $! > child.pid; wait"
+            "sleep 60 & child=$!; printf '%s\\n' \"$child\" > child.pid.tmp && mv child.pid.tmp child.pid; wait"
         } else {
             "test -z \"$MEDULLA_TOKEN$OPENROUTER_API_KEY$FIXTURE_API_KEY\" || exit 9; echo credentials-absent; pwd; printf '\\nowner=%s\\n' \"$TURN_OWNER\""
         };
@@ -60,6 +131,7 @@ fn options(
         .unwrap(),
     );
     RunTaskOptions {
+        task_id: None,
         embed: host,
         budget: None,
         provider: HarnessProvider::Openhuman,
@@ -94,12 +166,89 @@ fn options(
 
 #[test]
 fn native_agents_keep_each_workers_context_private_and_resume_their_own_session() {
+    let _runtime_lock = EMBED_RUNTIME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     std::thread::Builder::new()
         .stack_size(medulla::tokio_tuning::WORKER_STACK_BYTES)
         .spawn(native_agents_scenario)
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn embedded_openhuman_shell_process_is_nested_under_a_pidless_row() {
+    let _runtime_lock = EMBED_RUNTIME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    std::thread::Builder::new()
+        .stack_size(medulla::tokio_tuning::WORKER_STACK_BYTES)
+        .spawn(embedded_openhuman_shell_scenario)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[cfg(target_os = "linux")]
+fn embedded_openhuman_shell_scenario() {
+    medulla::tokio_tuning::build_runtime()
+        .unwrap()
+        .block_on(async {
+            let mock = MockServer::start().await;
+            Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::path("/v1/chat/completions"))
+                .respond_with(Provider)
+                .mount(&mock)
+                .await;
+            let home = tempfile::tempdir().unwrap();
+            let cwd = tempfile::tempdir().unwrap();
+            let host = Arc::new(EmbedHost::default());
+            let options = options(host, home.path(), cwd.path(), &mock, "slow-worker");
+            let abort = options.abort.clone();
+            let run = tokio::spawn(run_local_task(options));
+            let child_pid = wait_for_pid(&cwd.path().join("child.pid")).await;
+
+            let agents = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let processes = current_process_records();
+                    let agents = medulla::resources::agents::discover_agents(
+                        &processes,
+                        &[],
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    );
+                    if agents.iter().any(|agent| {
+                        agent.kind == medulla::resources::agents::AgentKind::EmbeddedOpenhuman
+                    }) {
+                        break agents;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("shell child should be visible under Medulla's in-process row");
+
+            let embedded = agents
+                .iter()
+                .filter(|agent| {
+                    agent.kind == medulla::resources::agents::AgentKind::EmbeddedOpenhuman
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(embedded.len(), 1);
+            assert_eq!(embedded[0].pid, None);
+            assert!(embedded[0]
+                .children
+                .iter()
+                .any(|child| process_tree_contains(child, child_pid)));
+
+            abort.abort();
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), run).await;
+        });
 }
 
 fn native_agents_scenario() {
@@ -234,12 +383,7 @@ fn native_agents_scenario() {
             slow.timeout_ms = if timeout { 5_000 } else { 10_000 };
             let abort = slow.abort.clone();
             let pending = tokio::spawn(run_local_task(slow));
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                while !slow_dir.path().join("child.pid").exists() {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            }).await.unwrap();
-            let pid: u32 = std::fs::read_to_string(slow_dir.path().join("child.pid")).unwrap().trim().parse().unwrap();
+            let pid = wait_for_pid(&slow_dir.path().join("child.pid")).await;
             if !timeout { abort.abort(); }
             let error = tokio::time::timeout(std::time::Duration::from_secs(15), pending).await.unwrap().unwrap().unwrap_err();
             assert!(if timeout { error.contains("idle") } else { error.contains("aborted") }, "{error}");
@@ -256,13 +400,10 @@ fn native_agents_scenario() {
             let dir = tempfile::tempdir().unwrap();
             let mut stopped = options(host.clone(), home.path(), dir.path(), &mock, "stop-hook");
             stopped.hooks.hooks = vec![serde_json::from_value(json!({"event":"Stop","type":"command",
-                "command":"sleep 60 & echo $! > stop.pid; wait","harnesses":["openhuman"]})).unwrap()];
+                "command":"sleep 60 & child=$!; printf '%s\\n' \"$child\" > stop.pid.tmp && mv stop.pid.tmp stop.pid; wait","harnesses":["openhuman"]})).unwrap()];
             let abort = stopped.abort.clone();
             let pending = tokio::spawn(run_local_task(stopped));
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                while !dir.path().join("stop.pid").exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
-            }).await.unwrap();
-            let pid: u32 = std::fs::read_to_string(dir.path().join("stop.pid")).unwrap().trim().parse().unwrap();
+            let pid = wait_for_pid(&dir.path().join("stop.pid")).await;
             abort.abort();
             assert!(tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.unwrap().unwrap().unwrap_err().contains("aborted during Stop hook"));
             if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {

@@ -179,6 +179,7 @@ pub async fn run_provider_task(mut options: RunTaskOptions) -> Result<RunTaskRes
     let router = options.router;
     let env = options.env;
     let spec = RunSpec {
+        task_id: options.task_id,
         provider: options.provider,
         prompt: options.prompt,
         cwd: options.cwd,
@@ -410,6 +411,24 @@ async fn run_provider_attempt(
             }
         }
     };
+    let agent_registration = child.id().and_then(|pid| {
+        medulla_monitor::agents::agent_registry().register(
+            pid,
+            spec.task_id.clone(),
+            spec.resume_session_id.clone(),
+            spec.provider.as_str(),
+        )
+    });
+    if let (Some(handle), Some(callback)) = (
+        agent_registration.as_ref().map(|guard| guard.handle()),
+        on_session.take(),
+    ) {
+        on_session = Some(Box::new(move |session_id| {
+            let _ = handle.set_session_id(session_id.clone());
+            callback(session_id);
+        }));
+    }
+    let _agent_registration = agent_registration;
 
     // stdin forwarding: hand the caller an unbounded sender; a background task
     // drains it into the child's stdin (appending a newline when missing).

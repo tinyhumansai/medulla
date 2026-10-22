@@ -33,6 +33,10 @@ const MAX_RECORD_BYTES: usize = 1_048_576;
 /// This grace window is the fallback for a transport that never emits one.
 const INTERRUPT_GRACE: Duration = Duration::from_millis(2_000);
 
+/// Retry budget for Linux's transient `ETXTBSY` spawn error.
+const TEXT_BUSY_RETRY_ATTEMPTS: u32 = 50;
+const TEXT_BUSY_RETRY_DELAY: Duration = Duration::from_millis(20);
+
 /// Build the argv for an interactive session.
 ///
 /// The prompt is *not* an argument here — turns arrive on stdin, which is the
@@ -100,22 +104,33 @@ impl InteractiveSession {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        // ETXTBSY (26) is a transient Unix race: another process can briefly
-        // hold a newly written executable open while this session starts it.
-        // Retry for up to a second, matching the headless provider path.
-        let mut spawn_tries = 0;
+        // A concurrently forked child can inherit a writer for a freshly
+        // published harness executable. Linux reports ETXTBSY until that
+        // writer closes, so retry this transient spawn error briefly.
+        let mut text_busy_retries = 0;
         let mut child = loop {
             match command.spawn() {
                 Ok(child) => break child,
-                Err(err) if is_text_file_busy(&err) && spawn_tries < 50 => {
-                    spawn_tries += 1;
-                    tokio::time::sleep(Duration::from_millis(20)).await;
+                Err(err)
+                    if cfg!(target_os = "linux")
+                        && err.raw_os_error() == Some(26)
+                        && text_busy_retries < TEXT_BUSY_RETRY_ATTEMPTS =>
+                {
+                    text_busy_retries += 1;
+                    tokio::time::sleep(TEXT_BUSY_RETRY_DELAY).await;
                 }
-                Err(err) => {
-                    return Err(format!("failed to start {}: {err}", spec.bin));
-                }
+                Err(err) => return Err(format!("failed to start {}: {err}", spec.bin)),
             }
         };
+        let agent_registration = child.id().and_then(|pid| {
+            medulla_monitor::agents::agent_registry().register(
+                pid,
+                None,
+                None,
+                spec.provider.as_str(),
+            )
+        });
+        let agent_registration_handle = agent_registration.as_ref().map(|guard| guard.handle());
 
         let stdin = child.stdin.take().ok_or("child has no stdin")?;
         let stdout = child.stdout.take().ok_or("child has no stdout")?;
@@ -159,6 +174,8 @@ impl InteractiveSession {
             harness_session_id: Mutex::new(None),
             interrupt_seq: AtomicU64::new(0),
             _hook_grant: hook_grant,
+            _agent_registration: agent_registration,
+            agent_registration_handle,
         }))
     }
 
@@ -228,11 +245,17 @@ impl InteractiveSession {
                     on_event(&event);
                     match event {
                         StreamEvent::Session { session_id } => {
+                            if let Some(handle) = &self.agent_registration_handle {
+                                let _ = handle.set_session_id(session_id.clone());
+                            }
                             *self.harness_session_id.lock().unwrap() = Some(session_id);
                         }
                         StreamEvent::AssistantDelta { text } => reply.push_str(&text),
                         StreamEvent::Result { reply: result, is_error, session_id } => {
                             if let Some(session_id) = session_id {
+                                if let Some(handle) = &self.agent_registration_handle {
+                                    let _ = handle.set_session_id(session_id.clone());
+                                }
                                 *self.harness_session_id.lock().unwrap() = Some(session_id);
                             }
                             // When an interrupt is in flight, the terminating
@@ -292,16 +315,6 @@ impl InteractiveSession {
             }
         }
     }
-}
-
-#[cfg(unix)]
-fn is_text_file_busy(err: &std::io::Error) -> bool {
-    err.raw_os_error() == Some(26)
-}
-
-#[cfg(not(unix))]
-fn is_text_file_busy(_err: &std::io::Error) -> bool {
-    false
 }
 
 mod types;

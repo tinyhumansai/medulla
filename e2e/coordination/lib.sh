@@ -70,6 +70,9 @@ cleanup() {
     log "E2E_KEEP=1 — leaving session $SESSION and run dir $RUN_DIR"
   else
     tmux kill-session -t "$SESSION" 2>/dev/null || true
+    if [ -n "${EXTERNAL_DIR:-}" ]; then
+      rm -rf "$EXTERNAL_DIR" 2>/dev/null || true
+    fi
     rm -rf "$RUN_DIR" 2>/dev/null || true
   fi
   return $rc

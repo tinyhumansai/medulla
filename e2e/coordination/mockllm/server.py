@@ -8,6 +8,7 @@ scenario has to know which port belongs to which CLI.
 import json
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import anthropic, openai_chat, openai_responses
@@ -107,6 +108,10 @@ class Handler(BaseHTTPRequestHandler):
         transport that silently fell back to the other one would still pass
         every assertion about the reply.
         """
+        delay_ms = int(os.environ.get("MOCK_LLM_RESPONSE_DELAY_MS", "0") or "0")
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000)
+
         if dialect is anthropic and anthropic.requests_state_probe(body):
             reply = "[tool_use Bash: state probe]"
             payload = dialect.log_payload(self.path, body, reply)

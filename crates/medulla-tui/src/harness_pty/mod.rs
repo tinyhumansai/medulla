@@ -88,6 +88,9 @@ fn spawn(request: PtyRequest) -> anyhow::Result<PtyHarness> {
     }
 
     let mut child = pair.slave.spawn_command(cmd)?;
+    let agent_registration = child.process_id().and_then(|pid| {
+        medulla_monitor::agents::agent_registry().register(pid, None, None, &request.bin)
+    });
     // Drop our handle on the slave: once the child's own copy closes, the master
     // sees EOF and the reader thread can finish.
     drop(pair.slave);
@@ -193,7 +196,10 @@ fn spawn(request: PtyRequest) -> anyhow::Result<PtyHarness> {
         done: done_rx,
         kill: kill_tx,
         drained: drained_rx,
-        restore: Box::new(move || drop(guard)),
+        restore: Box::new(move || {
+            drop(agent_registration);
+            drop(guard);
+        }),
     })
 }
 
@@ -218,3 +224,42 @@ fn spawn_resize_forwarder(_master: Box<dyn portable_pty::MasterPty + Send>) {}
 
 mod types;
 use types::RawGuard;
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn pty_child_registration_is_removed_when_restore_drops_its_guard() {
+        let registry = medulla_monitor::agents::agent_registry();
+        let before: HashSet<u32> = registry
+            .snapshot()
+            .into_iter()
+            .map(|entry| entry.pid)
+            .collect();
+        let harness = spawn(PtyRequest {
+            bin: "/bin/sh".into(),
+            args: vec!["-c".into(), "sleep 30".into()],
+            cwd: "/".into(),
+            env: Default::default(),
+            env_remove: Vec::new(),
+        })
+        .expect("the PTY child starts");
+        let registration = registry
+            .snapshot()
+            .into_iter()
+            .find(|entry| !before.contains(&entry.pid) && entry.provider == "/bin/sh")
+            .expect("the PTY child is registered");
+        assert_eq!(registration.task_id, None);
+        assert_eq!(registration.session_id, None);
+
+        harness.kill.send(()).unwrap();
+        assert_ne!(harness.done.await.unwrap(), 0);
+        (harness.restore)();
+        assert!(registry
+            .snapshot()
+            .into_iter()
+            .all(|entry| entry.pid != registration.pid));
+    }
+}

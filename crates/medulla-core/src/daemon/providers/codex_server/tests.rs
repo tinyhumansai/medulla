@@ -26,6 +26,7 @@ type WorkspaceRecording = (
 /// matters to the two functions under test here.
 fn options(transport: HarnessTransport, env: &[(&str, &str)]) -> RunTaskOptions {
     RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: super::super::types::RunTaskOrigin::DelegatedTask,

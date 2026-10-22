@@ -98,6 +98,7 @@ fn options(
     cwd: &str,
 ) -> RunTaskOptions {
     RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,

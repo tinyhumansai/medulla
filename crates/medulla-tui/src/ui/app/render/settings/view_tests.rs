@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 
 use super::{harnesses, tokens};
-use crate::ui::app::types::{SETTINGS_GROUPS, SETTINGS_SUBPAGES};
+use crate::ui::app::types::{DetectedProvider, SETTINGS_GROUPS, SETTINGS_SUBPAGES};
 
 fn rendered(draw: impl FnOnce(&mut ratatui::Frame<'_>, Rect)) -> String {
     let mut terminal = Terminal::new(TestBackend::new(100, 32)).expect("test terminal");
@@ -205,11 +205,11 @@ fn tokens_app_renders_pricing_only_for_provider_attributed_events() {
 fn harnesses_view_renders_injected_detection_routing_budget_and_customizations() {
     let view = harnesses::HarnessesView {
         providers: vec![
-            harnesses::DetectedProvider {
+            DetectedProvider {
                 name: "Claude Code".into(),
                 version: Some("2.1.4".into()),
             },
-            harnesses::DetectedProvider {
+            DetectedProvider {
                 name: "Codex".into(),
                 version: Some("0.123.0".into()),
             },
@@ -261,7 +261,7 @@ fn harnesses_view_explains_empty_detection_without_host_probes() {
 
 #[test]
 fn selected_harnesses_page_uses_the_collected_app_snapshot() {
-    use crate::ui::app::types::{tab_pos, App, DetectedProvider, HarnessesView};
+    use crate::ui::app::types::{tab_pos, App, HarnessesView};
     use medulla::config::LoadedConfig;
     use medulla::runtime::mock::MockRuntime;
     use medulla::runtime::Runtime;

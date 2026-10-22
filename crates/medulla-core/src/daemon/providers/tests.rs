@@ -33,7 +33,11 @@ async fn direct_runs_report_the_session_before_workspace_context() {
     .unwrap();
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let order = Arc::new(Mutex::new(Vec::new()));
+    let registry_during_session = Arc::new(Mutex::new(
+        None::<medulla_monitor::agents::AgentRegistration>,
+    ));
     let options = RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: super::types::RunTaskOrigin::DelegatedTask,
@@ -62,7 +66,17 @@ async fn direct_runs_report_the_session_before_workspace_context() {
         on_stdin: None,
         on_session: Some({
             let order = order.clone();
-            Box::new(move |session_id| order.lock().unwrap().push(format!("session:{session_id}")))
+            let registry_during_session = registry_during_session.clone();
+            Box::new(move |session_id| {
+                if let Some(registration) = medulla_monitor::agents::agent_registry()
+                    .snapshot()
+                    .into_iter()
+                    .find(|registration| registration.session_id.as_deref() == Some(&session_id))
+                {
+                    *registry_during_session.lock().unwrap() = Some(registration);
+                }
+                order.lock().unwrap().push(format!("session:{session_id}"));
+            })
         }),
         on_workspace_context: Some({
             let order = order.clone();
@@ -73,6 +87,17 @@ async fn direct_runs_report_the_session_before_workspace_context() {
     let result = super::execute::run_provider_task(options).await.unwrap();
 
     assert_eq!(result.session_id.as_deref(), Some("direct-session"));
+    let registration = registry_during_session
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the live CLI child is registered when its session arrives");
+    assert_eq!(registration.session_id.as_deref(), Some("direct-session"));
+    assert_eq!(registration.provider, "claude");
+    assert!(medulla_monitor::agents::agent_registry()
+        .snapshot()
+        .into_iter()
+        .all(|entry| entry.pid != registration.pid));
     assert_eq!(
         order.lock().unwrap().as_slice(),
         ["session:direct-session", "workspace"]
@@ -629,6 +654,7 @@ fn idle_probe_options(
     std::fs::write(&harness, body).unwrap();
     std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o755)).unwrap();
     let options = RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         // A watchdog test drives a delegated task, exactly like a peer would.

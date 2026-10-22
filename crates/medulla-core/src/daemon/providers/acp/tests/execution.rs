@@ -22,6 +22,7 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id" ;;
     *'"method":"session/new"'*)
+      sleep 0.2
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-session-1"}}\n' "$id" ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
@@ -33,7 +34,9 @@ done
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let reported = Arc::new(Mutex::new(Vec::new()));
+    let registration_during_callback = Arc::new(Mutex::new(None));
     let mut options = attribution_options(false);
+    options.task_id = Some("acp-task-1".into());
     options.provider = HarnessProvider::Opencode;
     options.cwd = dir.path().to_string_lossy().into_owned();
     options.env.insert(
@@ -42,7 +45,15 @@ done
     );
     options.on_session = Some({
         let reported = reported.clone();
-        Box::new(move |session_id| reported.lock().unwrap().push(session_id))
+        let registration_during_callback = registration_during_callback.clone();
+        Box::new(move |session_id| {
+            *registration_during_callback.lock().unwrap() =
+                medulla_monitor::agents::agent_registry()
+                    .snapshot()
+                    .into_iter()
+                    .find(|entry| entry.session_id.as_deref() == Some(session_id.as_str()));
+            reported.lock().unwrap().push(session_id)
+        })
     });
 
     let result = super::super::execution::run_acp_task(options)
@@ -51,6 +62,18 @@ done
 
     assert_eq!(reported.lock().unwrap().as_slice(), ["acp-session-1"]);
     assert_eq!(result.session_id.as_deref(), Some("acp-session-1"));
+    let registration = registration_during_callback
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("ACP child registration is updated before session reporting");
+    assert_eq!(registration.task_id.as_deref(), Some("acp-task-1"));
+    assert_eq!(registration.session_id.as_deref(), Some("acp-session-1"));
+    assert_eq!(registration.provider, "opencode");
+    assert!(medulla_monitor::agents::agent_registry()
+        .snapshot()
+        .into_iter()
+        .all(|entry| entry.pid != registration.pid));
 }
 
 /// Spawns a fake ACP agent (as opencode) whose one `session/request_permission`
@@ -261,6 +284,7 @@ fn disabling_workflows_keeps_the_fleet_family_on_the_session_grant() {
 /// A `RunTaskOptions` carrying `attribution`, with everything else inert.
 fn attribution_options(attribution: bool) -> RunTaskOptions {
     RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: crate::daemon::providers::RunTaskOrigin::DelegatedTask,

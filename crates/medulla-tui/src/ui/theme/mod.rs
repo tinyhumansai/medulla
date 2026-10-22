@@ -12,6 +12,9 @@ use ratatui::style::{Color, Modifier, Style};
 
 use medulla::config::ThemeConfig;
 
+mod gradient;
+pub use gradient::{truecolor_to_16, truecolor_to_256, ColorDepth, Gradient, TTY_PALETTE};
+
 /// The editable theme roles, in Appearance-editor order.
 pub const THEME_ROLES: [&str; 5] = [
     "Primary",
@@ -72,6 +75,7 @@ impl Default for Theme {
             attention: Color::Yellow,
             attention_blink: true,
             attention_blink_ms: DEFAULT_BLINK_MS,
+            resources: ResourcesTheme::default(),
         }
     }
 }
@@ -120,7 +124,18 @@ impl Theme {
                 .attention_blink_seconds
                 .map(blink_ms_from_seconds)
                 .unwrap_or(d.attention_blink_ms),
+            resources: cfg
+                .resources
+                .as_ref()
+                .map(ResourcesTheme::from_config)
+                .unwrap_or_default(),
         }
+    }
+
+    /// Adapt resource colors to the detected terminal palette.
+    pub fn with_depth(mut self, depth: ColorDepth) -> Self {
+        self.resources = self.resources.with_depth(depth);
+        self
     }
 
     /// Whether the attention pulse is in its bright phase on `frame`.
@@ -323,4 +338,4 @@ pub fn persist_theme(path: &Path, theme: &Theme) -> anyhow::Result<()> {
 mod tests;
 
 mod types;
-pub use types::Theme;
+pub use types::{ResourcesTheme, Theme};

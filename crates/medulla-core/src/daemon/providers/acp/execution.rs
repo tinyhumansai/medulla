@@ -208,6 +208,20 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     // authority while the harness is still running.
     let mut agent_env = acp_env(&options)?;
     let _hook_grant = crate::harness_hooks::seed_hook_grant(&session_key, &mut agent_env);
+    // `agent-client-protocol` owns the child it starts inside ConnectTo. Its
+    // public `spawn_process` exposes a PID, but its connection builder does not
+    // accept an already spawned child, so use the SDK-supported env overlay as
+    // a unique marker and match the process after the connection starts.
+    const REGISTRY_MARKER: &str = "MEDULLA_AGENT_REGISTRY_MARKER";
+    let registry_marker = uuid::Uuid::new_v4().to_string();
+    agent_env.insert(REGISTRY_MARKER.to_string(), registry_marker.clone());
+    let registry_task_id = options.task_id.clone();
+    let registry_session_id = options.resume_session_id.clone();
+    let registry_provider = options.provider.as_str().to_string();
+    let registry_handle = Arc::new(Mutex::new(
+        None::<medulla_monitor::agents::RegistrationHandle>,
+    ));
+    let latest_session_id = Arc::new(Mutex::new(registry_session_id.clone()));
     // The ACP server process receives `agent_env`; the local PostToolUse
     // fallback spawns hooks from this same process, so it gets the same
     // per-session environment — the hook grant and task-specific router /
@@ -235,11 +249,21 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     let resume = options.resume_session_id.clone();
     let prompt = options.prompt.clone();
     let abort = options.abort.clone();
-    let on_session = options.on_session;
+    let on_session = options.on_session.map(|callback| {
+        let registry_handle = registry_handle.clone();
+        let latest_session_id = latest_session_id.clone();
+        Box::new(move |session_id: String| {
+            *latest_session_id.lock().unwrap() = Some(session_id.clone());
+            if let Some(handle) = registry_handle.lock().unwrap().as_ref() {
+                let _ = handle.set_session_id(session_id.clone());
+            }
+            callback(session_id);
+        }) as crate::daemon::providers::types::OnSession
+    });
     let provider = options.provider;
     let timeout = Duration::from_millis(options.timeout_ms);
 
-    let result = agent_client_protocol::Client
+    let run = agent_client_protocol::Client
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
@@ -419,8 +443,37 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
                 usage: None,
                 session_id: Some(session_id.to_string()),
             })
-        })
-        .await;
+        });
+    tokio::pin!(run);
+    let mut process_system = sysinfo::System::new();
+    let (result, _agent_registration) = loop {
+        tokio::select! {
+            result = &mut run => break (result, None),
+            _ = tokio::time::sleep(Duration::from_millis(25)) => {
+                if let Some((pid, started_at_secs)) = process_with_marker(
+                    &mut process_system,
+                    REGISTRY_MARKER,
+                    &registry_marker,
+                ) {
+                    let guard = medulla_monitor::agents::agent_registry().register_at(
+                        medulla_monitor::agents::AgentRegistration {
+                            pid,
+                            started_at_secs,
+                            task_id: registry_task_id.clone(),
+                            session_id: registry_session_id.clone(),
+                            provider: registry_provider.clone(),
+                        },
+                    );
+                    let handle = guard.handle();
+                    if let Some(session_id) = latest_session_id.lock().unwrap().as_ref() {
+                        let _ = handle.set_session_id(session_id.clone());
+                    }
+                    *registry_handle.lock().unwrap() = Some(handle);
+                    break (run.await, Some(guard));
+                }
+            }
+        }
+    };
 
     // The session is over, so its grant should stop working — a token that
     // outlived the harness it was minted for is a capability nobody is holding.
@@ -431,6 +484,42 @@ pub async fn run_acp_task(options: RunTaskOptions) -> Result<RunTaskResult, Stri
     }
 
     result.map_err(|error| format!("{} ACP error: {error}", provider.as_str()))
+}
+
+/// Find the ACP SDK child by its per-run environment marker.
+fn process_with_marker(system: &mut sysinfo::System, key: &str, value: &str) -> Option<(u32, u64)> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
+
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_environ(UpdateKind::Always),
+    );
+    let prefix = format!("{key}=");
+    let marked = system
+        .processes()
+        .values()
+        .filter(|process| {
+            process.environ().iter().any(|entry| {
+                entry
+                    .to_str()
+                    .is_some_and(|entry| entry.strip_prefix(&prefix) == Some(value))
+            })
+        })
+        .collect::<Vec<_>>();
+    let marked_pids = marked
+        .iter()
+        .map(|process| process.pid())
+        .collect::<std::collections::HashSet<_>>();
+    marked
+        .iter()
+        .filter(|process| {
+            process
+                .parent()
+                .is_none_or(|parent| !marked_pids.contains(&parent))
+        })
+        .min_by_key(|process| process.start_time())
+        .map(|process| (process.pid().as_u32(), process.start_time()))
 }
 
 /// Construct the ACP server command for a supported harness.

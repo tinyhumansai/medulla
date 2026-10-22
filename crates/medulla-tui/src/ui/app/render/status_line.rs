@@ -52,7 +52,7 @@ impl App {
             .sum::<usize>();
 
         let mut resource_config = self.loaded.config.appearance.clone();
-        let sample = self.resource_monitor.sample();
+        let sample = self.resource_snapshot.current_process.unwrap_or_default();
         let mut resource_segments = crate::ui::resources::segments(&resource_config, sample);
         let resource_width = resource_segments.join(" · ").width() + 2;
         if base_left_width + resource_width > available_left_width {

@@ -91,6 +91,8 @@ impl Abort {
 
 /// Inputs for one headless run.
 pub struct RunTaskOptions {
+    /// Backend task identifier, when this run came from a task frame.
+    pub task_id: Option<String>,
     /// Daemon-owned lazy native runtime, shared by every task on this host.
     pub embed: Arc<super::EmbedHost>,
     /// Optional per-agent admission and between-call token budget.
@@ -281,6 +283,7 @@ pub type RunTaskFn = Arc<
 /// Raised to `pub(super)` (from a private struct) so the sibling `execute`
 /// module can construct it and read its fields.
 pub(super) struct RunSpec {
+    pub(super) task_id: Option<String>,
     pub(super) provider: HarnessProvider,
     pub(super) prompt: String,
     pub(super) cwd: String,

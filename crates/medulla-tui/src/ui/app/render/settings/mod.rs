@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::ui::multi_pane;
 
 use super::super::types::{
-    App, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK, SP_HARNESSES,
+    App, SP_ACCOUNT, SP_APPEARANCE, SP_CONFIG, SP_CONTEXT, SP_FEEDBACK, SP_HARNESSES, SP_RESOURCES,
     SP_STATUS_LINE, SP_SUBSCRIPTIONS, SP_TOKENS, SP_TRACE, SP_USAGE,
 };
 
@@ -32,9 +32,6 @@ mod status_line;
 mod subscriptions;
 mod tokens;
 mod usage;
-
-#[cfg(test)]
-mod view_tests;
 
 /// Return the number of terminal rows a rendered, wrapped footer occupies.
 ///
@@ -69,6 +66,7 @@ impl App {
             SP_TRACE => self.draw_trace(f, content),
             SP_CONTEXT => self.draw_context(f, content),
             SP_ACCOUNT => self.draw_account(f, content),
+            SP_RESOURCES => self.draw_resources_settings(f, content),
             _ => self.draw_help(f, content),
         }
     }

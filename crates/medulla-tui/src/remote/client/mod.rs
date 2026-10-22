@@ -72,6 +72,8 @@ pub struct RemoteHost {
     capabilities: RemoteCapabilities,
     /// Every session over there, as last reported.
     rows: Vec<RemoteSessionRow>,
+    sessions_chunks: Option<(u64, Vec<Option<Vec<RemoteSessionRow>>>)>,
+    latest_sessions_batch: Option<u64>,
     /// The session whose screen is streaming, and the view being folded.
     watching: Option<(String, Option<ScreenView>)>,
     /// Held so the SSH session is not reaped while the host is in use.
@@ -158,6 +160,8 @@ impl RemoteHost {
             bridge,
             capabilities: RemoteCapabilities::default(),
             rows: Vec::new(),
+            sessions_chunks: None,
+            latest_sessions_batch: None,
             watching: None,
             _ssh: None,
         })
@@ -173,6 +177,8 @@ impl RemoteHost {
             bridge,
             capabilities: RemoteCapabilities::default(),
             rows: Vec::new(),
+            sessions_chunks: None,
+            latest_sessions_batch: None,
             watching: None,
             _ssh: None,
         }
@@ -314,7 +320,48 @@ impl RemoteHost {
                         self.capabilities = capabilities;
                         events.push(PumpEvent::Connected);
                     }
-                    RemoteMessage::Sessions { rows } => self.rows = rows,
+                    RemoteMessage::Sessions { rows } => {
+                        self.sessions_chunks = None;
+                        self.rows = rows;
+                    }
+                    RemoteMessage::SessionsChunk {
+                        batch_id,
+                        index,
+                        count,
+                        rows,
+                    } => {
+                        if count == 0 || count > 4096 || index >= count {
+                            self.sessions_chunks = None;
+                            continue;
+                        }
+                        if self
+                            .latest_sessions_batch
+                            .is_some_and(|latest| batch_id < latest)
+                        {
+                            continue;
+                        }
+                        if self
+                            .sessions_chunks
+                            .as_ref()
+                            .is_none_or(|(current, chunks)| {
+                                *current != batch_id || chunks.len() != count as usize
+                            })
+                        {
+                            self.latest_sessions_batch = Some(batch_id);
+                            self.sessions_chunks = Some((batch_id, vec![None; count as usize]));
+                        }
+                        if let Some((_, chunks)) = self.sessions_chunks.as_mut() {
+                            chunks[index as usize] = Some(rows);
+                            if chunks.iter().all(Option::is_some) {
+                                self.rows = chunks
+                                    .iter_mut()
+                                    .filter_map(Option::take)
+                                    .flatten()
+                                    .collect();
+                                self.sessions_chunks = None;
+                            }
+                        }
+                    }
                     RemoteMessage::Opened { session_id, .. } => {
                         events.push(PumpEvent::Opened(session_id));
                     }

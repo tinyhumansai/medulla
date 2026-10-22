@@ -27,14 +27,12 @@ fn status_line_renders_the_injected_process_snapshot() {
 
     let mut app = app();
     app.loaded.config.appearance.cpu = ResourceDisplay::Percent;
-    app.resource_monitor.inject(ResourceSnapshot {
+    let mut snapshot = crate::ui::resources::sampler::ResourceSnapshot::default();
+    snapshot.current_process = Some(ResourceSnapshot {
         cpu_fraction: 0.25,
-        memory_bytes: 0,
-        total_memory_bytes: 0,
-        disk_read_bytes_per_second: 0.0,
-        disk_write_bytes_per_second: 0.0,
-        disk_peak_bytes_per_second: 1.0,
+        ..Default::default()
     });
+    app.set_resource_snapshot(Arc::new(snapshot));
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).expect("terminal");
 

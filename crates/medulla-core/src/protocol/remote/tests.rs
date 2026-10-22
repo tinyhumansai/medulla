@@ -39,7 +39,41 @@ fn row() -> RemoteSessionRow {
         attention: None,
         bracketed_paste: true,
         last_error: None,
+        usage: None,
     }
+}
+
+#[test]
+fn session_rows_read_old_payloads_and_round_trip_agent_usage() {
+    let old = serde_json::to_value(row()).unwrap();
+    let mut old = old;
+    old.as_object_mut().unwrap().remove("usage");
+    let decoded: RemoteSessionRow = serde_json::from_value(old).unwrap();
+    assert_eq!(decoded.usage, None);
+    assert!(!serde_json::to_string(&decoded)
+        .unwrap()
+        .contains("\"usage\""));
+
+    let mut current = row();
+    current.usage = Some(AgentUsage {
+        kind: "Claude".into(),
+        pid: 42,
+        cpu: 12.5,
+        rss: 1024,
+        threads: 3,
+        started_at: 1_700_000_000,
+        cpu_history: vec![10.0, 12.5],
+    });
+    let encoded = serde_json::to_string(&current).unwrap();
+    let decoded: RemoteSessionRow = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, current);
+
+    #[derive(serde::Deserialize)]
+    struct LegacyClientRow {
+        id: String,
+    }
+    let old_client: LegacyClientRow = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(old_client.id, "w_1");
 }
 
 #[test]

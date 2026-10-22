@@ -126,6 +126,10 @@ pub struct App {
     /// the page entirely. Entering the pane hands `↑↓` to the content and makes
     /// the letter bindings deliberate rather than ambient.
     pub(in crate::ui::app) settings_focused: bool,
+    /// Selected option on the Resources settings page.
+    pub(in crate::ui::app) resources_settings_index: usize,
+    /// State owned by the Resources tab.
+    pub(in crate::ui::app) resources: super::super::resources::ResourcesState,
     /// The selected row on the Appearance subpage.
     pub(in crate::ui::app) appearance_index: usize,
     /// The selected meter row on the Subscriptions subpage.
@@ -165,12 +169,11 @@ pub struct App {
     /// pane's width, and read by the key handler to decide whether `Tab` has
     /// anything to switch.
     pub(in crate::ui::app) status_line_split: bool,
-    /// Throttled sampler backing the optional local-process status indicators.
-    pub(in crate::ui::app) resource_monitor: crate::ui::resources::ResourceMonitor,
     /// Throttled sampler backing the optional whole-device sidebar indicators.
     pub(in crate::ui::app) device_monitor: crate::ui::resources::DeviceMonitor,
-    /// Throttled sampler backing the per-session usage shown in pane titles.
-    pub(in crate::ui::app) session_monitor: crate::ui::resources::SessionMonitor,
+    /// Latest immutable host snapshot consumed by the Resources tab.
+    pub(in crate::ui::app) resource_snapshot:
+        std::sync::Arc<crate::ui::resources::sampler::ResourceSnapshot>,
     /// The selected field row on the Status line subpage.
     pub(in crate::ui::app) status_line_index: usize,
     /// Whether the next persisted status-line edit must write the complete

@@ -24,6 +24,8 @@ pub struct FakeAppServer {
     pub bin: String,
     /// File each spawned process appends one line to, for counting processes.
     pub spawn_log: String,
+    /// File each spawned server writes its operating-system PID to.
+    pub pid_log: String,
     /// File each process appends one JSON request line to.
     pub request_log: String,
     /// File each process appends one line per request it sent *to* the client.
@@ -42,6 +44,14 @@ impl FakeAppServer {
     /// run, so it is the assertion most of these tests are really making.
     pub fn spawn_count(&self) -> usize {
         read_lines(&self.spawn_log).len()
+    }
+
+    /// Operating-system PIDs of the fake servers spawned for this fixture.
+    pub fn pids(&self) -> Vec<u32> {
+        read_lines(&self.pid_log)
+            .iter()
+            .filter_map(|line| line.parse().ok())
+            .collect()
     }
 
     /// Every request the fake received, in arrival order, as decoded JSON.
@@ -165,6 +175,7 @@ impl TurnScript {
 /// Write a fake app-server into `dir` that answers turns with `script`.
 pub fn fake_app_server(dir: &TempDir, script: TurnScript) -> FakeAppServer {
     let spawn_log = dir.path().join("spawns.log").to_string_lossy().into_owned();
+    let pid_log = dir.path().join("pids.log").to_string_lossy().into_owned();
     let request_log = dir
         .path()
         .join("requests.log")
@@ -176,6 +187,7 @@ pub fn fake_app_server(dir: &TempDir, script: TurnScript) -> FakeAppServer {
 import itertools, json, os, sys, threading, uuid
 
 SPAWN_LOG = {spawn_log:?}
+PID_LOG = {pid_log:?}
 REQUEST_LOG = {request_log:?}
 ASK_LOG = {ask_log:?}
 
@@ -186,6 +198,8 @@ if "app-server" not in sys.argv[1:]:
 
 with open(SPAWN_LOG, "a") as handle:
     handle.write("spawn\n")
+with open(PID_LOG, "a") as handle:
+    handle.write(str(os.getpid()) + "\n")
 
 lock = threading.Lock()
 
@@ -294,6 +308,7 @@ while True:
     threading.Thread(target=serve, args=(message,), daemon=True).start()
 "#,
         spawn_log = spawn_log,
+        pid_log = pid_log,
         request_log = request_log,
         ask_log = ask_log,
         turn = script.python(),
@@ -302,6 +317,7 @@ while True:
     FakeAppServer {
         bin,
         spawn_log,
+        pid_log,
         request_log,
         ask_log,
     }

@@ -212,7 +212,12 @@ mod bind {
         drop(tokio::net::UnixListener::bind(&path).unwrap());
         assert!(path.exists());
 
-        assert!(prepare_bind(&path).await.is_ok());
+        let result = prepare_bind(&path).await;
+        assert!(
+            result.is_ok(),
+            "failed to reap stale socket at {path:?}: {:?}",
+            result.err()
+        );
         assert!(!path.exists(), "the stale socket should have been unlinked");
     }
 

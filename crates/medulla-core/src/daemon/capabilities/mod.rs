@@ -94,6 +94,7 @@ pub async fn probe_capabilities(options: ProbeOptions) -> AgentCapabilities {
         None => CAPABILITY_PROMPT.to_string(),
     };
     let run_options = RunTaskOptions {
+        task_id: None,
         embed: Default::default(),
         budget: None,
         origin: crate::daemon::providers::RunTaskOrigin::CapabilityProbe,

@@ -358,6 +358,7 @@ impl App {
             return;
         }
         match self.tab() {
+            "Resources" => {}
             // Over the rail, the wheel walks the cursor over the lanes and
             // their tasks; anywhere else on the tab it scrolls the transcript.
             "Sessions" => {
@@ -473,6 +474,10 @@ impl App {
             return None;
         }
         let tab = self.tab();
+        if tab == "Resources" {
+            self.resources_click(x, y);
+            return None;
+        }
         // Subpage nav. Clicking a page both selects it and takes focus, which is
         // what Enter does from the keyboard — a click that only moved the
         // highlight would leave the arrows driving the menu the pointer just

@@ -36,6 +36,7 @@ impl DaemonRuntime {
             .expect("semaphore is never closed");
         self.log(&format!("plaintext DM → {}", provider.as_str()));
         let options = RunTaskOptions {
+            task_id: None,
             embed: self.inner.embed.clone(),
             budget: None,
             // A plain DM comes from the requester's own session, not from a

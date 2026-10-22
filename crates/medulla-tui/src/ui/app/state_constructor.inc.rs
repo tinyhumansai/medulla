@@ -3,6 +3,7 @@ impl App {
     /// Sessions tab with an empty composer and the config-derived theme.
     pub fn new(runtime: Arc<dyn Runtime>, loaded: LoadedConfig) -> Self {
         let snapshot = runtime.snapshot();
+        let resources = super::resources::ResourcesState::from_config(&loaded.config.resources);
         let theme = Theme::from_config(&loaded.config.theme);
         let harness_skip_permissions = loaded.config.harness.skip_permissions;
         let status_line_promotion_pending = loaded.config.status_line.is_none();
@@ -56,6 +57,8 @@ impl App {
             account_usage: None,
             settings_index: 0,
             settings_focused: false,
+            resources_settings_index: 0,
+            resources,
             appearance_index: 0,
             subscriptions_index: 0,
             harnesses_view: None,
@@ -70,9 +73,8 @@ impl App {
             appearance_split: false,
             status_line_preview: false,
             status_line_split: false,
-            resource_monitor: Default::default(),
             device_monitor: Default::default(),
-            session_monitor: Default::default(),
+            resource_snapshot: Default::default(),
             status_line_index: 0,
             status_line_promotion_pending,
             config_index: 0,

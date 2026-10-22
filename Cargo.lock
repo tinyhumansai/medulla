@@ -2539,6 +2539,7 @@ dependencies = [
  "medulla-harness",
  "medulla-juice",
  "medulla-link",
+ "medulla-monitor",
  "medulla-providers",
  "medulla-pty",
  "medulla-tokens",
@@ -2619,6 +2620,8 @@ version = "0.13.0"
 dependencies = [
  "serde",
  "sysinfo 0.37.2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2679,6 +2682,7 @@ version = "0.13.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chrono",
  "crossterm",
  "dirs 6.0.0",
  "fs2",
@@ -2693,6 +2697,7 @@ dependencies = [
  "medulla-pty",
  "portable-pty",
  "ratatui",
+ "regex",
  "rustls",
  "serde",
  "serde_json",

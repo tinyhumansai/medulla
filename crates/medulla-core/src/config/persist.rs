@@ -174,6 +174,16 @@ fn write_json_document(
 /// Used to clear an optional setting back to "unset" so the layered default
 /// applies again, rather than pinning it to the default's current value.
 pub fn clear_setting(path: &Path, section: &str, key: &str) -> anyhow::Result<()> {
+    if uses_json_format(path) {
+        let mut doc = read_json_document(path)?;
+        if let Some(serde_json::Value::Object(existing)) = doc.get(section) {
+            let mut table = existing.clone();
+            table.remove(key);
+            doc.insert(section.to_string(), serde_json::Value::Object(table));
+            write_json_document(path, &doc)?;
+        }
+        return Ok(());
+    }
     let mut doc = read_document(path)?;
     if let Some(toml::Value::Table(existing)) = doc.get(section) {
         let mut table = existing.clone();

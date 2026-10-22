@@ -44,10 +44,11 @@
 /// bindings stay in `app::changes`; only the top-level tab and its `D` shortcut
 /// were removed.
 #[cfg(feature = "workflows")]
-pub const TABS: [&str; 5] = [
+pub const TABS: [&str; 6] = [
     "Sessions",
     "Workflows",
     "Subconscious",
+    "Resources",
     "Feedback",
     "Settings",
 ];
@@ -59,7 +60,7 @@ pub const TABS: [&str; 5] = [
 /// the Sessions rail with its `d` diff pane, the live Subconscious signal
 /// field, Feedback, and Settings — renders without the workflow engine.
 #[cfg(not(feature = "workflows"))]
-pub const TABS: [&str; 4] = ["Sessions", "Subconscious", "Feedback", "Settings"];
+pub const TABS: [&str; 5] = ["Sessions", "Subconscious", "Resources", "Feedback", "Settings"];
 
 /// The TokenMaxxxing tab's sidebar pages.
 pub(in crate::ui::app) const TOKENMAXXING_SUBPAGES: [&str; 3] =
@@ -73,7 +74,7 @@ pub(in crate::ui::app) const TM_LEADERBOARD: usize = 2;
 ///
 /// This is the flat, selectable list [`App::settings_index`] indexes into.
 /// [`SETTINGS_GROUPS`] overlays the display-only headings.
-pub const SETTINGS_SUBPAGES: [&str; 12] = [
+pub const SETTINGS_SUBPAGES: [&str; 13] = [
     "Usage",
     "Tokens",
     "Harnesses",
@@ -81,6 +82,7 @@ pub const SETTINGS_SUBPAGES: [&str; 12] = [
     "Subscriptions",
     "Status line",
     "Config",
+    "Resources",
     "Feedback",
     "Trace",
     "Context",
@@ -107,11 +109,12 @@ pub(in crate::ui::app) const SP_APPEARANCE: usize = 3;
 pub(in crate::ui::app) const SP_SUBSCRIPTIONS: usize = 4;
 pub(in crate::ui::app) const SP_STATUS_LINE: usize = 5;
 pub(in crate::ui::app) const SP_CONFIG: usize = 6;
-pub(in crate::ui::app) const SP_FEEDBACK: usize = 7;
-pub(in crate::ui::app) const SP_TRACE: usize = 8;
-pub(in crate::ui::app) const SP_CONTEXT: usize = 9;
-pub(in crate::ui::app) const SP_ACCOUNT: usize = 10;
-pub(in crate::ui::app) const SP_HELP: usize = 11;
+pub(in crate::ui::app) const SP_RESOURCES: usize = 7;
+pub(in crate::ui::app) const SP_FEEDBACK: usize = 8;
+pub(in crate::ui::app) const SP_TRACE: usize = 9;
+pub(in crate::ui::app) const SP_CONTEXT: usize = 10;
+pub(in crate::ui::app) const SP_ACCOUNT: usize = 11;
+pub(in crate::ui::app) const SP_HELP: usize = 12;
 
 /// The index of a tab by name, or 0 if unknown. Keeps tab jumps robust as the tab
 /// list grows.

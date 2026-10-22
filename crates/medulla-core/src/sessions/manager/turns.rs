@@ -390,6 +390,7 @@ impl SessionManager {
     ) -> Result<TurnOutcome, String> {
         let provider = self.provider_for(request);
         let options = RunTaskOptions {
+            task_id: None,
             embed: self.inner.embed.clone(),
             budget: None,
             origin: crate::daemon::providers::RunTaskOrigin::Interactive,

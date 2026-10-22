@@ -63,6 +63,8 @@ impl Drop for PendingFrame {
 
 /// Messages sent from spawned async tasks back to the event loop.
 pub(super) enum AppMsg {
+    /// Fresh whole-device resources sampled away from the UI task.
+    Resources(std::sync::Arc<medulla_tui::ui::resources::sampler::ResourceSnapshot>),
     /// A status-line update.
     Status(String),
     /// Fresh context-inspection rows.

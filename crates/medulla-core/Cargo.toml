@@ -42,6 +42,7 @@ tinyhumans-sdk = { workspace = true }
 tinyflows = { workspace = true, optional = true }
 # Native agents share one process-owned OpenHuman runtime.
 openhuman-embed = { workspace = true }
+medulla-monitor = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

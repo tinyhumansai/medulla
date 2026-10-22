@@ -180,6 +180,7 @@ pub async fn run_wrapper_with(mut config: WrapperConfig) -> anyhow::Result<i32> 
         mut kill,
         drained,
         restore,
+        _agent_registration,
     } = spawn_child(&bin, &child_args, &mut config, receive_active)?;
 
     if let Some(bridge) = bridge.as_mut() {

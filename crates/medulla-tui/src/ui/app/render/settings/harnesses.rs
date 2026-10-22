@@ -1,7 +1,5 @@
 //! The Harnesses Settings section and its injected, side-effect-free view data.
 
-#[cfg(test)]
-pub(super) use super::super::super::types::DetectedProvider;
 pub(super) use super::super::super::types::HarnessesView;
 use ratatui::layout::Rect;
 use ratatui::text::Line;

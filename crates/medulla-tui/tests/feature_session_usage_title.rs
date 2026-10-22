@@ -27,6 +27,7 @@ use medulla::runtime::mock::MockRuntime;
 use medulla::runtime::Runtime;
 use medulla_tui::ui::app::{App, TABS};
 use medulla_tui::ui::harness_pane::LocalSessions;
+use medulla_tui::ui::resources::sampler::{ProcessSnapshot, ResourceSnapshot};
 use medulla_tui::worker::pty::{LaunchSpec, PtyManager, SessionControl};
 
 /// Wide enough that the title is not truncated before its segments are drawn.
@@ -148,6 +149,24 @@ fn the_pane_title_reports_the_session_s_own_cpu_memory_and_io() {
     wait_for("the child to paint", || {
         sessions.row(&id).is_some_and(|row| row.state.is_running())
     });
+
+    let pid = sessions.pid(&id).expect("the live session has a pid");
+    app.set_resource_snapshot(Arc::new(ResourceSnapshot::default().with_processes(vec![
+        ProcessSnapshot {
+            pid,
+            ppid: None,
+            exe: Some("/bin/sh".to_string()),
+            cmd: vec!["/bin/sh".to_string()],
+            cwd: Some("/".to_string()),
+            start_time: 1,
+            owner_uid: None,
+            cpu_percent: 18.0,
+            memory_bytes: 1024,
+            disk_read_bytes: 512,
+            disk_written_bytes: 256,
+            threads: 1,
+        },
+    ])));
 
     let title = title(&select_first_harness(&mut app));
 

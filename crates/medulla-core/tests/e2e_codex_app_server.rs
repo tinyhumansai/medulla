@@ -15,6 +15,7 @@ mod support;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use medulla::codex_app_server::{AppServerSpec, Connection};
 use medulla::daemon::mappers::HarnessSemanticEvent;
 use medulla::daemon::providers::{run_provider_task, Abort, RunTaskOptions, RunTaskResult};
 use medulla::protocol::{HarnessProvider, HarnessTransport};
@@ -43,6 +44,7 @@ fn options(
     );
     (
         RunTaskOptions {
+            task_id: None,
             embed: Default::default(),
             budget: None,
             origin: medulla::daemon::providers::RunTaskOrigin::DelegatedTask,
@@ -109,6 +111,54 @@ async fn runs_a_turn_and_reports_the_reply() {
         .collect();
     assert!(kinds.contains(&"agent_message"), "{kinds:?}");
     assert!(kinds.contains(&"status"), "{kinds:?}");
+}
+
+#[tokio::test]
+async fn app_server_connection_registration_tracks_the_pooled_child_lifetime() {
+    let dir = TempDir::new();
+    let fake = fake_app_server(&dir, TurnScript::Reply("unused"));
+    let registry = medulla_monitor::agents::agent_registry();
+    let connection = Connection::open(&AppServerSpec {
+        bin: fake.bin.clone(),
+        args: Vec::new(),
+        env: HashMap::from([
+            ("PATH".into(), std::env::var("PATH").unwrap_or_default()),
+            ("CODEX_HOME".into(), home(&dir, "registry-home")),
+        ]),
+    })
+    .await
+    .expect("fake app-server initializes");
+    let child_pid = fake
+        .pids()
+        .last()
+        .copied()
+        .expect("fake server records its exact process id");
+    let registration = registry
+        .snapshot()
+        .into_iter()
+        .find(|entry| entry.pid == child_pid && entry.provider == "codex-app-server")
+        .expect("app-server process is registered");
+    assert_eq!(registration.task_id, None);
+    assert_eq!(registration.session_id, None);
+
+    drop(connection);
+    let gone = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while registry.snapshot().iter().any(|entry| {
+            entry.pid == registration.pid && entry.started_at_secs == registration.started_at_secs
+        }) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        gone.is_ok(),
+        "registration identity remained after connection drop: {:?}",
+        registry
+            .snapshot()
+            .into_iter()
+            .filter(|entry| entry.pid == registration.pid)
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

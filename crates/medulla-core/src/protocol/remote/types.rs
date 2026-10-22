@@ -57,7 +57,7 @@ pub struct RemoteAttention {
 /// serve views that act on the *local* filesystem, and a client cannot act on
 /// the far side's. Adding them later is additive; sending them now would be
 /// inventing a contract nothing reads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSessionRow {
     /// The daemon's own session id (`w_…`), unique on that host.
@@ -107,6 +107,30 @@ pub struct RemoteSessionRow {
     /// Why it failed, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Classified process usage for this session, when its agent process is sampled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<AgentUsage>,
+}
+
+/// Bounded process telemetry for one classified agent session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentUsage {
+    /// The Agents pane classification (for example `Claude` or `Codex`).
+    pub kind: String,
+    /// Process identifier on the reporting host.
+    pub pid: u32,
+    /// CPU utilization percentage.
+    pub cpu: f64,
+    /// Resident memory in bytes.
+    pub rss: u64,
+    /// Number of threads/tasks.
+    pub threads: usize,
+    /// Process start time in seconds since Unix epoch.
+    pub started_at: u64,
+    /// Recent CPU readings, oldest first, capped by the sender.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cpu_history: Vec<f64>,
 }
 
 /// One thing a remote host can start a session on.
@@ -159,7 +183,7 @@ pub struct RemoteCapabilities {
 /// it, travel on [`medulla.screen.v1`](super::super::screen) — which already
 /// models a synchronised screen and already has somewhere for input to go, and
 /// which a remote session shares verbatim with a locally-watched one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteMessage {
     /// Client → daemon: I am here; what can you do?
@@ -214,10 +238,23 @@ pub enum RemoteMessage {
         /// Every session on the host, in the daemon's own order.
         rows: Vec<RemoteSessionRow>,
     },
+    /// Daemon → client: one bounded part of a session list too large for one
+    /// transport message. Clients publish the list only after every part with
+    /// the same batch id has arrived.
+    SessionsChunk {
+        /// Monotonically increasing per-server list generation.
+        batch_id: u64,
+        /// Zero-based part index.
+        index: u16,
+        /// Number of parts in this generation.
+        count: u16,
+        /// Sessions carried by this part.
+        rows: Vec<RemoteSessionRow>,
+    },
 }
 
 /// A remote message with its version tag, as it appears on the wire.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoteEnvelope {
     /// Wire version tag ([`REMOTE_PROTO`]).
     pub remote_version: String,

@@ -67,5 +67,6 @@ pub fn wire_row(row: &SessionRow, bracketed_paste: bool) -> RemoteSessionRow {
         }),
         bracketed_paste,
         last_error: row.last_error.clone(),
+        usage: None,
     }
 }

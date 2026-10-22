@@ -11,7 +11,7 @@ services:
     hostname: buildbox
     command: ["/usr/sbin/sshd", "-D", "-e"]
     volumes:
-      - ../../target/debug:/opt/medulla:ro
+      - ${MEDULLA_TARGET_DIR:-../../target}/debug:/opt/medulla:ro
       - ./workspace:/work:ro
     networks: [remote]
 
@@ -21,7 +21,7 @@ services:
     container_name: medulla-e2e-client
     depends_on: [host]
     volumes:
-      - ../../target/debug:/opt/medulla:ro
+      - ${MEDULLA_TARGET_DIR:-../../target}/debug:/opt/medulla:ro
       - ./run-e2e.sh:/run-e2e.sh:ro
       # `<home>/local/…` because nobody is signed in: medulla files a home per
       # account and `local` is the pre-login one. Dropping it one level up is a

@@ -154,6 +154,14 @@ impl App {
 
         let tab = self.tab();
 
+        if tab == "Resources" && self.resources.menu_open && k.code == KeyCode::Esc {
+            self.resources.menu_open = false;
+            return None;
+        }
+        if tab == "Resources" && self.resources_key(k.code) {
+            return None;
+        }
+
         // Global control chords.
         if ctrl {
             match k.code {

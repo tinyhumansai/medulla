@@ -32,6 +32,7 @@ mod remote_sessions;
 #[cfg(test)]
 mod remote_sessions_tests;
 mod render;
+mod resources;
 mod session_control;
 mod settings_edit;
 mod state;

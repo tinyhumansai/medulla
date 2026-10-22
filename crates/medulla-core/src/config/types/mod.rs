@@ -17,6 +17,7 @@ pub use medulla_providers::{
 
 use super::urls::PROD_BACKEND_BASE_URL;
 use super::AppearanceConfig;
+use super::ResourcesConfig;
 use super::SubscriptionsConfig;
 use crate::harness_hooks::HooksConfig;
 use crate::protocol::HarnessProvider;

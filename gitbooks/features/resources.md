@@ -7,9 +7,9 @@ description: >-
 # Resources
 
 The Resources tab shows a live snapshot of this machine's CPU, memory and swap,
-disks, network interfaces, and discovered agent processes. Sampling runs in the
-background at the configured interval; changing tabs does not require opening
-the Resources page first. Press `?` on the tab for the short key-help overlay,
+disks, network interfaces, and discovered agent processes, on this machine and
+on each connected remote host. Sampling runs in the background at the
+configured interval while the tab is on screen, and pauses on every other tab. Press `?` on the tab for the short key-help overlay,
 or `o` to open Settings › Resources.
 
 ![Illustrative Resources tab screenshot with CPU, memory, network, and Agents panels. Values are sample data.](../../docs/screenshots/resources-overview.svg)

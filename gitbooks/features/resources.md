@@ -18,10 +18,14 @@ or `o` to open Settings › Resources.
 
 | Panel | What it shows |
 | --- | --- |
-| **CPU** | Overall and per-core utilization, with the selected CPU fields, frequency, and temperatures where the platform reports them. |
-| **Mem** | Memory and swap graphs, optional mounted disks, and optional disk activity. Disk filtering and graph ceilings can be configured in `[resources]`. |
-| **Net** | Received and transmitted rates and totals for the selected interface. Automatic scaling, shared scales, interface cycling, and resetting displayed totals are available. |
+| **CPU** | A full-height usage history beside a per-core box: an overall meter, each core's history, usage and temperature where reported, the CPU model and frequency on its border, and the load average. When the box is too small for it, the cores become text rows under the graph. A lower field the platform never reports, such as iowait on macOS, gives its half of the graph to the upper field. |
+| **Mem** | Total, used, available, cached, and free memory, each with its percentage and a history graph (or a meter with `memGraphs = false`), and swap. Beside a divider, the mounted disks with their used meters and an IO row. Disk filtering and graph ceilings can be configured in `[resources]`. |
+| **Net** | Download history growing up and upload history growing down, each on its own scale, beside a box of current, peak, and total traffic each way. Automatic scaling, shared scales, interface cycling, and resetting displayed totals are available. The interface chosen by default is the first active one with a routable address. |
 | **Agents** | Recognized agent processes and supported shells, their ownership/origin, workspace, CPU and memory use, thread count, runtime, and recent CPU history. Tree mode can show descendants. |
+
+Each panel is a rounded box in the btop style. Its borders carry its
+controls as tags, `┐¹cpu┌┐menu┌`, with the hotkey letter highlighted; every
+tag can be clicked as well as pressed. A dimmed tag is a toggle that is off.
 
 The layout adapts to terminal size. If all panels do not fit, Medulla hides
 lower-priority panels as whole boxes and shows a hint; at very small sizes it
@@ -77,8 +81,9 @@ network controls.
 | `b` / `n` | Select the previous / next available network interface. |
 | `z` | Reset the displayed network totals for the selected interface. |
 | `o` | Open Settings › Resources. |
+| `m` | Toggle the menu. |
 | `?` | Toggle key help. |
-| `Esc` | Close help. |
+| `Esc` | Close the menu or help. |
 
 ## Layout presets
 
@@ -157,6 +162,12 @@ between start and end; an empty `End` produces a solid start color.
 | `meterBg` | color | `#404040` |
 | `graphText` | color | `#606060` |
 | `inactiveFg` | color | `#404040` |
+| `mainFg` | color | `#cccccc` |
+| `mainBg` | color, or `""` for the terminal's own | `#000000` |
+| `title` | color | `#eeeeee` |
+| `hiFg` | color | `#b54040` |
+| `selectedBg` | color | `#6a2f2f` |
+| `selectedFg` | color | `#eeeeee` |
 | `cpuStart`, `cpuMid`, `cpuEnd` | colors | `#77ca9b`, `#cbc06c`, `#dc4c4c` |
 | `tempStart`, `tempMid`, `tempEnd` | colors | `#4897d4`, `#5474e8`, `#ff40b6` |
 | `usedStart`, `usedMid`, `usedEnd` | colors | `#592b26`, `#d9626d`, `#ff4769` |

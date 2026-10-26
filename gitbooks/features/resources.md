@@ -19,7 +19,7 @@ or `o` to open Settings › Resources.
 | Panel | What it shows |
 | --- | --- |
 | **CPU** | A full-height usage history beside a per-core box: an overall meter, each core's history, usage and temperature where reported, the CPU model and frequency on its border, and the load average. When the box is too small for it, the cores become text rows under the graph. A lower field the platform never reports, such as iowait on macOS, gives its half of the graph to the upper field. |
-| **Mem** | Total, used, available, cached, and free memory, each with its percentage and a history graph (or a meter with `memGraphs = false`), and swap. Beside a divider, the mounted disks with their used meters and an IO row. Disk filtering and graph ceilings can be configured in `[resources]`. |
+| **Mem** | Total, used, available, cached, and free memory, each with its percentage and a history graph (or a meter with `memGraphs = false`), and swap. Beside a divider, every local volume as btop lists it, each under a divider headed by its name and size, with swap second: an IO row where the column has room and the volume has IO counters, then its used meter. On macOS this includes the system volumes (VM, Preboot, Update, and the rest) that Finder hides. Disk filtering and graph ceilings can be configured in `[resources]`. |
 | **Net** | Download history growing up and upload history growing down, each on its own scale, beside a box of current, peak, and total traffic each way. Automatic scaling, shared scales, interface cycling, and resetting displayed totals are available. The interface chosen by default is the first active one with a routable address. |
 | **Agents** | Recognized agent processes and supported shells, their ownership/origin, workspace, CPU and memory use, thread count, runtime, and recent CPU history. Tree mode can show descendants. |
 
@@ -34,13 +34,21 @@ shows the minimum required size. The `cpuBottom`, `memBelowNet`, and
 
 ## Agents pane
 
-The pane classifies processes only when executable names or command-line
-signatures match known harnesses. Current kinds include Claude, Codex,
-Codex App Server, Claude ACP, Codex ACP, OpenCode, OpenCode ACP, OpenHuman
-Core, embedded OpenHuman, and supported shells. `Unknown` is used when argv is
-unavailable for an executable name the classifier supports; other
-unclassifiable processes are omitted. Medulla does not guess a kind from
-missing metadata. A recognized row may include child processes in tree mode.
+Each row is one harness: a process whose program is a known harness, named
+by its executable, by the name it was launched as (Claude's native build runs
+from a versioned file such as `versions/2.1.310`), or, under an interpreter
+such as `node` or `python3`, by the script it runs. A path or argument that
+merely mentions a harness does not count, so an editor installed under
+`Cursor.app` or an MCP server is not listed. Current kinds are Claude, Codex,
+Codex Server, Claude-ACP, Codex-ACP, OpenCode, OpenCode-ACP, OpenHuman (core
+and embedded), Gemini, Aider, Goose, Cursor Agent, and supported shells.
+`Unknown` is used when argv is unavailable for a program the classifier
+supports. A session Medulla launched stays listed even when its program is not
+one of these.
+
+A harness that re-runs itself, such as Codex's app-server daemon and the
+server it supervises, is one row. Each row's threads, memory, and CPU are
+the whole process tree's; tree mode lists the descendants beneath it.
 
 Origins explain which Medulla activity owns a process: `Session{id}`,
 `Task{id}`, `Headless`, `Remote{host}`, or `External`. Remote session usage is

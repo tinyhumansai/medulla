@@ -163,7 +163,7 @@ between start and end; an empty `End` produces a solid start color.
 | `graphText` | color | `#606060` |
 | `inactiveFg` | color | `#404040` |
 | `mainFg` | color | `#cccccc` |
-| `mainBg` | color, or `""` for the terminal's own | `#000000` |
+| `mainBg` | color, or `""` for the terminal's own | the app-wide `[theme] background` (`#000000`) |
 | `title` | color | `#eeeeee` |
 | `hiFg` | color | `#b54040` |
 | `selectedBg` | color | `#6a2f2f` |

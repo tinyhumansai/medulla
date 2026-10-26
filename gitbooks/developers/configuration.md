@@ -148,9 +148,10 @@ dimBorder = "darkgray"         # panel borders
 attention = "yellow"           # ⚠ rows, the tab badge, "N waiting on you"
 attentionBlink = true          # false holds the cue steady
 attentionBlinkSeconds = 1.0    # one full pulse; clamped to 0.2 to 10.0
+background = "#000000"         # behind the whole interface; "" keeps the terminal's
 ```
 
-Values are ratatui colour names (`cyan`, `lightblue`, `darkgray`, …) or `#rrggbb`. A failed session pulses red regardless of `attention`. Settings › Appearance edits these live and writes them back.
+Values are ratatui colour names (`cyan`, `lightblue`, `darkgray`, …) or `#rrggbb`. A failed session pulses red regardless of `attention`. Settings › Appearance edits these live and writes them back; `background` is set here only, and saving Appearance leaves it and `[theme.resources]` alone. The background also fills behind a session's own output wherever the harness leaves its default colour.
 
 ## Appearance
 

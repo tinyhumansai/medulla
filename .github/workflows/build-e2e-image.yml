@@ -2,7 +2,7 @@
 # Build and publish the coordination e2e harness's **tools base** to GHCR.
 #
 #   ghcr.io/tinyhumansai/medulla_e2e_base:latest
-#   ghcr.io/tinyhumansai/medulla_e2e_base:oc<ver>-cc<ver>-cx<ver>-node<major>
+#   ghcr.io/tinyhumansai/medulla_e2e_base:oc<ver>-cc<ver>-cx<ver>-node<major>-<debian release>
 #
 # The base carries tmux, python3, node and all three real coding CLIs, plus the
 # primed ACP npm cache — roughly 600 MB of downloads that do not change when the
@@ -71,11 +71,12 @@ jobs:
                   raise SystemExit(f"Dockerfile.base has no ARG {name}")
               return match.group(1)
 
-          print("oc{}-cc{}-cx{}-node{}".format(
+          print("oc{}-cc{}-cx{}-node{}-{}".format(
               arg("OPENCODE_VERSION"),
               arg("CLAUDE_VERSION"),
               arg("CODEX_VERSION"),
               arg("NODE_VERSION").split(".")[0],
+              arg("DEBIAN_RELEASE"),
           ))
           PY
           )"

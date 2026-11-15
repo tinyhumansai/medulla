@@ -436,7 +436,12 @@ jobs:
           context: .
           file: e2e/coordination/Dockerfile
           build-args: |
-            BASE_IMAGE=medulla-e2e-base:ci
+            BASE_IMAGE=e2e-base
+          # The `docker-container` Buildx builder does not automatically use
+          # images loaded into the runner's Docker daemon as FROM sources.
+          # Import the just-built base explicitly as a named image context.
+          build-contexts: |
+            e2e-base=docker-image://medulla-e2e-base:ci
           tags: medulla-e2e:latest
           load: true
           provenance: false

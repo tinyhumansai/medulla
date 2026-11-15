@@ -5,7 +5,7 @@
 # rebuilding its toolchain per run:
 #
 #   ghcr.io/tinyhumansai/medulla_e2e_base:latest
-#   ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22
+#   ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22-trixie
 #
 # It exists because these downloads are ~600 MB and they do not change when the
 # source does. Baking them into the harness image meant every CI run whose layer
@@ -18,7 +18,13 @@
 # and pointing `Dockerfile`'s `BASE_IMAGE` at the new tag — deliberately three
 # steps, because a silently-moving CLI version is a harness that tests something
 # other than what its tag says.
-FROM debian:bookworm-slim
+#
+# The Debian release is in the tag too, and must match the `rust:*-<release>`
+# build stage in `Dockerfile`: the harness binary links the build stage's glibc,
+# so a base on an older release cannot run it. Trixie because the vendored btop
+# (`src/btop`) is C++23 and needs g++ 14, which bookworm does not package.
+ARG DEBIAN_RELEASE=trixie
+FROM debian:${DEBIAN_RELEASE}-slim
 
 # Pinned CLI versions. The version tag above is derived from these.
 #

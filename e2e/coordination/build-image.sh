@@ -58,11 +58,12 @@ def arg(name):
 # Node moves for reasons unrelated to the harness, so only its major is in the
 # tag: a patch bump should not orphan an otherwise identical base.
 print(
-    "oc{}-cc{}-cx{}-node{}".format(
+    "oc{}-cc{}-cx{}-node{}-{}".format(
         arg("OPENCODE_VERSION"),
         arg("CLAUDE_VERSION"),
         arg("CODEX_VERSION"),
         arg("NODE_VERSION").split(".")[0],
+        arg("DEBIAN_RELEASE"),
     )
 )
 PY

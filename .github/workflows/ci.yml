@@ -393,6 +393,16 @@ jobs:
     permissions:
       contents: read
       packages: read
+    # A job-local registry hands the just-built tools base to the harness build.
+    # The `docker-container` Buildx builder cannot read the runner daemon's image
+    # store (not even through a `docker-image://` named context), so a `load`ed
+    # base is invisible to it and the harness build falls back to a registry
+    # pull of a tag that does not exist before merge.
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
     steps:
       - uses: actions/checkout@v7
         with:
@@ -402,7 +412,26 @@ jobs:
       - name: Initialize submodules
         run: bash scripts/init-submodules.sh
 
+      # `network=host` lets the builder container reach the registry service on
+      # localhost:5000.
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      # PRs that change Dockerfile.base cannot pull the versioned image yet:
+      # Build E2E Image publishes it only after such a change reaches main.
+      # Build the matching base here so the harness uses trixie's g++ 14 and
+      # glibc without depending on a tag that does not exist before merge.
+      - name: Build E2E tools base
+        uses: docker/build-push-action@v6
+        with:
+          context: e2e/coordination
+          file: e2e/coordination/Dockerfile.base
+          tags: localhost:5000/medulla-e2e-base:ci
+          push: true
+          provenance: false
+          cache-from: type=gha,scope=e2e-base
+          cache-to: type=gha,scope=e2e-base,mode=max,ignore-error=true
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -420,13 +449,15 @@ jobs:
         with:
           context: .
           file: e2e/coordination/Dockerfile
+          build-args: |
+            BASE_IMAGE=localhost:5000/medulla-e2e-base:ci
           tags: medulla-e2e:latest
           load: true
           provenance: false
-          cache-from: type=gha
+          cache-from: type=gha,scope=e2e-harness
           # A transient GHA cache-service failure must not discard a successfully
           # built and loaded image or prevent the offline scenarios from running.
-          cache-to: type=gha,mode=max,ignore-error=true
+          cache-to: type=gha,scope=e2e-harness,mode=max,ignore-error=true
 
       - name: Coordination round trip (run.sh, --network none)
         run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh

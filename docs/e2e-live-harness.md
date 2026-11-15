@@ -308,8 +308,8 @@ must change boot-time state (a custom `MOCK_LLM_MARKER`). Factor your harness in
 
 ### 9. Docker wraps the *same* script, with no second harness
 
-The image bakes prebuilt binaries (multi-stage: `rust:1.96-bookworm` build →
-`debian:bookworm-slim` + tmux + python3 + a pinned opencode release tarball) and sets
+The image bakes prebuilt binaries (multi-stage: `rust:1.96-trixie` build →
+`debian:trixie-slim` + tmux + python3 + a pinned opencode release tarball) and sets
 the `*_BIN` env overrides; the container entry just runs `run.sh` unchanged. One
 source of truth for the test logic; docker is only an environment.
 

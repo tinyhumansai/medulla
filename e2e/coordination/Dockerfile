@@ -31,13 +31,16 @@
 #   bash e2e/coordination/build-image.sh --base
 #   BASE_IMAGE=ghcr.io/tinyhumansai/medulla_e2e_base:latest \
 #     bash e2e/coordination/build-image.sh
-ARG BASE_IMAGE=ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22
+ARG BASE_IMAGE=ghcr.io/tinyhumansai/medulla_e2e_base:oc1.17.18-cc2.1.226-cx0.147.0-node22-trixie
 
 # ---------------------------------------------------------------------------
 # Stage 1: compile medulla + examples (release)
 # ---------------------------------------------------------------------------
 # Debian (glibc) base so the resulting binaries match the glibc runtime stage.
-FROM rust:1.96.1-bookworm AS build
+# The release must be the base image's (its tag ends in it): a binary linked
+# against a newer glibc than the runtime's does not start. Trixie for its g++ 14,
+# which the vendored btop (`src/btop`, C++23) needs; bookworm ships only g++ 12.
+FROM rust:1.96.1-trixie AS build
 
 WORKDIR /build
 
@@ -56,6 +59,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# The image is what the E2E suites run, so it must really contain btop: without
+# this, `src/btop/build.rs` would quietly build the Resources tab's stub if the
+# toolchain above ever regressed to a g++ older than 14.
+ENV MEDULLA_BTOP_REQUIRED=1
 
 # The workspace's vendored path deps live under vendor/* (tinyagents, tinyflows,
 # tinyhumans-sdk). src/ carries every member crate (src/sdk, src/tui, src/link)

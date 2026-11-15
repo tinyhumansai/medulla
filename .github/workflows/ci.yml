@@ -416,8 +416,8 @@ jobs:
           tags: medulla-e2e-base:ci
           load: true
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max,ignore-error=true
+          cache-from: type=gha,scope=e2e-base
+          cache-to: type=gha,scope=e2e-base,mode=max,ignore-error=true
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -445,10 +445,10 @@ jobs:
           tags: medulla-e2e:latest
           load: true
           provenance: false
-          cache-from: type=gha
+          cache-from: type=gha,scope=e2e-harness
           # A transient GHA cache-service failure must not discard a successfully
           # built and loaded image or prevent the offline scenarios from running.
-          cache-to: type=gha,mode=max,ignore-error=true
+          cache-to: type=gha,scope=e2e-harness,mode=max,ignore-error=true
 
       - name: Coordination round trip (run.sh, --network none)
         run: SKIP_BUILD=1 bash e2e/coordination/run-docker.sh

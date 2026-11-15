@@ -404,6 +404,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # PRs that change Dockerfile.base cannot pull the versioned image yet:
+      # Build E2E Image publishes it only after such a change reaches main.
+      # Build the matching base here so the harness uses trixie's g++ 14 and
+      # glibc without depending on a tag that does not exist before merge.
+      - name: Build E2E tools base
+        uses: docker/build-push-action@v6
+        with:
+          context: e2e/coordination
+          file: e2e/coordination/Dockerfile.base
+          tags: medulla-e2e-base:ci
+          load: true
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -420,6 +435,8 @@ jobs:
         with:
           context: .
           file: e2e/coordination/Dockerfile
+          build-args: |
+            BASE_IMAGE=medulla-e2e-base:ci
           tags: medulla-e2e:latest
           load: true
           provenance: false
